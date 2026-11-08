@@ -510,10 +510,189 @@ func TestDetectorAlertDroppedAtQuota(t *testing.T) {
 			r.Tick(bg)
 			d := detectorStatus(t, st)
 			if d.AlertsNotStored != 2 || d.AlertsPending != 0 || d.AlertCommitFailures != 0 || d.Through != 1 || d.Checkpointed != 1 ||
-				detectorCursor(t, r) != 1 || countAlarms(st, AlarmAlertNotStored) != 2 {
+				detectorCursor(t, r) != 1 || countAlarms(st, AlarmAlertNotStored) != 1 {
 				t.Fatalf("cursor %d, status %+v, %d alarms", detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
 			}
+			reason := map[c5.Code]string{c5.CodeQuotaReached: sensorlink.DropClassFull, c5.CodeRecordTooLarge: sensorlink.DropRecordCap}[code]
+			if s := st.Snapshot("x").Sensor; !maps.Equal(s.AlertsDropped, map[string]uint64{reason: 2}) || !maps.Equal(s.AlertsDroppedBy, spoofDrops(1)) {
+				t.Fatalf("dropped %v, by (rule, asset) %v", s.AlertsDropped, s.AlertsDroppedBy)
+			}
 		})
+	}
+}
+
+// spoofDrops are the drop counts by (rule, asset) of n spoofFlow alert
+// pairs: the relay's endpoint is the destination.
+func spoofDrops(n uint64) map[string]uint64 {
+	return map[string]uint64{string(netobs.RuleOwnSessionOutsideRecord) + "." + relayID: n, string(netobs.RuleNodeAddressSpoofed) + "." + relayID: n}
+}
+
+// alertDropEvent is the last intake.drop-counted event of the alert
+// stream's, or nil.
+func alertDropEvent(t *testing.T, r *Runtime) map[string]string {
+	t.Helper()
+	got, err := r.Store(HealthStream).Read(bg, HealthStream, 0, 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]string
+	for _, st := range got {
+		e, err := event.Decode(st.Event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h := e.Health; h != nil && h.Type == event.HealthDropCounted && h.Details["stream"] == string(NetAlertStream(sensorID)) {
+			out = h.Details
+		}
+	}
+	return out
+}
+
+// AP-36 (3), desk: the alerts the store refuses at the class's quota are
+// counted by (rule, asset) in status, beside network-full, and in an
+// intake.drop-counted event of the alert class, and a clean stop and
+// start keeps them. Desk: the store's refusal is a test hook; D6's row
+// fills a real store.
+func TestDetectorAlertDropsKept(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	r.alertAppend = func([]c5.Record) error { return &c5.Error{Code: c5.CodeQuotaReached} }
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	det := alertDropEvent(t, r)
+	want := map[string]string{"stream": string(NetAlertStream(sensorID)), "class": string(c5.ClassNetworkAlert), "count": "2", "reason." + sensorlink.DropClassFull: "2"}
+	for k := range spoofDrops(1) {
+		want[k] = "1"
+	}
+	since := st.Snapshot("x").Sensor.AlertDropsSince
+	want["since"] = since.Format(time.RFC3339Nano)
+	if !maps.Equal(det, want) {
+		t.Fatalf("event %v, want %v", det, want)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	s := st.Snapshot("x").Sensor
+	if !maps.Equal(s.AlertsDropped, map[string]uint64{sensorlink.DropClassFull: 2}) || !maps.Equal(s.AlertsDroppedBy, spoofDrops(1)) || !s.AlertDropsSince.Equal(since) {
+		t.Fatalf("after the restart: dropped %v, by (rule, asset) %v, since %v (was %v)", s.AlertsDropped, s.AlertsDroppedBy, s.AlertDropsSince, since)
+	}
+}
+
+// D6's E15 on #590 and D1 on B3: network-alert-not-stored is raised once
+// for a stretch of failures, and again for the next stretch after an
+// alert commits, whether the alerts were dropped at the quota or held.
+// Desk: the store's refusal is a test hook.
+func TestDetectorAlertAlarmRearmed(t *testing.T) {
+	for _, refuse := range []error{&c5.Error{Code: c5.CodeQuotaReached}, errors.New("refused")} {
+		t.Run(refuse.Error(), func(t *testing.T) {
+			c, dir := holdConfig(t)
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			r.alertAppend = func([]c5.Record) error { return refuse }
+			if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+				t.Fatal(err)
+			}
+			r.Tick(bg)
+			r.Tick(bg)
+			if n := countAlarms(st, AlarmAlertNotStored); n != 1 {
+				t.Fatalf("%d alarms in the first stretch", n)
+			}
+			r.alertAppend = nil
+			if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(frameData(1))))); err != nil {
+				t.Fatal(err)
+			}
+			r.Tick(bg)
+			if n := countAlarms(st, AlarmAlertNotStored); n != 1 || detectorStatus(t, st).Alerts == 0 {
+				t.Fatalf("%d alarms, status %+v", n, detectorStatus(t, st))
+			}
+			r.alertAppend = func([]c5.Record) error { return refuse }
+			third := laterFlow(3, hashOf(frameData(1)))
+			third.FirstUTC, third.LastUTC = "2026-11-07T10:40:00.000001Z", "2026-11-07T10:40:00.120001Z"
+			if err := r.ServeSensor(bg, sensorChannel(t, third)); err != nil {
+				t.Fatal(err)
+			}
+			r.Tick(bg)
+			if n := countAlarms(st, AlarmAlertNotStored); n != 2 {
+				t.Fatalf("%d alarms after the second stretch, status %+v", n, detectorStatus(t, st))
+			}
+		})
+	}
+}
+
+// B4 on the node (D1 on #590, C13 §14 item 19): a connected session
+// handed over before any observation, as when a collection runs before the
+// sensor has sent anything, is checkpointed with no clock, restored, and
+// judged once an observation moves the clock past its window: one
+// own-session-unseen, with no checkpoint failure.
+func TestDetectorSessionBeforeClock(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	from := time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)
+	guardRun(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), from, 0)
+	r.Tick(bg)
+	if d := detectorStatus(t, st); d.CheckpointFailures != 0 || d.CheckpointsWritten != 2 || countAlarms(st, AlarmDetectorCheckpoint) != 0 {
+		t.Fatalf("status %+v", d)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(1, hashOf(frameData(1))))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	if d := detectorStatus(t, st); unseenAlerts(t, r) != 1 || !d.Restored || d.CheckpointFailures != 0 {
+		t.Fatalf("%d unseen, status %+v", unseenAlerts(t, r), d)
+	}
+}
+
+// The alarm re-arms at a commit with alerts still unsent: in one flush,
+// an alert that commits ends the stretch, and the next one dropped raises
+// the alarm again (D1 on B3). Desk: the store's answers are a test hook.
+func TestDetectorAlertAlarmRearmedInFlush(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	r.alertAppend = func([]c5.Record) error { return &c5.Error{Code: c5.CodeQuotaReached} }
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	answers := []error{errors.New("batch refused"), nil, &c5.Error{Code: c5.CodeQuotaReached}}
+	r.alertAppend = func([]c5.Record) error {
+		err := answers[0]
+		answers = answers[1:]
+		return err
+	}
+	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(frameData(1))))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	if d := detectorStatus(t, st); len(answers) != 0 || d.Alerts != 1 || d.AlertsNotStored != 3 || countAlarms(st, AlarmAlertNotStored) != 2 {
+		t.Fatalf("%d answers left, status %+v, %d alarms", len(answers), d, countAlarms(st, AlarmAlertNotStored))
+	}
+}
+
+// D1 on B3: the alert class's intake.drop-counted event names the pairs of
+// an enrolled asset before the unresolved buckets, so decoys to unresolved
+// addresses in every rule never push an enrolled asset's one drop into
+// other; past SensorDropDetailAssets the rest are summed there.
+func TestAlertDropDetailsEnrolledFirst(t *testing.T) {
+	d := dropCounts{map[string]uint64{sensorlink.DropClassFull: 0}, map[string]uint64{}}
+	rules := []netobs.Rule{netobs.RuleNodeAddressSpoofed, netobs.RuleOwnSessionOutsideRecord, netobs.RuleOwnSessionUnseen, netobs.RuleUnresolvedAddress,
+		"r5", "r6", "r7", "r8", "r9"}
+	for _, rule := range rules {
+		d.asset[string(rule)+"."+netobs.AssetUnresolved] = 1000
+	}
+	real := string(netobs.RuleOwnSessionOutsideRecord) + "." + relayID
+	d.asset[real] = 1
+	for _, n := range d.asset {
+		d.reason[sensorlink.DropClassFull] += n
+	}
+	det := alertDropDetails(NetAlertStream(sensorID), time.Now(), d)
+	if det[real] != "1" || det[sensorDropOther] != "2000" || det["count"] != "9001" {
+		t.Fatalf("details %v", det)
 	}
 }
 
@@ -756,12 +935,13 @@ func unseenAlerts(t *testing.T, r *Runtime) (n int) {
 // refused record is the pruned observation stored again by hand with
 // another sensor's ID, which the detector refuses.
 func TestDetectorGuardEdge(t *testing.T) {
-	for _, malformed := range []bool{false, true} {
-		t.Run(fmt.Sprintf("malformed %v", malformed), func(t *testing.T) {
+	for _, first := range []string{"stored", "refused", "undecodable", "a day ahead"} {
+		t.Run(first, func(t *testing.T) {
 			r, st, c, e := prunedStart(t)
 			defer r.Close()
 			stream := NetObservationStream(sensorID)
-			if malformed {
+			switch first {
+			case "refused", "undecodable":
 				var o netobs.Observation
 				if err := json.Unmarshal(e.Netobs, &o); err != nil {
 					t.Fatal(err)
@@ -771,6 +951,9 @@ func TestDetectorGuardEdge(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if first == "undecodable" { // D6's E11 on #590: observationOf fails
+					b = []byte(`{"schema":"not an observation"}`)
+				}
 				e.ID.Seq, e.Netobs = 0, b
 				if b, err = json.Marshal(e); err != nil {
 					t.Fatal(err)
@@ -778,12 +961,24 @@ func TestDetectorGuardEdge(t *testing.T) {
 				if _, err := r.Log(stream).Append(bg, c5.Record{Stream: stream, Class: c5.ClassNetworkObservation, Event: b}); err != nil {
 					t.Fatal(err)
 				}
-			} else if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(2))); err != nil {
-				t.Fatal(err)
+			case "a day ahead": // D3 on #590: the sensor's clock a day ahead of the commit
+				ahead := ownFlow(2)
+				day := time.Now().UTC().Add(24 * time.Hour).Format("2006-01-02T15:04:05.000000Z")
+				ahead.FirstUTC, ahead.LastUTC = day, day
+				if err := r.ServeSensor(bg, sensorChannel(t, ahead)); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(2))); err != nil {
+					t.Fatal(err)
+				}
 			}
 			got, err := r.Store(stream).Read(bg, stream, 1, 1)
 			if err != nil || len(got) != 1 || got[0].Key.Seq != 2 {
 				t.Fatalf("%d records, %v", len(got), err)
+			}
+			if _, err := observationOf(got[0]); (err != nil) != (first == "undecodable") {
+				t.Fatalf("observationOf: %v", err)
 			}
 			at, g := got[0].CommittedAt, time.Duration(netobs.DefaultTieGraceS)*time.Second
 			s := newScheduler(t, r, &fakeCollector{})
@@ -798,7 +993,7 @@ func TestDetectorGuardEdge(t *testing.T) {
 			r.Tick(bg)
 			d := detectorStatus(t, st)
 			refused := int64(0)
-			if malformed {
+			if first == "refused" || first == "undecodable" {
 				refused = 1
 			}
 			if !r.detector.firstObs.Equal(at) || d.NotJudged["before-retained"] != 1 || unseenAlerts(t, r) != 1 || d.Refused != refused || d.Through != 3 {
@@ -1017,6 +1212,12 @@ func TestDetectorFrameIndexBound(t *testing.T) {
 // stream that fails moves nothing. Desk: the commit is
 // refused by a test hook, and the read by a fake reader.
 func TestDetectorHealthPosition(t *testing.T) {
+	for _, bad := range []bool{true, false} { // D6's E6 on #590: the good session first
+		t.Run(fmt.Sprintf("bad first %v", bad), func(t *testing.T) { healthPosition(t, bad) })
+	}
+}
+
+func healthPosition(t *testing.T, bad bool) {
 	c, dir := holdConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -1024,16 +1225,21 @@ func TestDetectorHealthPosition(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 		t.Fatal(err)
 	}
+	before := r.detector.health
 	s := newScheduler(t, r, &fakeCollector{})
-	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "x"})
+	missing := int64(0)
+	if bad {
+		runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "x"})
+		missing = 1
+	}
 	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
 	r.Tick(bg)
 	run, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.detector.health >= run {
-		t.Fatalf("health position %d past the session at %d, not handed over", r.detector.health, run)
+	if h := r.detector.health; h >= run || (!bad && h != before) {
+		t.Fatalf("health position %d (was %d) past the session at %d, not handed over", h, before, run)
 	}
 	r.alertAppend = nil
 	r.Tick(bg)
@@ -1042,7 +1248,7 @@ func TestDetectorHealthPosition(t *testing.T) {
 		t.Fatal(err)
 	}
 	k, err := netobs.DecodeDetectorCheckpoint(doc)
-	if d := detectorStatus(t, st); err != nil || k.SessionThrough != uint64(run) || d.Alerts != 2 || d.NotJudged["session-missing"] != 1 {
+	if d := detectorStatus(t, st); err != nil || k.SessionThrough != uint64(run) || d.Alerts != 2 || d.NotJudged["session-missing"] != missing {
 		t.Fatalf("session through %d, status %+v, %v", k.SessionThrough, d, err)
 	}
 	pages, health := 0, r.detector.health

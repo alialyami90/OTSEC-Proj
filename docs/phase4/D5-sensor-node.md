@@ -146,7 +146,10 @@ The node's detection module, the network baseline and its detector (D4's note), 
   - An alert whose frames are all missing has a header-only capture.
   - `own-session-unseen` has no capture.
 - **An alert that isn't committed** (D1's F1 on #590). Alerts commit in the order raised.
-  - If the store refuses an alert for its class's quota or record cap, the alert is dropped and counted, as §8 of `D5-c5-0.9.md` drops a full class's records, and the detector goes on.
+  - If the store refuses an alert for its class's quota or record cap, the alert is dropped and counted, as §8 of `D5-c5-0.9.md` drops a full class's records, and the detector goes on. It is counted by reason (`class-full`, `record-cap`) and by its C13 rule and destination asset, with one bucket, `asset-unresolved`, for every unresolved destination (AP-36 (3), PR B3).
+  - Those counts are in status beside `network-full`, and in an `intake.drop-counted` event of class `network-alert` on `platform/health`. The event is written as the observation class's is: at most once a minute when the counts changed, and at a clean stop. A restart restores them from the last event, so they count since `alert_drops_since`.
+  - The event names at most `SensorDropDetailAssets` (8) pairs as `<rule>.<asset>` details, with no prefix, since a detail key is at most 64 characters and the longest rule and an asset ID take 63. It sums the rest in `other`. Pairs with an enrolled asset are named before the unresolved buckets, then by the most drops (D1 on B3). At its worst case it renders in 1,465 octets, within three quarters of a default Syslog target's 2,048 (`TestSensorAlertDropEventFits`, desk Linux).
+  - `network-alert-not-stored` is raised once for a stretch of drops or held alerts, and again only after an alert commits (D1 on B3, D6's E15 on #590).
   - Any other failure keeps the alert and those after it. The detector then reads nothing more and is not checkpointed until they commit, so neither its checkpoint nor its cursor passes an alert that isn't stored.
   - Each tick tries the commit again. A restart reads the observations again from the last checkpoint and raises the alert again.
 
@@ -211,6 +214,7 @@ Status gets a `sensor` section, written as the other sections are, and `otsec he
 - the oldest file in the capture ring;
 - the C-11 interface check (§7): `ok`, or what is bound;
 - the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), the start repair's runs (`runs_repaired`, `runs_repair_refused`), and the runs whose `collection.run` has no session (`runs_session_missing`) (D4-72, `D5-c5-0.9.md` §8);
+- beside `network-full`, the alerts the store refused, by reason (`alerts_dropped`) and by `<rule>.<asset>` (`alerts_dropped_by_rule_asset`), since `alert_drops_since`, and when they were last written (`alert_drops_written`) (AP-36 (3), PR B3);
 - the detector's part (`detector`, D4-74):
   - `through` and `checkpointed`, and whether it was `restored`;
   - the counts since start: alerts committed, `alerts_frames_missing` (alerts whose `frames_missing` is above 0), alerts dropped and counted, the alerts pending a commit and the failed commits, observations refused, and checkpoints written and failed;
@@ -288,6 +292,7 @@ These tests would show the design holds:
 - **Retention of the capture ring by size only** (§4): if the owner needs a retention in days, that is D3's row and a C5 question.
 - **Driver access on Windows, and egress enforcement on Linux** (§7): `unknown` until ADR-0009's runs show them.
 - **Option (b)'s buffering on the sensor host:** D4's design.
-- **A detector checkpoint with sessions and no clock** (found on desk Linux while writing D6's rows on #590). A detector that has taken a connected session, and no observation it accepted, can't write its checkpoint: `netobs` refuses own-session state with no `clock_utc`. That happens when the node runs a collection before the sensor has sent anything, or when every record read so far was refused. The node then keeps its cursor, raises `network-detector-checkpoint-failed` once, counts a failure at each tick, and stores the checkpoint once an observation is accepted. Nothing is lost, but the alarm is raised for a state that is not a fault. The fix is netdetect's or C13's, and D1 rules where.
+- **A detector checkpoint with sessions and no clock** (found on desk Linux while writing D6's rows on #590) is fixed by B4 (#593): with no `clock_utc`, a checkpoint may hold `session_through` and pending sessions, so a collection that runs before the sensor has sent anything no longer fails the checkpoint (`TestDetectorSessionBeforeClock`, desk Linux).
 - **Restore re-reads the health stream** from its first retained record, since the detector has no `SessionThrough` getter. Sessions already taken are ignored. A getter would let the node start from it (D4).
-- **Per-(rule, asset) alert drop counts** are the follow-up PR B3, which merges before item 4's exit gate and before anything forwards or relies on alerts.
+- **The alert drop counts don't close AP-36 (3)'s hiding case** (D1 on B3). Naming enrolled assets first keeps decoys to unresolved addresses from pushing a real asset's drop into `other`, but a spoofed source address can still land decoys on an enrolled asset. Past 8 named pairs, a restart can move a pair's attribution into `other`. The total is never lost across a clean stop; a crash can lose up to the last minute's counts, as D5-c5-0.9 §4 says.
+- **`runs_session_missing` counts since start** (D4 on #590). The driver reads the health stream again from its first retained record after each restart, so a `collection.run` that doesn't parse is counted again after each restart.

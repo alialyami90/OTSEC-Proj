@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -232,6 +233,114 @@ func TestSensorDropEventFits(t *testing.T) {
 		t.Fatalf("%d octets (limit %d), %+v, %v: %s", len(msg), syslog.DefaultMaxOctets*3/4, out, err, msg)
 	}
 	t.Logf("worst case: %d octets", len(msg))
+}
+
+// The alert class's intake.drop-counted event at its worst case (D1 on
+// B3): eight pairs of the longest rule name and a 36-character asset ID,
+// other, both reasons, and every count at its widest, with the
+// longest node ID, render within a default Syslog target's 2048 octets,
+// and within three quarters of it as the observation event does.
+func TestSensorAlertDropEventFits(t *testing.T) {
+	d := dropCounts{map[string]uint64{sensorlink.DropClassFull: math.MaxUint64, sensorlink.DropRecordCap: math.MaxUint64}, map[string]uint64{}}
+	var longest netobs.Rule
+	for _, r := range netobs.Rules {
+		if len(r) > len(longest) {
+			longest = r
+		}
+	}
+	for i := range SensorDropDetailAssets + 2 {
+		d.asset[string(longest)+"."+fmt.Sprintf("ffffffff-ffff-4fff-bfff-%012d", i)] = math.MaxUint64 - uint64(i)
+	}
+	det := alertDropDetails(NetAlertStream(strings.Repeat("f", 36)), time.Date(2026, 11, 1, 0, 0, 0, 123456789, time.UTC), d)
+	for k := range det {
+		if k != "stream" && k != "class" && k != "since" {
+			det[k] = strconv.FormatUint(math.MaxUint64, 10)
+		}
+	}
+	if n := len(det); n != 4+2+SensorDropDetailAssets+1 {
+		t.Fatalf("%d details: %v", n, det)
+	}
+	e := &event.Event{Schema: event.Identifier, ID: event.EventID{NodeID: event.NodeID(strings.Repeat("n", 63)), Stream: event.Stream(HealthStream), Seq: math.MaxUint64 >> 1},
+		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
+		Received: event.Received{UTC: "2026-11-01T00:00:00.000000001Z", ResolutionNS: 1, Clock: event.Clock{Sync: event.SyncSynchronized, Source: "ntp"}},
+		Health:   &event.Health{Type: event.HealthDropCounted, Details: det}}
+	tg, err := syslog.ParseTarget([]byte(`{"schema": "otsec.syslog/0.1", "name": "central", "host": "collector.example", "port": 6514,
+		"transport": "tls", "format": "rfc5424", "framing": "octet-counting", "class": "best-effort", "replay_seconds": 3600, "max_message_octets": 2048,
+		"tls": {"server_name": "collector.example", "trust_anchor_ref": "ca"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg, out, err := syslog.Render(e, tg)
+	if err != nil || out.SummaryDropped || len(msg) > syslog.DefaultMaxOctets*3/4 {
+		t.Fatalf("%d octets (limit %d), %+v, %v: %s", len(msg), syslog.DefaultMaxOctets*3/4, out, err, msg)
+	}
+	t.Logf("worst case: %d octets", len(msg))
+}
+
+// D6's B8 on #597 and D1's ruling: more than SensorDropDetailAssets
+// (rule, asset) pairs, every rule's on the enrolled relay as a spoofed
+// source could land them, plus decoys to unresolved addresses, written at
+// a tick and kept across a clean stop and start. The pairs past the eighth
+// come back in other, and other plus the named pairs equals the totals
+// from before the stop. Desk: the drops are counted through the hook the
+// detector calls, not by a store that refused them.
+func TestSensorAlertDropOtherKept(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	total := uint64(0)
+	for i, rule := range netobs.Rules {
+		for range i + 1 {
+			r.alertDropped(sensorlink.DropClassFull, string(rule)+"."+relayID)
+			total++
+		}
+	}
+	for _, rule := range netobs.Rules[:2] {
+		r.alertDropped(sensorlink.DropRecordCap, string(rule)+"."+netobs.AssetUnresolved)
+		total++
+	}
+	r.tickSensor(bg, false)
+	r.Close()
+	r, st := g.start()
+	defer r.Close()
+	s := st.Snapshot("x").Sensor
+	var named, all uint64
+	for k, n := range s.AlertsDroppedBy {
+		all += n
+		if k != sensorDropOther {
+			named++
+		}
+	}
+	if s.AlertsDroppedBy[sensorDropOther] == 0 || named != SensorDropDetailAssets || all != total ||
+		s.AlertsDropped[sensorlink.DropClassFull]+s.AlertsDropped[sensorlink.DropRecordCap] != total {
+		t.Fatalf("after the restart: by (rule, asset) %v, by reason %v, want a total of %d with %d named", s.AlertsDroppedBy, s.AlertsDropped, total, SensorDropDetailAssets)
+	}
+}
+
+// D6's B14 on #597 and D1's ruling: an alert-class drop-count event is
+// written again a minute after the first when more alerts were dropped,
+// with the higher count, so the written counts are not the live ones.
+// Desk only.
+func TestSensorAlertDropEventRewritten(t *testing.T) {
+	g := newRetentionRig(t)
+	r, _ := g.start()
+	defer r.Close()
+	key := string(netobs.RuleNodeAddressSpoofed) + "." + relayID
+	alertEvents := func() (out []string) {
+		for _, d := range dropEvents(t, r) {
+			if d["class"] == string(c5.ClassNetworkAlert) {
+				out = append(out, d["count"]+"/"+d[key])
+			}
+		}
+		return out
+	}
+	r.alertDropped(sensorlink.DropClassFull, key)
+	r.tickSensor(bg, false)
+	g.advance(time.Minute)
+	r.alertDropped(sensorlink.DropClassFull, key)
+	r.tickSensor(bg, false)
+	if got := alertEvents(); !slices.Equal(got, []string{"1/1", "2/2"}) {
+		t.Fatalf("alert drop events (count/pair) %v", got)
+	}
 }
 
 // A drop-count write that fails raises store-commit-failed on the health
