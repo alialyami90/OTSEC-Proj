@@ -255,6 +255,55 @@ func TestSmallQuotaFullOncePerFill(t *testing.T) {
 	}
 }
 
+// D6's R1 on #602 (kills a re-arm at half a minimum record free): a prune
+// that leaves free room between half of min(MinRecordBytes, quota) and one
+// byte short of it doesn't re-arm the class, so the next refusal raises no
+// second alarm. Here the quota is 4 KiB: a 2.5 KiB record and small ones
+// fill it, and pruning the large one leaves between 2 KiB and 4 KiB free.
+func TestSmallQuotaRearmNeedsRoom(t *testing.T) {
+	const (
+		stream c5.StreamID = "platform/health"
+		quota              = 4 << 10
+	)
+	a := &alarms{}
+	db := open1(t, storeDir(t), withQuota(evidenceDB, c5.ClassPlatform, quota), a)
+	// padded is record n with a detail of size bytes.
+	padded := func(n int, size int64) c5.Record {
+		r := rec(stream, c5.ClassPlatform, n)
+		r.Event = bytes.Replace(r.Event, []byte(`"}}}`), []byte(`","pad":"`+strings.Repeat("p", int(size))+`"}}}`), 1)
+		return r
+	}
+	commit1(t, db, padded(0, 2560))
+	n, refused := 0, error(nil)
+	for refused == nil && n < 1000 {
+		n++
+		_, refused = db.CommitBatch(bg, stream, []c5.Record{rec(stream, c5.ClassPlatform, n)})
+	}
+	if !isCode(refused, c5.CodeQuotaReached) {
+		t.Fatalf("after %d records: %v, want CodeQuotaReached", n, refused)
+	}
+	pruneN(t, db, stream, c5.ClassPlatform, 1)
+	used, err := db.classBytes(bg, c5.ClassPlatform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if free := quota - used; free < quota/2 || free >= quota {
+		t.Fatalf("%d bytes free after the prune, want [%d, %d)", free, quota/2, quota)
+	}
+	if _, err := db.CommitBatch(bg, stream, []c5.Record{padded(n+1, quota-used)}); !isCode(err, c5.CodeQuotaReached) {
+		t.Fatalf("a record over the free room: %v, want CodeQuotaReached", err)
+	}
+	var full int
+	for _, x := range a.got {
+		if x.Code == c5.FullAlarm(c5.ClassPlatform) {
+			full++
+		}
+	}
+	if full != 1 {
+		t.Fatalf("%d full alarms, want 1: the prune left less than a minimum record free", full)
+	}
+}
+
 // A first-sight observation stores a capture and an alert cites it: both
 // classes are charged its bytes. Pruning the observation ends only the
 // observation class's charge. Pruning the alert deletes the capture and ends
