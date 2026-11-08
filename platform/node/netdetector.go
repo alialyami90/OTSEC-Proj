@@ -259,7 +259,10 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 		if err != nil {
 			r.opt.Status.Raise("", AlarmDetectorNotRestored, "the detector's checkpoint did not restore, so it starts again from the oldest retained observation: "+err.Error())
 		} else {
-			nd.restored, nd.written = true, nd.d.Through()
+			// The health read starts after the last session taken, so a
+			// run before it, one that doesn't parse included, is not
+			// read or counted again (D1's note 2 on #590).
+			nd.restored, nd.written, nd.health = true, nd.d.Through(), c5.Seq(nd.d.SessionThrough())
 		}
 	}
 	if nd.d == nil {

@@ -1263,6 +1263,83 @@ func healthPosition(t *testing.T, bad bool) {
 	}
 }
 
+// D1's note 2 on #590: a restored detector's health read starts at its
+// SessionThrough, so a collection.run before the last session taken, one
+// that doesn't parse included, is not read or counted again after a
+// restart.
+func TestDetectorHealthReadRestored(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st, _ := start(t, c, dir)
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	s := newScheduler(t, r, &fakeCollector{})
+	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "x"})
+	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
+	r.Tick(bg)
+	run, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := detectorStatus(t, st); d.NotJudged["session-missing"] != 1 || r.detector.d.SessionThrough() != uint64(run) {
+		t.Fatalf("session through %d (run %d), status %+v", r.detector.d.SessionThrough(), run, d)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	r.Tick(bg)
+	if d := detectorStatus(t, st); !d.Restored || d.NotJudged["session-missing"] != 0 {
+		t.Fatalf("after the restart: status %+v", d)
+	}
+	// D6's R1 on #600: a run after the restart is read and judged.
+	guardRun(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(3), time.Date(2026, 11, 7, 10, 5, 0, 0, time.UTC), 1)
+	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(frameData(1))))); err != nil {
+		t.Fatal(err)
+	}
+	r.Tick(bg)
+	if n := unseenAlerts(t, r); n != 1 {
+		t.Fatalf("%d own-session-unseen after the restart, status %+v", n, detectorStatus(t, st))
+	}
+}
+
+// D6's R2 on #600: a crash after a collection.run commits and before the
+// checkpoint that takes it. The run, the first past the restored
+// SessionThrough, is read and taken after the restart. Desk: the
+// checkpoint fails at item 3's ceiling, filled by hand, as a crash before
+// it would leave it.
+func TestDetectorHealthReadAfterCrash(t *testing.T) {
+	c, dir := ceilingConfig(t)
+	r, st, _ := start(t, c, dir)
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+		t.Fatal(err)
+	}
+	s := newScheduler(t, r, &fakeCollector{})
+	last := func() c5.Seq {
+		seq, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
+	r.Tick(bg)
+	run1 := last()
+	fillCeiling(t, r, c)
+	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "1", "connected": "false"})
+	run2 := last()
+	r.Tick(bg)
+	if d := detectorStatus(t, st); run2 != run1+1 || r.detector.d.SessionThrough() != uint64(run2) || d.CheckpointFailures == 0 {
+		t.Fatalf("runs at %d and %d, session through %d, status %+v", run1, run2, r.detector.d.SessionThrough(), d)
+	}
+	r.Close()
+	r, st, _ = start(t, c, dir)
+	defer r.Close()
+	r.Tick(bg)
+	if d := detectorStatus(t, st); !d.Restored || r.detector.d.SessionThrough() != uint64(run2) {
+		t.Fatalf("after the restart: session through %d, want %d, status %+v", r.detector.d.SessionThrough(), run2, d)
+	}
+}
+
 // readerFunc is a health stream reader.
 type readerFunc func(c5.Seq) ([]c5.Stored, error)
 
