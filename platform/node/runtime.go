@@ -83,6 +83,12 @@ type Runtime struct {
 	// section (sensor.go).
 	sensor *sensorIntake
 	intake intakeRecords // the intake hold's records (netintake.go)
+	// detector is the detector consumer, nil until it starts
+	// (netdetector.go). Only Start, Tick and Close touch it.
+	detector *netDetector
+	// afterRelease, when set, runs between a run's release and its entry
+	// in the handover barrier at its after_seq: a test's way to tick there.
+	afterRelease func()
 
 	// state guards each database's report, store and Log, which Tick
 	// replaces while the scheduler and the forwarder read them.

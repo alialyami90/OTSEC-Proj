@@ -1,0 +1,740 @@
+package node
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"slices"
+	"strconv"
+	"time"
+
+	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/netobs"
+	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/modules/detection/netdetect"
+	"otsec.local/otsec/platform/sensorlink"
+)
+
+// The detector consumer (P4-4-B5 deliverable 3, D4-72 to D4-74,
+// docs/phase4/D5-sensor-node.md section 3): the node reads the sensor's
+// observation stream into netdetect's detector, hands it the node's own
+// sessions from collection.run, commits the alerts it raises with their
+// capture, and checkpoints it, and only then moves its C5 cursor.
+
+// DetectorConsumer is the detector's required C5 consumer of the
+// observation stream: what it has folded into a committed checkpoint is
+// prunable.
+const DetectorConsumer c5.ConsumerID = "node-netdetector"
+
+// The detector's alarms.
+const (
+	// AlarmDetectorCheckpoint: a netcheckpoint.detector was not stored,
+	// or the cursor not saved after it, so the cursor stays where it was
+	// and a restart resumes from the last checkpoint stored.
+	AlarmDetectorCheckpoint = "network-detector-checkpoint-failed"
+	// AlarmDetectorNotStarted: the detector consumer did not start, so
+	// no alert is raised, and its cursor holds the observation stream.
+	AlarmDetectorNotStarted = "network-detector-not-started"
+	// AlarmDetectorNotRestored: the stored checkpoint did not restore, so
+	// the detector started again from the oldest retained observation.
+	AlarmDetectorNotRestored = "network-detector-not-restored"
+	// AlarmDetectorMismatch: a restore's replay departed from the alerts
+	// already committed (netdetect.Detector.Mismatches).
+	AlarmDetectorMismatch = "network-detector-mismatch"
+	// AlarmDetectorOrdering: a session was handed over after observations
+	// it precedes, the node's ordering fault (netdetect.ErrOrdering).
+	AlarmDetectorOrdering = "network-detector-ordering"
+	// AlarmEndpointsNotTracked: enrolled run endpoints past
+	// MaxDetectorEndpoints, whose sessions are never judged before
+	// acknowledgement (D1's C1 on #575). Raised at start.
+	AlarmEndpointsNotTracked = "network-endpoints-not-tracked"
+	// AlarmAlertNotStored: an alert the detector raised was not committed.
+	AlarmAlertNotStored = "network-alert-not-stored"
+)
+
+// FrameIndexEntries bounds the frame index, from a cited frame's SHA-256
+// to the first-sight capture that holds it; the oldest goes first (D1 in
+// D4-74).
+const FrameIndexEntries = 4096
+
+// detectorReadPage is how many records the driver reads at a time.
+const detectorReadPage = 256
+
+// DetectorStatus is the detector's part of the sensor section. Nothing in
+// it is device text or packet bytes.
+type DetectorStatus struct {
+	// Through is the last observation seq taken, Checkpointed the last
+	// one a stored checkpoint holds, which the cursor follows.
+	Through      uint64 `json:"through"`
+	Checkpointed uint64 `json:"checkpointed"`
+	Restored     bool   `json:"restored"`
+	// Alerts are the alerts committed since start; AlertsFramesMissing
+	// those of them with frames_missing above 0 (D1 in D4-74).
+	Alerts              int64 `json:"alerts"`
+	AlertsFramesMissing int64 `json:"alerts_frames_missing"`
+	AlertsNotStored     int64 `json:"alerts_not_stored"`
+	// Refused are observations the detector refused, still taken.
+	Refused int64 `json:"observations_refused"`
+	// NotJudged are the sessions not judged, by reason (D4-74).
+	NotJudged map[string]int64 `json:"not_judged"`
+	// OpenFlowSeen counts the sessions seen through a reused conversation,
+	// apart from those seen by a tie (D1 in D4-73).
+	OpenFlowSeen        int64 `json:"open_flow_seen"`
+	EndpointsNotTracked int   `json:"endpoints_not_tracked"`
+	// NotYetSeen are the run endpoints own-session-unseen can't judge yet,
+	// as "<asset_id> <l4> <addr>:<port>".
+	NotYetSeen []string `json:"not_yet_seen,omitempty"`
+	// EarlyCloses are the windows closed early since start, and
+	// EarlyClosesPerHour the same over the node's monotonic hours since
+	// start: a rising rate is decoys rotated over more keys than the cap
+	// (D3's C1 on #569).
+	EarlyCloses        int64   `json:"early_closes"`
+	EarlyClosesPerHour float64 `json:"early_closes_per_hour"`
+	Mismatches         int64   `json:"mismatches"`
+	OrderingFaults     int64   `json:"ordering_faults"`
+	CheckpointsWritten int64   `json:"checkpoints_written"`
+	CheckpointFailures int64   `json:"checkpoint_failures"`
+}
+
+// netDetector is the runtime's detector and its driver's state.
+type netDetector struct {
+	d   *netdetect.Detector
+	cfg netdetect.DetectorConfig
+	obs c5.StreamID
+	// restored: the detector came from a checkpoint. pruned says the
+	// observations after its Through were pruned at start, as they are at
+	// a first start over a pruned stream, with firstObs the capture time
+	// of the first observation the detector read: the before-retained
+	// guard (D1 in D4-74).
+	restored bool
+	pruned   bool
+	firstObs time.Time
+	// health is the health stream's seq the driver has read sessions to.
+	health c5.Seq
+	// written is Through at the last stored checkpoint, saved the cursor
+	// stored, and ckpts the seqs of the stored checkpoints, oldest first,
+	// the last one the newest. handed is the newest collection.run seq
+	// handed over, and moved says one was handed over since the last
+	// stored checkpoint, which holds the sessions taken.
+	written uint64
+	saved   c5.Seq
+	ckpts   []c5.Seq
+	handed  uint64
+	moved   bool
+	index   frameIndex
+	start   time.Duration
+	st      DetectorStatus
+	raised  map[string]bool
+}
+
+// frameIndex maps a cited frame's SHA-256 to the evidence ref of the
+// first-sight capture that holds it, oldest out past FrameIndexEntries.
+type frameIndex struct {
+	at    map[string]string
+	order []string
+}
+
+func (x *frameIndex) add(frame, ref string) {
+	if x.at == nil {
+		x.at = map[string]string{}
+	}
+	if _, ok := x.at[frame]; ok {
+		return
+	}
+	x.at[frame] = ref
+	x.order = append(x.order, frame)
+	if len(x.order) > FrameIndexEntries {
+		delete(x.at, x.order[0])
+		x.order = x.order[1:]
+	}
+}
+
+// note indexes o's frames when it is a first sight.
+func (x *frameIndex) note(o *netobs.Observation) {
+	if o == nil || o.Node == nil || o.Node.StoredCapture == "" {
+		return
+	}
+	for _, f := range o.Citation.Frames {
+		x.add(f.SHA256, "sha256:"+o.Node.StoredCapture)
+	}
+}
+
+// detectorConfig is the detector's configuration from the node's.
+func (r *Runtime) detectorConfig() netdetect.DetectorConfig {
+	s := r.cfg.NetworkSensor
+	cfg := netdetect.DetectorConfig{SensorID: s.SensorID, NodeID: r.cfg.NodeID, Stream: event.Stream(NetObservationStream(s.SensorID)),
+		Params:        netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: netobs.DefaultCoalesceWindowS},
+		NodeAddresses: s.NodeAddresses, NodeMACs: s.NodeMACs}
+	for _, v := range s.NodeVLANs {
+		if v == 0 {
+			cfg.NodeUntagged = true
+		} else {
+			cfg.NodeVLANs = append(cfg.NodeVLANs, int(v))
+		}
+	}
+	for _, x := range r.cfg.NetExclusions() {
+		cfg.Exclusions = append(cfg.Exclusions, netdetect.Destination{Addr: x.Addr.String(), L4: x.L4, Port: x.Port})
+	}
+	seen := map[netdetect.Endpoint]bool{}
+	for _, col := range r.cfg.Schedule {
+		ep, l4, ok := r.cfg.holdEndpoint(col)
+		if !ok {
+			continue
+		}
+		e := netdetect.Endpoint{AssetID: col.AssetID, Destination: netdetect.Destination{Addr: ep.Addr().String(), L4: l4, Port: int(ep.Port())}}
+		if !seen[e] {
+			seen[e] = true
+			cfg.Endpoints = append(cfg.Endpoints, e)
+		}
+	}
+	return cfg
+}
+
+// startDetector restores the detector from its newest checkpoint, or starts
+// it at the oldest retained observation, after the intake's start repair
+// (D4-72). It rebuilds the frame index from the retained first sights.
+func (r *Runtime) startDetector(ctx context.Context) error {
+	s := r.cfg.NetworkSensor
+	nd := &netDetector{cfg: r.detectorConfig(), obs: NetObservationStream(s.SensorID), start: r.opt.Mono(), raised: map[string]bool{}}
+	odb := r.Store(nd.obs)
+	if odb == nil {
+		return errors.New("the network database is not open")
+	}
+	head, err := odb.LastCommitted(ctx, nd.obs)
+	if err != nil {
+		return err
+	}
+	cursors, err := odb.LoadCursors(ctx, nd.obs)
+	if err != nil {
+		return err
+	}
+	for _, c := range cursors {
+		if c.Consumer == DetectorConsumer {
+			nd.saved = c.Through
+		}
+	}
+	if seqs, doc, err := r.detectorCheckpoints(ctx); err != nil {
+		return err
+	} else if doc != nil {
+		// Every stored checkpoint goes once a newer one is stored, the
+		// one that didn't restore too.
+		nd.ckpts = seqs
+		committed, err := r.alertsAfter(ctx, doc)
+		if err == nil {
+			nd.d, err = netdetect.RestoreDetector(nd.cfg, doc, committed, head)
+		}
+		if err != nil {
+			r.opt.Status.Raise("", AlarmDetectorNotRestored, "the detector's checkpoint did not restore, so it starts again from the oldest retained observation: "+err.Error())
+		} else {
+			nd.restored, nd.written = true, nd.d.Through()
+		}
+	}
+	if nd.d == nil {
+		if nd.d, err = netdetect.NewDetector(nd.cfg); err != nil {
+			return err
+		}
+	}
+	first, err := odb.FirstRetained(ctx, nd.obs)
+	if err != nil {
+		return err
+	}
+	through := c5.Seq(nd.d.Through())
+	nd.pruned = first > through+1 || (first == 0 && head > through)
+	if err := r.rebuildFrameIndex(ctx, nd); err != nil {
+		return err
+	}
+	if !nd.restored {
+		// A first start stores its checkpoint before it reads anything,
+		// so a crash before the next one restores from it and holds back
+		// the alerts already committed. The guard holds after that
+		// restore, as the observations after Through 0 are still pruned.
+		r.checkpointDetector(ctx, nd)
+	}
+	nd.st.EndpointsNotTracked = nd.d.EndpointsNotTracked()
+	if n := nd.st.EndpointsNotTracked; n > 0 {
+		r.opt.Status.Raise("", AlarmEndpointsNotTracked, fmt.Sprintf("%d enrolled run endpoint addresses past %d are not tracked, so before acknowledgement their sessions are never judged", n, netobs.MaxDetectorEndpoints))
+	}
+	r.detector = nd
+	return nil
+}
+
+// observationOf decodes a stored observation.
+func observationOf(st c5.Stored) (*netobs.Observation, error) {
+	e, err := event.Decode(st.Event)
+	if err != nil {
+		return nil, err
+	}
+	return netobs.ObservationFromEvent(e)
+}
+
+// detectorCheckpoints are the seqs of the netcheckpoint.detector records
+// on the intake's configuration stream, oldest first, and the newest's
+// document, or nil.
+func (r *Runtime) detectorCheckpoints(ctx context.Context) ([]c5.Seq, []byte, error) {
+	stream := r.intakeStream()
+	db := r.Store(stream)
+	if db == nil {
+		return nil, nil, errors.New("the configuration database is not open")
+	}
+	var (
+		after c5.Seq
+		seqs  []c5.Seq
+		doc   []byte
+	)
+	for {
+		got, err := db.Read(ctx, stream, after, 16)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, st := range got {
+			after = st.Key.Seq
+			var head struct{ Schema, Half string }
+			if json.Unmarshal(st.Event, &head) == nil && head.Schema == netobs.CheckpointIdentifier && head.Half == netobs.HalfDetector {
+				seqs, doc = append(seqs, st.Key.Seq), st.Event
+			}
+		}
+		if len(got) < 16 {
+			return seqs, doc, nil
+		}
+	}
+}
+
+// alertsAfter are the alerts on the alert stream after the checkpoint's
+// last_alert_seq, which a restore holds back when its replay raises them
+// again (D1 in D4-74).
+func (r *Runtime) alertsAfter(ctx context.Context, doc []byte) ([]netdetect.Committed, error) {
+	k, err := netobs.DecodeDetectorCheckpoint(doc)
+	if err != nil {
+		return nil, err
+	}
+	stream := NetAlertStream(r.cfg.NetworkSensor.SensorID)
+	db := r.Store(stream)
+	if db == nil {
+		return nil, errors.New("the network database is not open")
+	}
+	var out []netdetect.Committed
+	for after := c5.Seq(k.LastAlertSeq); ; {
+		got, err := db.Read(ctx, stream, after, detectorReadPage)
+		if err != nil {
+			return nil, err
+		}
+		for _, st := range got {
+			after = st.Key.Seq
+			e, err := event.Decode(st.Event)
+			if err != nil {
+				return nil, err
+			}
+			a, err := netobs.AlertFromEvent(e)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, netdetect.Committed{Seq: st.Key.Seq, Alert: *a})
+		}
+		if len(got) < detectorReadPage {
+			return out, nil
+		}
+	}
+}
+
+// rebuildFrameIndex indexes the frames of the retained first sights at or
+// below the detector's Through, newest first, until the index is full.
+func (r *Runtime) rebuildFrameIndex(ctx context.Context, nd *netDetector) error {
+	db := r.Store(nd.obs)
+	first, err := db.FirstRetained(ctx, nd.obs)
+	if err != nil || first == 0 {
+		return err
+	}
+	var sights []*netobs.Observation
+	n := 0
+	for hi := c5.Seq(nd.d.Through()); hi >= first && n < FrameIndexEntries; {
+		lo := max(first-1, hi-min(hi, detectorReadPage))
+		got, err := db.Read(ctx, nd.obs, lo, int(hi-lo))
+		if err != nil {
+			return err
+		}
+		for i := len(got) - 1; i >= 0 && n < FrameIndexEntries; i-- {
+			if o, err := observationOf(got[i]); err == nil && o.Node != nil && o.Node.StoredCapture != "" {
+				sights = append(sights, o)
+				n += len(o.Citation.Frames)
+			}
+		}
+		if lo < first {
+			break
+		}
+		hi = lo
+	}
+	for i := len(sights) - 1; i >= 0; i-- {
+		nd.index.note(sights[i])
+	}
+	return nil
+}
+
+// tickDetector runs the driver to the barrier, and checkpoints when the
+// detector took an observation or a session since the last checkpoint,
+// at each tick and so at a clean stop too (D1 in D4-74). A session counts
+// because a restart must find it taken: one skipped, handed over again to
+// a restored detector, would be judged.
+func (r *Runtime) tickDetector(ctx context.Context) {
+	nd := r.detector
+	if nd == nil {
+		return
+	}
+	r.driveDetector(ctx, nd)
+	if nd.d.Through() != nd.written || nd.moved {
+		r.checkpointDetector(ctx, nd)
+	}
+	r.detectorStatus(nd)
+}
+
+// driveDetector feeds the detector the sessions and observations committed
+// since it last ran. The observation stream's head is read first, then the
+// handover barrier (the lowest after_seq of a run whose release committed
+// and whose collection.run may still come), then the health stream: so a
+// run that releases after the barrier has its after_seq at or past the
+// head read, and a run that left the barrier has its collection.run on the
+// health stream already. Observations go to min(head, barrier), and each
+// session is handed over, in health-stream seq order, before the
+// observations past its after_seq (D4's finding 4 on #576).
+func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector) {
+	odb, hdb := r.Store(nd.obs), r.Store(HealthStream)
+	if odb == nil || hdb == nil {
+		return
+	}
+	head, err := odb.LastCommitted(ctx, nd.obs)
+	if err != nil {
+		return
+	}
+	limit := min(head, r.intake.barrier(head))
+	sessions, err := r.newSessions(ctx, hdb, nd)
+	if err != nil {
+		return
+	}
+	for _, s := range sessions {
+		r.observeTo(ctx, nd, min(s.AfterSeq, limit))
+		r.handOver(ctx, nd, s)
+	}
+	r.observeTo(ctx, nd, limit)
+}
+
+// newSessions reads the collection.run records with a session after the
+// driver's health position, in seq order.
+func (r *Runtime) newSessions(ctx context.Context, hdb interface {
+	Read(context.Context, c5.StreamID, c5.Seq, int) ([]c5.Stored, error)
+}, nd *netDetector) ([]RunSession, error) {
+	var out []RunSession
+	want := []byte(`"` + HealthCollectionRun + `"`)
+	for {
+		got, err := hdb.Read(ctx, HealthStream, nd.health, detectorReadPage)
+		if err != nil {
+			return out, err
+		}
+		for _, st := range got {
+			nd.health = st.Key.Seq
+			if !bytes.Contains(st.Event, want) {
+				continue
+			}
+			if s, ok, err := runSessionOf(st); err == nil && ok {
+				out = append(out, s)
+			}
+		}
+		if len(got) < detectorReadPage {
+			return out, nil
+		}
+	}
+}
+
+// handOver hands s to the detector, or skips it when its flows may have
+// been pruned (beforeRetained).
+func (r *Runtime) handOver(ctx context.Context, nd *netDetector, s RunSession) {
+	ds := netdetect.Session{Seq: s.Seq, InvocationID: s.InvocationID, AssetID: s.AssetID,
+		Endpoint:  netdetect.Destination{Addr: s.Endpoint.Addr().String(), L4: s.L4, Port: int(s.Endpoint.Port())},
+		Connected: s.Connected, OpenFlow: s.OpenFlow, StartedUTC: s.StartedUTC, EndedUTC: s.EndedUTC}
+	var (
+		alerts []netobs.Alert
+		err    error
+	)
+	if s.Seq > nd.handed {
+		nd.handed, nd.moved = s.Seq, true
+	}
+	if nd.beforeRetained(s) {
+		err = nd.d.Skip(ds, s.AfterSeq)
+	} else {
+		alerts, err = nd.d.Session(ds, s.AfterSeq)
+	}
+	if errors.Is(err, netdetect.ErrOrdering) {
+		r.raiseDetector(nd, AlarmDetectorOrdering, fmt.Sprintf("collection.run %d was handed over after observations it precedes; it is not judged", s.Seq))
+	}
+	r.commitAlerts(ctx, nd, alerts)
+}
+
+// beforeRetained is the guard: with the observations after the start's
+// Through pruned, a connected session that is not open_flow, whose start
+// less g is before the first observation read's capture time plus g, may
+// have had its flows pruned, so it is skipped (D1 in D4-74).
+func (nd *netDetector) beforeRetained(s RunSession) bool {
+	if !nd.pruned || !s.Connected || s.OpenFlow {
+		return false
+	}
+	start, err := time.Parse(time.RFC3339Nano, s.StartedUTC)
+	g := time.Duration(netobs.DefaultTieGraceS) * time.Second
+	return err != nil || nd.firstObs.IsZero() || start.Add(-g).Before(nd.firstObs.Add(g))
+}
+
+// observeTo feeds the detector the observations after its Through, to to.
+func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64) {
+	db := r.Store(nd.obs)
+	for nd.d.Through() < to {
+		got, err := db.Read(ctx, nd.obs, c5.Seq(nd.d.Through()), int(min(to-nd.d.Through(), detectorReadPage)))
+		if err != nil || len(got) == 0 {
+			return
+		}
+		for _, st := range got {
+			if st.Key.Seq > to {
+				return
+			}
+			id := event.EventID{NodeID: r.cfg.NodeID, Stream: event.Stream(nd.obs), Seq: st.Key.Seq}
+			o, err := observationOf(st)
+			if err != nil {
+				o = nil // refused by Observe, which still takes its seq
+			}
+			nd.index.note(o)
+			if o != nil && nd.firstObs.IsZero() {
+				nd.firstObs, _ = time.Parse(time.RFC3339Nano, o.FirstUTC)
+			}
+			alerts, err := nd.d.Observe(id, o)
+			if err != nil {
+				nd.st.Refused++
+			}
+			r.commitAlerts(ctx, nd, alerts)
+		}
+	}
+}
+
+// commitAlerts builds each alert's capture from the first-sight captures
+// it cites and commits the alerts, in order, to the alert stream (C13
+// section 7.1). A cited frame whose capture the node no longer holds, or
+// whose bytes don't hash to the cite, is left out and counted in
+// frames_missing (D1 in D4-74).
+func (r *Runtime) commitAlerts(ctx context.Context, nd *netDetector, alerts []netobs.Alert) {
+	if len(alerts) == 0 {
+		return
+	}
+	stream := NetAlertStream(r.cfg.NetworkSensor.SensorID)
+	recs := make([]c5.Record, 0, len(alerts))
+	var missing int64
+	for i := range alerts {
+		rec, err := r.alertRecord(ctx, nd, stream, &alerts[i])
+		if err != nil {
+			r.raiseDetector(nd, AlarmAlertNotStored, "an alert was not built: "+err.Error())
+			nd.st.AlertsNotStored++
+			continue
+		}
+		recs = append(recs, rec)
+		if alerts[i].FramesMissing > 0 {
+			missing++
+		}
+	}
+	if len(recs) == 0 {
+		return
+	}
+	err := errors.New("the network database is not open")
+	if log := r.Log(stream); log != nil {
+		_, err = log.AppendBatch(ctx, recs)
+	}
+	if err != nil {
+		r.raiseDetector(nd, AlarmAlertNotStored, fmt.Sprintf("%d alerts were not committed: %v", len(recs), err))
+		nd.st.AlertsNotStored += int64(len(recs))
+		return
+	}
+	nd.st.Alerts += int64(len(recs))
+	nd.st.AlertsFramesMissing += missing
+}
+
+// alertRecord is a's record, with its capture unless it is
+// own-session-unseen, which has none (C13 section 7.1).
+func (r *Runtime) alertRecord(ctx context.Context, nd *netDetector, stream c5.StreamID, a *netobs.Alert) (c5.Record, error) {
+	var capture *c5.Capture
+	if a.Rule != netobs.RuleOwnSessionUnseen {
+		c, n, err := r.alertCapture(ctx, nd, a)
+		if err != nil {
+			return c5.Record{}, err
+		}
+		capture, a.Capture, a.FramesMissing = c, c.SHA256, n
+	}
+	h, err := a.Health()
+	if err != nil {
+		return c5.Record{}, err
+	}
+	rec, err := r.healthEventRecord(stream, h)
+	rec.Capture = capture
+	return rec, err
+}
+
+// alertCapture is a's capture: its cited frames the node still holds, in
+// citation order, in the stored form, and the count of those it doesn't.
+func (r *Runtime) alertCapture(ctx context.Context, nd *netDetector, a *netobs.Alert) (*c5.Capture, int64, error) {
+	db := r.Store(nd.obs)
+	read := map[string][]sensorlink.CaptureFrame{}
+	var (
+		frames  []sensorlink.CaptureFrame
+		missing int64
+	)
+	for _, ct := range a.Cites {
+		for _, f := range ct.Frames {
+			ref, ok := nd.index.at[f.SHA256]
+			got, done := read[ref]
+			if ok && !done {
+				if c, err := db.ReadCapture(ctx, ref); err == nil {
+					got, _ = sensorlink.ParseCapture(c.Bytes)
+				}
+				read[ref] = got
+			}
+			found := false
+			for _, cf := range got {
+				if sum := sha256.Sum256(cf.Data); hex.EncodeToString(sum[:]) == f.SHA256 {
+					frames, found = append(frames, cf), true
+					break
+				}
+			}
+			if !found {
+				missing++
+			}
+		}
+	}
+	c, err := sensorlink.BuildCapture(frames)
+	return c, missing, err
+}
+
+// checkpointDetector stores the detector's checkpoint, then moves the
+// consumer's cursor to its Through, then removes the older checkpoints, as
+// identity.read's are (D1 in D4-74). A step that fails keeps the cursor
+// where it was and raises the alarm; the next tick tries again.
+func (r *Runtime) checkpointDetector(ctx context.Context, nd *netDetector) {
+	seq, err := r.storeDetectorCheckpoint(ctx, nd)
+	if err != nil {
+		nd.st.CheckpointFailures++
+		r.raiseDetector(nd, AlarmDetectorCheckpoint, "the detector's checkpoint was not stored, so its cursor stays and a restart resumes from the last one stored: "+err.Error())
+		return
+	}
+	nd.st.CheckpointsWritten++
+	nd.written, nd.moved = nd.d.Through(), false
+	nd.ckpts = append(nd.ckpts, seq)
+	r.saveDetectorCursor(ctx, nd)
+}
+
+// storeDetectorCheckpoint stores the detector's checkpoint, which holds
+// back the alerts committed after the alert stream's head (D1 in D4-74).
+// Item 3's ceiling holds it as it holds the intake's records (D5-c5-0.9
+// section 8).
+func (r *Runtime) storeDetectorCheckpoint(ctx context.Context, nd *netDetector) (c5.Seq, error) {
+	alerts, stream := NetAlertStream(r.cfg.NetworkSensor.SensorID), r.intakeStream()
+	adb, log, db := r.Store(alerts), r.Log(stream), r.Store(stream)
+	if adb == nil || log == nil || db == nil {
+		return 0, errors.New("a database is not open")
+	}
+	last, err := adb.LastCommitted(ctx, alerts)
+	if err != nil {
+		return 0, err
+	}
+	doc, err := nd.d.Checkpoint(uint64(last))
+	if err != nil {
+		return 0, err
+	}
+	used, err := db.ClassBytes(ctx, c5.ClassConfiguration)
+	if err != nil {
+		return 0, err
+	}
+	if ceiling := r.cfg.Item3Ceiling(); used+int64(len(doc)) > ceiling {
+		return 0, fmt.Errorf("a detector checkpoint of %d bytes is over item 3's ceiling (%d of %d bytes used)", len(doc), used, ceiling)
+	}
+	rc, err := log.Append(ctx, c5.Record{Stream: stream, Class: c5.ClassConfiguration, Event: doc})
+	if err != nil {
+		return 0, err
+	}
+	return rc.Key().Seq, nil
+}
+
+// saveDetectorCursor moves the cursor to the last stored checkpoint's
+// Through, and then removes the checkpoints older than the newest.
+func (r *Runtime) saveDetectorCursor(ctx context.Context, nd *netDetector) {
+	if c5.Seq(nd.written) > nd.saved {
+		db := r.Store(nd.obs)
+		err := errors.New("the network database is not open")
+		if db != nil {
+			err = db.SaveCursor(ctx, c5.Cursor{Consumer: DetectorConsumer, Stream: nd.obs, Through: c5.Seq(nd.written)})
+		}
+		if err != nil {
+			nd.st.CheckpointFailures++
+			r.raiseDetector(nd, AlarmDetectorCheckpoint, "the detector's cursor was not saved, so the observation stream is pruned less and no checkpoint is removed: "+err.Error())
+			return
+		}
+		nd.saved = c5.Seq(nd.written)
+	}
+	old := nd.ckpts[:len(nd.ckpts)-1]
+	for len(old) > 0 {
+		step := old[:min(len(old), c5.RemoveConfigStep)]
+		db := r.Store(r.intakeStream())
+		if db == nil {
+			return
+		}
+		if _, err := db.RemoveConfig(ctx, r.intakeStream(), c5.SeriesNetCheckpointDetector, step); err != nil {
+			r.raiseDetector(nd, AlarmDetectorCheckpoint, fmt.Sprintf("older detector checkpoints %v not removed, so they stay in the configuration class: %v", step, err))
+			return
+		}
+		old = old[len(step):]
+		nd.ckpts = nd.ckpts[len(step):]
+	}
+	delete(nd.raised, AlarmDetectorCheckpoint)
+}
+
+// raiseDetector raises code once until it clears.
+func (r *Runtime) raiseDetector(nd *netDetector, code, detail string) {
+	if nd.raised[code] {
+		return
+	}
+	nd.raised[code] = true
+	r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: c5.AlarmCode(code), At: r.opt.Now(), Stream: nd.obs, Detail: detail})
+}
+
+// detectorStatus sets the detector's counts, and raises the mismatch and
+// ordering alarms when their counts rise.
+func (r *Runtime) detectorStatus(nd *netDetector) {
+	d := nd.d
+	if n := d.Mismatches(); n > nd.st.Mismatches {
+		r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmDetectorMismatch, At: r.opt.Now(), Stream: nd.obs,
+			Detail: fmt.Sprintf("%d departures of a restore's replay from the alerts already committed", n)})
+	}
+	if n := d.OrderingFaults(); n > nd.st.OrderingFaults {
+		delete(nd.raised, AlarmDetectorOrdering)
+	}
+	r.intake.mu.Lock()
+	missing := int64(r.intake.sessionMissing)
+	r.intake.mu.Unlock()
+	nd.st.Through, nd.st.Checkpointed, nd.st.Restored = d.Through(), nd.written, nd.restored
+	nd.st.NotJudged = map[string]int64{"pending-full": d.PendingFull(), "tied-evicted": d.TiedEvicted(), "before-retained": d.BeforeRetained(), "session-missing": missing}
+	nd.st.OpenFlowSeen, nd.st.EarlyCloses, nd.st.Mismatches, nd.st.OrderingFaults = d.OpenFlowSeen(), d.EarlyCloses(), d.Mismatches(), d.OrderingFaults()
+	if h := (r.opt.Mono() - nd.start).Hours(); h > 0 {
+		nd.st.EarlyClosesPerHour = float64(nd.st.EarlyCloses) / h
+	}
+	nd.st.NotYetSeen = nil
+	for _, e := range d.NotYetSeen() {
+		nd.st.NotYetSeen = append(nd.st.NotYetSeen, e.AssetID+" "+e.L4+" "+e.Addr+":"+strconv.Itoa(e.Port))
+	}
+	slices.Sort(nd.st.NotYetSeen)
+}
+
+// checkDetectorRecord is ConfigDocuments' check of a network checkpoint:
+// only the detector's half is stored, as working state in its series.
+func checkDetectorRecord(document []byte, capture *c5.Capture) (c5.DocumentInfo, error) {
+	if capture != nil {
+		return c5.DocumentInfo{}, errors.New("configuration document: a detector checkpoint has no capture")
+	}
+	if _, err := netobs.DecodeDetectorCheckpoint(document); err != nil {
+		return c5.DocumentInfo{}, err
+	}
+	return c5.DocumentInfo{Kind: c5.DocumentWorkingState, Series: c5.SeriesNetCheckpointDetector}, nil
+}

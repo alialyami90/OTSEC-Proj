@@ -108,6 +108,36 @@ The node's detection module, the network baseline and its detector (D4's note), 
 - What is folded becomes prunable.
 - The alert stream is consumed by the forward targets, like any event stream that is forwarded, if C13 makes alerts C4 events.
 
+**The detector consumer as built (P4-4-B5, PR B2, D1 in D4-74).** `platform/node/netdetector.go`. Desk and CI only: no sensor has produced a record and no device was contacted.
+
+- **The consumer.** `node-netdetector` is a required consumer of the observation stream whenever the sensor section is set. The detector reads the observations the sensor committed, and the node's own sessions from the `collection.run` records on the health stream. It commits the alerts it raises to the alert stream, each with its capture.
+- **The handover barrier.** A session must reach the detector before any observation past its `after_seq` (D4's finding 4 on #576). Each tick reads the observation head, then the barrier, then the health stream. The barrier is the lowest seq of the runs whose release may still precede a `collection.run`.
+  - A run enters the barrier at the observation head before its release. This seq is never above its `after_seq`.
+  - Once released, the run's barrier seq moves to its `after_seq`.
+  - The run leaves the barrier once its `collection.run` is stored or failed.
+  - The driver reads observations up to the barrier, or up to the head when the barrier is higher. It hands each session over, in health-stream seq order, once it has read the observations up to that session's `after_seq`.
+  - A released run whose `collection.run` was not stored counts in `runs_session_missing`.
+- **Checkpoint cadence.** The node writes `netcheckpoint.detector` at each tick where the detector took an observation or a session. The tick at a clean stop counts too.
+  - A session counts toward that, even with `through` unmoved. Without it, a session skipped at the tail would be judged when a restart handed it over again.
+  - The cursor moves to the stored checkpoint's `through` only after the checkpoint commits. The older checkpoints are then removed, as `identity.read`'s are.
+  - Item 3's ceiling holds the checkpoint as it holds the intake's records (`D5-c5-0.9.md` §8).
+  - A checkpoint or cursor that is not stored keeps the old cursor, raises `network-detector-checkpoint-failed` once, and is counted. The next tick tries again.
+  - A checkpoint is at most `MaxDetectorCheckpointBytes` (1,354,752 bytes). The desk rows' checkpoints are about 3.4 KB.
+  - At one tick a minute, the node writes at most 1,440 checkpoints a day, so at most about 1.8 GiB a day of configuration writes in the worst case. Only the newest one or two are ever stored.
+- **Restore and replay.** At start, after the intake's start repair, the node restores from the newest checkpoint. It passes `RestoreDetector` the alerts committed after the checkpoint's `last_alert_seq`, so an alert raised again in the replay is held back.
+  - Desk row: a crash after an alert commits and before its checkpoint gives one alert (`TestDetectorReplayNoDuplicate`).
+  - A first start, with no checkpoint, stores one at `through` 0 before it reads anything, so a crash before the next checkpoint still restores and holds back.
+  - A checkpoint that doesn't restore raises `network-detector-not-restored`, and the detector starts again from the oldest retained observation.
+- **The before-retained guard.** The detector begins at the oldest retained observation. If the observations right after its `through` were pruned, as at a first start over a pruned stream, the node judges a connected session that is not `open_flow` only if `started_at − g` is at or after the first observation's capture time plus `g`.
+  - Otherwise the node calls `Skip` and the session counts as `before-retained`.
+  - The guard is computed from the stream, so it also holds after a restore from the first start's checkpoint.
+  - Desk row: a trailing skip, then a checkpoint, then a restart, gives no ordering fault and no alert (`TestDetectorTrailingSkip`).
+- **An alert's capture.** The node keeps a frame index that maps a cited frame's SHA-256 to the first-sight capture holding it. It holds at most `FrameIndexEntries` (4,096) entries, drops the oldest first, and is rebuilt at start from the retained first sights.
+  - The capture holds the cited frames the node still has, in citation order.
+  - A frame counts as missing, in `frames_missing`, when its capture is gone or pruned, or when its bytes there don't hash to the cited SHA-256.
+  - An alert whose frames are all missing has a header-only capture.
+  - `own-session-unseen` has no capture.
+
 **Sizing.** Each class gets a floor that the node checks at load, like the configuration floor (D4-20 rule 5):
 
 - the alert floor holds a number of the largest alerts, each alert plus its packets at the alert's `MaxRecordBytes`;
@@ -168,11 +198,19 @@ Status gets a `sensor` section, written as the other sections are, and `otsec he
 - the restart count since the node started, and the open coverage gap, if any;
 - the oldest file in the capture ring;
 - the C-11 interface check (§7): `ok`, or what is bound;
-- the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), the start repair's runs (`runs_repaired`, `runs_repair_refused`), and the runs whose `collection.run` has no session (`runs_session_missing`) (D4-72, `D5-c5-0.9.md` §8).
+- the intake hold's counts (`hold`: held records and runs, ties, the caps' releases, the open table's counts and checkpoint failures), the start repair's runs (`runs_repaired`, `runs_repair_refused`), and the runs whose `collection.run` has no session (`runs_session_missing`) (D4-72, `D5-c5-0.9.md` §8);
+- the detector's part (`detector`, D4-74):
+  - `through` and `checkpointed`, and whether it was `restored`;
+  - the counts since start: alerts committed, `alerts_frames_missing` (alerts whose `frames_missing` is above 0), alerts not stored, observations refused, checkpoints written and failed;
+  - the sessions not judged, by reason: `pending-full`, `tied-evicted`, `before-retained` and `session-missing`;
+  - `open_flow_seen` and `endpoints_not_tracked`;
+  - the run endpoints `own-session-unseen` has not seen yet (`not_yet_seen`);
+  - `early_closes`, and the same as a rate per hour since start;
+  - `mismatches` and `ordering_faults`.
 
 Status never shows packet bytes or device text, and banners are shown bounded and quoted (D3).
 
-The alarm codes in this note are `sensor-unreachable`, `sensor-record-refused`, `sensor-coverage-mismatch` and `sensor-interface-bound`, and the intake hold's `intake-checkpoint-failed`, `intake-record-not-removed` and `intake-repair-refused`. They are draft names. The node's alarm codes and C6's health events are named with the C5 draft.
+The alarm codes in this note are `sensor-unreachable`, `sensor-record-refused`, `sensor-coverage-mismatch` and `sensor-interface-bound`, the intake hold's `intake-checkpoint-failed`, `intake-record-not-removed` and `intake-repair-refused`, and the detector's `network-detector-not-started`, `network-detector-not-restored`, `network-detector-checkpoint-failed`, `network-detector-mismatch`, `network-detector-ordering`, `network-endpoints-not-tracked` and `network-alert-not-stored`. They are draft names. The node's alarm codes and C6's health events are named with the C5 draft.
 
 ## 7. C-11 on Windows: the install side
 

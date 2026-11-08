@@ -107,6 +107,9 @@ type SensorStatus struct {
 	// has no session: the dispatch's record was not saved, or the result
 	// could not be released (D1 in D4-74).
 	SessionMissing uint64 `json:"runs_session_missing"`
+	// Detector is the detector consumer's part, nil until it starts
+	// (netdetector.go).
+	Detector *DetectorStatus `json:"detector,omitempty"`
 	// Heartbeat is the last heartbeat of the run: the sensor's own
 	// report of its totals and time, which the node checks only for
 	// monotonic counters (C13 section 6, AP-36 (2)).
@@ -156,6 +159,9 @@ type sensorIntake struct {
 	raised      bool // the alarm for this quiet stretch is raised
 	// checkpointFailures is the hold's count the last alarm was raised at.
 	checkpointFailures uint64
+	// detectorDown: the detector consumer did not start, and its alarm is
+	// raised; each tick tries again (netdetector.go).
+	detectorDown bool
 }
 
 // dropCounts are dropped observations by reason and by destination asset.
@@ -288,6 +294,19 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	}
 	in.link.TickHold(ctx)
 	r.pruneIntake(ctx, "")
+	if r.detector == nil {
+		// After the intake's start repair, so the sessions it wrote are
+		// on the health stream when the detector replays them (D4-72).
+		if err := r.startDetector(ctx); err != nil {
+			if !in.detectorDown {
+				r.opt.Status.Raise("", AlarmDetectorNotStarted, "the network detector did not start, so no alert is raised and the observation stream is not pruned: "+err.Error())
+			}
+			in.detectorDown = true
+		} else {
+			in.detectorDown = false
+		}
+	}
+	r.tickDetector(ctx)
 	st := in.link.Stats()
 	in.mu.Lock()
 	defer in.mu.Unlock()
@@ -334,6 +353,10 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	r.intake.mu.Lock()
 	s.Repaired, s.RepairRefused, s.SessionMissing = r.intake.repaired, r.intake.repairRefused, r.intake.sessionMissing
 	r.intake.mu.Unlock()
+	if nd := r.detector; nd != nil {
+		d := nd.st
+		s.Detector = &d
+	}
 	if h := st.Heartbeat; h != nil {
 		s.Heartbeat = &SensorHeartbeat{AtUTC: h.AtUTC, Counters: h.Counters, RingOldestUTC: h.RingOldestUTC, InterfaceCheck: h.InterfaceCheck}
 	}

@@ -10,6 +10,7 @@ import (
 	"otsec.local/otsec/contracts/baseline"
 	"otsec.local/otsec/contracts/config"
 	"otsec.local/otsec/contracts/finding"
+	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
 )
 
@@ -45,7 +46,10 @@ import (
 //     the node's encoder writes (findings.go);
 //   - since C5 0.9, the intake hold's record (otsec.netcheckpoint.intake,
 //     working state, series netcheckpoint.intake), with no capture
-//     (netintake.go).
+//     (netintake.go);
+//   - since C5 0.9, the detector's network checkpoint (otsec.netcheckpoint,
+//     half detector, working state, series netcheckpoint.detector), with no
+//     capture, that C13's DecodeDetectorCheckpoint accepts (netdetector.go).
 //
 // It returns each document's C5 0.7 DocumentInfo. The first three are
 // evidence, in the series config.snapshot or config.difference (C9's own
@@ -123,6 +127,8 @@ func ConfigDocuments(document []byte, capture *c5.Capture) (c5.DocumentInfo, err
 		return checkFindingRecord(document, capture)
 	case head.Schema == IntakeSchema:
 		return checkIntakeRecord(document, capture)
+	case head.Schema == netobs.CheckpointIdentifier:
+		return checkDetectorRecord(document, capture)
 	}
-	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set, an identity record, a C12 finding or an intake hold record", head.Schema, head.Kind)
+	return c5.DocumentInfo{}, fmt.Errorf("configuration document: schema %q kind %q is not a C9 snapshot or difference, a C10 baseline, an event checkpoint, a C11 set, an identity record, a C12 finding, an intake hold record or a detector checkpoint", head.Schema, head.Kind)
 }
