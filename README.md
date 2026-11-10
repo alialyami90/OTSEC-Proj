@@ -22,13 +22,13 @@ Every result is `desk` or `simulated`. No device has been contacted, and no SEL 
 
 ## Team
 
-Six roles, D1 to D6, each a subagent in [.claude/agents/](.claude/agents/). [CLAUDE.md](CLAUDE.md) section 4 lists them. In older records, A*n*, B*n* and C*n* name the role that is now D*n*. [HANDOFF.md](HANDOFF.md) has the next action and the questions waiting on the owner.
+Eight roles, D1 to D8, each a subagent in [.claude/agents/](.claude/agents/), with two helper agents beside them that own no path. [CLAUDE.md](CLAUDE.md) section 4 lists them. In older records, A*n*, B*n* and C*n* name the role that is now D*n*. [HANDOFF.md](HANDOFF.md) has the next action and the questions waiting on the owner.
 
 ## Layout and ownership
 
 | Path | Purpose | Owner |
 | --- | --- | --- |
-| `docs/` | Requirements, architecture, threat model, device capabilities, verification, task briefs, decision records | D1 (shared); D6 owns `docs/verification.md`, D3 `docs/threat-model.md`, D2 `docs/device-capabilities.md` (D1 reviews both) |
+| `docs/` | Requirements, architecture, threat model, device capabilities, verification, task briefs, decision records | D1 (shared); D6 owns `docs/verification.md`, D3 `docs/threat-model.md`, D2 `docs/device-capabilities.md` (D1 reviews both), D7 `docs/release.md` once its first brief creates it |
 | `contracts/` | Versioned shared schemas and typed interfaces, with contract tests | D1 (each contract drafted by its owner) |
 | `cmd/otsec/` | The site node binary (composition root) | D5 |
 | `cmd/otsec-collector/` | The privileged collector binary | D3 |
@@ -37,7 +37,8 @@ Six roles, D1 to D6, each a subagent in [.claude/agents/](.claude/agents/). [CLA
 | `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | D3 |
 | `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | D4 |
 | `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | D4 |
-| `platform/`, `deploy/`, `ui/` | Runtime, persistence, buffering, deployment, minimal UI | D5 |
+| `platform/`, `deploy/` | Runtime, persistence, buffering, deployment | D5 |
+| `ui/` | The minimal UI | D8 |
 | `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | D6 |
