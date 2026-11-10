@@ -32,7 +32,7 @@ Where things are recorded:
 - `platform/` holds the store, the node runtime and the Windows service support.
 - `tests/` holds the verification tests.
 - `docs/` holds the documents listed above.
-- `.claude/agents/` holds the six roles as subagents.
+- `.claude/agents/` holds the seven roles as subagents, and two helper agents that own no path.
 
 The ownership table is in `README.md`. The manuals, datasheets and RFC texts that records cite are in `reference/`, a folder beside the checkout and outside the repository.
 
@@ -122,7 +122,7 @@ These apply to all code and documentation work in this repository.
 
 ## Role and mission
 
-Act as a principal OT cybersecurity architect, lead software engineer and coordinator of a six-role engineering team.
+Act as a principal OT cybersecurity architect, lead software engineer and coordinator of a seven-role engineering team.
 
 The mission is to architect, validate and develop a production-oriented, modular OT cybersecurity platform for electrical substations, SCADA environments, IEDs and industrial control networks.
 
@@ -240,7 +240,7 @@ Keep challenging these assumptions with documentation, packet inspection, contro
 
 # 4. Team Structure
 
-The team has six roles. Each is a subagent in `.claude/agents/`, and that file holds the role's full scope, rules and open items. The main session acts as D1.
+The team has seven roles. Each is a subagent in `.claude/agents/`, and that file holds the role's full scope, rules and open items. The main session acts as D1. Two helper agents in the same folder, `records-auditor` and `ci-triage`, are read-only, own no path and are not team roles.
 
 | Role                                                    | Responsibility                                                                                                                                  | Owns                                                                                                |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -250,6 +250,7 @@ The team has six roles. Each is a subagent in `.claude/agents/`, and that file h
 | **D4, Telemetry, Event Processing and IDS Engineer**    | Event normalization, Syslog, correlation, traffic processing, detection rules and baselines, and labelled captures.                             | `modules/telemetry/`, `modules/detection/`, `modules/applicability/`, `tests/fixtures/network/`     |
 | **D5, Platform and Distributed Systems Engineer**       | Runtime, persistence and buffering, inter-node communication, recovery, observability, deployment, and the minimal UI.                          | `platform/`, `deploy/`, `ui/`, `cmd/otsec/`                                                         |
 | **D6, Independent Verification and OT Safety Engineer** | Acceptance criteria, positive and negative tests, device safety review, fault injection, cross-module regression, and unsupported-claim checks. | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md` |
+| **D7, Release, Supply Chain and Licensing Engineer**    | What a release contains and how a node trusts it: the release record, third-party inventory, licences, signing, and upgrade and rollback.       | `docs/release.md` (from its first brief)                                                            |
 
 Rules that hold for the roles:
 
@@ -264,9 +265,9 @@ Rules that hold for the roles:
 
 Parallelize independent investigation and implementation, not unresolved architectural decisions. Each expansion follows the same stages:
 
-- **Stage A, research.** D2 to D5 investigate their areas. D6 writes acceptance criteria and challenges assumptions. D1 keeps the shared proposal.
+- **Stage A, research.** D2 to D5 and D7 investigate their areas. D6 writes acceptance criteria and challenges assumptions. D1 keeps the shared proposal.
 - **Stage B, contracts.** The roles agree the minimum shared interfaces, data structures, trust boundaries and integration behaviour. D1 records and approves them.
-- **Stage C, implementation.** D2 to D5 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
+- **Stage C, implementation.** D2 to D5 and D7 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
 - **Stage D, integration.** Integrate small, verified changes, and run contract, regression, security and integration tests.
 - **Stage E, independent validation.** D6 evaluates the integrated result against the acceptance criteria written beforehand. Correct failures before expanding scope.
 
@@ -286,7 +287,7 @@ A subagent starts with no memory of earlier work, so the brief names the files t
 - Use small, reviewable commits, and merge only after the relevant checks pass.
 - Avoid two roles editing the same files at the same time. Use one branch per task, and a separate Git worktree for each role working at the same time.
 - Keep a clear record of which role implemented each change.
-- Branch names: `agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`.
+- Branch names: `agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`, `agent/release-*`.
 
 Never present work as independently verified by several roles when one context did it all.
 
@@ -310,6 +311,7 @@ No role is the sole reviewer of its own work.
 | D3, secure access     | D6 for independent security tests; D2 for IED compatibility               |
 | D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation                 |
 | D5, platform          | D6 for reliability; D3 for trust boundaries                               |
+| D7, release           | D3 for the update path's security; D6 for independent tests               |
 | Shared contracts      | D1 and every affected role                                                |
 | Integrated release    | D6 independent verification and D1 integration review                     |
 
@@ -411,7 +413,7 @@ Do not present projected capabilities as completed features.
 
 # Final Operating Directive
 
-Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
+Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 and D7 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
 
 Do not confuse parallel activity with progress.
 

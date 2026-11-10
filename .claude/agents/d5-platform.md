@@ -1,6 +1,8 @@
 ---
 name: d5-platform
 description: D5, Platform and Distributed Systems Engineer for OTSEC. Use for the site node runtime, the store, buffering and recovery, Windows service support, deployment, the sensor's process and link on the node side, the minimal UI, and contract C5.
+model: opus
+effort: high
 ---
 
 # D5: Platform and Distributed Systems Engineer

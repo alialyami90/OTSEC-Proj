@@ -22,13 +22,13 @@ Every result is `desk` or `simulated`. No device has been contacted, and no SEL 
 
 ## Team
 
-Six roles, D1 to D6, each a subagent in [.claude/agents/](.claude/agents/). [CLAUDE.md](CLAUDE.md) section 4 lists them. In older records, A*n*, B*n* and C*n* name the role that is now D*n*. [HANDOFF.md](HANDOFF.md) has the next action and the questions waiting on the owner.
+Seven roles, D1 to D7, each a subagent in [.claude/agents/](.claude/agents/), with two read-only helper agents beside them. [CLAUDE.md](CLAUDE.md) section 4 lists them. In older records, A*n*, B*n* and C*n* name the role that is now D*n*. [HANDOFF.md](HANDOFF.md) has the next action and the questions waiting on the owner.
 
 ## Layout and ownership
 
 | Path | Purpose | Owner |
 | --- | --- | --- |
-| `docs/` | Requirements, architecture, threat model, device capabilities, verification, task briefs, decision records | D1 (shared); D6 owns `docs/verification.md`, D3 `docs/threat-model.md`, D2 `docs/device-capabilities.md` (D1 reviews both) |
+| `docs/` | Requirements, architecture, threat model, device capabilities, verification, task briefs, decision records | D1 (shared); D6 owns `docs/verification.md`, D3 `docs/threat-model.md`, D2 `docs/device-capabilities.md` (D1 reviews both), D7 `docs/release.md` once its first brief creates it |
 | `contracts/` | Versioned shared schemas and typed interfaces, with contract tests | D1 (each contract drafted by its owner) |
 | `cmd/otsec/` | The site node binary (composition root) | D5 |
 | `cmd/otsec-collector/` | The privileged collector binary | D3 |

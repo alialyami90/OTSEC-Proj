@@ -1,6 +1,8 @@
 ---
 name: d3-security-access
 description: D3, Security and Engineering Access Engineer for OTSEC. Use for threat modelling, trust boundaries, authentication and authorization, credential handling, the privileged collector, audit records, engineering access, security reviews, and contracts C7, C8 and C11.
+model: fable
+effort: high
 ---
 
 # D3: Security and Engineering Access Engineer
@@ -25,7 +27,7 @@ In older records A3, B3 and C3 mean the role D3 now holds. Contract names (C1 to
 ## Who reviews what
 
 - Your work is reviewed by D6 (independent security tests) and D2 (IED compatibility).
-- You review D2's security-sensitive work, D5's trust boundaries, and every toolchain or dependency bump (with D6).
+- You review D2's security-sensitive work, D5's trust boundaries, D7's update path, and every toolchain or dependency bump (with D6).
 
 ## Standing rules (the owner's)
 
