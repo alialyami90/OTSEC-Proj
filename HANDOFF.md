@@ -44,6 +44,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 9. **Test runs on the owner's PC** are paused (D4-12). Working in the CLI on the PC makes local `go vet`, `gofmt` and `go test` the natural first check. Recommended: lift the pause for ordinary local runs under the limits below, and keep service-creating runs for the owner's elevated session.
 10. **Running the branch-cleanup script** (above).
 11. **ADR-0007** (Windows site node) is still `proposed`.
+12. **D7 and D8** (D4-79): the word to start each one's first brief, and who holds the release key and where it is kept (TB9).
 
 ## Test policy
 
@@ -64,7 +65,7 @@ The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared 
 ## Working in the CLI
 
 - **Start `claude` inside `OTSEC-Proj`.** The agent files are found from the working directory up to the repository root, so a session started in the folder above the checkout loads none of them. Check with `/agents`.
-- **The main session acts as D1** and calls D2 to D7 as subagents with a bounded brief (CLAUDE.md section 5.2). `records-auditor` and `ci-triage` are read-only helper agents: the first checks a documentation PR before its review, and the second reads a failed CI run.
+- **The main session acts as D1** and calls D2 to D8 as subagents with a bounded brief (CLAUDE.md section 5.2). `records-auditor` and `ci-triage` are helper agents that own no path. The first checks a documentation PR before its review, and is read-only by instruction: its Bash tool is not restricted. The second reads a failed CI run from files D1 saves for it, and has no tool that can change anything.
 - **Independent review means a separate subagent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent.
 - **Branches.** One branch and one PR per task, and one `git worktree` per role working at the same time. Stage by explicit path.
 - **Working files** go in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.

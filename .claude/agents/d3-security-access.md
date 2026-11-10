@@ -27,7 +27,7 @@ In older records A3, B3 and C3 mean the role D3 now holds. Contract names (C1 to
 ## Who reviews what
 
 - Your work is reviewed by D6 (independent security tests) and D2 (IED compatibility).
-- You review D2's security-sensitive work, D5's trust boundaries, D7's update path, and every toolchain or dependency bump (with D6).
+- You review D2's security-sensitive work, D5's trust boundaries, D7's update path, D8's surfaces that authenticate, authorize, sign or show a secret, and every toolchain or dependency bump (with D6).
 
 ## Standing rules (the owner's)
 

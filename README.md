@@ -22,7 +22,7 @@ Every result is `desk` or `simulated`. No device has been contacted, and no SEL 
 
 ## Team
 
-Seven roles, D1 to D7, each a subagent in [.claude/agents/](.claude/agents/), with two read-only helper agents beside them. [CLAUDE.md](CLAUDE.md) section 4 lists them. In older records, A*n*, B*n* and C*n* name the role that is now D*n*. [HANDOFF.md](HANDOFF.md) has the next action and the questions waiting on the owner.
+Eight roles, D1 to D8, each a subagent in [.claude/agents/](.claude/agents/), with two helper agents beside them that own no path. [CLAUDE.md](CLAUDE.md) section 4 lists them. In older records, A*n*, B*n* and C*n* name the role that is now D*n*. [HANDOFF.md](HANDOFF.md) has the next action and the questions waiting on the owner.
 
 ## Layout and ownership
 
@@ -37,7 +37,8 @@ Seven roles, D1 to D7, each a subagent in [.claude/agents/](.claude/agents/), wi
 | `modules/security/`, `modules/access/` | Authentication, authorization, sessions, audit, engineering access | D3 |
 | `modules/telemetry/`, `modules/detection/` | Event normalization, Syslog, correlation, IDS | D4 |
 | `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | D4 |
-| `platform/`, `deploy/`, `ui/` | Runtime, persistence, buffering, deployment, minimal UI | D5 |
+| `platform/`, `deploy/` | Runtime, persistence, buffering, deployment | D5 |
+| `ui/` | The minimal UI | D8 |
 | `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | D6 |

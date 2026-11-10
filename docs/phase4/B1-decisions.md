@@ -1419,9 +1419,9 @@ Both of the owner's messages are from the CLI session, at about 21:05Z. Evidence
 - **What is `unknown` under (a)** (ADR-0009): offline decoding and live capture on Windows, the Windows 10/11 LTSC floor, a timed replay on Windows for R6.4, and whether Npcap's install options force administrator rights. Under (a), hostile input reaches C and C++ decoders on the machine that holds the node's store and keys, and the process and account boundary is the only wall (AP-30).
 - **Still owed by the owner.** Their answer on PC test runs (D4-12), and the rest of the list in `HANDOFF.md`.
 
-## D4-79: a seventh role, two helper agents, and a model and an effort for each agent (owner and D1, 2026-11-10)
+## D4-79: two new roles, two helper agents, and a model and an effort for each agent (owner and D1, 2026-11-10)
 
-The owner's words are from the CLI session, at about 21:10Z. Evidence class: `desk`.
+The owner's words are from the CLI session, at about 21:10Z and 21:20Z. Evidence class: `desk`.
 
 - **The ask.** The owner asked D1 to review the agents in `.claude/agents/`, to say what is missing as a role for the project's goal, to create the missing subagents, and to suggest a model and an effort for each: "i want the workflow to be perfect."
 - **What the six roles leave unowned.**
@@ -1429,20 +1429,22 @@ The owner's words are from the CLI session, at about 21:10Z. Evidence class: `de
   - **Whether the records agree with each other.** `docs/requirements.md` gives `not started` for all 59 requirements and was last changed on 2026-10-26 (#143), although Phases 0 to 3 and items 1 to 3 of Phase 4 are accepted. The review of #607 found two errors and two inaccuracies in D1's own entries.
   - **Reading a failed CI run.** It is bounded reading that fills the coordinator's context (D4-70's "CI misses" are an example).
 - **What is added** (this entry's PR).
-  - **D7, the Release, Supply Chain and Licensing Engineer**, a team role (`d7-release-supply-chain`). It owns `docs/release.md` from its first brief. D3 and D6 review it. D5 still builds the node's update verifier. It is not briefed, and nothing starts before the owner says so (D4-34).
-  - **`records-auditor` and `ci-triage`**, two helper agents. Each is read-only, owns no path and is not a team role. Neither replaces D6's review.
+  - **D7, the Release, Supply Chain and Licensing Engineer**, a team role (`d7-release-supply-chain`). It owns `docs/release.md` from its first brief. D3 and D6 review it. D5 still builds the node's update verifier and R8.7's upgrade and rollback mechanism; D7 drafts the update package's contract and keeps the record of which versions upgrade and roll back together. It is not briefed, and nothing starts before the owner says so (D4-34).
+  - **D8, the UI and UX Engineer**, a team role (`d8-ui-ux`), on the owner's word: "Add UI/UX subagent." D1 had left it out, because `ui/` is empty and CLAUDE.md §4 holds UI work back until the foundational workflows are proven. D8 takes `ui/` over from D5, who still owns the handlers in the binary that serve its templates (ADR-0003). It maintains `PRODUCT.md` through the impeccable skill. D6, D3 and D5 review it. The hold on elaborate UI work stays, and now names D8. It is not briefed.
+  - **`records-auditor` and `ci-triage`**, two helper agents. Neither owns a path, neither is a team role, and neither replaces D6's review.
+    - `ci-triage` has only the tools that read files (`Read`, `Grep`, `Glob`), so it cannot change anything. D1 saves the failed run's log and lists for it first.
+    - `records-auditor` is read-only by instruction only. It needs Bash for `git` and `gh`, its Bash tool is not restricted, and it runs under the owner's credentials, so the limit rests on the agent following its file (D6 on #608). A permission rule in the session's settings would enforce it, and that is the owner's decision.
 - **Not added, with the reason.**
-  - A UI and UX role: `ui/` is empty, CLAUDE.md §4 holds UI work back until the foundational workflows are proven, and D5 keeps it.
   - A red-team role: D3 designs the boundaries and D6 tests them independently, so the two are already separate.
   - A lab role: H-tests need the owner's authorization and the owner's hands, and D6 writes them.
 - **Model and effort**, set in each agent file's frontmatter (`model` and `effort`):
   - D1, D3 and D6: `fable`, `high`.
-  - D2, D4, D5 and D7: `opus`, `high`.
+  - D2, D4, D5, D7 and D8: `opus`, `high`.
   - `records-auditor`: `sonnet`, `high`. `ci-triage`: `haiku`, `medium`.
-  - **The reason.** The most capable model goes where an error costs most and a test catches it least: the architecture and the gates (D1), the trust boundaries (D3), and the independent verification (D6). The implementing roles work against approved contracts, with tests and reviewers behind them. D2's, D4's, D5's and D7's work is reviewed by D6, an agent on a different model from its author. By list price on 2026-11-03, `opus` costs half of `fable`, `sonnet` a quarter, and `haiku` about one eightieth.
+  - **The reason.** The most capable model goes where an error costs most and a test catches it least: the architecture and the gates (D1), the trust boundaries (D3), and the independent verification (D6). The implementing roles work against approved contracts, with tests and reviewers behind them. D2's, D4's, D5's, D7's and D8's work is reviewed by D6, an agent on a different model from its author. D1 and D3 share `fable` with D6, so that does not hold for them; D3's second reviewer, D2, is on `opus`. By list price on 2026-11-03, `opus` costs half of `fable`, `sonnet` a quarter, and `haiku` about one eightieth.
   - **These are a starting point.** No run has measured these models on this repository. Raise D3 or D6 to `xhigh` for a gate if a later check finds what a review at `high` missed. Lower a role if its reviewers find nothing through a whole item.
 - **How the agent files load** (Claude Code's documentation, read on 2026-11-10 through a summarizing fetch, so not word for word).
   - The frontmatter fields are `model`, `effort` and `tools`. An unknown field is ignored without an error, so a misspelt one fails silently. Check the loaded agents with `/agents` after the merge.
   - Agent files are found from the working directory up to the repository root. The first CLI session was started in the folder above the checkout and loaded none of them, so its reviews ran in a general-purpose subagent briefed from D6's role file (D4-77). `HANDOFF.md` now says where to start `claude`.
-- **This entry's PR merges only on the owner's word,** because it changes the team in the brief.
-- **Follow-ups (D1).** Bring `docs/requirements.md`'s Status column in line with the accepted gates, and give the result to `records-auditor` as its first run. Write D7's first brief when the owner says to start.
+- **The owner approved this entry's PR** in the CLI: "I approve the changes you made. PR and MErge." It changes the team in the brief, so it needed their word.
+- **Follow-ups (D1).** Bring `docs/requirements.md`'s Status column in line with the accepted gates, and give the result to `records-auditor` as its first run. Write D7's and D8's first briefs when the owner says to start.

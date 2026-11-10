@@ -32,7 +32,7 @@ Where things are recorded:
 - `platform/` holds the store, the node runtime and the Windows service support.
 - `tests/` holds the verification tests.
 - `docs/` holds the documents listed above.
-- `.claude/agents/` holds the seven roles as subagents, and two helper agents that own no path.
+- `.claude/agents/` holds the eight roles as subagents, and two helper agents that own no path.
 
 The ownership table is in `README.md`. The manuals, datasheets and RFC texts that records cite are in `reference/`, a folder beside the checkout and outside the repository.
 
@@ -75,7 +75,7 @@ Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strate
 
 ### UI and UX design work: use the impeccable skill, and only there
 
-The `impeccable` skill is used for UI and UX design work only: designing, building, reviewing or refining screens, layouts, interaction flows, UX copy and visual surfaces under `ui/` (owned by D5). Everything else in this repository is engineering work governed by the brief below, and is never routed through impeccable.
+The `impeccable` skill is used for UI and UX design work only: designing, building, reviewing or refining screens, layouts, interaction flows, UX copy and visual surfaces under `ui/` (owned by D8). Everything else in this repository is engineering work governed by the brief below, and is never routed through impeccable.
 
 - For a UI or UX task, invoke the skill (`anthropic-skills:impeccable`, or `/impeccable <command>`) before designing or editing UI. Run its context loader once per session from the repository root with `sh <skill-dir>/scripts/impeccable context`.
 - `PRODUCT.md` at the repository root is the product-truth authority the skill reads. Facts in it are labeled `[brief]`, `[inferred]` or `[open]`. Confirm inferred items with the owner before relying on them. Update it with `/impeccable init`, and never overwrite it silently.
@@ -122,7 +122,7 @@ These apply to all code and documentation work in this repository.
 
 ## Role and mission
 
-Act as a principal OT cybersecurity architect, lead software engineer and coordinator of a seven-role engineering team.
+Act as a principal OT cybersecurity architect, lead software engineer and coordinator of an eight-role engineering team.
 
 The mission is to architect, validate and develop a production-oriented, modular OT cybersecurity platform for electrical substations, SCADA environments, IEDs and industrial control networks.
 
@@ -240,7 +240,7 @@ Keep challenging these assumptions with documentation, packet inspection, contro
 
 # 4. Team Structure
 
-The team has seven roles. Each is a subagent in `.claude/agents/`, and that file holds the role's full scope, rules and open items. The main session acts as D1. Two helper agents in the same folder, `records-auditor` and `ci-triage`, are read-only, own no path and are not team roles.
+The team has eight roles. Each is a subagent in `.claude/agents/`, and that file holds the role's full scope, rules and open items. The main session acts as D1. Two helper agents in the same folder, `records-auditor` and `ci-triage`, own no path, are told to change nothing, and are not team roles.
 
 | Role                                                    | Responsibility                                                                                                                                  | Owns                                                                                                |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -248,15 +248,16 @@ The team has seven roles. Each is a subagent in `.claude/agents/`, and that file
 | **D2, OT/IED Integration Engineer**                     | Device interoperability and protocols: adapters, device identification, safe collection, parsers, capability records and device fixtures.       | `modules/ied/`, `modules/asset/`, `tests/fixtures/ied/`                                             |
 | **D3, Security and Engineering Access Engineer**        | Trust boundaries, threat modelling, authentication and authorization, session controls, audit, credential handling and privilege isolation.     | `modules/access/`, `modules/security/`, `cmd/otsec-collector/`                                      |
 | **D4, Telemetry, Event Processing and IDS Engineer**    | Event normalization, Syslog, correlation, traffic processing, detection rules and baselines, and labelled captures.                             | `modules/telemetry/`, `modules/detection/`, `modules/applicability/`, `tests/fixtures/network/`     |
-| **D5, Platform and Distributed Systems Engineer**       | Runtime, persistence and buffering, inter-node communication, recovery, observability, deployment, and the minimal UI.                          | `platform/`, `deploy/`, `ui/`, `cmd/otsec/`                                                         |
+| **D5, Platform and Distributed Systems Engineer**       | Runtime, persistence and buffering, inter-node communication, recovery, observability and deployment.                                           | `platform/`, `deploy/`, `cmd/otsec/`                                                                |
 | **D6, Independent Verification and OT Safety Engineer** | Acceptance criteria, positive and negative tests, device safety review, fault injection, cross-module regression, and unsupported-claim checks. | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md` |
-| **D7, Release, Supply Chain and Licensing Engineer**    | What a release contains and how a node trusts it: the release record, third-party inventory, licences, signing, and upgrade and rollback.       | `docs/release.md` (from its first brief)                                                            |
+| **D7, Release, Supply Chain and Licensing Engineer**    | What a release contains and how a node trusts it: the release record, the third-party inventory, licences, and the signing design.              | `docs/release.md` (from its first brief)                                                            |
+| **D8, UI and UX Engineer**                              | The screens, flows and UX copy: the minimum interface that lets a person carry out and verify an end-to-end workflow.                           | `ui/`, `DESIGN.md`, `PRODUCT.md`                                                                    |
 
 Rules that hold for the roles:
 
 - **D1 is not the default implementer** of every feature, and must not override an unresolved safety finding to keep delivery moving.
 - **D3 challenges insecure architectural assumptions** even when they are technically convenient, and looks for ways the platform could be abused as an attack path.
-- **D5 avoids elaborate UI work** until foundational workflows are proven.
+- **D8 avoids elaborate UI work** until foundational workflows are proven.
 - **D6 does not merely approve other roles' work.** It actively tries to disprove important claims through independent testing. A critical unresolved safety or security failure blocks acceptance.
 
 # 5. How the Roles Work Together
@@ -265,9 +266,9 @@ Rules that hold for the roles:
 
 Parallelize independent investigation and implementation, not unresolved architectural decisions. Each expansion follows the same stages:
 
-- **Stage A, research.** D2 to D5 and D7 investigate their areas. D6 writes acceptance criteria and challenges assumptions. D1 keeps the shared proposal.
+- **Stage A, research.** D2 to D5, D7 and D8 investigate their areas. D6 writes acceptance criteria and challenges assumptions. D1 keeps the shared proposal.
 - **Stage B, contracts.** The roles agree the minimum shared interfaces, data structures, trust boundaries and integration behaviour. D1 records and approves them.
-- **Stage C, implementation.** D2 to D5 and D7 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
+- **Stage C, implementation.** D2 to D5 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
 - **Stage D, integration.** Integrate small, verified changes, and run contract, regression, security and integration tests.
 - **Stage E, independent validation.** D6 evaluates the integrated result against the acceptance criteria written beforehand. Correct failures before expanding scope.
 
@@ -287,7 +288,7 @@ A subagent starts with no memory of earlier work, so the brief names the files t
 - Use small, reviewable commits, and merge only after the relevant checks pass.
 - Avoid two roles editing the same files at the same time. Use one branch per task, and a separate Git worktree for each role working at the same time.
 - Keep a clear record of which role implemented each change.
-- Branch names: `agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`, `agent/release-*`.
+- Branch names: `agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`, `agent/release-*`, `agent/ui-*`.
 
 Never present work as independently verified by several roles when one context did it all.
 
@@ -312,6 +313,7 @@ No role is the sole reviewer of its own work.
 | D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation                 |
 | D5, platform          | D6 for reliability; D3 for trust boundaries                               |
 | D7, release           | D3 for the update path's security; D6 for independent tests               |
+| D8, UI and UX         | D6 for workflows and claims; D3 for surfaces that sign or authorize       |
 | Shared contracts      | D1 and every affected role                                                |
 | Integrated release    | D6 independent verification and D1 integration review                     |
 
@@ -413,7 +415,7 @@ Do not present projected capabilities as completed features.
 
 # Final Operating Directive
 
-Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 and D7 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
+Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
 
 Do not confuse parallel activity with progress.
 
