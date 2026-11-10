@@ -122,6 +122,7 @@ The tool folders stay outside the checkout so that `go vet ./...` and `gofmt -l 
 
 1. In `OTSEC-Proj`, run `git status` and `git log -1`, and compare with `origin/main`.
 2. Check the toolchain: `go version` must report 1.27.3 on `windows/amd64`. Use `$(go env GOROOT)/bin/gofmt`.
-3. If the owner has lifted D4-12, run `go vet ./...`, `gofmt -l .` and `go test ./...`, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
-4. Check the latest `ci` and `govulncheck` runs on `main`.
-5. Ask the owner the ADR-0009 question as one decision with D1's recommendation, then follow the next action above.
+3. If `tools/venv` is missing, create it with `python -m venv ../tools/venv` and install `pytest` and `asyncssh==2.24.1` into it. Nothing else is installed.
+4. If the owner has lifted D4-12, run `go vet ./...`, `gofmt -l .` and `go test ./...`, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
+5. Check the latest `ci` and `govulncheck` runs on `main`.
+6. Ask the owner the ADR-0009 question as one decision with D1's recommendation, then follow the next action above.
