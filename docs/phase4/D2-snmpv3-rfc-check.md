@@ -1,6 +1,6 @@
 # The SNMPv3 client checked against the RFC texts (D2, 2026-11-06)
 
-**Why.** C2 wrote the collector's SNMPv3 client (`modules/ied/snmpv3`, P4-3-C2 deliverable 4) from memory of the RFCs, because the texts were not in the project then. GT-MIB's agent is now being built from the texts themselves (D4-58), so the client is checked against the same texts first. That way a V-M1 failure is not the first place a misreading shows up. This is task 1 in [D2-handoff.md](../../handoffs/D2-handoff.md).
+**Why.** C2 wrote the collector's SNMPv3 client (`modules/ied/snmpv3`, P4-3-C2 deliverable 4) from memory of the RFCs, because the texts were not in the project then. GT-MIB's agent is now being built from the texts themselves (D4-58), so the client is checked against the same texts first. That way a V-M1 failure is not the first place a misreading shows up.
 
 **Sources.** The twelve texts in `reference/rfc/`. `sha256sum -c SHA256SUMS` gives `OK` for all twelve, and D4-58 records where they came from. D2 read the texts first and did not open GT-MIB's agent patch, so the two readings stay independent. D6's eight points (relayed through the coordinator) were checked as well, and each is answered below.
 
