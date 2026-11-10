@@ -1466,3 +1466,31 @@ The owner's words are from the CLI session, at about 21:25Z. Evidence class: `de
   - D8's file no longer cites D4-68 ruling 10 for a wider rule than it states.
   - D5's file now names the update verifier and R8.7's mechanism as its own, when briefed.
 - **Still owed by the owner:** their answer on PC test runs (D4-12), and the rest of the list in `HANDOFF.md`.
+
+## D4-81: `docs/requirements.md` states each requirement's status, and the branch list is built (owner and D1, 2026-11-10)
+
+The owner gave the CLI session a list of eight items at about 21:40Z. Items 3 and 4 are this entry. Evidence class: `desk`.
+
+- **The ask.** Item 3: "D1 updates it from the exit reports, and records-auditor checks it as its first run." Item 4: "D1 lists only branches whose every PR is merged at the branch tip and brings the list to you for approval."
+- **How the Status column is read.** The file's legend had five values and no definitions. This entry's PR defines them in the file, and adds a Basis column.
+  - Status is the furthest state the requirement has reached for at least one device family, at a gate the owner accepted.
+  - `verified` means that D6's independent tests of the requirement passed and an accepted exit report records them. It never means hardware-verified. Basis gives the evidence class, the scope, what is still owed, and the record.
+  - `implemented` means that product code on `main` does it, and D6's test of it is partial, not run, or not recorded in an exit report.
+  - Item 4 is not at a gate, so its work counts no higher than `contracted`.
+  - **Why a Basis column.** A bare `verified` beside a requirement that names every device class would claim more than the evidence holds (P10). Every `verified` row is `desk` or `simulated`, and most are for the SEL-751 alone.
+- **The result,** with `main` at `d507a62c`: 23 `verified`, 20 `implemented`, 8 `contracted`, 6 `investigating` and 2 `not started`, of 59.
+- **Where the rule was close.**
+  - A requirement whose criterion needs a device is still `verified` when its `simulated` form passed at a gate, and Basis names the hardware test that is owed (R1.2, R4.2).
+  - R3.1 and R3.5 are `implemented`, not `verified`, because `docs/phase-4a-exit.md` lists "Retrieval sees a real change made with the vendor tool (R3.1, R3.5)" under its unverified assumptions.
+  - R5.7 is `verified` at `desk` only: V-S5 and V-S10 pass in unit tests, because the node builds only valid requests.
+  - R6.1 to R6.5 and R6.7 are `contracted`. R6.6 is `investigating`, because no measured visibility statement exists.
+  - R1.7 is a standing rule. Its `implemented` means that the work follows it.
+  - R2.2 and R2.3 are the two `not started` rows. Item 5 is not briefed.
+- **Two facts are not from an exit report.** That each asset records its device class (R1.6) is read from `contracts/asset/asset.go`. Item 4's state (R6) is from `HANDOFF.md` and D4-68 to D4-76.
+- **Checks.** `records-auditor`'s first run and D6's review are on this entry's PR.
+- **The branch list.** On 2026-11-10 at about 21:45Z the remote had 253 branches. The 150 on `reference/carried/delete-merged-branches-2026-11-06.ps1` all still exist, each at the SHA the script records. D1 sorted the other 102 (without `main`) into three groups, in `reference/carried/branch-cleanup-2026-11-10.md`:
+  - **A, 49 branches:** every PR from the branch is merged, and the tip is the head of its newest merged PR. These meet the owner's rule.
+  - **B, 6 branches:** the tip is a later commit, not a PR's head, but its tree equals a commit on `main`, so the branch holds nothing that `main` lacks. These do not meet the rule as written, and wait for the owner's own answer.
+  - **C, 47 branches:** kept. Each has an open PR, a PR closed unmerged, no PR, or commits that differ from `main`. The four mutant branches kept on purpose are among them.
+  - Nothing is approved, and nothing was deleted. The list is a snapshot: re-check each SHA before any delete.
+- **Still owed by the owner:** their answer on the branch list, and the rest of the list in `HANDOFF.md`.
