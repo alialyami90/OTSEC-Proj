@@ -28,7 +28,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## Open PRs and branches
 
-- **Open PRs: none** besides the one that adds this file. No role has work in flight. Each role's open items are in its file in `.claude/agents/`.
+- **Open PRs:** list them with `gh pr list`. On 2026-11-10 the only one was #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80). It changes no code, and it merges when `ci` and `govulncheck` are green on its head. No role has work in flight. Each role's open items are in its file in `.claude/agents/`.
 - **Branches.** The remote has 248 branches. The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`.
 
 ## Waiting on the owner
@@ -74,10 +74,9 @@ The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared 
 ## The project folder on the owner's PC
 
 ```text
-OTSEC/
-├── OTSEC-Proj/      the only checkout of this repository; start `claude` here
-├── reference/       files that records cite, outside the repository
-└── tools/           portable Go 1.27.3 for 64-bit Windows in `tools/go`, the Go caches, and the Python venv
+OTSEC-Proj/          the only checkout of this repository; start `claude` here
+├── reference/       files that records cite; ignored by Git, never committed
+└── tools/           portable Go 1.27.3 for 64-bit Windows in `tools/go`, the Go caches, and the Python venv; ignored by Git
 ```
 
 | In `reference/` | What it holds |
@@ -88,8 +87,14 @@ OTSEC/
 | `carried/` | D1's log to #604 (`d1-open-items.md`), D6's queue of GT-PCAP cases (`d6-gt-pcap-next-plan-edits.md`, **live**), the branch-cleanup script, and the evidence files that records cite |
 | `pc-logs/` | Logs from earlier runs on the owner's PC, including the 2026-10-27 run that `docs/verification.md` cites |
 
-- The tool folders stay outside the checkout so that `go vet ./...` and `gofmt -l .` never walk into a Go distribution or a module cache.
-- `tools/go` has not been run on the PC yet. Go is not on the PATH: call `..\tools\go\bin\go.exe`, or set `PATH` for the session only.
+- **`reference/` and `tools/` are inside the checkout since 2026-11-10 (D4-80), and neither is ever committed.** The repository is public, and `reference/` holds vendor manuals and logs from the owner's PC. `.gitignore` lists both once #609 merges. Until then `.git/info/exclude` on the PC does. Stage by explicit path, as always.
+- **Never run `git clean -x`, `git clean -X` or `git stash --all` in this checkout.** Each removes or moves ignored files, so each would take both folders, and `reference/carried/` holds files that are in use.
+- **Go, `gofmt` and pytest do not read `.gitignore`,** so from the repository root they can walk into the two folders. This is not tested on the PC yet, because runs are paused (D4-12). `tools/go/src` has no `go.mod` there, so do not assume that Go skips it. Before the first run:
+  - Check that `go list ./...` names only `otsec.local/otsec` packages. If it names anything under `tools/` or `reference/`, give each of the two folders a one-line `go.mod`, so that Go treats it as another module, and check again.
+  - Run `gofmt` on tracked files only, as CI does, and not `gofmt -l .`: `gofmt -l $(git ls-files '*.go' | grep -v '^platform/experiments/')`.
+  - Run `python -m pytest -q --ignore=tools --ignore=reference`.
+  - CI is not affected, because neither folder is in the repository.
+- `tools/go` has not been run on the PC yet. Go is not on the PATH: call `tools\go\bin\go.exe`, or set `PATH` for the session only.
 - The Python venv does not exist yet. Create it as `tools/venv` (step 3 below).
 - Eleven test files still carry paths into a shared folder that no longer exists (the eight SEL-751 register goldens, two files under `tests/integration/gt_mib/`, and `contracts/adapter/testdata/snmp/README.md`). The goldens are pinned by checksum, so the owner left them. The paths are citations only, and nothing opens them.
 
@@ -97,7 +102,7 @@ OTSEC/
 
 1. In `OTSEC-Proj`, run `git status` and `git log -1`, and compare with `origin/main`.
 2. Check the toolchain: `go version` must report 1.27.3 on `windows/amd64`. Use `$(go env GOROOT)/bin/gofmt`.
-3. If `tools/venv` is missing, create it with `python -m venv ../tools/venv` and install `pytest` and `asyncssh==2.24.1` into it. Nothing else is installed.
-4. If the owner has lifted D4-12, run `go vet ./...`, `gofmt -l .` and `go test ./...`, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
+3. If `tools/venv` is missing, create it with `python -m venv tools/venv` and install `pytest` and `asyncssh==2.24.1` into it. Nothing else is installed.
+4. If the owner has lifted D4-12, make the `go list` check above, then run `go vet ./...`, `gofmt` and `go test ./...` in the forms given above for the PC, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
 5. Check the latest `ci` and `govulncheck` runs on `main`.
 6. Follow the next action above. The owner answered the ADR-0009 question on 2026-11-10 (D4-78).

@@ -39,6 +39,7 @@ Eight roles, D1 to D8, each a subagent in [.claude/agents/](.claude/agents/), wi
 | `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | D4 |
 | `platform/`, `deploy/` | Runtime, persistence, buffering, deployment | D5 |
 | `ui/` | The minimal UI | D8 |
+| `PRODUCT.md`, `DESIGN.md` | The product facts the UI rests on, and the design record. Both are written through the impeccable skill. `DESIGN.md` does not exist yet | D8 (D1 reviews `PRODUCT.md`) |
 | `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | D6 |

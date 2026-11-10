@@ -1448,3 +1448,21 @@ The owner's words are from the CLI session, at about 21:10Z and 21:20Z. Evidence
   - Agent files are found from the working directory up to the repository root. The first CLI session was started in the folder above the checkout and loaded none of them, so its reviews ran in a general-purpose subagent briefed from D6's role file (D4-77). `HANDOFF.md` now says where to start `claude`.
 - **The owner approved this entry's PR** in the CLI: "I approve the changes you made. PR and MErge." It changes the team in the brief, so it needed their word.
 - **Follow-ups (D1).** Bring `docs/requirements.md`'s Status column in line with the accepted gates, and give the result to `records-auditor` as its first run. Write D7's and D8's first briefs when the owner says to start.
+
+## D4-80: `reference/` and `tools/` move into the checkout, and the notes from #608's review (owner and D1, 2026-11-10)
+
+The owner's words are from the CLI session, at about 21:25Z. Evidence class: `desk`.
+
+- **The move.** The owner wrote: "I moved the reference and tools folders inside the OTSEC-Proj folder." The next session starts inside `OTSEC-Proj`, which is also where the agent files load from (D4-79).
+- **Neither folder is ever committed.** The repository is public. `reference/` holds vendor manuals, datasheets and logs from the owner's PC, and `tools/` holds a Go distribution and its caches. #609 adds both to `.gitignore`, and it waits for `ci` and `govulncheck`. Until it merges, D1 listed both in `.git/info/exclude` on the PC, and `git status` there shows neither.
+- **Go, `gofmt` and pytest do not read `.gitignore`.** From the repository root they can walk into the two folders. `HANDOFF.md` used to give this as the reason for keeping the tool folders outside the checkout. Nothing is tested on the PC, because runs are paused (D4-12). `tools/go/src` has no `go.mod` there (a directory listing), so nobody should assume that Go skips it. `HANDOFF.md` now gives the check to make before the first run, and the forms of `gofmt` and pytest that skip the two folders. CI is not affected.
+- **Records.** CLAUDE.md, `HANDOFF.md` and D6's file give the new layout. Records still cite the files as `reference/...`, and no citation changes.
+- **A new way to lose the folders.** Now that Git ignores them, `git clean -x`, `git clean -X` and `git stash --all` would remove or move both (the review of this entry's PR). `HANDOFF.md` forbids all three in this checkout.
+- **#608 merged as `4dddecdc`,** on the owner's approval, after its review accepted `ed133531` with six notes. This entry's PR answers them:
+  - `PRODUCT.md` still says `ui/` is owned by A5. It changes only through `/impeccable init`, so it is now an open item in D8's file.
+  - `README.md`'s ownership table gains a row for `PRODUCT.md` and `DESIGN.md`.
+  - CLAUDE.md §5.6's D8 row now names D5 beside D6 and D3.
+  - Stage C and the final directive now name D8, which builds the interface. D7 builds no component, so they do not name it.
+  - D8's file no longer cites D4-68 ruling 10 for a wider rule than it states.
+  - D5's file now names the update verifier and R8.7's mechanism as its own, when briefed.
+- **Still owed by the owner:** their answer on PC test runs (D4-12), and the rest of the list in `HANDOFF.md`.
