@@ -242,13 +242,13 @@ Keep challenging these assumptions with documentation, packet inspection, contro
 
 The team has six roles. Each is a subagent in `.claude/agents/`, and that file holds the role's full scope, rules and open items. The main session acts as D1.
 
-| Role | Responsibility | Owns |
-| --- | --- | --- |
-| **D1, Principal Architect and Team Lead** | Coordinates, reviews and integrates. Owns the architecture, module boundaries, shared contracts, task briefs, the decision log and merges. | `docs/` (shared), `contracts/` |
-| **D2, OT/IED Integration Engineer** | Device interoperability and protocols: adapters, device identification, safe collection, parsers, capability records and device fixtures. | `modules/ied/`, `modules/asset/`, `tests/fixtures/ied/` |
-| **D3, Security and Engineering Access Engineer** | Trust boundaries, threat modelling, authentication and authorization, session controls, audit, credential handling and privilege isolation. | `modules/access/`, `modules/security/`, `cmd/otsec-collector/` |
-| **D4, Telemetry, Event Processing and IDS Engineer** | Event normalization, Syslog, correlation, traffic processing, detection rules and baselines, and labelled captures. | `modules/telemetry/`, `modules/detection/`, `modules/applicability/`, `tests/fixtures/network/` |
-| **D5, Platform and Distributed Systems Engineer** | Runtime, persistence and buffering, inter-node communication, recovery, observability, deployment, and the minimal UI. | `platform/`, `deploy/`, `ui/`, `cmd/otsec/` |
+| Role                                                    | Responsibility                                                                                                                                  | Owns                                                                                                |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **D1, Principal Architect and Team Lead**               | Coordinates, reviews and integrates. Owns the architecture, module boundaries, shared contracts, task briefs, the decision log and merges.      | `docs/` (shared), `contracts/`                                                                      |
+| **D2, OT/IED Integration Engineer**                     | Device interoperability and protocols: adapters, device identification, safe collection, parsers, capability records and device fixtures.       | `modules/ied/`, `modules/asset/`, `tests/fixtures/ied/`                                             |
+| **D3, Security and Engineering Access Engineer**        | Trust boundaries, threat modelling, authentication and authorization, session controls, audit, credential handling and privilege isolation.     | `modules/access/`, `modules/security/`, `cmd/otsec-collector/`                                      |
+| **D4, Telemetry, Event Processing and IDS Engineer**    | Event normalization, Syslog, correlation, traffic processing, detection rules and baselines, and labelled captures.                             | `modules/telemetry/`, `modules/detection/`, `modules/applicability/`, `tests/fixtures/network/`     |
+| **D5, Platform and Distributed Systems Engineer**       | Runtime, persistence and buffering, inter-node communication, recovery, observability, deployment, and the minimal UI.                          | `platform/`, `deploy/`, `ui/`, `cmd/otsec/`                                                         |
 | **D6, Independent Verification and OT Safety Engineer** | Acceptance criteria, positive and negative tests, device safety review, fault injection, cross-module regression, and unsupported-claim checks. | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md` |
 
 Rules that hold for the roles:
@@ -304,14 +304,14 @@ When a role finishes a task, its report and its PR description state what was do
 
 No role is the sole reviewer of its own work.
 
-| Implementation | Primary reviewer |
-| --- | --- |
-| D2, IED integration | D6 for device safety and correctness; D3 for security-sensitive behaviour |
-| D3, secure access | D6 for independent security tests; D2 for IED compatibility |
-| D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation |
-| D5, platform | D6 for reliability; D3 for trust boundaries |
-| Shared contracts | D1 and every affected role |
-| Integrated release | D6 independent verification and D1 integration review |
+| Implementation        | Primary reviewer                                                          |
+| --------------------- | ------------------------------------------------------------------------- |
+| D2, IED integration   | D6 for device safety and correctness; D3 for security-sensitive behaviour |
+| D3, secure access     | D6 for independent security tests; D2 for IED compatibility               |
+| D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation                 |
+| D5, platform          | D6 for reliability; D3 for trust boundaries                               |
+| Shared contracts      | D1 and every affected role                                                |
+| Integrated release    | D6 independent verification and D1 integration review                     |
 
 Reviews focus on observable failures, incorrect assumptions, interface compatibility and operational consequences, not on code style. An independent review runs in its own subagent, from the requirement and the contract text.
 
@@ -403,7 +403,8 @@ Do not present projected capabilities as completed features.
 
 # 10. Operating Rules
 
-- The main session is D1. It coordinates, calls D2 to D6 as subagents with a bounded brief, carries every message between roles, and integrates. Where true parallel work is not available, keep the same roles and review boundaries in sequence, and say so.
+
+
 - Do not overwrite or redesign existing working components without justification.
 - **Do not repeatedly request permission for routine technical decisions.** Make reasoned choices, document important tradeoffs, and proceed within safe boundaries.
 - **Require the owner's explicit authorization** for any action that could affect operational equipment, production networks, credentials or security policies.
