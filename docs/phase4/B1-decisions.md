@@ -1405,7 +1405,7 @@ The owner's words up to 20:49Z are from the cloud D1 thread, as that thread's D1
   - Unchanged: the main session acts as D1 and calls D2 to D6 as subagents (CLAUDE.md §4), no role is the sole reviewer of its own work (§5.6), and an independent review runs in its own subagent.
   - The removed bullet also said that where true parallel work is not available, the roles and review boundaries are kept in sequence, and the report says so. No other text states that. The review of the CLAUDE.md change found that its loss weakens no review requirement, because §5.3's last line and §5.6 hold without it. That review ran in a general-purpose subagent briefed from D6's role file, because the session had not loaded the agent files.
   - Older records that say "through the coordinator" stay as written.
-- **D1's recommendation on ADR-0009.** D1 recommended option (b) in the cloud D1 thread on 2026-11-08 at 17:41Z ("I recommend a second Linux machine per site"), under a decision card the owner did not answer there. It was not in the repository until this entry. D1 asked again in the CLI on 2026-11-10. The owner's choice is in D4-78.
+- **D1's recommendation on ADR-0009.** D1 recommended option (b) in the cloud D1 thread on 2026-11-08 at 17:41Z ("I recommend a second Linux machine per site"), under a decision card the owner did not answer there. Until this entry the repository said only that D1 recommended (b) (`HANDOFF.md` and D1's agent file, from #605), not where or when. D1 asked again in the CLI on 2026-11-10. The owner's choice is in D4-78.
 
 ## D4-78: the owner chooses option (a) for the sensor, and no work on it starts yet (owner and D1, 2026-11-10)
 
@@ -1413,8 +1413,8 @@ Both of the owner's messages are from the CLI session, at about 21:05Z. Evidence
 
 - **The choice.** The owner wrote: "ADR-0009 go with (a". D1 reads it as option (a): Zeek or Suricata on the Windows site node, with a capture driver. D1 had recommended (b) (D4-77).
 - **No work starts.** The owner then wrote: "do not start work on it just log the decision". So ADR-0009 stays `proposed` and its text is unchanged, D4 is not called, and no sensor brief is written. The sensor is still the only blocker for item 4.
-- **What option (a) still needs from the owner before ADR-0009 can be accepted** (from the ADR's table and "What decides it"):
-  - **The engine.** Suricata has a Windows build, needs Npcap for live capture, and is GPLv2. No official Zeek binary for Windows was found, so Zeek on Windows is `unknown`.
-  - **The capture driver.** Npcap may not be redistributed without the sold OEM licence, and its free edition is limited to five systems. Its price is `unknown`. The variant (a′) uses `pktmon` instead. Whether `pktmon` is enough on a SPAN or TAP port is `unknown` until a lab run shows it, and a lab run needs the owner's authorization.
+- **What option (a) still needs before ADR-0009 can be accepted** (from the ADR's table and "What decides it"):
+  - **From the owner: is an Npcap OEM licence acceptable?** Npcap may not be redistributed without the sold OEM licence, and its free edition is limited to five systems. Its price is `unknown`. The variant (a′) uses `pktmon` instead. Whether `pktmon` is enough is `unknown` until a lab run shows that it captures on a SPAN or TAP port, under a service account with less privilege, and with layer-2 frames intact. A lab run needs the owner's authorization.
+  - **From D1 with D4, the ADR's deciders: the engine.** Suricata has a Windows build, needs Npcap for live capture, and is GPLv2. No official Zeek binary for Windows was found, so Zeek on Windows is `unknown`.
 - **What is `unknown` under (a)** (ADR-0009): offline decoding and live capture on Windows, the Windows 10/11 LTSC floor, a timed replay on Windows for R6.4, and whether Npcap's install options force administrator rights. Under (a), hostile input reaches C and C++ decoders on the machine that holds the node's store and keys, and the process and account boundary is the only wall (AP-30).
 - **Still owed by the owner.** Their answer on PC test runs (D4-12), and the rest of the list in `HANDOFF.md`.

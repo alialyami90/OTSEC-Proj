@@ -24,7 +24,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (a) for the passive sensor on 2026-11-10, and said not to start work on it yet** (D4-78). [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**NEXT ACTION (D1):** wait for the owner's word to start. Then get their answers on the engine and the capture driver (D4-78), mark ADR-0009 accepted with D4, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
+**NEXT ACTION (D1):** wait for the owner's word to start. Then get their answer on the Npcap OEM licence, choose the engine with D4 (D4-78), mark ADR-0009 accepted with D4, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
 
 ## Open PRs and branches
 
@@ -33,7 +33,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## Waiting on the owner
 
-1. **The sensor under option (a)** (ADR-0009, D4-78): the word to start, which engine, and the capture driver. This blocks item 4.
+1. **The sensor under option (a)** (ADR-0009, D4-78): the word to start, and whether an Npcap OEM licence is acceptable. This blocks item 4.
 2. **The sites' networks:** which protocols run on them, whether a site can give a SPAN port or a TAP, and whether the station network is PRP (D4-66).
 3. **R6.7's insecure list:** should it add IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68)?
 4. **May the DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5) be given to the project, in `reference/` (D4-68)?
@@ -98,4 +98,4 @@ OTSEC/
 3. If `tools/venv` is missing, create it with `python -m venv ../tools/venv` and install `pytest` and `asyncssh==2.24.1` into it. Nothing else is installed.
 4. If the owner has lifted D4-12, run `go vet ./...`, `gofmt -l .` and `go test ./...`, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
 5. Check the latest `ci` and `govulncheck` runs on `main`.
-6. Ask the owner the ADR-0009 question as one decision with D1's recommendation, then follow the next action above.
+6. Follow the next action above. The owner answered the ADR-0009 question on 2026-11-10 (D4-78).
