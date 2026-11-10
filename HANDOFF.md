@@ -24,7 +24,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner has not yet chosen where the passive sensor runs** ([ADR-0009](docs/decisions/ADR-0009-passive-sensor.md), still `proposed`). The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**NEXT ACTION (D1):** get the owner's choice. Then mark ADR-0009 accepted with D4, record the choice as D4-77, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
+**NEXT ACTION (D1):** get the owner's choice. Then mark ADR-0009 accepted with D4, record the choice as D4-78, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
 
 ## Open PRs and branches
 
@@ -63,7 +63,7 @@ The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared 
 
 ## Working in the CLI
 
-- **The main session acts as D1** and calls D2 to D6 as subagents with a bounded brief (CLAUDE.md section 5.2). Every message between roles passes through the main session.
+- **The main session acts as D1** and calls D2 to D6 as subagents with a bounded brief (CLAUDE.md section 5.2).
 - **Independent review means a separate subagent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent.
 - **Branches.** One branch and one PR per task, and one `git worktree` per role working at the same time. Stage by explicit path.
 - **Working files** go in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.

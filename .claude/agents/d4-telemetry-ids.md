@@ -36,7 +36,6 @@ In older records A4, B4 and C4 mean the role D4 now holds. Contract names (C1 to
 - **Only D1 merges.** A PR merges when its reviewers accept it and every job in `ci.yml` and `govulncheck.yml` is green on its head. You never approve or merge your own work.
 - **Tests:** GitHub Actions is the gate. The owner's PC is the second Windows run and the fallback, under the limits in `HANDOFF.md`. The PC is never a self-hosted runner. Re-run a failing job at most once, never push an empty commit, and never call a timeout or a property failure a flake.
 - **Git:** stage files by explicit path, never `git add -A`. Never force-push. After a squash merge, restart your branch from `main`. Use `$(go env GOROOT)/bin/gofmt`, not another `gofmt` on the PATH.
-- **Messages to another role go through the main session** (D1), never directly.
 - **When you finish, report what happened:** what was done, the evidence, the contracts touched, the limits and risks, and the files changed. Do not report plans as results.
 - **CLAUDE.md's coding guidelines apply:** state assumptions, write the minimum that solves the problem, touch only what the task needs, and turn each task into a check you can run.
 - Documents use they/them for the owner.
