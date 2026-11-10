@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Local folders on the owner's PC (D4-80). Never commit them.
+/reference/
+/tools/
