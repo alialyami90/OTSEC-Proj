@@ -106,17 +106,22 @@ D1 records both answers, with the move itself, as D4-77.
 
 ## The project folder on the owner's PC
 
-The layout below is the one proposed to the owner on 2026-11-10. It is in force only once they confirm it.
+The owner approved this layout on 2026-11-10, and it was put in place the same day.
 
 ```text
 OTSEC/
 ├── OTSEC-Proj/      the only checkout of this repository; start `claude` here
-├── project-files/   a copy of the Claude project's shared folder (history, RFC texts, work-in-progress notes)
-├── reference/       SEL datasheets and manuals (PDF), outside the repository
-└── tools/           portable Go 1.27.3 (64-bit), the Go caches, and the Python venv
+├── project-files/   a copy of the Claude project's shared folder as of 2026-11-10, plus `pc-logs/` (the PC's old run logs) and `exports/`
+├── reference/       SEL datasheets and manuals (PDF and text), outside the repository
+└── tools/           portable Go 1.27.3 for 64-bit Windows in `tools/go`, the Go caches, and the Python venv once it is recreated
 ```
 
-The tool folders stay outside the checkout so that `go vet ./...` and `gofmt -l .` never walk into a Go distribution or a module cache.
+- The tool folders stay outside the checkout so that `go vet ./...` and `gofmt -l .` never walk into a Go distribution or a module cache.
+- `OTSEC-Proj` was cloned at `82daa04`. The three older checkouts (`otsec-ci-local`, `otsec-ci-a6`, `pc-run`) were deleted after a check that they held no unpushed work and no uncommitted change.
+- The PDFs that records cite under `/mnt/project-files/phase0/manuals-SEL/` and `datasheets-SEL/` are in `reference/`, not in `project-files/`.
+- `tools/go` is the Go toolchain module `golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64`, fetched through `proxy.golang.org` and checked against `sum.golang.org`. It has not been run on the PC yet. Go is not on the PATH: call `..\tools\go\bin\go.exe`, or set `PATH` for the session only.
+- The old venv was deleted, because a venv breaks when moved. Recreate it as `tools/venv` (first session, step 3).
+- `pc-run/.pytest_cache` could not be removed without elevation, so an otherwise empty `pc-run` folder remains until the owner deletes it.
 
 ## First session in the CLI
 
