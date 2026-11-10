@@ -314,7 +314,7 @@ No role is the sole reviewer of its own work.
 | D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation                 |
 | D5, platform          | D6 for reliability; D3 for trust boundaries                               |
 | D7, release           | D3 for the update path's security; D6 for independent tests               |
-| D8, UI and UX         | D6 for workflows and claims; D3 for signing surfaces; D5 for node calls   |
+| D8, UI and UX         | D6 for workflows and claims; D3 for security surfaces; D5 for node calls  |
 | Shared contracts      | D1 and every affected role                                                |
 | Integrated release    | D6 independent verification and D1 integration review                     |
 
