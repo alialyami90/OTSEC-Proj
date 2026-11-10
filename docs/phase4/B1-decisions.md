@@ -88,7 +88,7 @@ Date: 2026-10-27.
 
 B5's ack also names job 122364490231.
 
-**B6's reading.** B6's analysis is in the project files, `b6/windows-go-timeouts-2026-10-27.md`. It reads these as slow disks across every disk-bound package, not one hung flush.
+**B6's reading.** B6's analysis is `reference/carried/windows-go-timeouts-2026-10-27.md`. It reads these as slow disks across every disk-bound package, not one hung flush.
 - `platform/node` normally uses 53 to 76 percent of the 600 s budget.
 - This reading is an inference, and `platform/store`'s 9-minute case is unclassified.
 
@@ -623,7 +623,7 @@ Date: 2026-11-04. C1, approving C5's proposal `docs/phase4/C5-c5-0.7.md` at `243
 
 ## D4-40: what the first gate still needs, who builds it, and the V-M3 and V-M4 rulings
 
-Date: 2026-11-04. C1, on C6's gate-run needs (`/mnt/project-files/c6/gate-run-needs.md`, checked against `main` at `68e3d57`).
+Date: 2026-11-04. C1, on C6's gate-run needs (a working file that was not kept, checked against `main` at `68e3d57`).
 
 1. **The finding.** The contracts for items 1 and 2 are merged, but the binaries do not yet do what V-M2 and V-M4 test:
    - no scheduled configuration read stores a C9 snapshot or difference;
@@ -967,7 +967,7 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
 
 - **The RFC texts (owner, 11:41Z).**
   - The owner chose "Allow www.rfc-editor.org" on C1's V-M1 decision card.
-  - C1 added that one host to the cloud environment's allowed hosts. C1 then fetched RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 into the project files (`/mnt/project-files/rfc/`, with `SHA256SUMS`).
+  - C1 added that one host to the cloud environment's allowed hosts. C1 then fetched RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 into the project's reference files (`reference/rfc/`, with `SHA256SUMS`).
   - Role 6 also needed RFC 2578 (the MIB roots), 3417 (the transport and BER rules), 1157 and 1901. C1 fetched them from the same host. Each matches role 6's own copy byte for byte, and `SHA256SUMS` covers all twelve.
   - V-M1 is unblocked. GT-MIB may be built only from these texts. The item 3 gate still never counts a GT-MIB built from memory.
 - **Messages between agents go through the coordinator (owner, 11:43Z).** "New rule. All messages run through you the coordinator."
@@ -1037,7 +1037,7 @@ D1, on D4's #504 (`docs/phase4/D4-c12-0.2.md`), with D2, D3, D5 and D6 reviewing
   - P4-H3, C12 0.2's code as D4-61 approved it, which closes item 3's last limitation.
 
   D1 told the owner that C12 0.2 follows the two fixes unless they say otherwise. When all three are merged, D1 reports to the owner and asks for the next item. The owner's other open questions (HR-18, severity scores, HR-17, which SEL switches, model naming) stay open.
-- **The branch cleanup (16:48Z).** The owner chose "Delete the 150 merged ones". D1 re-checked that each of the 150 branches is still at the tip recorded on 2026-10-31 and is the head of no open PR. `claude/project-thread-8k5430` has moved and stays. This session's GitHub access refuses a branch delete, as it refuses a force push. So D1 wrote `/mnt/project-files/d1/delete-merged-branches-2026-11-06.ps1` for the owner to run from a clone. Each delete is leased to the recorded SHA. The four unmerged mutant branches are kept.
+- **The branch cleanup (16:48Z).** The owner chose "Delete the 150 merged ones". D1 re-checked that each of the 150 branches is still at the tip recorded on 2026-10-31 and is the head of no open PR. `claude/project-thread-8k5430` has moved and stays. This session's GitHub access refuses a branch delete, as it refuses a force push. So D1 wrote `reference/carried/delete-merged-branches-2026-11-06.ps1` for the owner to run from a clone. Each delete is leased to the recorded SHA. The four unmerged mutant branches are kept.
 
 ## D4-63: the hardening briefs are done, and two rulings on P4-H2 (D1, 2026-11-07)
 
@@ -1125,7 +1125,7 @@ ADR-0009 stays **proposed** until the owner chooses where the sensor runs. None 
 7. **The learner has its own checkpoint series, `netcheckpoint.learner`.** At the end of learning the draft is frozen. From then until acknowledgement, the learner folds nothing more and its cursor follows the detector's. At acknowledgement the learner consumer is retired, with an audit record written before it leaves the consumer set, and it never holds pruning again. Relearning starts a new one.
 8. **The network acknowledgement is its own admin kind, `node.network_baseline_ack`.** Through `authorized_writers` it decides which hosts may write to relays without an alert, which is a different grant from accepting a configuration or event baseline (P4). No existing key gains it silently.
 9. **A key-kind grant is recorded at first use.** The node writes `policy.apply`, carrying the collector's new keys-and-kinds digest, before it applies any decision from a reply that carries that digest. If the write fails, the decision is not applied.
-10. **A DNP3 Secure Authentication failure is an alert in 0.1.** The rule matches g120v7 in function 33 (from the master) or 131 (from the outstation), after a challenge or an aggressive-mode request. It cites the challenged or aggressive-mode request and the error. Its detail says "SA authentication failed" and names the sender. It never says "forged", because a passive sensor can't check the MACs. It never gives a number of failures, because `hits` is only a lower bound under the outstation's error cap (S23 §12.4.8). Every failure code is `unknown` until the owner allows the SA specification text into the project files. It needs no baseline, so it runs before acknowledgement. `sa: failed` does not set `dnp3_no_sa`.
+10. **A DNP3 Secure Authentication failure is an alert in 0.1.** The rule matches g120v7 in function 33 (from the master) or 131 (from the outstation), after a challenge or an aggressive-mode request. It cites the challenged or aggressive-mode request and the error. Its detail says "SA authentication failed" and names the sender. It never says "forged", because a passive sensor can't check the MACs. It never gives a number of failures, because `hits` is only a lower bound under the outstation's error cap (S23 §12.4.8). Every failure code is `unknown` until the owner allows the SA specification text into `reference/`. It needs no baseline, so it runs before acknowledgement. `sa: failed` does not set `dnp3_no_sa`.
 11. **A DNP3 request the sensor never sees answered is still observed (D3, D5).** Every pending DNP3 request completes at `sa_reply_timeout_ms`, whatever its code. The default is 5 s, bounded 1 to 30 s. The request is emitted with what has been seen by then, with `sa` absent if nothing decided it. The node never sets `dnp3_no_sa` from an absent `sa`, and `unauthorized-write` still fires from the function code. `max_pending_dnp3` bounds the pending table. On overflow the oldest pending request is emitted the same way and counted in its own coverage-loss counter (#538). At `sensor-stop`, every pending request is emitted the same way. Both settings travel in `coverage.settings`, the node refuses values outside their bounds, and R6.4's latency allows the wait.
 12. **Plain HTTP stays on the insecure list, whatever it serves.** A port 80 service that only redirects to HTTPS is flagged `insecure`, because the redirect is itself sent in clear and can be stripped. The detail reads "redirect to HTTPS only, no credential seen". GT-PCAP labels follow the same rule. The owner may change this when they rule on the R6.7 candidates in D2's note.
 13. **D4-67 is amended.** Its redaction slots now also cover the value of every `Cookie` and `Set-Cookie` header and the whole body of a plain-HTTP form request (`application/x-www-form-urlencoded` or `multipart/form-data`). Where a slot can't be placed, fail-closed applies to whichever side carries it, server bytes included.
@@ -1141,7 +1141,7 @@ ADR-0009 stays **proposed** until the owner chooses where the sensor runs. None 
 **Carried to the owner.**
 - Should R6.7's insecure list add IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D2's note, #528)?
 - Which protocols run on their substation networks? Can a site get a SPAN port or a TAP? Is the station network PRP?
-- May the DNP3 SA specification text be placed in the project files?
+- May the DNP3 SA specification text be placed in `reference/`?
 - Where should the sensor run (ADR-0009)?
 
 ## D4-69: C2 0.9 is approved, with the rulings from item 4's first briefs and code (D1, 2026-11-07)

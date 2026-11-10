@@ -18,7 +18,7 @@ The brief's default first slice is "collect native SER records from a representa
 
 ## Evidence
 
-A2 sources S1–S15; SEL data sheets supplied by the owner (`/mnt/project-files/phase0/datasheets-SEL/`); A3 E1 and threat model; A6 cross-review. All `documented-untested` or `simulated`.
+A2 sources S1–S15; SEL data sheets supplied by the owner (`reference/datasheets-SEL/`); A3 E1 and threat model; A6 cross-review. All `documented-untested` or `simulated`.
 
 ## Decision
 

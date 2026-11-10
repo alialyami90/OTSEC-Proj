@@ -2,7 +2,7 @@
 
 C2, 2026-11-05. This is the family note of P4-3-A2 (`docs/agent-handoffs.md`, "Phase 4 item 3: Stage A briefs"). C6's GT-MIB plan depends on it.
 
-**Evidence class.** `desk`. Every statement here is from the SEL manuals in the project files (`phase0/manuals-SEL/`, read through `pdftotext -layout`), and page numbers are the manuals' own. No device was contacted, no MIB was read, and nothing here is `hardware-verified`.
+**Evidence class.** `desk`. Every statement here is from the SEL manuals in `reference/manuals-SEL/` (read through `pdftotext -layout`), and page numbers are the manuals' own. No device was contacted, no MIB was read, and nothing here is `hardware-verified`.
 
 **Sources.** The source IDs are those in `docs/phase0/A2-sel-portfolio.md`:
 
@@ -67,7 +67,7 @@ The served MIBs are SNMPv2-MIB (system group), ENTITY-MIB (`entPhysicalTable`), 
 ## The SEL MIB text and GT-MIB
 
 - **The project has no SEL MIB file.** Both manuals say the MIBs are downloaded from SEL: S29 p. 46 says from the product page, and S43 p. 86 says from the device. Neither prints the MIB text.
-- **Identity needs no SEL MIB.** Its OIDs are all in standard MIBs: SNMPv2-MIB (RFC 3418), ENTITY-MIB (RFC 6933) and SNMP-FRAMEWORK-MIB (RFC 3411). Their text is public. **It is not in the project files, and this container cannot fetch it** (the proxy refused the RFC Editor, 2026-11-05). To build GT-MIB from MIB text rather than from memory, those three modules need to be added to the project files by the owner or by a session with network access. The SEL power-supply MIB is needed only for health, which is not in item 3.
+- **Identity needs no SEL MIB.** Its OIDs are all in standard MIBs: SNMPv2-MIB (RFC 3418), ENTITY-MIB (RFC 6933) and SNMP-FRAMEWORK-MIB (RFC 3411). Their text is public. **It was not among the project's reference files when this was written, and this container could not fetch it** (the proxy refused the RFC Editor, 2026-11-05). To build GT-MIB from MIB text rather than from memory, those three modules need to be added to the reference files by the owner or by a session with network access. The SEL power-supply MIB is needed only for health, which is not in item 3.
 - **What GT-MIB cannot show from documents.** It cannot show which `entPhysicalTable` column and row hold the FID, what `sysDescr` and `sysObjectID` contain, or how many rows the table has. A simulator built now has to invent these and label them SYNTHESIZED, as V-M2's SHO replies were. So V-M1 (e) would show that the client reads and attributes exactly what the agent served. It would not show that the client finds the FID where a real switch puts it. Reading it by its form, as above, is what keeps that assumption from mattering, and a hardware item (V-M1's new H item) closes it.
 - **For the SEL-2730M, if C1 keeps it.** Its served set is unknown beyond `ifTable`, `entPhysicalTable` and the history's MIB list. GT-MIB could serve the same standard identity OIDs, but which other OIDs exist would be invented. The FID point above applies the same way.
 

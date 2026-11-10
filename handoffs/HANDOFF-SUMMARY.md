@@ -58,23 +58,23 @@ The contracts are listed in [contracts/README.md](../contracts/README.md); the i
 - **The sites' protocols,** before IDS (item 4) is briefed (D4-33).
 - **Authorization for any device contact.** This covers a lab relay or switch before any H-test or Q3, and any SNMPv3 contact after V-M1.
 - **Resuming test runs on their PC** (D4-12).
-- **Deleting the leftover branches.** The 2026-10-31 cleanup list (`/mnt/project-files/a1/branch-cleanup-2026-10-31.md`) was never handed to the owner (C1, 2026-11-06). On 2026-11-06, 150 of its 151 merged branches were still at their recorded tips, each restorable from its merged PR; `claude/project-thread-8k5430` has moved and is off the list. Also owed: the four unmerged branches `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. The owner approved deleting the 150 on 2026-11-06 (D4-62). This session cannot delete a branch, so D1 gave the owner `/mnt/project-files/d1/delete-merged-branches-2026-11-06.ps1`, with each delete leased to its recorded SHA. It waits for the owner to run it. The four unmerged branches are kept.
+- **Deleting the leftover branches.** The 2026-10-31 cleanup list (a working file that was not kept) was never handed to the owner (C1, 2026-11-06). On 2026-11-06, 150 of its 151 merged branches were still at their recorded tips, each restorable from its merged PR; `claude/project-thread-8k5430` has moved and is off the list. Also owed: the four unmerged branches `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. The owner approved deleting the 150 on 2026-11-06 (D4-62). This session cannot delete a branch, so D1 gave the owner `reference/carried/delete-merged-branches-2026-11-06.ps1`, with each delete leased to its recorded SHA. It waits for the owner to run it. The four unmerged branches are kept.
 
 ## Open PRs at the checkpoint
 
-None. Every PR from generation C is merged or closed. The last were #479 (the item 3 exit report), #480 (role 6's D4-57 tests) and the checkpoints #481 to #485. Role 6's V-M1 work is not a PR yet: it is a patch in `/mnt/project-files/c6-wip/` (see its README). This checkpoint's own PR is the only one open.
+None. Every PR from generation C is merged or closed. The last were #479 (the item 3 exit report), #480 (role 6's D4-57 tests) and the checkpoints #481 to #485. Role 6's V-M1 work is not a PR yet: it is a patch in a working folder that was not kept (see its README). This checkpoint's own PR is the only one open.
 
 ## Dependency order and each agent's next action
 
 V-M1 is the only gate item left. The order:
 
 0. **This checkpoint's PR** merges on D6's review. Then every D agent writes its ack, and D1 merges the acks (cutover).
-1. **D2** checks `modules/ied/snmpv3` against the RFC texts in `/mnt/project-files/rfc/`.
+1. **D2** checks `modules/ied/snmpv3` against the RFC texts in `reference/rfc/`.
 2. **D6** checks GT-MIB's case table and the egress corpus against the same texts, then builds GT-MIB's agent and runs V-M1.
 3. **Reviews of D6's V-M1 PR:** D2 (SNMP reading), D3 (security), D5 (node side), and D4 (any change to `contracts/finding` or `modules/applicability`).
 4. **D1** merges the PR, decides the gate, updates the exit report, and puts the acceptance to the owner. Then work stops for the owner's check (D4-34).
 
-Every D agent first writes its ack (reading order, step 4), whether or not its handoff repeats this step. Read the role handoffs with these corrections, made after they were written. #479 and #480 are merged (`a69c416`, `158a5d0`). This summary is the C-to-D one, GENERATIONS.md's C row is closed, and its standing rules section is "Standing rules every D agent must keep". All twelve RFC texts are in `/mnt/project-files/rfc/` (D4-58). "C1" in a role handoff means D1.
+Every D agent first writes its ack (reading order, step 4), whether or not its handoff repeats this step. Read the role handoffs with these corrections, made after they were written. #479 and #480 are merged (`a69c416`, `158a5d0`). This summary is the C-to-D one, GENERATIONS.md's C row is closed, and its standing rules section is "Standing rules every D agent must keep". All twelve RFC texts are in `reference/rfc/` (D4-58). "C1" in a role handoff means D1.
 
 After the ack, each agent's NEXT ACTION is:
 
@@ -83,9 +83,9 @@ After the ack, each agent's NEXT ACTION is:
 - **D3:** the security review of V-M1 when D6 posts GT-MIB's agent ([D3-handoff.md](D3-handoff.md)).
 - **D4:** review for the item 3 gate. #480 has merged, so this means any change V-M1 makes to `contracts/finding`, `modules/applicability` or `tests/integration/applicability`. Then the C12 0.2 proposal when D1 opens it ([D4-handoff.md](D4-handoff.md)).
 - **D5:** the node-side review of D6's V-M1 PR ([D5-handoff.md](D5-handoff.md)).
-- **D6:** finish GT-MIB's agent from the WIP patch `/mnt/project-files/c6-wip/2026-11-06-gt-mib-agent-wip.patch`, and correct the case table to what the RFC texts confirm. Two corrections are known: H12 is not hostile (RFC 3417 §8), and W4 is 720 varbinds (RFC 6933's 18 columns). Then build the V-M1 runner on the real binaries ([D6-handoff.md](D6-handoff.md)).
+- **D6:** finish GT-MIB's agent from its WIP patch (a working file that was not kept), and correct the case table to what the RFC texts confirm. Two corrections are known: H12 is not hostile (RFC 3417 §8), and W4 is 720 varbinds (RFC 6933's 18 columns). Then build the V-M1 runner on the real binaries ([D6-handoff.md](D6-handoff.md)).
 
-**The single highest team priority:** V-M1 over GT-MIB, built from the RFC texts in `/mnt/project-files/rfc/`. The twelve texts are the eight from D4-58, plus RFC 2578, 3417, 1157 and 1901 for the MIB roots and encoding. All twelve are listed in `SHA256SUMS`. It is the last item 3 gate item.
+**The single highest team priority:** V-M1 over GT-MIB, built from the RFC texts in `reference/rfc/`. The twelve texts are the eight from D4-58, plus RFC 2578, 3417, 1157 and 1901 for the MIB roots and encoding. All twelve are listed in `SHA256SUMS`. It is the last item 3 gate item.
 
 ## STALLED items
 

@@ -1,6 +1,6 @@
 # C8 0.2: collector reset and node-side suspensions
 
-Owner: A3 (C8 is A3's, per `contracts/README.md`). Ruling: A1 D2-15. Reviewed in draft by A5 and A6 (`/mnt/project-files/phase2/reviews/A3-c8-seq-reset-A6.md`). Implemented in `contracts/audit` as `otsec.audit/0.2`. The node side is A5's and follows this contract.
+Owner: A3 (C8 is A3's, per `contracts/README.md`). Ruling: A1 D2-15. Reviewed in draft by A5 and A6 (A6's review was a working file that was not kept). Implemented in `contracts/audit` as `otsec.audit/0.2`. The node side is A5's and follows this contract.
 
 ## Problem
 

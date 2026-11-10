@@ -5,9 +5,9 @@ From D5 to C5 and D1, 2026-11-06, at `main` `a774a97` (#486). I read [CLAUDE.md]
 ## State I checked
 
 - `main` is `a774a97`. Since `961221b`, where D5-handoff.md was written, `main` gained #479, #480 and the checkpoints #481 to #486. None of them touches my paths: `git diff --stat 961221b origin/main -- platform deploy ui cmd/otsec contracts/store .github` is empty. So the node-side state in D5-handoff.md's table still holds.
-- Open PRs on GitHub: none (before this one). There is no V-M1 PR yet. D6's GT-MIB agent is still the uncommitted patch `/mnt/project-files/c6-wip/2026-11-06-gt-mib-agent-wip.patch` (no tests yet, per its README).
+- Open PRs on GitHub: none (before this one). There is no V-M1 PR yet. D6's GT-MIB agent is still an uncommitted patch (a working file that was not kept; no tests yet, per its README).
 - Role 5 has no open PR, branch or patch.
-- Corrections to D5-handoff.md, already made in the summary: #479 and #480 are merged (`a69c416`, `158a5d0`), not open. `/mnt/project-files/rfc/` holds twelve RFC texts with `SHA256SUMS`, not eight. The summary now states the coordinator rule.
+- Corrections to D5-handoff.md, already made in the summary: #479 and #480 are merged (`a69c416`, `158a5d0`), not open. `reference/rfc/` holds twelve RFC texts with `SHA256SUMS`, not eight. The summary now states the coordinator rule.
 - I did not run `go vet`, `gofmt` or the tests. This PR changes only this file, and my paths are unchanged since C5's run on `961221b` (D5-handoff.md, step 1 results).
 
 ## My scope

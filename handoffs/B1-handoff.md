@@ -65,7 +65,7 @@ You merge PRs:
 | [docs/verification.md](../docs/verification.md) | B6's criteria. V-M1 to V-M8 are the Phase 4 bar, and a brief may not lower them. |
 | [contracts/README.md](../contracts/README.md) | Contract versioning and compatibility rules. |
 | `.github/workflows/ci.yml` | The ten jobs every merge depends on. |
-| `/mnt/project-files/phase3/` (project files, not the repo) | `A1-exit-notes.md` is A1's running log of gate events. `P3-W1-pc-run-result.md` and `P3-W1-pc-pytest.txt` are the owner's PC run. |
+| The Phase 3 working files (not the repo; not kept, apart from the two PC-run files, now in `reference/carried/`) | `A1-exit-notes.md` is A1's running log of gate events. `P3-W1-pc-run-result.md` and `P3-W1-pc-pytest.txt` are the owner's PC run. |
 
 ## Decisions made
 
@@ -100,7 +100,7 @@ These are recorded in the decision files. Don't reopen them without new evidence
 
 - **Stale CI.** CI on a PR's head can predate newer `main`. #197 merged on old CI and turned `main`'s Windows job red. Before merging such a PR, run `go vet ./...` (also with `GOOS=windows`), `gofmt -l .`, the affected packages with `-race`, and the affected end-to-end suites on the PR merged locally with `main`. If the Windows leg matters, get it run on the merged result.
 - **One re-run per failing commit.** Never push an empty commit to kick CI. A property-test failure is a finding, not a flake: #178 and the CNG pointer bug both looked like flakes at first.
-- **The owner's PC log was UTF-16LE with a BOM and CRLF.** That is how Windows PowerShell's `Tee-Object` writes. The copy in project files is UTF-8 with LF. To check it against the PC's hash, re-encode it the same way: `(printf '\xff\xfe'; sed 's/$/\r/' P3-W1-pc-pytest.txt | iconv -f UTF-8 -t UTF-16LE) | sha256sum`.
+- **The owner's PC log was UTF-16LE with a BOM and CRLF.** That is how Windows PowerShell's `Tee-Object` writes. The copy in `reference/carried/` is UTF-8 with LF. To check it against the PC's hash, re-encode it the same way: `(printf '\xff\xfe'; sed 's/$/\r/' P3-W1-pc-pytest.txt | iconv -f UTF-8 -t UTF-16LE) | sha256sum`.
 - **Service teardown lines go to the SCM log, not to pytest's output.** Don't expect them in `pytest.txt`.
 - **Use the GitHub MCP tools for GitHub work.** There is no `gh` CLI in the session.
 - **Every GitHub comment ends with the Claude Code footer.** Commit messages and PR bodies end with the attribution lines the session gives you. No model names in anything pushed.

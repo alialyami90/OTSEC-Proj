@@ -2,7 +2,7 @@
 
 C6, 2026-11-04. This is V-M3's desk half for the SEL-751 (R3.7, D4-40 point 3).
 
-**What was checked.** Every cell of the SEL-751 block in `docs/device-capabilities.md` on `main` at `68e3d57` (C2's desk check, #378), against its citation. The source is S22, the SEL-751 Instruction Manual, date code 20260910. It is read from the owner-supplied copy in the project files (`phase0/manuals-SEL/751_IM_20260910.pdf`), extracted to text with `pdftotext -layout`. Page numbers are the manual's own.
+**What was checked.** Every cell of the SEL-751 block in `docs/device-capabilities.md` on `main` at `68e3d57` (C2's desk check, #378), against its citation. The source is S22, the SEL-751 Instruction Manual, date code 20260910. It is read from the owner-supplied copy (`reference/manuals-SEL/751_IM_20260910.pdf`), extracted to text with `pdftotext -layout`. Page numbers are the manual's own.
 
 **Evidence class.** `desk`. No device was contacted, and nothing here is hardware-verified.
 

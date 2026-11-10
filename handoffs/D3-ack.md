@@ -20,8 +20,8 @@ From D3 to D1, 2026-11-06, read at `main` `a774a97` (#486). I read [CLAUDE.md](.
 | D3-handoff §3's two caveats | Both resolved: #479 merged, so `docs/phase-4-item3-exit.md` is on `main`, and its line 114 still states role 3's no-objection with the two standing limits. #480 merged. | `git log`, `docs/phase-4-item3-exit.md:114` |
 | C3's two proposals to D1 | Both recorded in D4-58: the coordinator routing rule, and the wall-clock rule for socket waits under a test clock. | `docs/phase4/B1-decisions.md:966` |
 | HR-16, HR-17 | Still "open, draft" although the design is built (#446, #449, #456, #461). Task 2 below. | `docs/threat-model.md:197-198` |
-| `snmpegress` | Comments cite RFC 3412, 3414 and 3416 and X.690, but D3-handoff §2 says its layouts were written from memory. Not yet checked against the texts in `/mnt/project-files/rfc/`. | `modules/security/snmpegress/egress.go:91,98,203` |
-| GT-MIB's agent | A WIP patch only (`/mnt/project-files/c6-wip/2026-11-06-gt-mib-agent-wip.patch`); no PR yet. | `c6-wip/README.md` |
+| `snmpegress` | Comments cite RFC 3412, 3414 and 3416 and X.690, but D3-handoff §2 says its layouts were written from memory. Not yet checked against the texts in `reference/rfc/`. | `modules/security/snmpegress/egress.go:91,98,203` |
+| GT-MIB's agent | A WIP patch only (a working file that was not kept); no PR yet. | role 6's WIP note (not kept) |
 
 ## My first three actions
 

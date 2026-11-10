@@ -30,7 +30,7 @@ Evidence classes: `desk`, `simulated`, `CI-Linux`, `CI-Windows` (GitHub-hosted r
 | Review of #347, relay PR 2b (B5) | PR head | 714203ee | pending at review time | B6 | **PASS on the code at 714203ee** (comment 6475908745): both probes pass, 7 of 7 mutants killed (including the earlier U3 and U5 survivors), `go test -race` clean. The FAIL at 55c8583b (comment 6475680160) is resolved. | Before merge: CI green on the head. Re-review only if B5 pushes again. |
 | Review of #346, C8 0.8 `config.baseline_recorded` (B3) | PR head | was 0ff42d08; now 95b91cd4 | not checked | B6 | Only read so far. B3 asks whether an event-kind acknowledgement stamped 0.8 or later must name a recorded digest. | Re-fetch the head (95b91cd4 or later). Check for a nil `Config` or `Target` dereference in the new `VerifyConfig` case; mutate the succession rule; answer B3 (draft answer in the README, written against 0ff42d08: recheck it). |
 | Review of B1's checkpoint consolidation | #337 | 77d758ff accepted (comment 6475723948) | n/a | B6 | B1 pushes the summary there | Review the consolidation when B1 says it is pushed. |
-| Checkpoint notes and probes (uncommitted test probes, never to be committed) | `/mnt/project-files/b6-wip/` (`README.md`, three `zz_b6probe*` files, `mut341.sh`; `b6-checkpoint/` is the same content) | n/a | n/a | n/a | Use them, then delete them once the reviews are posted | Copy a probe into a worktree of the PR, run it, and remove it before leaving. |
+| Checkpoint notes and probes (uncommitted test probes, never to be committed) | a working folder that was not kept (`README.md`, three `zz_b6probe*` files, `mut341.sh`; a second folder held the same content) | n/a | n/a | n/a | Use them, then delete them once the reviews are posted | Copy a probe into a worktree of the PR, run it, and remove it before leaving. |
 
 Stale `claude/b6-*` branches: everything in them is on `main` through squash merges (#304, #307 to #309, #316). `b6-mut-*` and `b6-restart-diag*` (#285, #286) are mutant and diagnostic branches that were never meant to merge. Ignore them all.
 
@@ -50,7 +50,7 @@ Windows evidence comes only from GitHub Actions. The latest Windows runs on B6 c
 ## 4. Next tasks, in priority order
 
 1. **NEXT ACTION: review #346, C8 0.8 `config.baseline_recorded` (P4-A6, item 4 of the B6 handoff), and answer B3's question.** (#347 was re-reviewed and passes on the code at 714203ee.)
-   - Paths: none changed. Use PR worktrees (PR head plus current `main`) with the probes from `/mnt/project-files/b6-wip/`; remove each probe and check `git status` before leaving.
+   - Paths: none changed. Use PR worktrees (PR head plus current `main`) with the probes from a working folder that was not kept; remove each probe and check `git status` before leaving.
    - Depends on: B3 (#346), B5 (#347).
    - Acceptance: each PR gets a PASS or FAIL comment with its mutant count, its probes and survivors explained, and the attribution footer.
    - Tests that prove it:

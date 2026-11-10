@@ -38,16 +38,17 @@ Owner of this file: D1. Written 2026-11-10, with `main` at `82daa04` (#604). The
 - **Open PRs: none** besides the one that adds this file. Every PR from #487 to #604 is merged or closed.
 - **Each role reports nothing in flight** (role threads, 2026-11-08). The per-role open items are in `.claude/agents/`.
 - **Branches.** The remote still has 248 branches. The owner approved deleting 150 merged ones on 2026-11-06 (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1` beside the checkout, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`.
-- **The Claude project's shared folder was not carried over** (owner, 2026-11-10). Older records cite it as `/mnt/project-files/...`. It held the agents' working notes, review drafts, probes and safety-copy patches, all for PRs that have merged, and their results are recorded in this repository. Four things from it were kept, in the `reference` folder beside the checkout:
+- **The Claude project's shared folder was not carried over** (owner, 2026-11-10). It held the agents' working notes, review drafts, probes and safety-copy patches, all for PRs that have merged, and their results are recorded in this repository. What is still needed is in `reference/`, a folder beside the checkout on the owner's PC and outside the repository:
 
-| Older records cite | Now at |
+| In `reference/` | What it holds |
 | --- | --- |
-| `/mnt/project-files/phase0/manuals-SEL/` (PDF and `text/`) | `reference/manuals-SEL/` |
-| `/mnt/project-files/phase0/datasheets-SEL/` | `reference/datasheets-SEL/` |
-| `/mnt/project-files/rfc/` (the twelve RFC texts with `SHA256SUMS`, D4-58) | `reference/rfc/` |
-| `d1/open-items.md` (D1's log to #604), `d6-wip/gt-pcap-next-plan-edits.md` (D6's queue of GT-PCAP cases, **live**), and the branch-cleanup script | `reference/carried/` |
+| `manuals-SEL/` | The SEL manuals (PDF) and their text in `text/` |
+| `datasheets-SEL/` | The SEL datasheets |
+| `rfc/` | The twelve RFC texts with `SHA256SUMS` (D4-58) |
+| `carried/` | `d1-open-items.md` (D1's log to #604), `d6-gt-pcap-next-plan-edits.md` (D6's queue of GT-PCAP cases, **live**), the branch-cleanup script, and the evidence files that records cite: the owner's PC run of 2026-10-27, A6's Phase 1 probes in `phase1-reviews/`, A3's public-repository audit, B6's Windows timeout analysis, A6's appendix A rows and one C6 probe |
+| `pc-logs/` | Logs from earlier runs on the owner's PC. `pc-out/` is the 2026-10-27 run that `docs/verification.md` cites, with the SCM logs under `slice` that were never read. `otsec-ci-a6/` and `otsec-ci-local/` are the `ci-logs` folders of the two deleted checkouts |
 
-Any other `/mnt/project-files/...` path in an older record names a working file that no longer exists. The record stands as written, and nothing in the build or the tests reads such a path.
+At the owner's request (2026-11-10), the Markdown records were rewritten so that none cites the shared folder. A path to a file that was kept now reads `reference/...`. A path to a file that was not kept now reads "a working file that was not kept". Ten test files (the eight SEL-751 register goldens, and `cases.json` and `egress/deny_test.go` under `tests/integration/gt_mib/`) and `contracts/adapter/testdata/snmp/README.md` were left as they are, because the goldens are pinned by checksum. The old shared-folder paths in them are citations only, and nothing in the build or the tests opens such a path.
 
 ## Waiting on the owner
 
@@ -88,7 +89,7 @@ Commands are in CLAUDE.md's repository-state section. The toolchain is Go 1.27.3
 - **The coordinator's job moves into the main session.** Subagents report only to the session that called them, so every message between roles still passes through one place (D4-58).
 - **Independent review still means a separate agent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent (§5.3).
 - **Branches.** Use the brief's convention (`agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`), one `git worktree` per agent working at the same time, and one PR per branch. Stage by explicit path.
-- **The shared folder is gone.** Read a `/mnt/project-files/...` path with the table above. Keep new working files in the repository, or in a scratch folder outside it that no record cites.
+- **The shared folder is gone.** Keep new working files in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.
 - **GitHub.** The cloud sessions could not force-push or delete a branch. A CLI session uses the owner's own credentials and can, so the rules now carry the weight the tooling used to: never force-push a shared branch, and delete only branches on a list the owner approved.
 
 ## Two process questions for the owner
@@ -98,7 +99,7 @@ These are the owner's rules, so D1 asks and does not assume.
 1. **PC test runs (D4-12).** They have been paused since 2026-10-27. Working in the CLI on the PC makes local `go vet`, `gofmt` and `go test` the natural first check. Recommended: lift the pause for ordinary local runs under the limits above, and keep service-creating runs for the owner's elevated session.
 2. **The coordinator rule (D4-58).** Recommended: the main session takes the coordinator's part, as described above.
 
-D1 records both answers, with the move itself, as D4-77.
+D1 records both answers as D4-77, with the move itself and the rewrite of the Markdown records described above.
 
 ## The project folder on the owner's PC
 
@@ -107,7 +108,7 @@ The owner approved this layout on 2026-11-10, and it was put in place the same d
 ```text
 OTSEC/
 ├── OTSEC-Proj/      the only checkout of this repository; start `claude` here
-├── reference/       SEL datasheets and manuals (PDF and text), the RFC texts, and `carried/`; outside the repository
+├── reference/       SEL datasheets and manuals (PDF and text), the RFC texts, `carried/` and `pc-logs/`; outside the repository
 └── tools/           portable Go 1.27.3 for 64-bit Windows in `tools/go`, the Go caches, and the Python venv once it is recreated
 ```
 
@@ -115,7 +116,6 @@ OTSEC/
 - `OTSEC-Proj` was cloned at `82daa04`. The three older checkouts (`otsec-ci-local`, `otsec-ci-a6`, `pc-run`) were deleted after a check that they held no unpushed work and no uncommitted change.
 - `tools/go` is the Go toolchain module `golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64`, fetched through `proxy.golang.org` and checked against `sum.golang.org`. It has not been run on the PC yet. Go is not on the PATH: call `..\tools\go\bin\go.exe`, or set `PATH` for the session only.
 - The old venv was deleted, because a venv breaks when moved. Recreate it as `tools/venv` (first session, step 3).
-- `pc-run/.pytest_cache` could not be removed without elevation, so an otherwise empty `pc-run` folder remains until the owner deletes it.
 
 ## First session in the CLI
 

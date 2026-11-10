@@ -43,7 +43,7 @@ You are the independent verifier. Your job is to try to disprove claims, not to 
 
 **Gate item 1 (P3-W1, the slice on the owner's PC)** is met with conditions. The record is `docs/verification.md`, "Phase 3 status" and "P3-W1 on the owner's PC (2026-10-27)".
 - **Result:** 159 passed, 27 skipped, 0 failed, at `main` 27fdea4, on Windows 11 Pro 10.0.26200.
-- **The log copy:** `/mnt/project-files/phase3/P3-W1-pc-pytest.txt` is stored as UTF-8 with LF. The PC's `pc-out\pytest.txt` is UTF-16LE with a BOM and CRLF (Windows PowerShell `Tee-Object`), 49,796 bytes, with SHA-256 `DBEF499A332683F67D9895B6522F1A0849E8083F3A7E1B8692AC17FC77403D4B`. Re-encode the copy that way to reproduce the hash; the command is in `/mnt/project-files/phase3/P3-W1-pc-run-result.md`.
+- **The log copy:** `reference/carried/P3-W1-pc-pytest.txt` is stored as UTF-8 with LF. The PC's `pc-out\pytest.txt` is UTF-16LE with a BOM and CRLF (Windows PowerShell `Tee-Object`), 49,796 bytes, with SHA-256 `DBEF499A332683F67D9895B6522F1A0849E8083F3A7E1B8692AC17FC77403D4B`. Re-encode the copy that way to reproduce the hash; the command is in `reference/carried/P3-W1-pc-run-result.md`.
 - **The SCM logs under `pc-out\slice` on the PC were not read.** They need an elevated read, which only the owner may do.
 
 **Owed from P3-W1. None of these is done:**
@@ -102,7 +102,7 @@ The DMY and YMD reconcile passes from the adapter through the normalizer (#211).
 | `tests/safety/recording_simulator/sim.py`, `profile_sel751.py`, `check.py` | The recording simulator (GT-REC) and the read-only register check. The oracle for every slice test. |
 | `tests/security/uintptr_args_test.go` | The AST rule for `uintptr` conversions in syscalls (#199). |
 | `.github/workflows/ci.yml` | The 10 jobs (D2-13). Read it; change it only with B1's authorization. |
-| `/mnt/project-files/a6/P3-W1-pc-run-sheet.md`, `/mnt/project-files/phase3/` | The PC run sheet, the result and the log copy. |
+| Working files outside the repository: the run sheet was not kept; the result and the log copy are in `reference/carried/` | The PC run sheet, the result and the log copy. |
 
 ## Decisions made
 
@@ -173,4 +173,4 @@ The DMY and YMD reconcile passes from the adapter through the normalizer (#211).
 - Use the GitHub MCP tools; there is no `gh` CLI.
 - Commits and PR bodies carry the session attribution lines.
 
-**Memory is off in this project.** Anything worth keeping goes in the repository or `/mnt/project-files/` (re-read a shared file about 10 seconds after writing it).
+**Memory is off in this project.** Anything worth keeping goes in the repository. (The project's shared folder, the other place at the time, was not carried past 2026-11-10.)

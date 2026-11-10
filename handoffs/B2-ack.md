@@ -8,7 +8,7 @@ These checks were run in B2's cloud container. No device and no network endpoint
 
 - `go test ./modules/ied/... ./contracts/adapter/... ./contracts/register/... ./contracts/asset/...` passes. With `OTSEC_SEL751_TEXT` set, the register tests pass too. `TestSimulator` skips, because `OTSEC_SEL751_SIM` is not set.
 - Register content is at revision 4. Its approved lines are `ACC`, `ID`, `QUI`, `SER`, `SHO G` and `SHO P 1`. `content_sel751_test.go` still classes `SHO 1`, `SHO P 2` and `SHO R` as not approved.
-- `build_sel751.py` reproduces the committed `sel-751.json` byte for byte. It was run with `python3 -I` against the S22 text in the project's shared folder (`phase0/manuals-SEL/text/751_IM_20260910.txt`). So register work does not need the owner's PC.
+- `build_sel751.py` reproduces the committed `sel-751.json` byte for byte. It was run with `python3 -I` against the S22 text (`reference/manuals-SEL/text/751_IM_20260910.txt`). So register work does not need the owner's PC.
 - No A2 PR is open. The open PRs are #176, #177, #181, #182 (A5) and #219 (CI).
 - `docs/phase-3-exit.md` lists no condition that B2 owns.
 
@@ -65,7 +65,7 @@ Each change bumps the minor, keeps a reader for the previous minor, and needs th
 2. **Where should B2's notes go?** The summary says `docs/phase{n}/B{n}-*.md`, and B2's handoff says `docs/phase4/A2-*.md`. B2 will use `docs/phase4/B2-*.md` unless told otherwise.
 3. **H-13 does not say what the handoff says it does.** The handoff says the `SHO G` layout and the port-server `T_OUT` rule wait on H-13. But H-13 in `docs/verification.md` names only the Level 0 `QUI` reply, a `SHO P 1` reply and the STX/ETX framing. Should H-13 also capture `SHO G`, each revision 5 form and `T_OUT`? Or is there another hardware item for them? This is B6's file, so the fix would be B6's.
 4. **`modules/ied/telnet/` is missing from the handoff.** D2-1 gives it to A2, but the handoff's scope and key files leave it out. B2 takes it as owned unless A2 says otherwise.
-5. **Manual text.** The Gotchas say to extract S22 from the owner's PDF. The text in the shared folder already reproduces revision 4, so B2 will use it. Was any A2 artifact built from a different extraction, with different `pdftotext` flags?
+5. **Manual text.** The Gotchas say to extract S22 from the owner's PDF. The text in `reference/manuals-SEL/text/` already reproduces revision 4, so B2 will use it. Was any A2 artifact built from a different extraction, with different `pdftotext` flags?
 6. **Page citation.** P4-A2 in `docs/agent-handoffs.md` cites "Table 7.67, p. 7.78". The table is on p. 7.77, and p. 7.78 has the `SHO` example. This is a one-line fix for B1.
 7. **Snapshot bytes.** P4-A2 asks for "one section per settings class with its native bytes and SHA-256". The handoff says the snapshot should "reference C2 transcript spans, not copy bytes twice". B2 reads the two as compatible: the snapshot holds each section's span and SHA-256 over the transcript bytes, and it holds no second copy. Is that A2's intent, and has B5 agreed to it for C5 0.4's size cap?
 

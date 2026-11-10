@@ -2,7 +2,7 @@
 
 **Why.** C2 wrote the collector's SNMPv3 client (`modules/ied/snmpv3`, P4-3-C2 deliverable 4) from memory of the RFCs, because the texts were not in the project then. GT-MIB's agent is now being built from the texts themselves (D4-58), so the client is checked against the same texts first. That way a V-M1 failure is not the first place a misreading shows up. This is task 1 in [D2-handoff.md](../../handoffs/D2-handoff.md).
 
-**Sources.** The twelve texts in `/mnt/project-files/rfc/`. `sha256sum -c SHA256SUMS` gives `OK` for all twelve, and D4-58 records where they came from. D2 read the texts first and did not open GT-MIB's agent patch, so the two readings stay independent. D6's eight points (relayed through the coordinator) were checked as well, and each is answered below.
+**Sources.** The twelve texts in `reference/rfc/`. `sha256sum -c SHA256SUMS` gives `OK` for all twelve, and D4-58 records where they came from. D2 read the texts first and did not open GT-MIB's agent patch, so the two readings stay independent. D6's eight points (relayed through the coordinator) were checked as well, and each is answered below.
 
 **Evidence class.** `desk` for every reading, and `simulated` for the tests (the Go-level fake agent in `agent_test.go`). No device or SNMP endpoint was contacted, and no RFC test vector exists in these texts for HMAC-SHA-2 or AES-CFB, so none was run. The only vector the texts give, RFC 3417 §8.1, is now a test.
 

@@ -1,6 +1,6 @@
 # D3: `modules/security/snmpegress` checked against the RFC texts
 
-D3, 2026-11-06, at `main` `22b85a8`. This is D3-ack action 1, and D1-handoff line 42 makes role 3 responsible for any `snmpegress` layout error the texts reveal. The texts are the twelve in `/mnt/project-files/rfc/` (D4-58). All twelve pass `sha256sum -c SHA256SUMS`. Line numbers below are lines of those files. Evidence class: `desk` for the reading. The one code change is tested in Go (`go test ./modules/security/...`, Linux, local). Its CI result is on the PR.
+D3, 2026-11-06, at `main` `22b85a8`. This is D3-ack action 1, and D1-handoff line 42 makes role 3 responsible for any `snmpegress` layout error the texts reveal. The texts are the twelve in `reference/rfc/` (D4-58). All twelve pass `sha256sum -c SHA256SUMS`. Line numbers below are lines of those files. Evidence class: `desk` for the reading. The one code change is tested in Go (`go test ./modules/security/...`, Linux, local). Its CI result is on the PR.
 
 The check was written from memory of the RFCs (D3-handoff §2). This note pins every layout it reads to a text. **Result:** one divergence, now fixed: OIDs had no 128-sub-identifier bound. The other rows match the texts. Where they don't, the check is deliberately stricter on our own outbound messages, which is policy and not an RFC claim, or it is lenient where the RFC makes the difference harmless.
 

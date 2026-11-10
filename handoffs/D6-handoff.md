@@ -34,8 +34,8 @@ Classes: `desk`, `simulated`, `CI-Linux`, `CI-Windows`. Nothing is hardware-veri
 | What | Where | Head | CI | Reviewers | Exact next step |
 | --- | --- | --- | --- | --- | --- |
 | #480: the D4-57 pair in `c12_c6_test.go`, `in_use_since` across a restart, gate table at `961221b` | merged as `158a5d0` | n/a | green on its head `523ccce` before C1 merged it | C1 | Nothing. The branch was restarted on `main` for the checkpoint PR |
-| GT-MIB agent, WIP (BER, USM crypto, message codec, served MIB from S29, the responder and its log) | `/mnt/project-files/c6-wip/2026-11-06-gt-mib-agent-wip.patch` (creates `tests/integration/gt_mib/agent/`) | not committed | none | C2 (SNMP reading), C3 (security) | After the checkpoint PR merges, `git apply` it on the restarted branch, then do NEXT ACTION. `c6-wip/README.md` describes it |
-| Extra RFC texts that the eight do not cover: RFC 2578 (the OID roots `mib-2` and `snmpModules`), RFC 3417 (BER rules), RFC 1157 and RFC 1901 (v1 and v2c message layouts) | `/mnt/project-files/c6-wip/rfc-extra/` with `SHA256SUMS` | n/a | n/a | n/a | Tell C1 (through the coordinator) that they are needed, so they join `/mnt/project-files/rfc/` |
+| GT-MIB agent, WIP (BER, USM crypto, message codec, served MIB from S29, the responder and its log) | a working file that was not kept (creates `tests/integration/gt_mib/agent/`) | not committed | none | C2 (SNMP reading), C3 (security) | After the checkpoint PR merges, `git apply` it on the restarted branch, then do NEXT ACTION. Its README (not kept) describes it |
+| Extra RFC texts that the eight do not cover: RFC 2578 (the OID roots `mib-2` and `snmpModules`), RFC 3417 (BER rules), RFC 1157 and RFC 1901 (v1 and v2c message layouts) | a working folder that was not kept (the four have since joined `reference/rfc/`) | n/a | n/a | n/a | Tell C1 (through the coordinator) that they are needed, so they join `reference/rfc/` |
 | Review of C1's checkpoint PR | pending | n/a | n/a | C6 | Review when C1 posts it |
 
 ## 3. Next tasks, in priority order
@@ -55,7 +55,7 @@ Classes: `desk`, `simulated`, `CI-Linux`, `CI-Windows`. Nothing is hardware-veri
    - **The table's `unconfirmed` list:**
      - replace it with `confirmed` entries, each naming its RFC and section;
      - change `test_rfc_items_stay_marked_until_the_texts_are_in` to assert that every RFC-derived OID has a `confirmed` citation;
-     - cite the RFC 2578 roots from `c6-wip/rfc-extra/` by SHA-256 until C1 adds them to `/mnt/project-files/rfc/`.
+     - cite the RFC 2578 roots from role 6's own copies by SHA-256 until C1 adds them to `reference/rfc/`.
    - **Imports:** the agent imports only the standard library. The plan allowed the contracts test clock, but the agent does not need it, so the import test refuses every `modules/`, `contracts/` and `platform/` package.
    - **What the texts showed** (checked 2026-11-06, `desk`). Write these into the table:
      - **Confirmed:**
@@ -141,4 +141,4 @@ ADR-0008 orders the collection methods.
 - **Review debt:** none over a day old.
 - **Repeated work:** none.
 
-Validation (2026-11-06, a fresh read-only subagent given only CLAUDE.md, the summary, this file and its links): it chose the right next action. Fixed after it: the plan document and the case-table test that confirming the RFC items breaks, the import rule, the RFC 2578 citation, the branch order for the checkpoint and agent PRs, what is left to write in the agent, H0 and H12 as positives, the stale `c6-wip/README.md`, and the §5 reference.
+Validation (2026-11-06, a fresh read-only subagent given only CLAUDE.md, the summary, this file and its links): it chose the right next action. Fixed after it: the plan document and the case-table test that confirming the RFC items breaks, the import rule, the RFC 2578 citation, the branch order for the checkpoint and agent PRs, what is left to write in the agent, H0 and H12 as positives, the stale WIP README, and the §5 reference.

@@ -43,7 +43,7 @@ Run 40548609999, the Windows Go job (122345921404), at `c9d4625`. That was a doc
 
 The next run on the same branch (40549186565, `0bc0d54`) was green. A syscall blocked for more than 9 minutes on the runner's disk, with three other packages slow at the same time, looks like the runner's I/O stalling, not a fault in our code. That is a reading, not a finding.
 
-**Since then.** B1 has opened issue #230 for this, and B6's analysis is in the project files (`b6/windows-go-timeouts-2026-10-27.md`). B6 found a second job, 122347974504. In it, the `platform/node` test that was running when the 600 s budget ran out had been going for only 1 s. On Windows, `platform/node` normally takes 317 to 455 s, so it has little headroom under the 600 s default. B6 reads both jobs as slow disks rather than a hang. For `platform/store`, B6 cannot tell from the logs whether it was one stall or many slow flushes.
+**Since then.** B1 has opened issue #230 for this, and B6's analysis is `reference/carried/windows-go-timeouts-2026-10-27.md`. B6 found a second job, 122347974504. In it, the `platform/node` test that was running when the 600 s budget ran out had been going for only 1 s. On Windows, `platform/node` normally takes 317 to 455 s, so it has little headroom under the 600 s default. B6 reads both jobs as slow disks rather than a hang. For `platform/store`, B6 cannot tell from the logs whether it was one stall or many slow flushes.
 
 After cutover, B1 asks me for three things on #230, and I accept them:
 1. **Per-test Windows times** for `platform/node` and `platform/store`, from a `go test -v` run on a dry-run branch, with its own push-triggered workflow and never on `main`.

@@ -12,7 +12,7 @@ From C1 to D1, 2026-11-06. `main` at `6045edb` (#485, the last role checkpoint),
 | V-M8 (set refusals 18 of 18; paired runs 12 of 12, no probe) | working | simulated, CI-Linux | #470, #474, #480 `158a5d0` |
 | V-S7 (egress corpus, SEL path, `check.py` over the V-M7 and V-M8 recordings) | working | desk, simulated | #449, #475 |
 | F-025 (an audit citation read as passive evidence) | fixed | desk, CI-Linux, CI-Windows | D4-57; #476 `8b04003`, #477 `06effb5`, #478 |
-| V-M1 (SNMPv3 over GT-MIB for the SEL-2731/2741) | not run; role 6's GT-MIB work is saved as a patch in `/mnt/project-files/c6-wip/` | desk only so far | owner's choice 2026-11-06; `/mnt/project-files/rfc/` |
+| V-M1 (SNMPv3 over GT-MIB for the SEL-2731/2741) | not run; role 6's GT-MIB work is saved as a patch in a working folder that was not kept | desk only so far | owner's choice 2026-11-06; `reference/rfc/` |
 | Item 3 exit report | written; gate not yet decided | desk | [phase-4-item3-exit.md](../docs/phase-4-item3-exit.md), #479 `a69c416` |
 | Windows node start sometimes over 12 s | open, cause unknown; tests survive it | CI-Windows | #471; exit report "Failed or incomplete" |
 | Any hardware result | none exists | — | No device has been contacted (B-01) |
@@ -30,7 +30,7 @@ Step 1 commands, on `main` `961221b`, in the container (Linux, Go 1.27.3):
 
 | PR or work | Branch | Head | CI | Reviewers, and what is left | Your next step |
 | --- | --- | --- | --- | --- | --- |
-| V-M1 (role 6) | patch in `/mnt/project-files/c6-wip/` (see its README) | not yet a PR | — | role 2 for the SNMP reading, role 3 for security, role 5 for the node side, role 4 for any change to `contracts/finding` or `modules/applicability` | Review the GT-MIB PR when it is up, then decide the gate |
+| V-M1 (role 6) | patch in a working folder that was not kept (see its README) | not yet a PR | — | role 2 for the SNMP reading, role 3 for security, role 5 for the node side, role 4 for any change to `contracts/finding` or `modules/applicability` | Review the GT-MIB PR when it is up, then decide the gate |
 | This checkpoint (role 1) | `claude/project-thread-jrno1y` | the branch tip | Markdown only | role 6 reviews | Merge on role 6's acceptance |
 | The C2 to C6 checkpoint PRs | each role's branch | #481 to #485 | Markdown only | role 1 | Merged before this file's PR |
 
@@ -38,7 +38,7 @@ Step 1 commands, on `main` `961221b`, in the container (Linux, Go 1.27.3):
 
 1. **NEXT ACTION: confirm the cutover.** Write `handoffs/D1-ack.md` as a Markdown-only PR. Then review and squash-merge the D2 to D6 ack PRs. Answer each question from the records, or ask the C agent through the coordinator (D4-58), or ask the owner. Role 6 reviews your own ack. Fix each gap in the handoff file itself. Acceptance: six acks on `main` with no open question. Then tell the coordinator that cutover is done.
 2. **Close V-M1 and decide the item 3 gate.** Brief P4-3-C6 (V-M1), against [the item 3 gate](../docs/agent-handoffs.md#phase-4-item-3-exit-gate-c1-decides).
-   - Role 6 builds GT-MIB's agent from `/mnt/project-files/rfc/` (RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860, plus 2578, 3417, 1157 and 1901, which role 6 needs for the MIB roots and encoding; `SHA256SUMS` beside them). The work so far is in role 6's WIP patch, `/mnt/project-files/c6-wip/`, checks the case table and the egress corpus against the texts, and runs V-M1 (a) to (c), (e) and (f), with (d) for the refusal alone.
+   - Role 6 builds GT-MIB's agent from `reference/rfc/` (RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860, plus 2578, 3417, 1157 and 1901, which role 6 needs for the MIB roots and encoding; `SHA256SUMS` beside them). The work so far is in role 6's WIP patch (a working folder that was not kept), checks the case table and the egress corpus against the texts, and runs V-M1 (a) to (c), (e) and (f), with (d) for the refusal alone.
    - Roles 2, 3 and 5 review, and role 4 reviews any change in its paths. A layout error the texts reveal is fixed in its owner's code (role 2 for `modules/ied/snmpv3`, role 3 for `snmpegress`).
    - Acceptance: V-M1 passes on `main` in CI. Then update `docs/phase-4-item3-exit.md` (status, the V-M1 rows, the gate decision) and put the acceptance to the owner on a decision card. Work stops for the owner's check (D4-34).
 3. **After the owner accepts item 3: brief item 4 (IDS)**, only once the owner names the sites' protocols (D4-33). The next items follow [the Phase 4 briefs](../docs/agent-handoffs.md#phase-4-task-briefs-issued-2026-10-27) in order.
@@ -100,7 +100,7 @@ Step 1 commands, on `main` `961221b`, in the container (Linux, Go 1.27.3):
 - **Out of scope:** none.
 - **Records fixed:**
   - #181 was closed unmerged on 2026-10-28 (no longer STALLED);
-  - the V-M1 brief is in `/mnt/project-files/c1/vm1-unblocked.md`.
+  - the V-M1 brief is in a working file that was not kept.
 - **STALLED:** the owner's leftover branches, and ADR-0007 (above).
 
 Validated 2026-11-06 (two fresh read-only agents): fixed: the exit report's F-025 identity-hold wording; V-M1's reviewers (roles 2, 3, 5, and 4 on its paths) made the same here and in the summary; the git-status line; GENERATIONS rows B and D; the four extra RFCs in D4-58; the summary's step 0 and its corrections to the role handoffs; the widened skip rule; README's wrongly renamed contract C1 and brief P4-3-C2.

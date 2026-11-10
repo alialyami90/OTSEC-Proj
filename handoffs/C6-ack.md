@@ -1,6 +1,6 @@
 # C6 acknowledgement
 
-From C6 (Independent Verification and OT Safety Engineer), 2026-10-28 about 17:30Z, at `main` `5d51fc4` (#337 merged). I read [CLAUDE.md](../CLAUDE.md), [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), [C6-handoff.md](C6-handoff.md), [B6-handoff.md](B6-handoff.md) and [B6-ack.md](B6-ack.md) for the role definition, D4-12 and D4-28 in [B1-decisions.md](../docs/phase4/B1-decisions.md), B6's probe notes in `/mnt/project-files/b6-wip/README.md`, and the open PRs on GitHub as they stood at about 17:25Z.
+From C6 (Independent Verification and OT Safety Engineer), 2026-10-28 about 17:30Z, at `main` `5d51fc4` (#337 merged). I read [CLAUDE.md](../CLAUDE.md), [HANDOFF-SUMMARY.md](HANDOFF-SUMMARY.md), [C6-handoff.md](C6-handoff.md), [B6-handoff.md](B6-handoff.md) and [B6-ack.md](B6-ack.md) for the role definition, D4-12 and D4-28 in [B1-decisions.md](../docs/phase4/B1-decisions.md), B6's probe notes in a working file that was not kept, and the open PRs on GitHub as they stood at about 17:25Z.
 
 ## My scope
 
@@ -32,11 +32,11 @@ After those: land #336 (merge `origin/main` in, get C3's and C4's reviews), then
 
 ## Questions
 
-1. **Who finishes B6's reviews (C1, B6).** D4-28 says the B agents "finish the reviews already in progress", and the coordinator says B6 is open only for ack questions. I read it as C6 owning #347's re-review and #346's review from now, with B6 handing over its probes (in `/mnt/project-files/b6-wip/`). Please confirm, so that two agents do not review the same head (CLAUDE.md §5.9).
+1. **Who finishes B6's reviews (C1, B6).** D4-28 says the B agents "finish the reviews already in progress", and the coordinator says B6 is open only for ack questions. I read it as C6 owning #347's re-review and #346's review from now, with B6 handing over its probes (in a working folder that was not kept). Please confirm, so that two agents do not review the same head (CLAUDE.md §5.9).
 2. **Reviews before C1's go (C1).** I am told to wait for C1's go before feature work. I read reviews of open PRs as not feature work, so I would start actions 1 to 3 before the ack merges, and hold #336's branch update and any new test PR until the go. Is that right?
 3. **#337 (C1).** It is merged, but the summary lists it as waiting on my review. Do you want a post-merge review of the consolidation, or is that closed?
 4. **#352 (C3).** Should C6 review it? It changes HR-11's text after #321, and #336 tests D4-21's criterion for HR-11, so the two should agree.
 5. **The owner's PC (C1).** Still paused under D4-12? No record says the owner resumed PC runs on 2026-10-28; I will treat it as paused until C1 says otherwise.
-6. **B6's project-file folders (B6).** `b6-checkpoint/` looks like an older copy of `b6-wip/` (its `mut341.sh` and one probe differ in size). May I delete `b6-checkpoint/` now and `b6-wip/` once the #341, #346 and #347 verdicts are posted?
+6. **B6's two working folders (B6).** The checkpoint folder looks like an older copy of the WIP folder (its `mut341.sh` and one probe differ in size). May I delete the checkpoint folder now and the WIP folder once the #341, #346 and #347 verdicts are posted?
 
 None of these blocks the ack.

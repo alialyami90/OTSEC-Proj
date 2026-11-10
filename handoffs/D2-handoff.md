@@ -15,7 +15,7 @@ Owned paths: `modules/ied/` (`sel751`, `telnet`, `snmpv3`), `modules/asset/`, `t
 | `modules/ied/snmpv3`: USM `authPriv` client, pinned engine ID, Report order (#437 §4 rule 1), BER decoder with `FuzzDecodeMessage` and `FuzzOID`, family identity parse, `Result` builder, `Permit` on the final wire bytes, `AdapterID`/`Version` | working | simulated (Go-level fake agent), CI-Linux, CI-Windows | #453 (16/16 green at `f743d7e`, passes from C3, C5, C6), #462 (`937c3d0`) |
 | Collector's SNMP path calling the client (C3's) | working | simulated, CI | #461, #465 (C2 passed both) |
 | V-M1 over GT-MIB | **not run** | none | `docs/verification.md` (item 3 gate row); GT-MIB's agent not built yet |
-| The client's wire layout against the RFC texts | **unverified**: written from memory | desk only | RFC texts in `/mnt/project-files/rfc/`. The owner allowed `www.rfc-editor.org` on 2026-11-06: recorded in the exit report on #479 (lines 3, 80), not yet on `main`, where D4-54 and `verification.md` still list the texts as owed |
+| The client's wire layout against the RFC texts | **unverified**: written from memory | desk only | RFC texts in `reference/rfc/`. The owner allowed `www.rfc-editor.org` on 2026-11-06: recorded in the exit report on #479 (lines 3, 80), not yet on `main`, where D4-54 and `verification.md` still list the texts as owed |
 
 **Checks run by C2 on `9ee439f` (main `961221b` merged into the branch; trees identical), 2026-11-06:**
 
@@ -29,12 +29,12 @@ Owned paths: `modules/ied/` (`sel751`, `telnet`, `snmpv3`), `modules/asset/`, `t
 
 ## 2. Work in flight
 
-- **None of C2's.** No open PR, no uncommitted work other than this file, no stash, no patch. The branch `claude/project-thread-yvmf7w` holds only merged history plus this file. Old WIP patches in `/mnt/project-files/phase4/c2/` (`c2-wip-snmpv3.patch`, `c2-wip-adapter-0.8.patch`) are superseded by #453; they are not records.
+- **None of C2's.** No open PR, no uncommitted work other than this file, no stash, no patch. The branch `claude/project-thread-yvmf7w` holds only merged history plus this file. Old WIP patches in a working folder that was not kept (`c2-wip-snmpv3.patch`, `c2-wip-adapter-0.8.patch`) are superseded by #453; they are not records.
 - **Other agents' open PRs at this checkpoint** (not C2's): #479 (C1, item 3 exit report), #480 (C6, gate tests). Neither waits on C2.
 
 ## 3. Next tasks, in priority order
 
-1. **NEXT ACTION: check `modules/ied/snmpv3` against the RFC texts.** Why: the client (P4-3-C2 deliverable 4) was written from memory of the RFCs, and C6 builds GT-MIB's agent from the texts themselves. The exit report's "Next coordinated tasks" 1 (`docs/phase-4-item3-exit.md` line 197, on #479 and not yet on `main`) gives C2 the SNMP reading of V-M1, and this check is C2's preparation for it, so a V-M1 failure is not first found in the gate run. Read `/mnt/project-files/rfc/` (`sha256sum -c SHA256SUMS` shows the copies are intact, not where they came from). Compare, with a section cited for each:
+1. **NEXT ACTION: check `modules/ied/snmpv3` against the RFC texts.** Why: the client (P4-3-C2 deliverable 4) was written from memory of the RFCs, and C6 builds GT-MIB's agent from the texts themselves. The exit report's "Next coordinated tasks" 1 (`docs/phase-4-item3-exit.md` line 197, on #479 and not yet on `main`) gives C2 the SNMP reading of V-M1, and this check is C2's preparation for it, so a V-M1 failure is not first found in the gate run. Read `reference/rfc/` (`sha256sum -c SHA256SUMS` shows the copies are intact, not where they came from). Compare, with a section cited for each:
    - RFC 3411 §5 `SnmpEngineID` format, which the engine pin depends on (`session.go`);
    - RFC 3412 §6: `msgGlobalData` layout and `msgFlags` bits (`msg.go`);
    - RFC 3414 §2.6 key localization, §3.1 and §3.2 USM parameters and the Report counters, §4 discovery (`session.go`, `usm.go`);

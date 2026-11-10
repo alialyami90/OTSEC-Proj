@@ -6,7 +6,7 @@ D2, 2026-11-07. This note answers brief P4-4-A2 in `docs/agent-handoffs.md` (ite
 - whether the service is on the insecure list;
 - what a passive sensor can read in clear for identity (R1.1, R6.7).
 
-**Evidence class.** Every cell is `desk`. It was read from the owner-supplied manuals in `/mnt/project-files/phase0/manuals-SEL/` (S22 to S43, `docs/phase0/A2-sel-portfolio.md` §1). Nothing was taken from the web (D4-58), and no device was contacted. A service is `unknown` where its manual is silent, and `unsupported` where the device's own list of ports or protocols leaves it out, as in the matrix. Page numbers are the manual's own, and a table or setting name is given wherever the manual has one. A port written "fixed" is one the manual says can't be changed.
+**Evidence class.** Every cell is `desk`. It was read from the owner-supplied manuals in `reference/manuals-SEL/` (S22 to S43, `docs/phase0/A2-sel-portfolio.md` §1). Nothing was taken from the web (D4-58), and no device was contacted. A service is `unknown` where its manual is silent, and `unsupported` where the device's own list of ports or protocols leaves it out, as in the matrix. Page numbers are the manual's own, and a table or setting name is given wherever the manual has one. A port written "fixed" is one the manual says can't be changed.
 
 **Families covered.** These are the nine families the matrix holds:
 

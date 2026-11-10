@@ -14,7 +14,7 @@ C6, 2026-11-05. This is part 2 of P4-3-A6 (#435). GT-MIB is a test-only SNMPv3 a
 - **Drafts:**
   - C2's family note and contract drafts (#439 at 92026c9, with D4-53);
   - C3's §4 rules (#437 at 1c9e479).
-- **RFCs:** RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860, plus RFC 2578 (the OID roots `mib-2` and `snmpModules`, §2; the OID bounds, §3.5), RFC 3417 (BER, §8), RFC 1157 and RFC 1901 (the v1 and v2c layouts). All twelve texts are in `/mnt/project-files/rfc/` with `SHA256SUMS` (D4-58). This plan was first written from memory, before the texts were in. On 2026-11-06 D6 checked every RFC-derived layout against them, and D2 checked them independently. Each is now listed under `confirmed` in `cases.json`, with its RFC, section and lines. Two corrections followed: W4 is 720 varbinds, not 680 (RFC 6933 has 18 accessible columns), and H12 is a positive case (RFC 3417 §8 (1)).
+- **RFCs:** RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860, plus RFC 2578 (the OID roots `mib-2` and `snmpModules`, §2; the OID bounds, §3.5), RFC 3417 (BER, §8), RFC 1157 and RFC 1901 (the v1 and v2c layouts). All twelve texts are in `reference/rfc/` with `SHA256SUMS` (D4-58). This plan was first written from memory, before the texts were in. On 2026-11-06 D6 checked every RFC-derived layout against them, and D2 checked them independently. Each is now listed under `confirmed` in `cases.json`, with its RFC, section and lines. Two corrections followed: W4 is 720 varbinds, not 680 (RFC 6933 has 18 accessible columns), and H12 is a positive case (RFC 3417 §8 (1)).
 
 ## 1. What GT-MIB is
 
@@ -224,4 +224,4 @@ There is also one discovery message sent after the engine ID is known. The exact
 - **C5:**
   - a way for the runner to start the collector with a schedule that has one SNMP entry, on the test clock.
 - **The owner, through C1:**
-  - RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 in the project files, or access to www.rfc-editor.org. *Done (D4-58).*
+  - RFC 3411, 3412, 3414, 3416, 3418, 3826, 6933 and 7860 in `reference/rfc/`, or access to www.rfc-editor.org. *Done (D4-58).*
