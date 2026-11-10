@@ -973,6 +973,7 @@ C6 found at the desk (F-025) that an operator audit citation, `audit:<node_id>:<
 - **Messages between agents go through the coordinator (owner, 11:43Z).** "New rule. All messages run through you the coordinator."
   - An agent sends a message meant for another agent to the coordinator, which relays it. This replaces direct thread-to-thread messages.
   - What an agent posts in its own thread, and on its own PRs, is unchanged.
+  - **Superseded by D4-77** (owner, 2026-11-10): the rule is dropped.
 - **The C team hands off to the D team (owner, 11:55Z).** The owner asked every agent to run a generation checkpoint.
   - C2 to C6 wrote `handoffs/D{n}-handoff.md` (#481 to #485). C1 wrote `D1-handoff.md` and the C-to-D `HANDOFF-SUMMARY.md`.
   - Roles, owned paths and rules stay with the number. Wherever a record says A*n*, B*n* or C*n*, read it as the role D*n* now holds.
@@ -1388,3 +1389,32 @@ D1, on #595 to #602, with each owner's and reviewer's word through the coordinat
   - It stays within C5 0.9: no alarm code, field or refusal changes, only how often one fill raises its alarm.
   - Rows: `TestNetworkFullOncePerFill`, `TestSmallQuotaFullOncePerFill` and `TestSmallQuotaRearmNeedsRoom` (D6's R1). Killed mutants: the old rule (used < quota), `MinRecordBytes` without `min`, a strict `<`, never re-arming, re-arming at half a record and at two records, and the old rule kept for the other classes. One survives and is accepted: re-arming one byte short, which only a class with exactly one byte of headroom can tell apart and which has no operational effect (D6).
 - **Next.** D6 tightens #601's count row from at least one `network-full` alarm to exactly one, in a small PR after #602. The sensor's brief waits on the owner's choice of where the sensor runs (ADR-0009).
+
+## D4-77: the move to Claude Code CLI, the rewrite of the records, and the message-routing rule is dropped (owner and D1, 2026-11-10)
+
+The owner's words up to 20:49Z are from the cloud D1 thread, as that thread's D1 gave them to the CLI session through the owner. The later ones are from the CLI session. Evidence class: `desk`.
+
+- **The move to Claude Code CLI (owner, 18:37Z).** The owner asked for `.claude/agents/` with one agent file for each of the six roles, a handoff file so that the work continues in Claude Code CLI on their PC, and one project folder with the unused and stale folders removed. At 19:25Z, on D1's card "Approve the OTSEC folder cleanup and the single-project layout?", they chose "Approve the plan as written".
+- **The rewrite of the records (owner, 20:07Z to 20:31Z).**
+  - The owner said they would delete the old shared folder, and asked that no document mention or cite its files. At 20:12Z, on D1's card "Remove the mentions of those files from older records and test data too?", they chose "Rewrite the Markdown records too".
+  - At 20:31Z they asked D1 to remove the agent handoff workflow from CLAUDE.md and the other documents, because it will not be used again, and to rewrite them without unimportant history.
+  - D1's card on how far the cleanup goes was not answered. D1 took its first option and closed the card at the merge.
+- **#605 (owner, 20:48Z).** "merge 605". It merged as `2cf9d6c5`. It is Markdown only, so neither workflow ran on it.
+- **The message-routing rule is dropped (owner, about 21:00Z).** The owner removed the first bullet of CLAUDE.md §10 in their own copy, and then told D1 in the CLI: "drop the messages rule".
+  - D4-58's rule that messages between roles go through the coordinator is superseded. It is removed from CLAUDE.md §10, `HANDOFF.md` and the six agent files (this entry's PR).
+  - Unchanged: the main session acts as D1 and calls D2 to D6 as subagents (CLAUDE.md §4), no role is the sole reviewer of its own work (§5.6), and an independent review runs in its own subagent.
+  - The removed bullet also said that where true parallel work is not available, the roles and review boundaries are kept in sequence, and the report says so. No other text states that. The review of the CLAUDE.md change found that its loss weakens no review requirement, because §5.3's last line and §5.6 hold without it. That review ran in a general-purpose subagent briefed from D6's role file, because the session had not loaded the agent files.
+  - Older records that say "through the coordinator" stay as written.
+- **D1's recommendation on ADR-0009.** D1 recommended option (b) in the cloud D1 thread on 2026-11-08 at 17:41Z ("I recommend a second Linux machine per site"), under a decision card the owner did not answer there. Until this entry the repository said only that D1 recommended (b) (`HANDOFF.md` and D1's agent file, from #605), not where or when. D1 asked again in the CLI on 2026-11-10. The owner's choice is in D4-78.
+
+## D4-78: the owner chooses option (a) for the sensor, and no work on it starts yet (owner and D1, 2026-11-10)
+
+Both of the owner's messages are from the CLI session, at about 21:05Z. Evidence class: `desk`.
+
+- **The choice.** The owner wrote: "ADR-0009 go with (a". D1 reads it as option (a): Zeek or Suricata on the Windows site node, with a capture driver. D1 had recommended (b) (D4-77).
+- **No work starts.** The owner then wrote: "do not start work on it just log the decision". So ADR-0009 stays `proposed` and its text is unchanged, D4 is not called, and no sensor brief is written. The sensor is still the only blocker for item 4.
+- **What option (a) still needs before ADR-0009 can be accepted** (from the ADR's table and "What decides it"):
+  - **From the owner: is an Npcap OEM licence acceptable?** Npcap may not be redistributed without the sold OEM licence, and its free edition is limited to five systems. Its price is `unknown`. The variant (a′) uses `pktmon` instead. Whether `pktmon` is enough is `unknown` until a lab run shows that it captures on a SPAN or TAP port, under a service account with less privilege, and with layer-2 frames intact. A lab run needs the owner's authorization.
+  - **From D1 with D4, the ADR's deciders: the engine.** Suricata has a Windows build, needs Npcap for live capture, and is GPLv2. No official Zeek binary for Windows was found, so Zeek on Windows is `unknown`.
+- **What is `unknown` under (a)** (ADR-0009): offline decoding and live capture on Windows, the Windows 10/11 LTSC floor, a timed replay on Windows for R6.4, and whether Npcap's install options force administrator rights. Under (a), hostile input reaches C and C++ decoders on the machine that holds the node's store and keys, and the process and account boundary is the only wall (AP-30).
+- **Still owed by the owner.** Their answer on PC test runs (D4-12), and the rest of the list in `HANDOFF.md`.
