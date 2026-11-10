@@ -34,7 +34,7 @@ Where things are recorded:
 - `docs/` holds the documents listed above.
 - `.claude/agents/` holds the eight roles as subagents, and two helper agents that own no path.
 
-The ownership table is in `README.md`. The manuals, datasheets and RFC texts that records cite are in `reference/`, a folder beside the checkout and outside the repository.
+The ownership table is in `README.md`. The manuals, datasheets and RFC texts that records cite are in `reference/`. On the owner's PC it sits inside the checkout, beside `tools/`. Git ignores both folders, and neither is ever committed.
 
 The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3). Python is used only for verification tooling.
 
@@ -47,6 +47,7 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 - Go tests: `go test ./...`; one test: `go test ./contracts/version -run TestParseValid`
 - Python verification tests: `python -m pytest -q` (needs `pytest` and `asyncssh==2.24.1`); one test: `python -m pytest -q tests/safety/recording_simulator/test_selftest.py -k <name>`
 - Environment-gated tests also need `OTSEC_SEL751_TEXT`, `OTSEC_ALLOWLIST` and `OTSEC_REGISTER` (see `docs/phase-0-exit.md`).
+- On the owner's PC, `tools/` and `reference/` sit inside the checkout, and Go, `gofmt` and pytest do not read `.gitignore`. `HANDOFF.md` gives the forms of these commands that skip the two folders.
 
 ## Testing and merging
 
@@ -268,7 +269,7 @@ Parallelize independent investigation and implementation, not unresolved archite
 
 - **Stage A, research.** D2 to D5, D7 and D8 investigate their areas. D6 writes acceptance criteria and challenges assumptions. D1 keeps the shared proposal.
 - **Stage B, contracts.** The roles agree the minimum shared interfaces, data structures, trust boundaries and integration behaviour. D1 records and approves them.
-- **Stage C, implementation.** D2 to D5 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
+- **Stage C, implementation.** D2 to D5 and D8 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
 - **Stage D, integration.** Integrate small, verified changes, and run contract, regression, security and integration tests.
 - **Stage E, independent validation.** D6 evaluates the integrated result against the acceptance criteria written beforehand. Correct failures before expanding scope.
 
@@ -313,7 +314,7 @@ No role is the sole reviewer of its own work.
 | D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation                 |
 | D5, platform          | D6 for reliability; D3 for trust boundaries                               |
 | D7, release           | D3 for the update path's security; D6 for independent tests               |
-| D8, UI and UX         | D6 for workflows and claims; D3 for surfaces that sign or authorize       |
+| D8, UI and UX         | D6 for workflows and claims; D3 for signing surfaces; D5 for node calls   |
 | Shared contracts      | D1 and every affected role                                                |
 | Integrated release    | D6 independent verification and D1 integration review                     |
 
@@ -415,7 +416,7 @@ Do not present projected capabilities as completed features.
 
 # Final Operating Directive
 
-Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
+Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 and D8 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
 
 Do not confuse parallel activity with progress.
 

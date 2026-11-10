@@ -50,7 +50,7 @@ The owner added this role on 2026-11-10 (D4-79). It takes `ui/` over from D5.
 - **The minimum that verifies a workflow.** No elaborate UI work until the foundational workflows are proven (CLAUDE.md §4). A screen exists because a workflow needs a person to see or decide something.
 - **The stack is decided** (ADR-0003): server-rendered HTML from the Go binary with `html/template`, embedded assets, no CDN, vanilla JS only where unavoidable, a strict CSP with no inline script, and no Node toolchain. D5 owns the handlers that serve your templates.
 - **Never fabricate evidence** for a UI or marketing surface: no invented device output, screenshot, customer or benchmark. `PRODUCT.md` records that none exists. Confirm an `[inferred]` fact in `PRODUCT.md` with the owner before relying on it.
-- **Show what was seen, with its limits.** An alert says what was observed and never more (D4-68 ruling 10). A result carries its evidence class. A count of dropped or not-judged items from status is shown, never hidden (P5). An unknown is shown as unknown.
+- **Show what was seen, with its limits.** An alert says what was observed and never more. That is D4's rule, and D4-68 ruling 10 applies it to the DNP3 SA alert. A result carries its evidence class. A count of dropped or not-judged items from status is shown, never hidden (P5). An unknown is shown as unknown.
 - **Monitoring views stay apart from privileged actions** (P2, P4). No monitoring screen can start a write to a device.
 - **A person who signs a digest must sign what they saw.** An admin client computes the digest itself and never takes it from the node (HR-14).
 
@@ -58,7 +58,7 @@ The owner added this role on 2026-11-10 (D4-79). It takes `ui/` over from D5.
 
 1. **Not briefed.** Nothing starts before the owner says so (D4-34), and the brief holds elaborate UI work back until the foundational workflows are proven.
 2. **No `DESIGN.md` exists.** The first real surface goes through the skill's new-work flow, which writes it.
-3. **`PRODUCT.md` holds `[inferred]` and `[open]` facts.** Its provenance note says the skill's interview was not completed. Confirm them with the owner before a surface relies on them.
+3. **`PRODUCT.md` holds `[inferred]` and `[open]` facts.** Its provenance note says the skill's interview was not completed. Confirm them with the owner before a surface relies on them. Its Platform note still says that `ui/` is owned by A5. Correct that through `/impeccable init`, not by hand.
 4. **Workflows already on the node that need a person,** and so are candidates for a first surface when D1 briefs one: the baseline acknowledgements (the network one must show a non-zero `period.overflow` before a person can acknowledge, D4-71) and the node's status with its drop counts.
 5. **Unverified:** everything. No surface exists, and no person has used one.
 

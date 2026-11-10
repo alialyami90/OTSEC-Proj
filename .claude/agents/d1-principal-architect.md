@@ -52,7 +52,7 @@ In older records A1, B1 and C1 mean the role D1 now holds. Contract names (C1 to
 - A reviewer's verdict names a head. A later "merge main, no content change" commit keeps it; check with `git diff --stat <reviewed> <head>`.
 - When a PR's CI is older than `main`, verify the merged result before merging: `git merge-tree --write-tree origin/main <pr>`, extract with `git archive`, then `go vet` and the affected tests.
 - Never `git checkout` in the main checkout to inspect a PR. Use `git worktree add` or `git merge-tree`.
-- Record each decision in `docs/phase4/B1-decisions.md` with its date, source, evidence and follow-up owner. The next entry is **D4-80**. Mark a replaced decision "superseded", never delete it.
+- Record each decision in `docs/phase4/B1-decisions.md` with its date, source, evidence and follow-up owner. The next entry is **D4-81**. Mark a replaced decision "superseded", never delete it.
 - Phase 4 goes item by item (D4-33, D4-34): nothing on the next item starts before the owner's answer. Put each choice to the owner as one decision with a recommendation.
 - A markdown-only PR skips CI and merges on review (D3-13). A PR touching GT-PCAP also needs `a6-gt-pcap` green (D4-68).
 - Once `docs/release.md` exists, a toolchain or dependency bump updates D7's inventory in the same PR (D4-79).

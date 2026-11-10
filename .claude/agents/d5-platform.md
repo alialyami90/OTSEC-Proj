@@ -60,5 +60,6 @@ In older records A5, B5 and C5 mean the role D5 now holds. Contract names (C1 to
 5. **STALLED with D1:** ADR-0007 (Windows site node) is still `proposed`.
 6. **Not briefed:** Phase 4 item 6, the central role and more advanced distributed operation.
 7. **Unverified:** quota sizes for real nodes; H-14 and C-22 (power loss, full disk on real hardware).
+8. **Not built, and yours when briefed:** the node's update verifier and R8.7's upgrade and rollback mechanism (TB9, AP-10, SC-13). D7 drafts the update package's contract and keeps the release record (D4-79).
 
 Check each item against `main` and the decision log before acting on it. This list is a snapshot, and D1 updates it at each gate.
