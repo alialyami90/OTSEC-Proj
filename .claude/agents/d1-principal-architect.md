@@ -50,16 +50,16 @@ In older records A1, B1 and C1 mean the role D1 now holds. Contract names (C1 to
 - A reviewer's verdict names a head. A later "merge main, no content change" commit keeps it; check with `git diff --stat <reviewed> <head>`.
 - When a PR's CI is older than `main`, verify the merged result before merging: `git merge-tree --write-tree origin/main <pr>`, extract with `git archive`, then `go vet` and the affected tests.
 - Never `git checkout` in the main checkout to inspect a PR. Use `git worktree add` or `git merge-tree`.
-- Record each decision in `docs/phase4/B1-decisions.md` with its date, source, evidence and follow-up owner. The next entry is **D4-78**. Mark a replaced decision "superseded", never delete it.
+- Record each decision in `docs/phase4/B1-decisions.md` with its date, source, evidence and follow-up owner. The next entry is **D4-79**. Mark a replaced decision "superseded", never delete it.
 - Phase 4 goes item by item (D4-33, D4-34): nothing on the next item starts before the owner's answer. Put each choice to the owner as one decision with a recommendation.
 - A markdown-only PR skips CI and merges on review (D3-13). A PR touching GT-PCAP also needs `a6-gt-pcap` green (D4-68).
 
 ## Open items on 2026-11-10 (`main` at `82daa04`, after #604 and D4-76)
 
-1. **Blocked on the owner: where the sensor runs (ADR-0009).** It is the only blocker for item 4. D1 recommended option (b), a second Linux machine at each site. When the owner chooses: mark ADR-0009 accepted with D4, record it in D4-78, and write the sensor's implementation brief (item 4, second part) in `docs/agent-handoffs.md`.
+1. **Blocked on the owner: the sensor under option (a) (ADR-0009, D4-78).** The owner chose (a) and said not to start work on it yet. D1 had recommended option (b), a second Linux machine at each site. It is the only blocker for item 4. When the owner says to start: get their answers on the engine and the capture driver, mark ADR-0009 accepted with D4, and write the sensor's implementation brief (item 4, second part) in `docs/agent-handoffs.md`.
 2. **Points the sensor brief must carry** (already ruled): the PRP duplicate-discard stage, which discards only copies that are byte-identical apart from the LAN ID, counts mismatched "duplicates" as a signal, and bounds and counts its table (D3 on #540, D4-69); a sensor that heartbeats but is blind, shown by flat packet counters (D4-74 notes); the channel's authentication under the chosen option (AP-34); the C-11 zero-frames test with its negative control; redaction by position (D4-67, D4-68 ruling 13).
 3. **Item 4's exit gate and report** follow the sensor and D6's V-M6 run. No `docs/phase-4-item4-exit.md` exists yet.
-4. **Record the owner's answer on PC test runs (D4-12) in D4-78**, with the ADR-0009 choice. Their 2026-11-10 instructions are in D4-77.
+4. **Record the owner's answer on PC test runs (D4-12)** when they give it. Their 2026-11-10 instructions are in D4-77.
 5. **Keep CLAUDE.md's "Current state" list current** at each gate.
 6. **Owed by the owner** (keep this list ready; the full list is in `HANDOFF.md`): the sites' protocols, SPAN or TAP, and PRP; the R6.7 additions; the DNP3 SA text; HR-18; severity scores; HR-17's approval key; which SEL switches; model naming; the reserve on compressed or copy-on-write volumes, the Windows folder flush and the rare slow starts (D4-65); authorization for any device contact; resuming PC runs (D4-12); running the branch-cleanup script.
 7. **STALLED:** ADR-0007 (Windows site node) is still `proposed`. Update it or close it.
