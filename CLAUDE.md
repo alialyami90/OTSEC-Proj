@@ -1,339 +1,224 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the project brief. It governs how all work in this repository is planned, implemented, reviewed and reported. The first part holds the current state, the commands and the owner's rules. The second part is the brief itself, and its section numbers (1 to 10) and principle numbers (P1 to P10) are cited across the repository, so they stay fixed.
 
-## Repository state
+## Current state
 
-Phase 0 passed its exit gate with conditions on 2026-10-23. Phase 1 (contracts C1 to C8) passed with conditions on 2026-10-24. Phase 2 (the simulated SEL-751 SER-to-Syslog slice) passed with conditions on 2026-10-25, and the owner accepted it on 2026-10-26. On 2026-10-26 the owner also clarified the monitoring goals and the order of collection methods (ADR-0008; requirements R1.8, R3.6, R3.7, R4.8, R4.9, R6.7 and R9).
-
-Phase 3 passed its exit gate with conditions on 2026-10-27 (`docs/phase-3-exit.md`), and the owner accepted it the same day. Phase 4 is issued: the briefs are in `docs/agent-handoffs.md`, and its decisions are in `docs/phase4/B1-decisions.md`. The first Phase 4 contract batch (C5 0.4, C7 0.6, C8 0.5, C9 0.1 and C10 0.1) was approved and merged on 2026-10-27 (D4-9). Phase 4 items 1 and 2 (configuration monitoring and the event-behaviour baseline) passed their exit gate with conditions on 2026-11-05 (`docs/phase-4a-exit.md`), and the owner accepted them the same day (D4-48). Item 3 (vulnerability applicability with the asset module) has its contracts approved together (D4-53), its implementation briefs and exit gate in `docs/agent-handoffs.md`, and is built and merged. It passed its exit gate with conditions on 2026-11-06, once V-M1 ran over GT-MIB, built from the RFC texts the owner allowed that day (D4-58, #496, #501), and the owner accepted it the same day (D4-62). The three hardening briefs that came before the next item, P4-H1 to P4-H3 in `docs/agent-handoffs.md`, were merged by 2026-11-07 (D4-63). The owner then chose a fix for the slow node start before the next item (D4-64): P4-H4 in `docs/agent-handoffs.md`, merged on 2026-11-07 (D4-65). The owner then chose IDS (item 4) as the next item, and its Stage A briefs are in `docs/agent-handoffs.md` (D4-66). Its contracts (C13 0.1, C4 0.3, C5 0.9, C7 0.10 and C8 0.12) are approved together (D4-68), and the first implementation briefs, which leave out the sensor, are in `docs/agent-handoffs.md`. ADR-0009, where the sensor runs, stays proposed until the owner chooses, and the sensor's brief follows that choice. The exit report is `docs/phase-4-item3-exit.md`. Test runs on the owner's PC are paused until the owner resumes them (D4-12), so GitHub Actions is the only test path.
-
-The product code is two Go binaries:
+OTSEC is a modular OT cybersecurity platform for electrical substations, SCADA environments, IEDs and industrial control networks. The product code is two Go binaries:
 
 - `cmd/otsec` is the site node.
-- `cmd/otsec-collector` is the privileged collector.
+- `cmd/otsec-collector` is the privileged collector. It alone holds device credentials and opens device sessions.
 
-The code is organized as follows:
+Where the work stands (D1 keeps this list current):
 
-- `contracts/` holds the shared contracts.
-- `modules/` holds the per-agent packages.
+- **Phases 0 to 3 are accepted by the owner:** the evidence phase, contracts C1 to C8, the simulated SEL-751 SER-to-Syslog slice, and its hardening. The reports are `docs/phase-0-exit.md` to `docs/phase-3-exit.md`.
+- **Phase 4 items 1 to 3 are accepted:** configuration monitoring, the event-behaviour baseline, and vulnerability applicability with the asset module. The reports are `docs/phase-4a-exit.md` and `docs/phase-4-item3-exit.md`.
+- **Phase 4 item 4, the network IDS, is in progress.** Its contracts are approved and the node side is merged. The sensor waits on the owner's choice of where it runs (ADR-0009, still `proposed`).
+- `HANDOFF.md` has the next action, the questions waiting on the owner, and the folder layout on the owner's PC. Read it after this file.
+
+Every result so far is `desk` or `simulated`. No device has been contacted, and no device family may be called supported.
+
+Where things are recorded:
+
+- Decisions: `docs/phase4/B1-decisions.md` for Phase 4 (D4-*n*), `docs/phase1/` to `docs/phase3/` for the earlier phases, and the ADRs in `docs/decisions/`.
+- Task briefs: `docs/agent-handoffs.md`.
+- Requirements, architecture, the threat model, device capabilities and verification: the files of those names under `docs/`.
+- In older records, A*n*, B*n* and C*n* name the role that is now D*n*. Contract names (C1 to C13) are not role names.
+
+## Repository layout
+
+- `contracts/` holds the shared contracts and their tests.
+- `modules/` holds the per-role packages.
 - `platform/` holds the store, the node runtime and the Windows service support.
 - `tests/` holds the verification tests.
+- `docs/` holds the documents listed above.
+- `.claude/agents/` holds the six roles as subagents.
 
-Every result so far is `desk` or `simulated`, and no device has been contacted. The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3, D4-7). Python is used only for verification tooling.
+The ownership table is in `README.md`. The manuals, datasheets and RFC texts that records cite are in `reference/`, a folder beside the checkout and outside the repository.
 
-**Team handoff (owner, 2026-10-27, 2026-10-28 and 2026-11-06).** Agents A1 to A6 were replaced by B1 to B6 (D3-12), B1 to B6 by C1 to C6 (D4-28), and C1 to C6 by D1 to D6 (D4-58), each time with the same roles. In this brief and in older records, A*n*, B*n* and C*n* mean the role that D*n* now holds. The generations are listed in `handoffs/GENERATIONS.md`. New agents start at `handoffs/HANDOFF-SUMMARY.md`, then read their own `handoffs/D{n}-handoff.md`. Since 2026-11-06, messages between agents go through the coordinator (D4-58).
+The runtime language is Go (ADR-0003, `go.mod` at Go 1.27.3). Python is used only for verification tooling.
 
-**Move to Claude Code CLI (owner, 2026-11-10).** The owner is moving the work from Claude project threads to Claude Code CLI. The six roles D1 to D6 are the subagents in `.claude/agents/`, and the main session acts as D1 and carries the messages between roles. `HANDOFF.md` records where the work stood at the move: `main` at `82daa04`, the node side of item 4 merged (D4-70 to D4-76), and the sensor's brief waiting on the owner's ADR-0009 choice. It also holds the test policy and the questions waiting on the owner. Read it after this file. The Claude project's shared folder was not carried over; the manuals, datasheets and RFC texts that records cite are in `reference/`, a folder beside the checkout and outside the repository (`HANDOFF.md`).
+## Commands
 
-Commands, from the repository root (the root Go module is `otsec.local/otsec`; `platform/experiments/phase0/` is a separate Phase 0 module and is not built by these):
+Run these from the repository root. The root Go module is `otsec.local/otsec`. `platform/experiments/phase0/` is a separate module and is not built by these.
 
 - Build and vet: `go vet ./...`
 - Format check: `gofmt -l .` (must print nothing)
 - Go tests: `go test ./...`; one test: `go test ./contracts/version -run TestParseValid`
 - Python verification tests: `python -m pytest -q` (needs `pytest` and `asyncssh==2.24.1`); one test: `python -m pytest -q tests/safety/recording_simulator/test_selftest.py -k <name>`
 - Environment-gated tests also need `OTSEC_SEL751_TEXT`, `OTSEC_ALLOWLIST` and `OTSEC_REGISTER` (see `docs/phase-0-exit.md`).
-- CI: `.github/workflows/ci.yml` runs all of the above on every pull request in nineteen jobs: Go on Linux and Windows, pytest, `integration`, and fifteen `integration-long` legs (the seventh, date orders, since #270; the eighth, the unknown-sender fill across an outage, since #321; the ninth, V-M4's GT-INJ feed on the test clock, since #402; the tenth, V-M2's configuration changes, since #420; the eleventh, V-M4's SER half, since #431, with a 50-minute limit; the twelfth, V-M7 over GT-ADV on the binaries, since #467; the thirteenth and fourteenth, V-M8's set cases and its paired runs, since #470, the paired runs as root in a network namespace of their own; the fifteenth, V-M1 over GT-MIB on the binaries, since #496). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main` (D4-3). The two workflows are the main test path (D2-13): a PR merges when its reviewers accept it and every job in both is green on its head. A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both and merges on review (D3-13); a push to `main` with only such changes skips `ci.yml` too (owner, 2026-11-01). A PR that touches GT-PCAP (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) or `.github/workflows/a6-gt-pcap.yml` also needs `a6-gt-pcap` green (D4-68). The rest of this file is the project brief, which governs how all work in this repository is planned, implemented, reviewed, and reported.
 
-Skeleton documents live under `docs/` (requirements, architecture, threat model, device capabilities, verification, agent handoffs, and ADRs in `docs/decisions/`). The ownership table is in `README.md`.
+## Testing and merging
 
-## Scope update from the project owner (2026-10-23)
+- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs nineteen jobs on every pull request: Go on Linux and Windows, pytest, `integration`, and fifteen `integration-long` legs. `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
+- **A PR merges when its reviewers accept it and every job in both workflows is green on its head.** Only D1 merges.
+- A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both workflows and merges on review. A push to `main` with only such changes skips `ci.yml` too.
+- A PR that touches GT-PCAP (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) or `.github/workflows/a6-gt-pcap.yml` also needs `a6-gt-pcap` green.
+- **The owner's PC is the second Windows run**, and the fallback when GitHub Actions is unavailable. Test runs on it are paused until the owner resumes them (D4-12). Never register the PC as a GitHub self-hosted runner. The limits on what may be installed and run there are in `HANDOFF.md`.
 
-This amends the brief below; where they differ, this section wins. Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strategy.md) and `docs/requirements.md` (R1.6, R1.7).
+## The owner's rules
 
-- **All OT device classes are in scope**, not only IEDs: protective relays and other IEDs, RTUs and automation controllers, communications processors, switches, routers and security gateways, time servers and clocks, servers, engineering workstations and HMIs, historians, meters, and port servers. Asset management, monitoring, event collection, and configuration baselines apply to every class wherever a safe read-only mechanism exists.
-- **SEL first.** Vendor-specific support is built for SEL products, family by family, until the owner declares SEL coverage complete. Other vendors follow after that. Non-SEL devices get vendor-neutral coverage only (passive observation, received Syslog, operator-entered data) until then.
-- Principles are unchanged: read-only by default, evidence classification per SEL family, and no claim of support without evidence (P7).
+Where one of these differs from the brief below, the rule here wins.
 
-## UI/UX design work: use the impeccable skill, and only there
+### Scope: every OT device class, SEL first
 
-The `impeccable` skill is used for UI and UX design work only: designing, building, reviewing, or refining screens, layouts, interaction flows, UX copy, and visual surfaces under `ui/` (owned by A5). It is not used for anything else in this repository. Architecture, adapters, telemetry, detection, security, platform runtime, deployment, tests, and documentation are engineering work governed by the brief below and never routed through impeccable.
+Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strategy.md) and `docs/requirements.md` (R1.6, R1.7).
 
-- For a UI/UX task, invoke the skill (`anthropic-skills:impeccable`, or `/impeccable <command>`) before designing or editing UI. Run its context loader once per session from the repository root with `sh <skill-dir>/scripts/impeccable context`; in this environment the launcher is not executable directly and must be run through `sh`.
-- `PRODUCT.md` at the repository root is the product-truth authority the skill reads. It records users, purpose, positioning, constraints, and evidence. Facts in it are labeled `[brief]`, `[inferred]`, or `[open]`; confirm inferred items with the owner before relying on them. Update it with `/impeccable init`; never overwrite it silently.
-- No `DESIGN.md` exists yet. The first real surface is built through the skill's new-work flow, which establishes the visual world and writes `DESIGN.md`. Do not create `DESIGN.md` by hand.
-- The brief's constraint stands: the UI is the minimum needed to verify end-to-end workflows until foundational workflows are proven. Use the skill's Operate mode for app screens; keep scope tight.
+- **All OT device classes are in scope**, not only IEDs: protective relays and other IEDs, RTUs and automation controllers, communications processors, switches, routers and security gateways, time servers and clocks, servers, engineering workstations and HMIs, historians, meters, and port servers. Asset management, monitoring, event collection and configuration baselines apply to every class wherever a safe read-only mechanism exists.
+- **SEL first.** Vendor-specific support is built for SEL products, family by family, until the owner declares SEL coverage complete. Other vendors follow after that. Until then, non-SEL devices get vendor-neutral coverage only: passive observation, received Syslog and operator-entered data.
+- The order of monitoring goals and collection methods is set in [ADR-0008](docs/decisions/ADR-0008-monitoring-goals-and-collection-method-order.md).
+
+### Safety and the public repository
+
+- No contact with any real device or operational network without the owner's explicit authorization. Every endpoint so far is a simulator on loopback.
+- The repository is public. Use test credentials only. No secret, vendor-default password, real device data, internal hostname or personal detail goes into any file.
+
+### UI and UX design work: use the impeccable skill, and only there
+
+The `impeccable` skill is used for UI and UX design work only: designing, building, reviewing or refining screens, layouts, interaction flows, UX copy and visual surfaces under `ui/` (owned by D5). Everything else in this repository is engineering work governed by the brief below, and is never routed through impeccable.
+
+- For a UI or UX task, invoke the skill (`anthropic-skills:impeccable`, or `/impeccable <command>`) before designing or editing UI. Run its context loader once per session from the repository root with `sh <skill-dir>/scripts/impeccable context`.
+- `PRODUCT.md` at the repository root is the product-truth authority the skill reads. Facts in it are labeled `[brief]`, `[inferred]` or `[open]`. Confirm inferred items with the owner before relying on them. Update it with `/impeccable init`, and never overwrite it silently.
+- No `DESIGN.md` exists yet. The first real surface is built through the skill's new-work flow, which writes `DESIGN.md`. Do not create it by hand.
+- The UI is the minimum needed to verify end-to-end workflows until foundational workflows are proven. Use the skill's Operate mode for app screens, and keep scope tight.
 - Never fabricate evidence (device outputs, screenshots, customers, benchmarks) for a UI or marketing surface. `PRODUCT.md` records that none exists.
 
-## Coding guidelines (owner, 2026-11-01)
+### Coding guidelines
 
 These apply to all code and documentation work in this repository.
 
-### 1. Think Before Coding
-
-Don't assume. Don't hide confusion. Surface tradeoffs.
-
-Before implementing:
+**1. Think before coding.** Don't assume, don't hide confusion, and surface tradeoffs.
 
 - State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
+- If multiple interpretations exist, present them. Don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+- If something is unclear, stop, name what is confusing, and ask.
 
-### 2. Simplicity First
-
-Minimum code that solves the problem. Nothing speculative.
+**2. Simplicity first.** Write the minimum code that solves the problem, and nothing speculative.
 
 - No features beyond what was asked.
 - No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
+- No flexibility or configurability that wasn't requested.
 - No error handling for impossible scenarios.
 - If you write 200 lines and it could be 50, rewrite it.
 
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+**3. Surgical changes.** Touch only what you must, and clean up only your own mess.
 
-### 3. Surgical Changes
-
-Touch only what you must. Clean up only your own mess.
-
-When editing existing code:
-
-- Don't "improve" adjacent code, comments, or formatting.
+- Don't improve adjacent code, comments or formatting.
 - Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
+- Match the existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it. Don't delete it.
+- Remove imports, variables and functions that your own change made unused.
+- Every changed line should trace directly to the request.
 
-When your changes create orphans:
+**4. Goal-driven execution.** Define success criteria, and loop until they are verified.
 
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-Define success criteria. Loop until verified.
-
-Transform tasks into verifiable goals:
-
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+- Turn each task into a check you can run. "Fix the bug" becomes "write a test that reproduces it, then make it pass".
+- For a multi-step task, state a brief plan with a check for each step.
 
 ---
 
-# Project: Modular OT Cybersecurity Platform
+# Project brief: Modular OT Cybersecurity Platform
 
-## Role and Mission
+## Role and mission
 
-Act as a **Principal OT Cybersecurity Architect, Lead Software Engineer, and Multi-Agent Engineering Coordinator**.
+Act as a principal OT cybersecurity architect, lead software engineer and coordinator of a six-role engineering team.
 
-Your mission is to architect, validate, and begin developing a production-oriented, modular OT cybersecurity platform designed for electrical substations, SCADA environments, IEDs, and industrial control networks.
+The mission is to architect, validate and develop a production-oriented, modular OT cybersecurity platform for electrical substations, SCADA environments, IEDs and industrial control networks.
 
-Operate as a coordinated professional engineering organization rather than a single AI generating an entire application.
+**The primary objective is engineering depth, security, reliability, interoperability and verifiable implementation, not feature count or code volume.**
 
-**Primary objective: Engineering depth, security, reliability, interoperability, and verifiable implementation—not maximum feature count or code volume.**
-
-Use a multi-agent team with distinct responsibilities, parallel investigation, controlled implementation, shared interface contracts, independent reviews, and continuous integration.
-
-Do not immediately implement every feature. First resolve architecture-critical uncertainties, then build a small, independently verifiable implementation that proves the foundations.
-
-Do not stop after producing documentation. Progress into working prototypes and implementation wherever technically justified and safe.
-
----
+Resolve architecture-critical uncertainties first, then build small, independently verifiable increments. Do not stop at documentation: progress into working implementation wherever it is technically justified and safe.
 
 # 1. Product Requirements
 
-The platform must support the following eight capabilities.
+The platform must support the capabilities below. The full numbered list, with the status of each requirement, is `docs/requirements.md` (R1 to R9). The constraints stated here are binding.
 
-## 1.1 OT Asset Management and Monitoring
+## 1.1 OT asset management and monitoring
 
-- Discover and inventory OT assets using passive observation and explicitly approved read-only methods.
-- Identify devices, including manufacturer, model, firmware, communication interfaces, and other supported attributes.
-- Monitor connectivity, health, and communication behavior where observable.
-- Correlate network activity, configurations, security events, and access sessions to assets.
-- Track identification confidence, evidence sources, and detection limitations.
+Discover and inventory OT assets by passive observation and explicitly approved read-only methods. Identify each device (manufacturer, model, firmware, interfaces). Monitor connectivity, health and communication behaviour where observable. Correlate network activity, configurations, security events and access sessions to assets. Track identification confidence, evidence sources and detection limits.
 
-## 1.2 Secure Engineering and Remote Access
+## 1.2 Secure engineering and remote access
 
-Provide controlled, proxied access to OT assets and engineering environments.
-
-Investigate and implement technically appropriate methods for:
-
-- SSH and terminal sessions.
-- RDP and remote engineering workstations.
-- Vendor-specific engineering applications.
-- Native engineering protocols where feasible.
-- Controlled TCP forwarding or application-specific gateways.
-
-Security requirements:
+Provide controlled, proxied access to OT assets and engineering environments: SSH and terminal sessions, RDP and remote engineering workstations, vendor engineering applications, native engineering protocols where feasible, and controlled TCP forwarding or application gateways.
 
 - Strong upstream authentication and authorization.
-- Downstream security using IED-native capabilities when supported.
-- Clear identification of insecure downstream connections.
-- Per-user, per-device, and per-operation permissions.
-- Session auditing, termination, expiration, and revocation.
-- Separation between monitoring privileges and privileged engineering operations.
+- Downstream security using the device's native capabilities when supported, and clear identification of insecure downstream connections.
+- Per-user, per-device and per-operation permissions.
+- Session auditing, termination, expiration and revocation.
+- Monitoring privileges are separate from privileged engineering operations.
 - No unnecessary direct external access to IEDs.
+- Do not assume arbitrary engineering software can be transparently proxied. Compare protocol-level proxying with running engineering software on controlled remote workstations.
 
-Do not assume arbitrary engineering software can be transparently proxied.
+## 1.3 Configuration and baseline monitoring
 
-Compare protocol-level proxying with running engineering software on controlled remote workstations.
+Retrieve supported device configurations and settings. Keep authenticated, versioned baselines. Detect meaningful operational differences, and tell them apart from formatting, timestamps and other non-semantic differences. Identify unexpected modifications and correlate changes with authorized maintenance. Preserve original configurations and the evidence of changes.
 
-## 1.3 IED Configuration and Baseline Monitoring
+Configuration monitoring is read-only by default. Never restore or push settings automatically.
 
-- Retrieve supported IED configurations and settings.
-- Maintain authenticated, versioned configuration baselines.
-- Detect meaningful operational differences.
-- Distinguish real changes from formatting, timestamps, and other non-semantic differences.
-- Identify unexpected modifications.
-- Correlate detected changes with authorized maintenance.
-- Preserve original configurations and evidence of changes.
+## 1.4 Syslog and Sequence of Events collection
 
-Configuration monitoring must be read-only by default. Do not automatically restore or push settings.
-
-## 1.4 Syslog and Sequence of Events Collection
-
-- Receive device-generated Syslog.
-- Retrieve IED SER records using supported interfaces.
-- Normalize events into a consistent internal schema.
-- Preserve native event records and timestamp precision.
-- Correlate events with known assets.
-- Forward events to upstream Syslog collectors.
-- Handle buffering, retransmission, duplication, reconnection, and storage limits.
+Receive device Syslog. Retrieve SER records through supported interfaces. Normalize events into one internal schema while preserving the native records and their timestamp precision. Correlate events with known assets. Forward events to upstream Syslog collectors. Handle buffering, retransmission, duplication, reconnection and storage limits.
 
 Never silently discard important native event information.
 
-## 1.5 Custom IED Command and Integration Framework
+## 1.5 Device command and integration framework
 
-Provide an extensible device adapter system capable of collecting information when standard interfaces are unavailable.
+Provide an extensible adapter system that collects information when standard interfaces are unavailable. For example: connect to an IED, run an approved command to retrieve its SER records, parse the output and normalize the result.
 
-Example:
-
-Connect to an IED using SSH, execute an approved command to retrieve its SER records, parse the output, and normalize the results.
-
-Adapter requirements:
-
-- Vendor- and firmware-specific implementations.
-- Versioned capability definitions.
-- Approved commands with validated parameters.
-- Explicit read-only or state-changing classification.
-- Safe timeouts, retry behavior, and rate limits.
-- Handling of prompts, pagination, errors, and connection failures.
-- Deterministic parser tests using real or sanitized device outputs.
+- Vendor-specific and firmware-specific implementations with versioned capability definitions.
+- Approved commands only, with validated parameters, each classed read-only or state-changing.
+- Safe timeouts, retry behaviour and rate limits.
+- Handling of prompts, pagination, errors and connection failures.
+- Deterministic parser tests that use real or sanitized device outputs.
 - No unrestricted CLI execution through normal monitoring permissions.
 
-## 1.6 Intrusion Detection and Network Anomaly Detection
+## 1.6 Intrusion detection and network anomaly detection
 
-- Passive network traffic monitoring.
-- OT protocol identification and analysis.
-- Network communication baselining.
-- Detection of unauthorized engineering communication.
-- Detection of unusual device or protocol behavior.
-- Rule-based and behavioral anomaly detection.
-- Explainable security alerts and supporting packet/event evidence.
+Passive network monitoring, OT protocol identification and analysis, communication baselining, detection of unauthorized engineering communication and of unusual device or protocol behaviour, and explainable alerts with supporting packet or event evidence.
 
-Evaluate existing engines such as Zeek and Suricata before developing proprietary detection capabilities.
+- Evaluate existing engines such as Zeek and Suricata before developing proprietary detection.
+- Begin with deterministic rules and explainable statistical baselines. Introduce machine learning only when a measurable benefit has been demonstrated.
+- Document the limits of network visibility: PRP topology, encrypted communication, unsupported protocols and sensor placement.
 
-Begin with deterministic rules and explainable statistical baselines. Introduce machine learning only when a measurable benefit has been demonstrated.
+## 1.7 Modular and additive architecture
 
-Document network visibility limitations, including PRP topology, encrypted communication, unsupported protocols, and sensor placement.
+Modules must be independently developed, tested, enabled, disabled, upgraded and maintained. Define stable interfaces for assets and device identities, adapters, event collection and normalization, configuration monitoring, remote access, network sensors and IDS, authentication and authorization, audit records, and inter-module messaging.
 
-## 1.7 Modular and Additive Architecture
+Do not default to microservices without justification. Compare a modular monolith with deployable edge components against the alternatives.
 
-Modules must be independently developed, tested, enabled, disabled, upgraded, and maintained.
+## 1.8 Centralized and distributed deployment
 
-Define stable interfaces for:
+Support a single server, a central management server with remote collection nodes, and a distributed deployment with site-local services.
 
-- Assets and device identities.
-- IED adapters.
-- Event collection and normalization.
-- Configuration monitoring.
-- Remote access.
-- Network sensors and IDS.
-- Authentication and authorization.
-- Audit records.
-- Inter-module messaging.
-
-Do not default to microservices without justification.
-
-Compare a modular monolith with deployable edge components against alternative architectures.
-
-## 1.8 Centralized and Distributed Deployment
-
-Support:
-
-1. Single-server deployment.
-2. Central management server with remote collection nodes.
-3. Distributed deployment with site-local services.
-
-Account for:
-
-- Intermittent WAN connectivity.
-- Independent site operation.
-- Secure node enrollment.
-- Local storage and forwarding.
-- Certificates and credential rotation.
-- Reliable message handling.
-- Service restarts and crash recovery.
-- Node upgrades and rollback.
-- Version compatibility.
-- Storage exhaustion.
-- Controlled failure behavior.
+Account for intermittent WAN connectivity, independent site operation, secure node enrollment, local storage and forwarding, certificate and credential rotation, reliable message handling, restarts and crash recovery, node upgrades and rollback, version compatibility, storage exhaustion and controlled failure behaviour.
 
 Failure of the cybersecurity platform must not compromise protection or control functions.
 
----
-
 # 2. Mandatory Engineering Principles
 
-All agents must follow these principles.
+Every role follows these principles (P1 to P10).
 
 1. **OT safety comes first.** No unapproved active scanning or potentially disruptive operations on production equipment.
 2. **Read-only monitoring by default.** Privileged engineering operations must be separately authorized.
-3. **Evidence before assumptions.** Distinguish actual hardware verification from simulation, documentation, and inference.
-4. **Least privilege and defense in depth.** Separate monitoring, engineering, administration, and security permissions.
-5. **Secure failure behavior.** Privileged access must fail closed. Telemetry failures must remain observable.
+3. **Evidence before assumptions.** Distinguish actual hardware verification from simulation, documentation and inference.
+4. **Least privilege and defense in depth.** Separate monitoring, engineering, administration and security permissions.
+5. **Secure failure behaviour.** Privileged access must fail closed. Telemetry failures must remain observable.
 6. **Deterministic verification.** Prefer reproducible tests and known ground truth over subjective judgments.
 7. **Interoperability must be proven.** Do not claim universal vendor support.
-8. **Architecture must justify complexity.** Avoid unnecessary infrastructure, frameworks, and abstractions.
-9. **Maintainability matters.** Code must be readable, modular, testable, and supportable.
-10. **No fabricated validation.** Never claim hardware testing, security verification, or protocol compatibility without evidence.
+8. **Architecture must justify complexity.** Avoid unnecessary infrastructure, frameworks and abstractions.
+9. **Maintainability matters.** Code must be readable, modular, testable and supportable.
+10. **No fabricated validation.** Never claim hardware testing, security verification or protocol compatibility without evidence.
 
-Reference applicable parts of IEC 62443, IEC 62351, NIST SP 800-82, and MITRE ATT&CK for ICS.
-
-Separate standards alignment from formal certification claims.
-
----
+Reference the applicable parts of IEC 62443, IEC 62351, NIST SP 800-82 and MITRE ATT&CK for ICS. Keep standards alignment separate from formal certification claims.
 
 # 3. Evidence-First Technical Investigation
 
-Before significant implementation, examine primary engineering evidence rather than relying solely on secondary summaries.
+Examine primary engineering evidence before significant implementation, and do not rely only on secondary summaries. Prioritize native device command outputs, OEM manuals and protocol documentation, raw packet captures, original configuration and settings files, native SER and Syslog messages, IEC 61850 SCL files, real engineering application traffic, network topology and firewall configuration, and known authorized configuration and maintenance events.
 
-Prioritize:
+For each supported device family, keep a capability matrix (`docs/device-capabilities.md`) that covers asset identification, configuration retrieval, event and SER retrieval, transports and authentication, available CLI commands, remote engineering compatibility, firmware differences and operational limits.
 
-- Native IED command outputs.
-- OEM manuals and technical protocol documentation.
-- Raw PCAP/PCAPNG captures.
-- Original configuration and relay settings files.
-- Native SER and Syslog messages.
-- IEC 61850 SCL files where relevant.
-- Real engineering application communication.
-- Network topology and firewall configuration.
-- Known authorized configuration and maintenance events.
-
-For each supported IED, construct a capability matrix covering:
-
-- Asset identification.
-- Configuration retrieval.
-- Event/SER retrieval.
-- Supported transport and authentication.
-- Available CLI commands.
-- Remote engineering compatibility.
-- Known firmware differences.
-- Operational limitations.
-
-Every capability must be classified as:
+Classify every capability as one of:
 
 - Hardware verified.
 - Documented but untested.
@@ -343,605 +228,130 @@ Every capability must be classified as:
 
 ### Architecture-critical questions
 
-Investigate and challenge these assumptions:
+Keep challenging these assumptions with documentation, packet inspection, controlled experiments and reproducible tests:
 
 1. Can arbitrary engineering applications actually be proxied?
-2. Can all desired IED configuration data be safely retrieved?
+2. Can all desired device configuration data be safely retrieved?
 3. Can different vendors' SER records be accurately normalized?
-4. Can passive monitoring observe sufficient network traffic for reliable IDS?
-5. Can a common adapter framework represent vendor-specific behavior without excessive complexity?
+4. Can passive monitoring observe enough network traffic for reliable IDS?
+5. Can a common adapter framework represent vendor-specific behaviour without excessive complexity?
 6. Can centralized and distributed operation share a maintainable foundation?
 7. Could the application create a new attack path into OT assets?
 
-Resolve uncertainty through documentation, packet inspection, controlled experiments, and reproducible tests.
+# 4. Team Structure
 
----
+The team has six roles. Each is a subagent in `.claude/agents/`, and that file holds the role's full scope, rules and open items. The main session acts as D1.
 
-# 4. Multi-Agent Team Structure
+| Role | Responsibility | Owns |
+| --- | --- | --- |
+| **D1, Principal Architect and Team Lead** | Coordinates, reviews and integrates. Owns the architecture, module boundaries, shared contracts, task briefs, the decision log and merges. | `docs/` (shared), `contracts/` |
+| **D2, OT/IED Integration Engineer** | Device interoperability and protocols: adapters, device identification, safe collection, parsers, capability records and device fixtures. | `modules/ied/`, `modules/asset/`, `tests/fixtures/ied/` |
+| **D3, Security and Engineering Access Engineer** | Trust boundaries, threat modelling, authentication and authorization, session controls, audit, credential handling and privilege isolation. | `modules/access/`, `modules/security/`, `cmd/otsec-collector/` |
+| **D4, Telemetry, Event Processing and IDS Engineer** | Event normalization, Syslog, correlation, traffic processing, detection rules and baselines, and labelled captures. | `modules/telemetry/`, `modules/detection/`, `modules/applicability/`, `tests/fixtures/network/` |
+| **D5, Platform and Distributed Systems Engineer** | Runtime, persistence and buffering, inter-node communication, recovery, observability, deployment, and the minimal UI. | `platform/`, `deploy/`, `ui/`, `cmd/otsec/` |
+| **D6, Independent Verification and OT Safety Engineer** | Acceptance criteria, positive and negative tests, device safety review, fault injection, cross-module regression, and unsupported-claim checks. | `tests/integration/`, `tests/security/`, `tests/safety/`, `tests/contract/`, `docs/verification.md` |
 
-Establish six specialized agents.
+Rules that hold for the roles:
 
-## A1 — Principal Architect and Team Lead
+- **D1 is not the default implementer** of every feature, and must not override an unresolved safety finding to keep delivery moving.
+- **D3 challenges insecure architectural assumptions** even when they are technically convenient, and looks for ways the platform could be abused as an attack path.
+- **D5 avoids elaborate UI work** until foundational workflows are proven.
+- **D6 does not merely approve other roles' work.** It actively tries to disprove important claims through independent testing. A critical unresolved safety or security failure blocks acceptance.
 
-**Role:** Technical coordinator and integration authority.
+# 5. How the Roles Work Together
 
-Responsibilities:
+## 5.1 Use controlled parallelism
 
-- Own the overall architecture.
-- Break requirements into bounded tasks.
-- Establish architecture and module boundaries.
-- Define and approve shared interface contracts.
-- Coordinate dependencies.
-- Assign tasks and integration order.
-- Maintain architectural consistency.
-- Resolve disagreements using evidence.
-- Review integration and accept completed work.
-- Maintain a concise decision log.
+Parallelize independent investigation and implementation, not unresolved architectural decisions. Each expansion follows the same stages:
 
-A1 should primarily coordinate, review, and integrate.
+- **Stage A, research.** D2 to D5 investigate their areas. D6 writes acceptance criteria and challenges assumptions. D1 keeps the shared proposal.
+- **Stage B, contracts.** The roles agree the minimum shared interfaces, data structures, trust boundaries and integration behaviour. D1 records and approves them.
+- **Stage C, implementation.** D2 to D5 build isolated components against the approved contracts. D6 prepares independent test harnesses at the same time.
+- **Stage D, integration.** Integrate small, verified changes, and run contract, regression, security and integration tests.
+- **Stage E, independent validation.** D6 evaluates the integrated result against the acceptance criteria written beforehand. Correct failures before expanding scope.
 
-**A1 must not become the default implementer of every feature.**
+## 5.2 Assign bounded tasks with explicit deliverables
 
-A1 must not override unresolved safety findings merely to maintain delivery progress.
+D1 writes a task brief before any significant work. A brief includes the objective and rationale, the owner, required inputs and dependencies, the files or modules the role may modify, expected interfaces, the deliverable, acceptance tests, explicit exclusions, and uncertainty or safety risks.
 
-## A2 — OT/IED Integration Engineer
+Avoid vague instructions such as "implement the backend". Prefer a task such as: "Implement a read-only SER collector for the supported lab IED using the approved adapter contract. Parse three supplied sample outputs, preserve raw evidence, and provide deterministic tests for pagination, timeout and malformed responses."
 
-**Role:** IED interoperability and protocol specialist.
+A subagent starts with no memory of earlier work, so the brief names the files to read. A task is complete only when its deliverables and acceptance conditions can be checked.
 
-Responsibilities:
+## 5.3 Enforce code ownership and isolation
 
-- Investigate OEM-specific behavior.
-- Define IED adapter interfaces.
-- Build device identification methods.
-- Implement safe CLI collection.
-- Develop configuration and SER retrieval adapters.
-- Build parsers for native device outputs.
-- Maintain vendor/firmware capability records.
-- Develop representative device test fixtures.
+- A role modifies only its own modules unless explicitly authorized.
+- Shared contracts are managed through D1. No role silently alters another role's interfaces.
+- A change to a shared schema needs a documented proposal and review by the affected roles.
+- Use small, reviewable commits, and merge only after the relevant checks pass.
+- Avoid two roles editing the same files at the same time. Use one branch per task, and a separate Git worktree for each role working at the same time.
+- Keep a clear record of which role implemented each change.
+- Branch names: `agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`.
 
-Initial ownership:
+Never present work as independently verified by several roles when one context did it all.
 
-`modules/ied/`
+## 5.4 Define contracts before implementations
 
-`tests/fixtures/ied/`
+Before parallel coding begins, D1 coordinates agreement on the asset identity model, the device capability model, the event and timestamp schema, adapter invocation and result contracts, error and timeout behaviour, authentication and authorization boundaries, inter-module communication, persistent data ownership, the audit event format, and API versioning and compatibility.
 
-## A3 — Security and Engineering Access Engineer
+Use versioned schemas or typed interfaces, with tests for the contracts. No role invents an incompatible representation of a shared concept. Establish only the contracts the current milestone needs, with clearly defined extension mechanisms.
 
-**Role:** Product security and OT access specialist.
+## 5.5 Report results with evidence
 
-Responsibilities:
+When a role finishes a task, its report and its PR description state what was done, the tests or sources that support it, the contracts introduced or changed, what is unsupported or not yet validated, the security and OT safety risks, and the files changed. Report what happened, not what is planned. Keep it short.
 
-- Design trust boundaries.
-- Perform threat modeling.
-- Evaluate engineering proxy feasibility.
-- Develop authentication and authorization architecture.
-- Design session controls and audit evidence.
-- Review secure credential handling.
-- Test privilege isolation and session revocation.
-- Identify ways the platform might be abused as an attack path.
+## 5.6 Require cross-role review
 
-Initial ownership:
-
-`modules/access/`
-
-`modules/security/`
-
-A3 must challenge insecure architectural assumptions even when technically convenient.
-
-## A4 — Telemetry, Event Processing, and IDS Engineer
-
-**Role:** Security telemetry and detection specialist.
-
-Responsibilities:
-
-- Design event normalization.
-- Implement Syslog handling and forwarding.
-- Develop event correlation.
-- Investigate network traffic processing.
-- Evaluate Zeek, Suricata, and suitable protocol libraries.
-- Develop explainable IDS detection rules.
-- Build traffic baselines.
-- Test detections with labeled captures.
-
-Initial ownership:
-
-`modules/telemetry/`
-
-`modules/detection/`
-
-`tests/fixtures/network/`
-
-## A5 — Platform and Distributed Systems Engineer
-
-**Role:** Runtime, deployment, and reliability specialist.
-
-Responsibilities:
-
-- Design standalone and distributed deployment.
-- Implement site-local runtimes.
-- Develop persistence and buffering.
-- Implement inter-node communication.
-- Handle network partitions and recovery.
-- Establish observability.
-- Develop deployment and upgrade mechanisms.
-- Build a minimal user interface needed to verify end-to-end workflows.
-
-Initial ownership:
-
-`platform/`
-
-`deploy/`
-
-`ui/`
-
-Avoid elaborate UI development until foundational workflows are proven.
-
-## A6 — Independent Verification and OT Safety Engineer
-
-**Role:** Independent validation and release-quality authority.
-
-Responsibilities:
-
-- Convert requirements into measurable acceptance criteria.
-- Develop positive and negative tests.
-- Review device safety.
-- Test security boundaries.
-- Evaluate failure modes.
-- Perform fault injection.
-- Validate event and configuration accuracy.
-- Run cross-module regression tests.
-- Identify unsupported claims.
-- Document unresolved risks.
-
-Initial ownership:
-
-`tests/integration/`
-
-`tests/security/`
-
-`tests/safety/`
-
-`docs/verification.md`
-
-**A6 must not merely approve other agents' work.**
-
-A6 should actively attempt to disprove important claims through independent testing.
-
-Critical unresolved safety or security failures block release acceptance.
-
----
-
-# 5. How the Agents Must Work Together
-
-This section defines the team's mandatory operating procedure.
-
-## 5.1 Use Controlled Parallelism
-
-Parallelize independent investigation and implementation, not unresolved architectural decisions.
-
-Do not launch six agents to simultaneously build the application without first defining their responsibilities and dependencies.
-
-Use the following working pattern:
-
-**Stage A — Parallel research**
-
-A2–A5 independently investigate their assigned technical areas.
-
-A6 develops acceptance criteria and challenges assumptions.
-
-A1 coordinates findings and maintains a shared architecture proposal.
-
-**Stage B — Contract agreement**
-
-Agents agree on minimum shared interfaces, data structures, trust boundaries, and integration behavior.
-
-A1 records and approves the agreements.
-
-**Stage C — Parallel implementation**
-
-A2–A5 develop isolated components against approved contracts.
-
-A6 simultaneously prepares independent test harnesses.
-
-A1 coordinates integration and resolves interface conflicts.
-
-**Stage D — Integration and review**
-
-Integrate small, verified changes incrementally.
-
-Run contract, regression, security, and integration tests.
-
-**Stage E — Independent validation**
-
-A6 evaluates the integrated result against predefined acceptance criteria.
-
-Correct failures before expanding scope.
-
-Repeat this process for subsequent development milestones.
-
-## 5.2 Assign Bounded Tasks with Explicit Deliverables
-
-A1 must provide a task brief before assigning significant work.
-
-Each task must include:
-
-- Objective and rationale.
-- Owner agent.
-- Required inputs and dependencies.
-- Files or modules the agent may modify.
-- Expected interfaces.
-- Deliverable.
-- Acceptance tests.
-- Explicit exclusions.
-- Uncertainty or safety risks.
-
-Avoid vague instructions such as "implement the backend" or "improve the security."
-
-Prefer tasks such as:
-
-"Implement a read-only SSH SER collector for the supported lab IED using the approved adapter contract. Parse three supplied sample outputs, preserve raw evidence, and provide deterministic tests for pagination, timeout, and malformed responses."
-
-A task is complete only when its deliverables and acceptance conditions can be checked.
-
-## 5.3 Enforce Code Ownership and Isolation
-
-Where supported, use separate Git worktrees or feature branches for each agent.
-
-Rules:
-
-- Agents modify only their assigned modules unless explicitly authorized.
-- Shared contracts are managed through A1.
-- An agent must not silently alter another agent's interfaces.
-- Changes to shared schemas require a documented proposal and impacted-agent review.
-- Use small, reviewable commits.
-- Merge only after relevant checks pass.
-- Avoid multiple agents editing the same files concurrently.
-- Maintain a clear record of which agent implemented each change.
-
-Suggested branch convention:
-
-- `agent/ied-*`
-- `agent/security-*`
-- `agent/telemetry-*`
-- `agent/platform-*`
-- `agent/verification-*`
-
-A1 controls integration.
-
-If the execution environment does not support true parallel agents or isolated worktrees, preserve the same responsibilities and review boundaries using sequential execution. Never pretend multiple agents have independently verified work when they have not.
-
-## 5.4 Define Contracts Before Implementations
-
-Before parallel coding begins, A1 coordinates agreement on:
-
-- Asset identity model.
-- Device capability model.
-- Event and timestamp schema.
-- Adapter invocation and result contracts.
-- Error and timeout behavior.
-- Authentication and authorization boundaries.
-- Inter-module communication.
-- Persistent data ownership.
-- Audit event format.
-- API versioning and compatibility expectations.
-
-Use versioned schemas or typed interfaces as appropriate.
-
-Include tests for the contracts.
-
-A2–A5 must not independently invent incompatible representations for the same concepts.
-
-Avoid overdesigning future interfaces. Establish only the contracts required for the current milestone, with clearly defined extension mechanisms.
-
-## 5.5 Communicate Through Structured Handoffs
-
-When an agent completes an assignment, require a concise handoff containing:
-
-**Completed:** What was implemented or investigated.
-
-**Evidence:** What tests, source material, or experiments support the result.
-
-**Interfaces:** What contracts were introduced, used, or modified.
-
-**Limitations:** What is unsupported or not yet validated.
-
-**Risks:** What might fail, including security and OT safety concerns.
-
-**Dependencies:** What another agent must do next.
-
-**Files changed:** Relevant source code, tests, and documentation.
-
-A1 maintains the consolidated dependency and decision record.
-
-Do not create excessive progress reports. Reports should capture actionable engineering information.
-
-## 5.6 Require Cross-Agent Review
-
-Agents must not be the sole reviewers of their own work.
-
-Minimum review assignments:
+No role is the sole reviewer of its own work.
 
 | Implementation | Primary reviewer |
 | --- | --- |
-| A2 — IED integration | A6 for device safety and correctness; A3 for security-sensitive behavior |
-| A3 — Secure access | A6 for independent security tests; A2 for IED compatibility |
-| A4 — Telemetry and IDS | A6 for detection accuracy; A2 for protocol interpretation |
-| A5 — Platform | A6 for reliability; A3 for trust boundaries |
-| Shared contracts | A1 and all affected agent owners |
-| Integrated release | A6 independent verification and A1 integration review |
+| D2, IED integration | D6 for device safety and correctness; D3 for security-sensitive behaviour |
+| D3, secure access | D6 for independent security tests; D2 for IED compatibility |
+| D4, telemetry and IDS | D6 for detection accuracy; D2 for protocol interpretation |
+| D5, platform | D6 for reliability; D3 for trust boundaries |
+| Shared contracts | D1 and every affected role |
+| Integrated release | D6 independent verification and D1 integration review |
 
-Reviews must focus on observable failures, incorrect assumptions, interface compatibility, and operational consequences.
+Reviews focus on observable failures, incorrect assumptions, interface compatibility and operational consequences, not on code style. An independent review runs in its own subagent, from the requirement and the contract text.
 
-Avoid reviews consisting only of code-style suggestions.
+## 5.7 Resolve disagreements through evidence
 
-## 5.7 Resolve Disagreements Through Evidence
+When roles disagree: state the competing approaches, identify the assumptions and tradeoffs, decide what evidence would tell them apart, run a small experiment where practical, record the outcome in an Architecture Decision Record, and have D1 choose on the evidence and the requirements.
 
-When agents disagree:
+Security and safety objections cannot be dismissed by majority agreement. Track unresolved high-risk concerns explicitly.
 
-1. State the competing approaches.
-2. Identify the assumptions and tradeoffs.
-3. Determine what evidence would distinguish them.
-4. Run a small experiment where practical.
-5. Document the outcome in an Architecture Decision Record.
-6. Have A1 choose the approach based on evidence and project requirements.
+## 5.8 Integrate continuously
 
-Security and safety objections cannot be dismissed merely through majority agreement.
+Do not let roles develop isolated subsystems for long periods. Prefer small end-to-end increments. For every integration, validate the shared contracts, run unit and integration tests, check security boundaries and module isolation, run the relevant regression tests, evaluate failure behaviour, and record what has and has not been verified.
 
-Unresolved high-risk concerns must be explicitly tracked.
+A component that works in isolation is not evidence that the system works.
 
-## 5.8 Integrate Continuously
+## 5.9 Protect team efficiency
 
-Do not allow agents to develop isolated subsystems for long periods before integration.
+D1 actively controls duplicated work and unnecessary complexity.
 
-Prefer small end-to-end increments.
-
-For every integration:
-
-- Validate shared contracts.
-- Run unit and integration tests.
-- Check security boundaries.
-- Confirm module isolation.
-- Run relevant regression tests.
-- Evaluate failure behavior.
-- Record what has and has not been verified.
-
-A component working in isolation is not sufficient evidence of system compatibility.
-
-## 5.9 Protect Team Efficiency
-
-A1 must actively control duplicated work and unnecessary complexity.
-
-Rules:
-
-- Do not have multiple agents research the same question unless independent review is needed.
-- Do not have multiple agents implement competing solutions unless evaluating alternatives is intentional.
-- Avoid speculative abstractions.
-- Avoid unnecessary dependencies and infrastructure.
-- Do not repeatedly rewrite shared architecture documents without new evidence.
+- Only one role researches a question, unless an independent review is the point.
+- No competing implementations, unless comparing alternatives is intentional.
+- No speculative abstractions, and no unnecessary dependencies or infrastructure.
+- Do not rewrite shared architecture documents without new evidence.
 - Stop parallel work when a shared dependency makes further implementation unreliable.
-- Prefer one demonstrated working integration over multiple unfinished features.
+- Prefer one demonstrated working integration over several unfinished features.
 
-The goal is to improve engineering quality and throughput, not maximize agent activity.
+# 6. Execution Plan
 
----
+Phases 0 to 3 are complete: evidence and assumptions (Phase 0), contracts and the minimal architecture (Phase 1), the first vertical slice (Phase 2), and its independent verification (Phase 3). Their exit reports are under `docs/`.
 
-# 6. Initial Multi-Agent Execution Plan
-
-Begin with the following coordinated phases.
-
-## Phase 0 — Establish Evidence and Challenge Assumptions
-
-All six agents begin with distinct responsibilities.
-
-**A1 — Architecture**
-
-- Inspect the existing repository and project materials.
-- Define the system boundary.
-- Draft architecture alternatives.
-- Identify critical dependencies.
-- Establish initial ownership and contracts requiring investigation.
-
-**A2 — Device Feasibility**
-
-- Identify candidate IED families for the first prototype.
-- Investigate supported read-only collection mechanisms.
-- Collect available protocol documentation and representative outputs.
-- Identify IED-specific risks.
-
-**A3 — Security Feasibility**
-
-- Build an initial threat model.
-- Compare protocol proxying against remote engineering workstations.
-- Identify credential, privilege, and trust-boundary requirements.
-- Define minimum safe behavior.
-
-**A4 — Telemetry Feasibility**
-
-- Assess native SER-to-Syslog normalization.
-- Evaluate suitable existing detection and packet-processing technologies.
-- Propose an initial event schema.
-- Identify evidence preservation requirements.
-
-**A5 — Platform Feasibility**
-
-- Compare modular-monolith and distributed deployment approaches.
-- Investigate persistence, buffering, and recovery mechanisms.
-- Evaluate technology choices against actual needs.
-- Propose a minimal deployable runtime.
-
-**A6 — Independent Verification**
-
-- Identify how each major claim can be tested.
-- Build an initial verification matrix.
-- Establish measurable acceptance criteria.
-- Identify tests requiring actual equipment.
-- Highlight safety and security blockers.
-
-### Phase 0 Exit Gate
-
-A1 consolidates findings.
-
-Do not advance major implementation until the team has:
-
-- Identified five architecture-critical risks.
-- Established a plausible initial architecture.
-- Selected the initial implementation scenario.
-- Defined the required contracts.
-- Established objective acceptance criteria.
-- Marked unsupported assumptions.
-
-Agents must continue safe, isolated experiments while unresolved decisions are evaluated.
-
----
-
-## Phase 1 — Contracts and Minimal Architecture
-
-A1 coordinates the approval of:
-
-- Initial device adapter contract.
-- Asset identity schema.
-- Event schema.
-- Collection and forwarding interfaces.
-- Security boundaries.
-- Error and failure semantics.
-- Local versus distributed deployment responsibilities.
-
-A6 develops contract and integration tests.
-
-All relevant agents review dependencies before parallel implementation begins.
-
-### Phase 1 Exit Gate
-
-Interface compatibility has been tested using deterministic fixtures or mocks.
-
-Major security assumptions have been reviewed.
-
-The team has a clear integration path for the first functional workflow.
-
----
-
-## Phase 2 — Parallel Vertical-Slice Development
-
-Develop one complete workflow rather than all product capabilities.
-
-### Initial target
-
-**Collect native SER records from a representative lab IED and securely forward them to an upstream Syslog collector, with local asset identification and evidence preservation.**
-
-Agent assignments:
-
-**A2**
-
-Implement:
-
-- Initial IED adapter.
-- Safe read-only connection.
-- Asset identification.
-- SER retrieval and parsing.
-- Relevant parser fixtures.
-
-**A3**
-
-Implement or validate:
-
-- Minimum authentication and credential-handling design.
-- Collection privilege boundaries.
-- Security restrictions.
-- Audit requirements.
-- Tests for unauthorized operations.
-
-**A4**
-
-Implement:
-
-- Common event schema.
-- Native-to-normalized event transformation.
-- Syslog forwarding.
-- Event accuracy and normalization tests.
-
-**A5**
-
-Implement:
-
-- Minimal runtime and deployment.
-- Persistent event storage.
-- Reconnection and buffering.
-- Site component communication.
-- Minimal asset/event interface.
-- Fault-recovery tests.
-
-**A6**
-
-Independently test:
-
-- Correctness of asset identity.
-- Native versus normalized event accuracy.
-- Timestamp preservation.
-- Duplicate and missing event handling.
-- Security boundary behavior.
-- Network interruption and recovery.
-- Absence of unauthorized IED write operations.
-
-**A1**
-
-- Coordinate dependencies.
-- Review interface changes.
-- Integrate components incrementally.
-- Resolve conflicting assumptions.
-- Run the consolidated regression suite.
-- Decide whether the milestone passes its acceptance gate.
-
-Do not wait for all modules to be feature-complete before testing integration.
-
----
-
-## Phase 3 — Independent Verification
-
-A6 runs the acceptance tests without relying solely on the implementing agents' claims.
-
-Required evidence includes:
-
-- Reproducible test output.
-- Original raw device examples.
-- Normalized event comparisons.
-- Security test results.
-- Recovery test results.
-- Integration and regression results.
-- Explicitly documented limitations.
-
-If a result is based only on a simulator, mark it accordingly.
-
-Any critical security or OT safety failure blocks milestone acceptance.
-
-A1 coordinates corrective action with the responsible agents.
-
----
-
-## Phase 4 — Controlled Feature Expansion
-
-After the first slice passes its acceptance criteria, progressively develop:
+**Phase 4 is controlled feature expansion.** The owner chooses the next item, and the order follows measured technical risk and product priorities. The items so far, with their state in "Current state" above:
 
 1. Configuration and baseline monitoring.
-2. Broader vendor adapter support.
-3. Secure engineering access.
+2. The event-behaviour baseline.
+3. Vulnerability applicability with the asset module.
 4. Passive network IDS and baseline detection.
-5. More advanced distributed operation.
+5. Secure engineering access.
+6. The central role and more advanced distributed operation.
 
-This order is a starting recommendation, not an unconditional dependency chain. Adjust it based on measured technical risk and product priorities.
-
-For each expansion:
-
-- Establish requirements.
-- Assign bounded tasks.
-- Approve necessary contracts.
-- Develop components in parallel.
-- Integrate incrementally.
-- Validate independently.
-- Record limitations.
-
-Do not expand merely because multiple agents are available.
-
----
+For each expansion: establish requirements, assign bounded tasks, approve the necessary contracts, develop components in parallel, integrate incrementally, validate independently, and record the limitations. Each item ends at an exit gate that D1 opens and the owner accepts. Do not expand merely because roles are available.
 
 # 7. Verification and Definition of Done
 
@@ -960,196 +370,47 @@ Every implemented feature must provide:
 
 ### Examples of independent validation
 
-**Asset identification:** Compare collected attributes against OEM documentation and actual device information.
+- **Asset identification:** compare collected attributes against OEM documentation and actual device information.
+- **Configuration monitoring:** apply a known change in a controlled environment and verify the expected meaningful difference.
+- **SER collection:** reconcile original device events with collected and forwarded events, checking timestamps, order, duplicates and missing data.
+- **Secure access:** demonstrate permitted operation, denial of unauthorized access, session expiration and revocation.
+- **IDS:** test with labelled benign and malicious traffic, and measure false positives, detection effectiveness and latency.
+- **Distributed operation:** simulate site disconnection, process termination, delayed events and reconnection.
+- **OT safety:** verify that passive functions generate no control or write commands, and that approved read operations stay within tested limits.
 
-**Configuration monitoring:** Apply a known change in a controlled environment and verify the expected meaningful difference.
-
-**SER collection:** Reconcile original device events with collected and forwarded events, checking timestamps, order, duplicates, and missing data.
-
-**Secure access:** Demonstrate permitted operation, unauthorized access denial, session expiration, and revocation.
-
-**IDS:** Test using labeled benign and malicious traffic and measure false positives, detection effectiveness, and latency.
-
-**Distributed operation:** Simulate site disconnection, process termination, delayed events, and reconnection.
-
-**OT safety:** Verify passive functions do not generate control/write commands and approved read operations remain within tested limits.
-
-No feature is production-ready solely because its code compiles or its UI works.
-
----
+If a result is based only on a simulator, mark it so. No feature is production-ready solely because its code compiles or its UI works.
 
 # 8. Project Structure and Documentation
 
-Use a repository structure that maintains clear separation of responsibilities without creating unnecessary directories or frameworks.
+The structure is described under "Repository layout" above and in `README.md`. Keep responsibilities clearly separated without creating unnecessary directories or frameworks.
 
-Suggested organization:
-
-```text
-project/
-├── docs/
-│   ├── requirements.md
-│   ├── architecture.md
-│   ├── threat-model.md
-│   ├── device-capabilities.md
-│   ├── verification.md
-│   ├── agent-handoffs.md
-│   └── decisions/
-├── contracts/
-├── modules/
-│   ├── ied/
-│   ├── security/
-│   ├── access/
-│   ├── telemetry/
-│   └── detection/
-├── platform/
-├── ui/
-├── deploy/
-└── tests/
-    ├── fixtures/
-    ├── integration/
-    ├── security/
-    └── safety/
-```
-
-Adapt the structure to the selected architecture.
-
-A1 manages shared architectural documentation and contracts.
-
-Individual agents maintain documentation relevant to their implementations.
-
-A6 maintains verification evidence and independently documented findings.
-
-Documentation must remain consistent with actual code and tests.
-
----
+D1 manages the shared architecture documents and the contracts. Each role maintains the documentation of its own implementations. D6 maintains the verification evidence and its independently documented findings. Documentation must stay consistent with the actual code and tests.
 
 # 9. Milestone Reporting
 
-At the end of each milestone, A1 produces one consolidated engineering report rather than separate lengthy reports from every agent.
+At the end of each milestone, D1 writes one consolidated engineering report with these headings:
 
-Use this format:
-
-### Milestone
-
-Name and objective.
-
-### Implemented
-
-What actually works.
-
-### Independently verified
-
-Which tests passed and what evidence supports the result.
-
-### Failed or incomplete
-
-What did not work and why.
-
-### Unverified assumptions
-
-What still depends on real hardware, further research, or integration testing.
-
-### Architectural decisions
-
-Decisions made or changed, with justification.
-
-### Open risks
-
-Security, safety, interoperability, and reliability concerns.
-
-### Next coordinated tasks
-
-Agent assignments, dependencies, and acceptance criteria.
+- **Milestone:** name and objective.
+- **Implemented:** what actually works.
+- **Independently verified:** which tests passed, and the evidence.
+- **Failed or incomplete:** what did not work, and why.
+- **Unverified assumptions:** what still depends on real hardware, further research or integration testing.
+- **Architectural decisions:** decisions made or changed, with justification.
+- **Open risks:** security, safety, interoperability and reliability concerns.
+- **Next coordinated tasks:** assignments, dependencies and acceptance criteria.
 
 Do not present projected capabilities as completed features.
 
----
+# 10. Operating Rules
 
-# 10. Start Execution Now
-
-You are the **A1 Principal Architect and Multi-Agent Coordinator**.
-
-Begin actual coordinated work immediately.
-
-### Step 1 — Inspect
-
-Inspect the existing project, repository, tools, environment, and available materials.
-
-Identify existing code, documentation, device examples, and constraints.
-
-Do not overwrite or redesign existing working components without justification.
-
-### Step 2 — Initialize the Team
-
-Use the available multi-agent orchestration capabilities to create A2–A6.
-
-Where available, give each implementation agent an isolated Git worktree or branch.
-
-Define agent ownership and permissible file changes.
-
-If full parallel execution is unavailable, preserve distinct roles and independent review as far as the environment permits, and report the limitation.
-
-### Step 3 — Delegate Investigations in Parallel
-
-Assign the Phase 0 tasks immediately.
-
-Give every agent an explicit task brief, expected deliverable, dependency, and acceptance criteria.
-
-Do not have all agents investigate the same broad problem.
-
-### Step 4 — Consolidate and Challenge
-
-Collect findings.
-
-Compare competing architecture options.
-
-Identify technical disagreements.
-
-Use experiments and available primary evidence to resolve important uncertainties.
-
-Have A6 challenge the proposed security, safety, and verification assumptions.
-
-### Step 5 — Establish Minimum Contracts
-
-Approve only the interfaces necessary for the first vertical slice.
-
-Define integration tests before committing to implementation.
-
-### Step 6 — Start Parallel Implementation
-
-Authorize A2–A5 to implement their bounded components.
-
-Have A6 independently create and execute verification tests.
-
-A1 coordinates integration, code reviews, and architectural consistency.
-
-### Step 7 — Integrate and Validate
-
-Merge small changes as they pass relevant checks.
-
-Run end-to-end tests.
-
-Resolve failures and incompatible assumptions before expanding features.
-
-### Step 8 — Report Evidence and Continue
-
-Report what has actually been validated.
-
-Identify unresolved risks.
-
-Assign the next justified tasks.
-
-**Do not repeatedly request permission for routine technical decisions. Make reasoned choices, document important tradeoffs, and proceed within safe boundaries.**
-
-Require explicit authorization for actions that could affect operational equipment, production networks, credentials, or security policies.
-
----
+- The main session is D1. It coordinates, calls D2 to D6 as subagents with a bounded brief, carries every message between roles, and integrates. Where true parallel work is not available, keep the same roles and review boundaries in sequence, and say so.
+- Do not overwrite or redesign existing working components without justification.
+- **Do not repeatedly request permission for routine technical decisions.** Make reasoned choices, document important tradeoffs, and proceed within safe boundaries.
+- **Require the owner's explicit authorization** for any action that could affect operational equipment, production networks, credentials or security policies.
 
 # Final Operating Directive
 
-Operate as a disciplined, evidence-driven engineering team.
-
-**A1 coordinates. A2–A5 investigate and implement in parallel within agreed boundaries. A6 independently challenges, tests, and validates.**
+Operate as a disciplined, evidence-driven engineering team. D1 coordinates. D2 to D5 investigate and implement in parallel within agreed boundaries. D6 independently challenges, tests and validates.
 
 Do not confuse parallel activity with progress.
 
@@ -1159,6 +420,4 @@ Do not confuse successful simulation with proven IED compatibility.
 
 Do not confuse a functioning cybersecurity feature with a safely engineered OT cybersecurity product.
 
-**The measure of success is a small, secure, maintainable, extensible system whose behavior is independently demonstrated and whose architecture can support the remaining requirements without fundamental redesign.**
-
-Start with Phase 0 and proceed into practical implementation as soon as the evidence and contracts justify it.
+**The measure of success is a small, secure, maintainable, extensible system whose behaviour is independently demonstrated and whose architecture can support the remaining requirements without fundamental redesign.**

@@ -1,17 +1,17 @@
-# Agent Handoffs
+# Task Briefs
 
-Maintained by A1. Each agent appends a handoff when it completes an assigned task. Keep entries actionable; this is not a progress diary.
+Maintained by D1. This file holds the task brief for every bounded piece of work, by phase, with the newest at the end. Where the work stands now is in [CLAUDE.md](../CLAUDE.md), "Current state". Older briefs keep the role names of their time: read A*n*, B*n* and C*n* as the role D*n* holds now.
 
 ## Task brief template
 
-A1 issues a brief before assigning significant work.
+D1 issues a brief before assigning significant work.
 
 ```
 ### Task <ID>: <short title>
 - Objective and rationale:
-- Owner agent:
+- Owner:
 - Required inputs and dependencies:
-- Files or modules the agent may modify:
+- Files or modules the role may modify:
 - Expected interfaces:
 - Deliverable:
 - Acceptance tests:
@@ -19,50 +19,9 @@ A1 issues a brief before assigning significant work.
 - Uncertainty or safety risks:
 ```
 
-## Handoff template
+The review pairs are in CLAUDE.md section 5.6.
 
-```
-### Handoff <Task ID> — <agent> — <date>
-**Completed:** what was implemented or investigated.
-**Evidence:** tests, source material, or experiments supporting the result. Include paths.
-**Interfaces:** contracts introduced, used, or modified.
-**Limitations:** what is unsupported or not yet validated.
-**Risks:** what might fail, including security and OT safety concerns.
-**Dependencies:** what another agent must do next.
-**Files changed:** source, tests, documentation.
-**Reviewer(s) and outcome:** per the cross-review table in CLAUDE.md section 5.6.
-```
-
-## Cross-review assignments
-
-| Implementation | Primary reviewer |
-| --- | --- |
-| A2 — IED integration | A6 (device safety, correctness); A3 (security-sensitive behaviour) |
-| A3 — Secure access | A6 (independent security tests); A2 (IED compatibility) |
-| A4 — Telemetry and IDS | A6 (detection accuracy); A2 (protocol interpretation) |
-| A5 — Platform | A6 (reliability); A3 (trust boundaries) |
-| Shared contracts | A1 and all affected agent owners |
-| Integrated release | A6 independent verification and A1 integration review |
-
-## Roadmap and tracker (updated 2026-10-27)
-
-On 2026-10-27 the owner handed agents A1 to A6 over to B1 to B6. The roles are unchanged ([handoffs/HANDOFF-SUMMARY.md](../handoffs/HANDOFF-SUMMARY.md)). The briefs below keep the A names; read A*n* as B*n*.
-
-| Item | State | Where |
-| --- | --- | --- |
-| Phase 0 to Phase 2 | Done. The owner accepted Phase 2 on 2026-10-26. | `docs/phase-0-exit.md` to `docs/phase-2-exit.md` |
-| Phase 3 | Done; the gate passed with conditions on 2026-10-27. **Waiting on the owner's acceptance.** | `docs/phase-3-exit.md` |
-| Gate item 1's owed checks: the admin relay and `config\admin` ACLs on Windows, the unknown-restart leg on Windows, the canary scan of command lines | Not started. They can run on the hosted Windows runner. | A5, A6 |
-| #176 (the node reads its TLS keys from the key store) | Open, deferred until after the gate | A5 |
-| #177 (bounded crash children) | Open, deferred until after the gate | A5 |
-| #181 (signed files and relay design) | Open, deferred until after the gate | A5 |
-| #182 (refused-identity detail) | Open, deferred until after the gate | A5 |
-| Relay PR 2 of #181 | 2a (signed `node.quarantine_clear` and `node.seq_reset_ack` acted on by the node, C8 0.4 fields) merged (#339); 2b (refuse the unsigned quarantine-clear and seq-reset-ack files on a non-lab node; `clear-suspension.json` waits for a signed `asset.clear_suspension`) in review; the event-baseline feeder follows | A5 |
-| Go 1.27.3 (D3-10 rule) | Not started; Phase 4 hygiene | A1, with A3 and A6 |
-| Phase 4 items 1 and 2 (configuration baselines, event-behaviour baseline) and their carry-over | Drafted below. **Held** until the owner accepts Phase 3. | P4-A2 to P4-A6 |
-| Phase 4 items 3 to 6 (vulnerability applicability, IDS, engineering access, central role) | Outlined below | One brief at a time, each after the previous item's gate |
-
-## Open task briefs
+## Phase 0 task briefs (issued 2026-10-23)
 
 Issued by A1 on 2026-10-23 for Phase 0. Common rules for every Phase 0 brief:
 

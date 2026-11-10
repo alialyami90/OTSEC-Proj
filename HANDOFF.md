@@ -1,27 +1,20 @@
-# Handoff: the move to Claude Code CLI
+# Handoff: continuing in Claude Code CLI
 
-Owner of this file: D1. Written 2026-11-10, with `main` at `82daa04` (#604). The project owner is moving the work from Claude project threads to Claude Code CLI on their own PC. This file is what a fresh CLI session needs to continue. Everything in it is `desk` evidence read from the repository, the decision log, GitHub and the role threads on 2026-11-10.
+Written by D1 on 2026-11-10, with `main` at `82daa04` (#604). The work moved from Claude project threads to Claude Code CLI on the owner's PC. This file is what a CLI session needs to continue. Everything in it is `desk` evidence, read from the repository, the decision log and GitHub on that day.
 
-## Reading order
-
-1. [CLAUDE.md](CLAUDE.md), the project brief. It governs all work.
-2. This file.
-3. [handoffs/HANDOFF-SUMMARY.md](handoffs/HANDOFF-SUMMARY.md): the agent map, the review pairs and the owner's standing rules. It was written on 2026-11-06 for the C-to-D handoff, so its "next action" lines are done. Where it differs from this file, this file wins.
-4. Your role's file in [.claude/agents/](.claude/agents/), then `handoffs/D{n}-handoff.md` for that role's lessons.
-5. [docs/phase4/B1-decisions.md](docs/phase4/B1-decisions.md) from D4-58 to D4-76.
+Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.claude/agents/](.claude/agents/). For the reasons behind recent work, read [docs/phase4/B1-decisions.md](docs/phase4/B1-decisions.md) from D4-58 to its last entry.
 
 ## Where the work stands
 
 | Phase | Result |
 | --- | --- |
-| 0 to 3 | Passed with conditions and accepted by the owner (2026-10-23 to 2026-10-27) |
-| 4, items 1 and 2: configuration baselines, the event-behaviour baseline | Accepted 2026-11-05 (D4-48) |
-| 4, item 3: vulnerability applicability with the asset module | Accepted 2026-11-06 (D4-62); report in `docs/phase-4-item3-exit.md` |
-| Hardening P4-H1 to P4-H4 | Merged by 2026-11-07 (D4-63, D4-65) |
-| 4, item 4: network IDS | **In progress.** Contracts approved (D4-68). The node side is built and merged (D4-70 to D4-76, #545 to #604). The sensor is not briefed |
+| 0 to 3 | Accepted by the owner |
+| 4, items 1 and 2: configuration baselines, the event-behaviour baseline | Accepted (D4-48) |
+| 4, item 3: vulnerability applicability with the asset module | Accepted (D4-62); report in `docs/phase-4-item3-exit.md` |
+| 4, item 4: network IDS | **In progress.** Contracts approved (D4-68). The node side is merged (D4-70 to D4-76). The sensor is not briefed |
 | 4, items 5 and 6: secure engineering access, the central role | Not briefed |
 
-**What is on `main`.** Two Go binaries: `cmd/otsec` (the site node) and `cmd/otsec-collector` (the privileged collector). For item 4 the node now has the sensor intake with its hold for the node's own sessions, the two network store classes, the detector consumer and its checkpoints, alert retention, alert drop counts by rule and asset, `sensor-unreachable`, the network baseline acknowledgement (C7 0.10, C8 0.12), and one full alarm per fill. C13 `otsec.netobs/0.1`, C4 0.3, C5 0.9 and C2 0.9 are coded. No sensor process exists yet, and nothing captures traffic.
+**What is on `main`.** Two Go binaries: `cmd/otsec` (the site node) and `cmd/otsec-collector` (the privileged collector). For item 4 the node has the sensor intake with its hold for the node's own sessions, the two network store classes, the detector consumer and its checkpoints, alert retention, alert drop counts by rule and asset, `sensor-unreachable`, the network baseline acknowledgement (C7 0.10, C8 0.12), and one full alarm per fill. C13 `otsec.netobs/0.1`, C4 0.3, C5 0.9 and C2 0.9 are coded. No sensor process exists yet, and nothing captures traffic.
 
 **Evidence ceiling.** Every result is `desk`, `simulated`, `CI-Linux` or `CI-Windows`. No device has been contacted, nothing is `hardware-verified`, and no SEL family may be called supported.
 
@@ -31,24 +24,12 @@ Owner of this file: D1. Written 2026-11-10, with `main` at `82daa04` (#604). The
 
 **The owner has not yet chosen where the passive sensor runs** ([ADR-0009](docs/decisions/ADR-0009-passive-sensor.md), still `proposed`). The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**NEXT ACTION (D1):** get the owner's choice. Then mark ADR-0009 accepted with D4, record the choice and this move as D4-77, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
+**NEXT ACTION (D1):** get the owner's choice. Then mark ADR-0009 accepted with D4, record the choice as D4-77, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
 
-## Open PRs, branches and work in progress
+## Open PRs and branches
 
-- **Open PRs: none** besides the one that adds this file. Every PR from #487 to #604 is merged or closed.
-- **Each role reports nothing in flight** (role threads, 2026-11-08). The per-role open items are in `.claude/agents/`.
-- **Branches.** The remote still has 248 branches. The owner approved deleting 150 merged ones on 2026-11-06 (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1` beside the checkout, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`.
-- **The Claude project's shared folder was not carried over** (owner, 2026-11-10). It held the agents' working notes, review drafts, probes and safety-copy patches, all for PRs that have merged, and their results are recorded in this repository. What is still needed is in `reference/`, a folder beside the checkout on the owner's PC and outside the repository:
-
-| In `reference/` | What it holds |
-| --- | --- |
-| `manuals-SEL/` | The SEL manuals (PDF) and their text in `text/` |
-| `datasheets-SEL/` | The SEL datasheets |
-| `rfc/` | The twelve RFC texts with `SHA256SUMS` (D4-58) |
-| `carried/` | `d1-open-items.md` (D1's log to #604), `d6-gt-pcap-next-plan-edits.md` (D6's queue of GT-PCAP cases, **live**), the branch-cleanup script, and the evidence files that records cite: the owner's PC run of 2026-10-27, A6's Phase 1 probes in `phase1-reviews/`, A3's public-repository audit, B6's Windows timeout analysis, A6's appendix A rows and one C6 probe |
-| `pc-logs/` | Logs from earlier runs on the owner's PC. `pc-out/` is the 2026-10-27 run that `docs/verification.md` cites, with the SCM logs under `slice` that were never read. `otsec-ci-a6/` and `otsec-ci-local/` are the `ci-logs` folders of the two deleted checkouts |
-
-At the owner's request (2026-11-10), the Markdown records were rewritten so that none cites the shared folder. A path to a file that was kept now reads `reference/...`. A path to a file that was not kept now reads "a working file that was not kept". Ten test files (the eight SEL-751 register goldens, and `cases.json` and `egress/deny_test.go` under `tests/integration/gt_mib/`) and `contracts/adapter/testdata/snmp/README.md` were left as they are, because the goldens are pinned by checksum. The old shared-folder paths in them are citations only, and nothing in the build or the tests opens such a path.
+- **Open PRs: none** besides the one that adds this file. No role has work in flight. Each role's open items are in its file in `.claude/agents/`.
+- **Branches.** The remote has 248 branches. The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`.
 
 ## Waiting on the owner
 
@@ -60,19 +41,17 @@ At the owner's request (2026-11-10), the Markdown records were rewritten so that
 6. **Item 3's questions:** severity scores in reports; the v1/v2c approval key if such a path is ever added (HR-17); which SEL switches the sites run; model naming for set authors (`SEL-2731M`).
 7. **From D4-65:** should the reserve fail on volumes that can't hold real space (compressed or copy-on-write)? Should the store get a Windows folder flush? Should the rare starts over 6 s be briefed?
 8. **Authorization for any device contact:** a lab relay or switch before any H-test or Q3, and any SNMPv3 contact.
-9. **Test runs on the owner's PC** are paused since 2026-10-27 (D4-12). See the first process question below.
+9. **Test runs on the owner's PC** are paused (D4-12). Working in the CLI on the PC makes local `go vet`, `gofmt` and `go test` the natural first check. Recommended: lift the pause for ordinary local runs under the limits below, and keep service-creating runs for the owner's elevated session.
 10. **Running the branch-cleanup script** (above).
-11. **STALLED:** ADR-0007 (Windows site node) is still `proposed`, unchanged since generation A.
+11. **ADR-0007** (Windows site node) is still `proposed`.
 
 ## Test policy
 
-In priority order (D2-13, D4-3, and the owner's project instructions):
-
-1. **GitHub Actions first.** `ci.yml` (nineteen jobs) and `govulncheck.yml` (one job) are the gate. A PR merges when its reviewers accept it and every job in both is green on its head. A PR that touches GT-PCAP also needs `a6-gt-pcap` green. A PR that changes only Markdown or other document files outside a `testdata` directory skips both and merges on review. When a head's CI is older than `main`, verify the merged result before merging.
+1. **GitHub Actions first.** `ci.yml` (nineteen jobs) and `govulncheck.yml` (one job) are the gate. The merge rules are in CLAUDE.md, "Testing and merging". When a head's CI is older than `main`, verify the merged result before merging.
 2. **The owner's PC second.** It is the second Windows run, and the fallback when GitHub Actions is unavailable or a run needs a real installation. A local run never replaces a green CI run for a merge. Label a PC result `simulated`, with the Windows version and the commit SHA.
 3. **Never register the PC as a GitHub self-hosted runner,** and never put machine keys on it. The repository is public, so any outside PR could run code on a self-hosted runner.
 
-Limits on the PC, from the owner's standing rules:
+Limits on the PC:
 
 - Install nothing beyond what the owner approved: a portable Go inside the project folder, and a Python venv inside it with `pytest` and `asyncssh==2.24.1`. No installer, no admin rights requested, no system settings, no permanent PATH change, no pip install outside the venv.
 - A run that creates Windows services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.
@@ -80,42 +59,37 @@ Limits on the PC, from the owner's standing rules:
 
 Other rules that hold: re-run a failing job at most once; never push an empty commit to retrigger CI; never call a timeout or a property failure a flake; a failure in code the PR doesn't touch is a finding to reproduce against `main`; before opening a code PR, check the latest scheduled run on `main`.
 
-Commands are in CLAUDE.md's repository-state section. The toolchain is Go 1.27.3 (`go.mod`), 64-bit; a 32-bit build is not a declared target (D4-72).
+The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared target (D4-72).
 
-## How the team maps onto Claude Code CLI
+## Working in the CLI
 
-- **The six roles are subagents** in `.claude/agents/`: `d1-principal-architect`, `d2-ied-integration`, `d3-security-access`, `d4-telemetry-ids`, `d5-platform`, `d6-verification-safety`. Each file holds the role's scope, owned paths, reviewers, standing rules and open items.
-- **The main session acts as D1,** as CLAUDE.md §10 already says, and calls D2 to D6 as subagents with a bounded brief (§5.2). A subagent starts with no memory of earlier work, so the brief names the files to read.
-- **The coordinator's job moves into the main session.** Subagents report only to the session that called them, so every message between roles still passes through one place (D4-58).
-- **Independent review still means a separate agent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent (§5.3).
-- **Branches.** Use the brief's convention (`agent/ied-*`, `agent/security-*`, `agent/telemetry-*`, `agent/platform-*`, `agent/verification-*`), one `git worktree` per agent working at the same time, and one PR per branch. Stage by explicit path.
-- **The shared folder is gone.** Keep new working files in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.
-- **GitHub.** The cloud sessions could not force-push or delete a branch. A CLI session uses the owner's own credentials and can, so the rules now carry the weight the tooling used to: never force-push a shared branch, and delete only branches on a list the owner approved.
-
-## Two process questions for the owner
-
-These are the owner's rules, so D1 asks and does not assume.
-
-1. **PC test runs (D4-12).** They have been paused since 2026-10-27. Working in the CLI on the PC makes local `go vet`, `gofmt` and `go test` the natural first check. Recommended: lift the pause for ordinary local runs under the limits above, and keep service-creating runs for the owner's elevated session.
-2. **The coordinator rule (D4-58).** Recommended: the main session takes the coordinator's part, as described above.
-
-D1 records both answers as D4-77, with the move itself and the rewrite of the Markdown records described above.
+- **The main session acts as D1** and calls D2 to D6 as subagents with a bounded brief (CLAUDE.md section 5.2). Every message between roles passes through the main session.
+- **Independent review means a separate subagent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent.
+- **Branches.** One branch and one PR per task, and one `git worktree` per role working at the same time. Stage by explicit path.
+- **Working files** go in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.
+- **GitHub.** A CLI session uses the owner's own credentials and can force-push and delete branches. Never force-push a shared branch, and delete only branches on a list the owner approved.
 
 ## The project folder on the owner's PC
-
-The owner approved this layout on 2026-11-10, and it was put in place the same day.
 
 ```text
 OTSEC/
 ├── OTSEC-Proj/      the only checkout of this repository; start `claude` here
-├── reference/       SEL datasheets and manuals (PDF and text), the RFC texts, `carried/` and `pc-logs/`; outside the repository
-└── tools/           portable Go 1.27.3 for 64-bit Windows in `tools/go`, the Go caches, and the Python venv once it is recreated
+├── reference/       files that records cite, outside the repository
+└── tools/           portable Go 1.27.3 for 64-bit Windows in `tools/go`, the Go caches, and the Python venv
 ```
 
+| In `reference/` | What it holds |
+| --- | --- |
+| `manuals-SEL/` | The SEL manuals (PDF) and their text in `text/` |
+| `datasheets-SEL/` | The SEL datasheets |
+| `rfc/` | The twelve RFC texts with `SHA256SUMS` (D4-58) |
+| `carried/` | D1's log to #604 (`d1-open-items.md`), D6's queue of GT-PCAP cases (`d6-gt-pcap-next-plan-edits.md`, **live**), the branch-cleanup script, and the evidence files that records cite |
+| `pc-logs/` | Logs from earlier runs on the owner's PC, including the 2026-10-27 run that `docs/verification.md` cites |
+
 - The tool folders stay outside the checkout so that `go vet ./...` and `gofmt -l .` never walk into a Go distribution or a module cache.
-- `OTSEC-Proj` was cloned at `82daa04`. The three older checkouts (`otsec-ci-local`, `otsec-ci-a6`, `pc-run`) were deleted after a check that they held no unpushed work and no uncommitted change.
-- `tools/go` is the Go toolchain module `golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64`, fetched through `proxy.golang.org` and checked against `sum.golang.org`. It has not been run on the PC yet. Go is not on the PATH: call `..\tools\go\bin\go.exe`, or set `PATH` for the session only.
-- The old venv was deleted, because a venv breaks when moved. Recreate it as `tools/venv` (first session, step 3).
+- `tools/go` has not been run on the PC yet. Go is not on the PATH: call `..\tools\go\bin\go.exe`, or set `PATH` for the session only.
+- The Python venv does not exist yet. Create it as `tools/venv` (step 3 below).
+- Eleven test files still carry paths into a shared folder that no longer exists (the eight SEL-751 register goldens, two files under `tests/integration/gt_mib/`, and `contracts/adapter/testdata/snmp/README.md`). The goldens are pinned by checksum, so the owner left them. The paths are citations only, and nothing opens them.
 
 ## First session in the CLI
 
