@@ -4,7 +4,7 @@ D2, 2026-11-06. This is a proposal and its code in one PR, paired with D3's C7 0
 
 ## Why
 
-RFC 3411 §5 (`SnmpEngineID`, `/mnt/project-files/rfc/rfc3411.txt`) says an engine ID "may not be all zeros or all 'ff'H". The collector's client refuses such a pinned ID before it sends anything (#495, `TestPinnedEngineIDForm`). C7 0.9 (#497) refuses such a credential at install. C1 0.3 still accepts the same value as an asset's declared `snmp_engine_id`. Because the collector requires the credential's engine ID to equal the asset's (`endpointMatches`), an asset like that can never get a credential and can never run. So the defect should be refused where the asset record is written, as it is for the credential. D3 asked whether C1 carries the same rule (D1 passed the question to D2), and D2 answered yes.
+RFC 3411 §5 (`SnmpEngineID`, `reference/rfc/rfc3411.txt`) says an engine ID "may not be all zeros or all 'ff'H". The collector's client refuses such a pinned ID before it sends anything (#495, `TestPinnedEngineIDForm`). C7 0.9 (#497) refuses such a credential at install. C1 0.3 still accepts the same value as an asset's declared `snmp_engine_id`. Because the collector requires the credential's engine ID to equal the asset's (`endpointMatches`), an asset like that can never get a credential and can never run. So the defect should be refused where the asset record is written, as it is for the credential. D3 asked whether C1 carries the same rule (D1 passed the question to D2), and D2 answered yes.
 
 ## The change
 

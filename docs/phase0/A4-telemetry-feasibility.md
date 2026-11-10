@@ -1,6 +1,6 @@
 # A4 Phase 0 findings: telemetry feasibility and IDS engine evaluation
 
-- Task: P0-A4 (brief in `/mnt/project-files/phase0/task-briefs.md`, issued by A1 2026-10-23)
+- Task: P0-A4 (brief in a working file that was not kept, issued by A1 2026-10-23)
 - Author: A4 (Telemetry, Event Processing, and IDS Engineer)
 - Date: 2026-10-23
 - Branch: `claude/project-thread-ix2tu3` (the session's fixed branch; the CLAUDE.md convention would be `agent/telemetry-phase0`)
@@ -185,7 +185,7 @@ Offered to A1 for the Phase 0 exit gate's list of five.
   - R-A4-3: A6 reproduced E-A4-03 independently. 12 of 12 runs with Direct queues lost nothing. Power loss is untested, and that limit is recorded in the schema draft section 5. **Closed for Phase 0.**
   - R-A4-4: the GOOSE checks failed all 8 of A6's hand-labeled adversarial cases. Recorded in section 4 as Phase 4 input, not a slice blocker (A1). **Closed for Phase 0.**
   - R-A4-5: the RTAC HEADER-versus-MSG time case was added to V-S3, and the V-S3 cases in schema draft section 3 were found consistent. The DNP3 4 h offset remains an inference. **Closed.**
-- **A2** (protocol interpretation; `/mnt/project-files/phase0/A2/A2-review-A4-schema-mapping.md`): the CP56Time2a, DNP3 CTO plus relative time, and IEC 61850 UtcTime decoding were judged correct. Five findings were addressed in `4d73987`:
+- **A2** (protocol interpretation; the review was a working file that was not kept): the CP56Time2a, DNP3 CTO plus relative time, and IEC 61850 UtcTime decoding were judged correct. Five findings were addressed in `4d73987`:
   - Silent row loss on an unexpected layout or `DATE_F`: every line is now a row, a relay message, or a parse error, and `DATE_F` is a required input.
   - Relay power-up and settings-change rows are matched explicitly.
   - `accuracy_ns` is null under `Time Source: Internal`.

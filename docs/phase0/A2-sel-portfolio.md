@@ -6,7 +6,7 @@ ADR-0006 limits vendor-specific work to SEL. It asks A2 to do two things: organi
 
 ## 1. Sources (continuing S1–S22)
 
-All sources below are owner-supplied PDFs in `/mnt/project-files/phase0/manuals-SEL/`. The quotations come from `pdftotext -layout` extractions, and page numbers are the manual's own.
+All sources below are owner-supplied PDFs in `reference/manuals-SEL/`. The quotations come from `pdftotext -layout` extractions, and page numbers are the manual's own.
 
 | ID | Document | Date code |
 | --- | --- | --- |

@@ -7,7 +7,7 @@
   - Each record went through `RenderAudit` on an audit target at exactly `MinAuditOctets`, and was read back with `ParseAudit`.
   - `audit.VerifyChain` then ran over the bytes read back.
   - Each message was then changed one way at a time.
-  - The probe is in the project files at `phase1/reviews/C6-audit-A6-probes.go.txt`. A6 commits it as a contract test once #63 merges.
+  - The probe is at `reference/carried/phase1-reviews/C6-audit-A6-probes.go.txt`. A6 commits it as a contract test once #63 merges.
 - **Evidence class:** `desk`.
 
 ## Outcome: accepted

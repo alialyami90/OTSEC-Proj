@@ -156,7 +156,7 @@ A3's §9 design remains the target. Until it lands, the file resolver is a gate 
 
 ## D2-13: GitHub Actions is the main test path again
 
-**Owner (2026-10-25, 05:10Z):** "Its public now. Double check nothing private or secret is in my repo. If making my repo has nothing to worry about. Make github my main testing again." A3 audited every ref, PR and issue of the now-public repository and found it clean (A3 report `A3-public-repo-audit-2026-10-25.md` in the project files).
+**Owner (2026-10-25, 05:10Z):** "Its public now. Double check nothing private or secret is in my repo. If making my repo has nothing to worry about. Make github my main testing again." A3 audited every ref, PR and issue of the now-public repository and found it clean (A3 report `reference/carried/A3-public-repo-audit-2026-10-25.md`).
 
 **Rules (this replaces the order in D1-26 and D2-7):**
 - A PR merges when its reviewers accept it and every job in `.github/workflows/ci.yml` is green on its head: `go` on Linux and Windows, `python`, and `integration`.
@@ -193,7 +193,7 @@ Both states are simulated (fuzz-found). A capture that shows either one (H-13, H
 
 **Context (A5, A3):**
 - A reinstall that loses both collector stores starts a fresh state, so `collector_seq` starts again at 1. `audit.VerifyCollectorSeq` then reports the chain as broken, and nothing records the reinstall or raises an alarm.
-- A5 proposed a C8 record for the reset. A3 drafted it as C8 0.2: [A3-c8-seq-reset.md](A3-c8-seq-reset.md), in the project files.
+- A5 proposed a C8 record for the reset. A3 drafted it as C8 0.2: [A3-c8-seq-reset.md](A3-c8-seq-reset.md).
 - While reviewing #100, A3 found that #97 records no asset suspension from `Code.Suspends`, and that a fresh collector state held no failed-auth floor. Both are fixed in A3's PR 4.
 - The node keeps no C1 suspensions (A5).
 

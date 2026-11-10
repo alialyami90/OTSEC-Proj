@@ -42,7 +42,7 @@ Consequence: for most commands I can cite the manual section that defines them, 
 | S13 | Digital Substation, "Magical case study #2: a report-control-block audit in IEDs" | 2026-05-15 | full text | trade article |
 | S14 | Siemens, "Cybersecurity for energy automation" tutorial page | undated | full text | OEM marketing |
 | S15 | SEL-751A ordering guide WI-7074 (selinc.com/api/download/3278) | 20180913 | full text | OEM document |
-| S16 | SEL-751 Data Sheet, supplied by the owner (`/mnt/project-files/phase0/datasheets-SEL/751_DS_20260910.pdf`) | date code 20260910 | full text, extracted by A2 from the PDF | OEM document |
+| S16 | SEL-751 Data Sheet, supplied by the owner (`reference/datasheets-SEL/751_DS_20260910.pdf`) | date code 20260910 | full text, extracted by A2 from the PDF | OEM document |
 | S17 | SEL-311L Data Sheet, supplied by the owner (`311L_DS_20221103.pdf`) | date code 20221103 | full text | OEM document |
 | S18 | SEL-400G Data Sheet, supplied by the owner (`400G_DS_20260331.pdf`) | date code 20260331 | full text | OEM document |
 | S19 | SEL-451 Data Sheet, supplied by the owner (`451_DS_20250731.pdf`) | date code 20250731 | full text | OEM document |

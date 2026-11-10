@@ -1,17 +1,17 @@
-# Agent Handoffs
+# Task Briefs
 
-Maintained by A1. Each agent appends a handoff when it completes an assigned task. Keep entries actionable; this is not a progress diary.
+Maintained by D1. This file holds the task brief for every bounded piece of work, by phase, with the newest at the end. Where the work stands now is in [CLAUDE.md](../CLAUDE.md), "Current state". Older briefs keep the role names of their time: read A*n*, B*n* and C*n* as the role D*n* holds now.
 
 ## Task brief template
 
-A1 issues a brief before assigning significant work.
+D1 issues a brief before assigning significant work.
 
 ```
 ### Task <ID>: <short title>
 - Objective and rationale:
-- Owner agent:
+- Owner:
 - Required inputs and dependencies:
-- Files or modules the agent may modify:
+- Files or modules the role may modify:
 - Expected interfaces:
 - Deliverable:
 - Acceptance tests:
@@ -19,50 +19,9 @@ A1 issues a brief before assigning significant work.
 - Uncertainty or safety risks:
 ```
 
-## Handoff template
+The review pairs are in CLAUDE.md section 5.6.
 
-```
-### Handoff <Task ID> — <agent> — <date>
-**Completed:** what was implemented or investigated.
-**Evidence:** tests, source material, or experiments supporting the result. Include paths.
-**Interfaces:** contracts introduced, used, or modified.
-**Limitations:** what is unsupported or not yet validated.
-**Risks:** what might fail, including security and OT safety concerns.
-**Dependencies:** what another agent must do next.
-**Files changed:** source, tests, documentation.
-**Reviewer(s) and outcome:** per the cross-review table in CLAUDE.md section 5.6.
-```
-
-## Cross-review assignments
-
-| Implementation | Primary reviewer |
-| --- | --- |
-| A2 — IED integration | A6 (device safety, correctness); A3 (security-sensitive behaviour) |
-| A3 — Secure access | A6 (independent security tests); A2 (IED compatibility) |
-| A4 — Telemetry and IDS | A6 (detection accuracy); A2 (protocol interpretation) |
-| A5 — Platform | A6 (reliability); A3 (trust boundaries) |
-| Shared contracts | A1 and all affected agent owners |
-| Integrated release | A6 independent verification and A1 integration review |
-
-## Roadmap and tracker (updated 2026-10-27)
-
-On 2026-10-27 the owner handed agents A1 to A6 over to B1 to B6. The roles are unchanged ([handoffs/HANDOFF-SUMMARY.md](../handoffs/HANDOFF-SUMMARY.md)). The briefs below keep the A names; read A*n* as B*n*.
-
-| Item | State | Where |
-| --- | --- | --- |
-| Phase 0 to Phase 2 | Done. The owner accepted Phase 2 on 2026-10-26. | `docs/phase-0-exit.md` to `docs/phase-2-exit.md` |
-| Phase 3 | Done; the gate passed with conditions on 2026-10-27. **Waiting on the owner's acceptance.** | `docs/phase-3-exit.md` |
-| Gate item 1's owed checks: the admin relay and `config\admin` ACLs on Windows, the unknown-restart leg on Windows, the canary scan of command lines | Not started. They can run on the hosted Windows runner. | A5, A6 |
-| #176 (the node reads its TLS keys from the key store) | Open, deferred until after the gate | A5 |
-| #177 (bounded crash children) | Open, deferred until after the gate | A5 |
-| #181 (signed files and relay design) | Open, deferred until after the gate | A5 |
-| #182 (refused-identity detail) | Open, deferred until after the gate | A5 |
-| Relay PR 2 of #181 | 2a (signed `node.quarantine_clear` and `node.seq_reset_ack` acted on by the node, C8 0.4 fields) merged (#339); 2b (refuse the unsigned quarantine-clear and seq-reset-ack files on a non-lab node; `clear-suspension.json` waits for a signed `asset.clear_suspension`) in review; the event-baseline feeder follows | A5 |
-| Go 1.27.3 (D3-10 rule) | Not started; Phase 4 hygiene | A1, with A3 and A6 |
-| Phase 4 items 1 and 2 (configuration baselines, event-behaviour baseline) and their carry-over | Drafted below. **Held** until the owner accepts Phase 3. | P4-A2 to P4-A6 |
-| Phase 4 items 3 to 6 (vulnerability applicability, IDS, engineering access, central role) | Outlined below | One brief at a time, each after the previous item's gate |
-
-## Open task briefs
+## Phase 0 task briefs (issued 2026-10-23)
 
 Issued by A1 on 2026-10-23 for Phase 0. Common rules for every Phase 0 brief:
 
@@ -215,14 +174,14 @@ Full text: last section of `docs/phase0/A5-platform-feasibility.md` on branch `c
 - **Owner questions** (site hardware/OS, WAN outage durations, central direct IED access) go into the exit report; until answered, the design assumes Linux amd64/arm64, a 72 h outage floor, and never.
 
 ### Owner-supplied evidence — 2026-10-23
-The project owner supplied six SEL data sheets (SEL-751 date code 20260910, SEL-311L, SEL-400G, SEL-411L, SEL-451, SEL-787-2/-3/-4). Copies, text extractions, and A1's reading notes: `/mnt/project-files/phase0/datasheets-SEL/` (`README-A1.md`). Class: OEM document, `documented-untested`. They are data sheets, not instruction manuals, so B-07 (command tables and example outputs) stays open. A2 and A6 read the PDFs themselves rather than relying on A1's notes. Items for A6: SEL-751 SER time-stamp resolution 1 ms, accuracy ±1 ms to the time source (event reports ±5 ms) for V-S3; SEL-311L single Telnet host session for V-S13; possible Spanish-language serial output for V-S2/V-S15.
+The project owner supplied six SEL data sheets (SEL-751 date code 20260910, SEL-311L, SEL-400G, SEL-411L, SEL-451, SEL-787-2/-3/-4). Copies, text extractions, and A1's reading notes: `reference/datasheets-SEL/` (`README-A1.md`). Class: OEM document, `documented-untested`. They are data sheets, not instruction manuals, so B-07 (command tables and example outputs) stays open. A2 and A6 read the PDFs themselves rather than relying on A1's notes. Items for A6: SEL-751 SER time-stamp resolution 1 ms, accuracy ±1 ms to the time source (event reports ±5 ms) for V-S3; SEL-311L single Telnet host session for V-S13; possible Spanish-language serial output for V-S2/V-S15.
 
 ### Cross-review P0-A5 — A6 — 2026-10-23
 Record: section "A5 findings" of `docs/phase0/A6-cross-review.md` (commit 827fffc). Accepted for Phase 0. E-02 (strace): NORMAL left 1,011 of 1,016 acks unsynced, FULL 0 of 680, so E-A5-1 is R8.7 evidence for FULL only; new hardware test H-11 (power cut). E-03: after a crash at full disk, reads and draining work (6/6) but pruning fails (6/6) until space is freed. C-18: "prune only confirmed" plus "RFC 5425 never confirms" stops SER polling permanently. A6 also re-checked A3's follow-up (E1 14/14 over 3 runs, revocation proven; R-A3-1, 2, 3, 5 closed) and A2's follow-up (both corpora pass; snapshot dedup including ambiguous offset).
 **A1 rulings:** folded into ADR-0004 (still proposed): required vs best-effort targets with a replay-window retirement rule (C-18); FULL for every cursor- or delivery-advancing stream; reserve release and pruning at startup.
 
 ### Handoff P0-A4 — A4 — 2026-10-23
-Full text: `/mnt/project-files/phase0/A4-handoff.md`; findings in `docs/phase0/A4-telemetry-feasibility.md` and `docs/phase0/A4-event-schema-draft.md` on branch `claude/project-thread-ix2tu3` (PR #4). Summary:
+Full text: in a working file that was not kept; findings in `docs/phase0/A4-telemetry-feasibility.md` and `docs/phase0/A4-event-schema-draft.md` on branch `claude/project-thread-ix2tu3` (PR #4). Summary:
 **Completed:** telemetry feasibility and engine evaluation; draft event schema `otsec.event/0.1-draft`, snapshot-alignment duplicate handling, forwarding profile `otsec-syslog/0.1` (mode A RELP/TLS, mode B RFC 5425 with replay window), evidence-preservation rules EP-1 to EP-9; experiments E-A4-01 (engine coverage, GOOSE checks), E-A4-02 (syslog framing), E-A4-03 (RELP ack vs storage), schema mapping and alignment tests.
 **Answers:** Q3 structurally yes, semantically no without per-device mapping tables. Q4 only per site with stated placement; stock Zeek 8.0.4 and Suricata 7.0.3 decode none of IEC 61850 MMS, GOOSE, or IEC 104.
 **Reviewer(s) and outcome:** A1 integration review, 2026-10-23: accepted for Phase 0. A1 re-ran with rsyslog 8.2312.0: E-A4-02 reproduces (naive newline framing forges 1 message in each of the LF and CRLF cases; the profile forges 0 in all 10 cases and recovers device bytes); E-A4-03 reproduces (default queues: 1,476 of 1,500 acknowledged messages not stored; Direct queues: 0); alignment tests 10/10. E-A4-01 not re-run (needs Zeek container and capture downloads). A6 (detection accuracy) and A2 (protocol interpretation) reviews requested.
@@ -239,7 +198,7 @@ Full text: `/mnt/project-files/phase0/A4-handoff.md`; findings in `docs/phase0/A
 The owner widened scope to all OT device classes with SEL as the only vendor for vendor-specific support until the SEL product is complete. Recorded in ADR-0006, `docs/requirements.md` R1.6/R1.7, the scope update section of `CLAUDE.md`, `PRODUCT.md`, and `docs/architecture.md` "Device coverage and vendor strategy". Effects on Phase 1 briefs: A2 organizes candidates and capability matrices by SEL product family and device class and confirms A1's SEL product list; the Q5 contrast exercise uses an SEL RTAC instead of SIPROTEC/Relion; A3 adds network-device and host credentials and any host agent to the threat model; A4 makes the schema accept non-SER native records (switch/gateway Syslog, Windows events, clock status); A6 states support per SEL family and device class. The first slice (ADR-0005) is unchanged.
 
 ### Owner-supplied SEL manuals — 2026-10-23
-The owner supplied 15 SEL instruction manuals and user's guides (SEL-751 IM date code 20260910, SEL-787-2/-3/-4, SEL-311L/-6, SEL-400G, SEL-411L, SEL-451-5, SEL-2488, SEL-2731, SEL-2741, SEL-3355-2, acSELerator RTAC SEL-5033, SEL-5056, Programming Reference, RSTP User's Guide, SDN User's Guide) and two more data sheets (SEL-2488, SEL-3355-2). PDFs and text extractions: `/mnt/project-files/phase0/manuals-SEL/`. Class: OEM document, `documented-untested`. **B-07 is unblocked for SEL-751.**
+The owner supplied 15 SEL instruction manuals and user's guides (SEL-751 IM date code 20260910, SEL-787-2/-3/-4, SEL-311L/-6, SEL-400G, SEL-411L, SEL-451-5, SEL-2488, SEL-2731, SEL-2741, SEL-3355-2, acSELerator RTAC SEL-5033, SEL-5056, Programming Reference, RSTP User's Guide, SDN User's Guide) and two more data sheets (SEL-2488, SEL-3355-2). PDFs and text extractions: `reference/manuals-SEL/`. Class: OEM document, `documented-untested`. **B-07 is unblocked for SEL-751.**
 
 A1 spot-read of the SEL-751 IM (A2 and A6 must read and cite the source themselves):
 - Table 7.43: `ID` is Access Level 0; Figure 7.38 prints an example ID response (candidate `documented-example` fixture).
@@ -296,7 +255,7 @@ Checked against SEL-751 IM Table 7.67 (SHOW command, all forms Access Level 1) a
 - **A3 follow-up (127f8bd, PR #1):** TB11 Windows hosts → platform, receive-only; host `origin_auth` is `tls-mutual` only with a pinned host certificate, otherwise `none`; AP-25 closed by design (credential-store audit checks zero Windows credentials); AP-26 (agents) kept as excluded by owner decision.
 
 ### Owner answers and second manual set — 2026-10-23 (17:21Z)
-**Manuals added** to `/mnt/project-files/phase0/manuals-SEL/` (PDF + `text/`, `documented-untested`): SEL-2401, SEL-2404, SEL-2407 clocks; SEL-3350-1 (RTAC, replaces discontinued SEL-3530); SEL-3505, SEL-3530, SEL-3555-2 RTAC hardware; SEL-3610/3620/3622 shared IM; SEL-735; AG95-04 Compressed ASCII Commands (format, checksum rule, configuration message at any level). Not supplied: SEL Fast Message standalone document (the SEL-751 IM covers Fast Message in its own appendix; A2 to check if it suffices), SEL-2730M, SSD-lifetime note (owner: not available).
+**Manuals added** to `reference/manuals-SEL/` (PDF + `text/`, `documented-untested`): SEL-2401, SEL-2404, SEL-2407 clocks; SEL-3350-1 (RTAC, replaces discontinued SEL-3530); SEL-3505, SEL-3530, SEL-3555-2 RTAC hardware; SEL-3610/3620/3622 shared IM; SEL-735; AG95-04 Compressed ASCII Commands (format, checksum rule, configuration message at any level). Not supplied: SEL Fast Message standalone document (the SEL-751 IM covers Fast Message in its own appendix; A2 to check if it suffices), SEL-2730M, SSD-lifetime note (owner: not available).
 **A1 grep only (A2 to read and cite):** SEL-3620/3622/3610 IM documents Syslog, SSH, SNMP, HTTPS; SEL-735 has Telnet and SER, no Syslog or SSH; SEL-2401/2404/2407 show no Syslog, SSH, Telnet, SNMP, or NTP; SEL-3555-2 has Syslog, SSH, SNMP, PTP.
 **Owner answers:** recorded in `docs/requirements.md` "Owner answers". Consequences: ADR-0007 (proposed) Windows site node on SEL-3355-2; ADR-0002/0003/0004 amended; `docs/architecture.md` device table and assumptions updated.
 **Follow-ups:** A5 owns ADR-0007 (Windows durability re-test, SCM supervision, service-account isolation, SSD write estimate); A3 credential-at-rest on Windows/TPM and AMT precondition; A6 Windows runs of E-02/E-03/E-04 and per-transport forwarding interoperability; A2 reads the new manuals and classifies; A4 forwarder transport set (RELP/TLS, 5425, 6587, 5426).
@@ -1228,7 +1187,7 @@ IEC 61850 (MMS, GOOSE, SV) and IEC 60870-5-104 are added once the owner confirms
   - which services are on the insecure list;
   - what a passive sensor can read in clear for identity (R1.1, R6.7).
 
-  The sources are the manuals already in the project files (S22 to S43). Nothing is taken from the web without the owner's leave (D4-58). Mark a service `unknown` where the document is silent. Nothing is guessed.
+  The sources are the manuals already in `reference/manuals-SEL/` (S22 to S43). Nothing is taken from the web without the owner's leave (D4-58). Mark a service `unknown` where the document is silent. Nothing is guessed.
 - **May change:** `docs/device-capabilities.md` and `docs/phase4/D2-*.md`.
 - **Reviewers:** D4 and D6.
 
@@ -1458,7 +1417,7 @@ Nothing captures traffic on a real network. Nothing scans, probes or transmits o
      - `ended_at` bounded to 9 fractional digits;
      - the collector refusing to load when two enrolled assets share one host:port.
   2. After D1 approves it, the code in `contracts/adapter`, the adapters and the collector, with D6's tests. The collector fills in `local_addr` for SNMPv3 sessions, or passes it through the `snmpv3` connection interface, because the socket is the collector's. The host:port refusal goes where the collector loads its configuration.
-  3. **If the owner places the DNP3 SA specification in the project files,** confirm `sa-failed`'s codes and the g120v7 layout in a C13 note.
+  3. **If the owner places the DNP3 SA specification in `reference/`,** confirm `sa-failed`'s codes and the g120v7 layout in a C13 note.
 - **May change:** `contracts/adapter`, `modules/ied/`, `modules/security/collector/` (for the two collector changes in deliverable 2 only), `docs/phase4/D2-*.md`.
 - **Reviewers:** D6, D3 for the collector, D5 for the node, and D4 for the known-flow tie.
 

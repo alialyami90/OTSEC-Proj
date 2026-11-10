@@ -258,7 +258,7 @@ This is A6's status against each Phase 3 exit gate item (`docs/agent-handoffs.md
 
 #### P3-W1 on the owner's PC (2026-10-27)
 
-- **Run:** by the owner, in their own elevated PowerShell, with the owner present. It followed A6's run sheet as adapted by A1 (everything in the owner's OTSEC folder: the clone, a Python venv, the Go caches and the output). A1 read `pc-out\pytest.txt` back read-only on the PC (`/mnt/project-files/phase3/P3-W1-pc-run-result.md`) and copied it to `/mnt/project-files/phase3/P3-W1-pc-pytest.txt` as UTF-8 with LF. The PC file is UTF-16LE with a BOM and CRLF (Windows PowerShell's `Tee-Object`), 49,796 bytes, and `Get-FileHash` gave SHA-256 `DBEF499A332683F67D9895B6522F1A0849E8083F3A7E1B8692AC17FC77403D4B`.
+- **Run:** by the owner, in their own elevated PowerShell, with the owner present. It followed A6's run sheet as adapted by A1 (everything in the owner's OTSEC folder: the clone, a Python venv, the Go caches and the output). A1 read `pc-out\pytest.txt` back read-only on the PC (`reference/carried/P3-W1-pc-run-result.md`) and copied it to `reference/carried/P3-W1-pc-pytest.txt` as UTF-8 with LF. The PC file is UTF-16LE with a BOM and CRLF (Windows PowerShell's `Tee-Object`), 49,796 bytes, and `Get-FileHash` gave SHA-256 `DBEF499A332683F67D9895B6522F1A0849E8083F3A7E1B8692AC17FC77403D4B`.
 - **Build:**
   - `HEAD` was `27fdea4870c4c5dfc1f6b03958823479376c26fa` on main, and `git status --short` was empty. The slice tree there is unchanged since #179's 40e15b7.
   - Go 1.26.10, portable, first on PATH, with `GOTOOLCHAIN=local`.
@@ -526,7 +526,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
 
 ### F-021 — 2026-11-04 — A `collection.missed` committed late gets a gap start that depends on the feeder's cadence, and can move a baseline's end past events already refused
 
-- **What ran.** C6's review of #414 (learner 0.2, D4-45) at `8c9899b`, with the probe `TestC6ProbeLateGapStartMovesTheEnd` (`/mnt/project-files/c6/probes/c6probe414_test.go`).
+- **What ran.** C6's review of #414 (learner 0.2, D4-45) at `8c9899b`, with the probe `TestC6ProbeLateGapStartMovesTheEnd` (`reference/carried/c6probe414_test.go.txt`).
 - **The case.** A `collection.missed` is written once the health stream takes it (D4-37). When it is committed more than `FeedLateness` after its series' `first_at`, the feeder clamps the gap's start to its watermark (`TestFeedMissedGapStartsAtItsSeries`), so the start depends on how far the steps had come. Events between the old T and the record are refused as `ErrPeriodEnded` before the gap arrives. The gap can then move T later.
 - **Result.** Same records, 1000 s minimum. A gap from 900 s gives T at 1400 s, and a gap from 1250 s gives T at 1000 s. In both, the event at 1100 s is refused. Neither `Late` nor `Refused` counts the case. The sign is the scheduler's `evidence.not_stored` alarm.
 - **Ruling.** C1 accepted it as a limitation of D4-45, together with C5's restart-gap residual (#416). Both need a fault.
@@ -634,7 +634,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
     - `SEL-751-R100-V0-Z001001-D20070410` appears only in Figure 10.16's header.
     - `SEL-751-R100-V0-Z001001-D20110601` appears only in the format explanation. For that date, Table A.5 lists `R101-V0`.
   - Both cite "Appendix A, firmware revision history", which does not list them.
-  - Branch R100 is `deny`, so neither FID can enable collection. A2 corrects the citations and decides whether to keep the entries. A6 sent A2 the row list (`/mnt/project-files/phase1/A6-appendixA-rows-2026-10-24.txt`).
+  - Branch R100 is `deny`, so neither FID can enable collection. A2 corrects the citations and decides whether to keep the entries. A6 sent A2 the row list (`reference/carried/A6-appendixA-rows-2026-10-24.txt`).
 - **Evidence class:** `desk`.
 
 ### F-014 — 2026-10-24 — H-14 third run: on NTFS, releasing the reserve before the first open kept a full store openable in every round; with no reserve the store reads but cannot be pruned
