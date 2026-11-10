@@ -1474,15 +1474,16 @@ The owner gave the CLI session a list of eight items at about 21:40Z. Items 3 an
 - **The ask.** Item 3: "D1 updates it from the exit reports, and records-auditor checks it as its first run." Item 4: "D1 lists only branches whose every PR is merged at the branch tip and brings the list to you for approval."
 - **How the Status column is read.** The file's legend had five values and no definitions. This entry's PR defines them in the file, and adds a Basis column.
   - Status is the furthest state the requirement has reached for at least one device family, at a gate the owner accepted.
-  - `verified` means that D6's independent tests of the requirement passed and an accepted exit report records them. It never means hardware-verified. Basis gives the evidence class, the scope, what is still owed, and the record.
-  - `implemented` means that product code on `main` does it, and D6's test of it is partial, not run, or not recorded in an exit report.
+  - `verified` means that D6's independent test of the requirement passed end to end on the real binaries, and an accepted exit report records the pass. It never means hardware-verified. Basis gives the evidence class, the scope, what is still owed, and the record.
+  - `implemented` means that product code on `main` does it, and D6's test of it ran at unit level only, was not run, or is not recorded in an exit report.
   - Item 4 is not at a gate, so its work counts no higher than `contracted`.
   - **Why a Basis column.** A bare `verified` beside a requirement that names every device class would claim more than the evidence holds (P10). Every `verified` row is `desk` or `simulated`, and most are for the SEL-751 alone.
-- **The result,** with `main` at `d507a62c`: 23 `verified`, 20 `implemented`, 8 `contracted`, 6 `investigating` and 2 `not started`, of 59.
+- **The result,** with `main` at `d507a62c`: 22 `verified`, 21 `implemented`, 8 `contracted`, 6 `investigating` and 2 `not started`, of 59.
 - **Where the rule was close.**
   - A requirement whose criterion needs a device is still `verified` when its `simulated` form passed at a gate, and Basis names the hardware test that is owed (R1.2, R4.2).
   - R3.1 and R3.5 are `implemented`, not `verified`, because `docs/phase-4a-exit.md` lists "Retrieval sees a real change made with the vendor tool (R3.1, R3.5)" under its unverified assumptions.
-  - R5.7 is `verified` at `desk` only: V-S5 and V-S10 pass in unit tests, because the node builds only valid requests.
+  - A criterion with parts that were not run is still `verified` when its end-to-end run passed at a gate, and Basis names those parts (R1.2, R4.3, R4.7, R5.4, R8.8). `records-auditor` asked for this rule to be stated (its findings 1, 3 and 4 on #611).
+  - R2.6 and R5.7 are `implemented`, because V-S5 and V-S10 pass in unit tests only: the node builds only valid requests. R5.7 was `verified` in the PR's first commit, against the same evidence that made R2.6 `implemented` (`records-auditor`'s finding 2). R5.3 stays `verified` on V-S7's recordings, and its Basis names the hostile parameters as unit-level.
   - R6.1 to R6.5 and R6.7 are `contracted`. R6.6 is `investigating`, because no measured visibility statement exists.
   - R1.7 is a standing rule. Its `implemented` means that the work follows it.
   - R2.2 and R2.3 are the two `not started` rows. Item 5 is not briefed.
