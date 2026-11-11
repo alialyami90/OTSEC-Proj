@@ -12,6 +12,7 @@ standin_sensor.py stands in for it and decodes nothing. Evidence class when
 they pass in CI: CI-Linux, simulated.
 """
 
+import errno
 import os
 import shutil
 import subprocess
@@ -182,21 +183,34 @@ def test_an_nftables_egress_rule_measured_against_each_send_path():
         time.sleep(2.0)
         rig.nft_egress_drop()
         cap = rig_netns.Capture(rig.rig_ns, TAP).start()
-        rig_netns.reach_neighbour(rig.sensor_ns)
-        rig_netns.dhcp_discover(rig.sensor_ns, MON)
+        told = {}  # what each sender was told: the kernel may refuse a send the rule drops
+
+        def attempt(name, send):
+            try:
+                send()
+                told[name] = "accepted"
+            except OSError as e:
+                told[name] = errno.errorcode.get(e.errno, str(e.errno))
+
+        attempt("neighbour", lambda: rig_netns.reach_neighbour(rig.sensor_ns))
+        attempt("dhcp", lambda: rig_netns.dhcp_discover(rig.sensor_ns, MON))
         for tag, bypass in (("plain", False), ("bypass", True)):
             s = rig_netns.packet_socket(rig.sensor_ns, MON, bypass=bypass)
-            s.send(rig_netns.marker_frame(tag))
+            attempt(tag, lambda: s.send(rig_netns.marker_frame(tag)))
             s.close()
         time.sleep(1.5)
         cap.stop()
         kernel = os.uname().release
     got = [f[3] for f in cap.arrived()]
     stack = [rig_netns.classify(f) for f in got if not f[14:].startswith(b"otsec-rig:")]
-    plain, bypass = (rig_netns.marker_frame(t) in got for t in ("plain", "bypass"))
-    print(f"MEASURED nft egress drop on mon0, kernel {kernel}: stack frames passed {stack}; "
-          f"packet socket passed {plain}; packet socket with PACKET_QDISC_BYPASS passed {bypass}")
+    arrived = {t: rig_netns.marker_frame(t) in got for t in ("plain", "bypass")}
+    print(f"MEASURED nft egress drop on mon0, kernel {kernel}: stack frames that passed: {stack} "
+          f"(sends: neighbour {told['neighbour']}, dhcp {told['dhcp']}); "
+          f"packet socket: send {told['plain']}, frame arrived {arrived['plain']}; "
+          f"packet socket with PACKET_QDISC_BYPASS: send {told['bypass']}, frame arrived {arrived['bypass']}")
     assert stack == [], "the egress rule is not in force: the host's own frames passed it"
+    for tag in ("plain", "bypass"):
+        assert told[tag] == "accepted" or not arrived[tag], f"{tag}: the send was refused and the frame still arrived"
 
 
 def test_capabilities_a_process_that_dropped_them_passes_and_one_that_kept_them_is_flagged():
