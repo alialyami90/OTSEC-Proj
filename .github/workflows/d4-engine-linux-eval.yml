@@ -25,10 +25,10 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: GT-PCAP DNP3 cases, rebuilt and checked, under every configuration
-        run: sh modules/telemetry/experiments/engine-linux/run.sh dnp3 "$RUNNER_TEMP/e-d4-03"
       - name: Fetch the public captures (pinned SHA-256s)
-        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; those rows read not run"
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; run.sh checks each again and drops it, and its rows read not run"
+      - name: GT-PCAP cases (DNP3, and the derived Modbus moved port with its control), rebuilt and checked, under every configuration
+        run: sh modules/telemetry/experiments/engine-linux/run.sh dnp3 "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - name: Public and extra captures under every configuration
         run: sh modules/telemetry/experiments/engine-linux/run.sh public "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

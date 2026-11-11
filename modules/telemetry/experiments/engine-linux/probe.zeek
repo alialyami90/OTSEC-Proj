@@ -132,3 +132,11 @@ event snmp_unknown_scoped_pdu(c: connection, is_orig: bool, header: SNMP::Header
 
 event snmp_encrypted_pdu(c: connection, is_orig: bool, header: SNMP::Header)
 	{ log_snmp(c, is_orig, header, "snmp_encrypted_pdu", T); }
+
+## A message whose version Zeek cannot parse carries no header, only the
+## version number it read.
+event snmp_unknown_header_version(c: connection, is_orig: bool, version: count)
+	{
+	Log::write(LOG, Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="snmp",
+	                     $ev="snmp_unknown_header_version", $snmp_version=version));
+	}

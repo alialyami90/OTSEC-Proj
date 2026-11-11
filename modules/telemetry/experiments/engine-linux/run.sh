@@ -7,10 +7,14 @@
 # a network or contacts a device. Evidence class: simulated (Linux).
 #
 # Usage:
-#   run.sh dnp3 WORK          GT-PCAP's DNP3 captures, rebuilt by D6's
-#                             dnp3_cases.py and checked against dnp3.sha256,
-#                             against the committed labels and, where it is
-#                             in the checkout, D6's engine-pass-conditions.tsv
+#   run.sh dnp3 WORK CACHE    GT-PCAP's DNP3 captures, rebuilt by D6's
+#                             dnp3_cases.py and checked against dnp3.sha256;
+#                             the derived modbus-moved-port, rebuilt by D6's
+#                             movedport.py from CACHE's modbus.pcap and checked
+#                             against its hash, with modbus.pcap as its
+#                             control; all against the committed labels and,
+#                             where it is in the checkout, D6's
+#                             engine-pass-conditions.tsv
 #   run.sh public WORK CACHE  MANIFEST.tsv's captures (already fetched into
 #                             CACHE by fetch_captures.sh) and the captures in
 #                             extra-captures.tsv
@@ -58,6 +62,7 @@ docker run --rm --network none -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --
   "$SURICATA_IMAGE" -T -c /cfg/suricata.yaml --disable-detection > "$work/suricata-T.txt" 2>&1 || {
   cat "$work/suricata-T.txt" >&2; exit 1; }
 docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base/protocols/dnp3/consts.zeek > "$work/zeek-dnp3-consts.zeek"
+docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base/protocols/modbus/consts.zeek > "$work/zeek-modbus-consts.zeek"
 {
   echo "zeek:      $zv"
   echo "zeek image: $ZEEK_IMAGE"
@@ -69,18 +74,20 @@ docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base
 } > "$work/versions.txt"
 
 # Every table opens with what ran and whether it counts (D1 and D6 on #625):
-# a run counts only on refs/heads/main with D6's pass conditions present.
+# a run counts only on refs/heads/main with D6's pass conditions present and
+# equal to the reviewed file pinned in pins.env.
 header() {
   commit=${GITHUB_SHA:-$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)}
   ref=${GITHUB_REF:-local}
   cond=$root/tests/integration/gt_pcap/engine-pass-conditions.tsv
   if [ -f "$cond" ]; then ch=$(sha256sum < "$cond" | cut -c1-64); else ch=absent; fi
-  if [ "$ref" = refs/heads/main ] && [ "$ch" != absent ]; then
+  if [ "$ch" = "$CONDITIONS_SHA256" ]; then pinned="equals the pin"; else pinned="differs from the pin $CONDITIONS_SHA256"; fi
+  if [ "$ref" = refs/heads/main ] && [ "$ch" = "$CONDITIONS_SHA256" ]; then
     kind=counted
   else
     kind="rehearsal: not the counted result"
   fi
-  printf '%s\n' "- Run: $kind" "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch" ""
+  printf '%s\n' "- Run: $kind" "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch ($pinned)" ""
 }
 
 # 2. Every configuration over one directory of captures.
@@ -106,10 +113,24 @@ engines() {
 
 case $mode in
   dnp3)
-    gt=$root/tests/fixtures/network/gt-pcap/dnp3
+    cache=$3
+    gt=$root/tests/fixtures/network/gt-pcap
     rm -rf "$work/dnp3"
     python3 "$root/tests/integration/gt_pcap/dnp3_cases.py" "$work/dnp3" > /dev/null
-    (cd "$work/dnp3" && sha256sum -c --quiet "$gt/dnp3.sha256")
+    (cd "$work/dnp3" && sha256sum -c --quiet "$gt/dnp3/dnp3.sha256")
+    # The derived Modbus case (D6's note, section 3) and its control: the
+    # source is checked against MANIFEST.tsv, the derived capture against its
+    # pinned hash. If either check fails, both are left out and their rows
+    # read "unknown (not run)".
+    src_sha=$(grep '^modbus\.pcap	' "$root/tests/fixtures/network/public-ot-captures/MANIFEST.tsv" | cut -f2)
+    if echo "$src_sha  $cache/modbus.pcap" | sha256sum -c --status \
+      && python3 "$root/tests/integration/gt_pcap/movedport.py" "$cache/modbus.pcap" "$work/dnp3" \
+      && (cd "$work/dnp3" && sha256sum -c --quiet "$gt/modbus/modbus-moved-port.sha256"); then
+      cp "$cache/modbus.pcap" "$work/dnp3/modbus.pcap"
+    else
+      echo "modbus-moved-port or its control did not check out; left out"
+      rm -f "$work/dnp3/modbus-moved-port.pcap"
+    fi
     engines "$work/dnp3" "$work/out-dnp3"
     { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; } > "$work/dnp3.md"
     ;;
