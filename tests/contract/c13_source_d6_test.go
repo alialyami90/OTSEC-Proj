@@ -17,17 +17,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"otsec.local/otsec/contracts/netobs"
 )
 
 // The decoder's acceptance above means something only if it refuses a
-// wrong record. Each case takes the stream's first observation, a first
-// sight that the decoder accepts, and breaks one rule of C13 in its bytes:
-// a duplicate key at the top level and inside the citation (strict JSON,
-// §1), the node's object on a channel record (§5), and frame bytes that no
-// longer hash to their citation (§4.2).
+// wrong record, and for the reason the contract names. Each case takes the
+// stream's first observation, a first sight that the decoder accepts, and
+// breaks one rule of C13 in its bytes: a duplicate key at the top level and
+// inside the citation (strict JSON, §1: decode), the node's object on a
+// channel record (§5: conflict), frame bytes that no longer hash to their
+// citation (§4.2: hash), and a record that says it is an alert, which the
+// channel never carries (§1, AP-34: type). The last case is a heartbeat
+// whose counters fall within its run (§6: order).
 func TestC13SourceRecordsBrokenOnPurposeAreRefused(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "c13-source", "gt-pcap-dnp3.stream"))
 	if err != nil {
@@ -59,15 +63,49 @@ func TestC13SourceRecordsBrokenOnPurposeAreRefused(t *testing.T) {
 	} else {
 		rehashed[at] = 'A'
 	}
-	for name, b := range map[string][]byte{
-		"a key twice at the top level":                 swap(`"kind":"flow"`, `"kind":"flow","kind":"flow"`),
-		"a key twice inside the citation":              swap(`"frames_total":1`, `"frames_total":1,"frames_total":1`),
-		"the node's object on the channel":             append(append([]byte{}, good[:len(good)-1]...), node...),
-		"frame bytes that do not hash to the citation": rehashed,
+	for _, c := range []struct {
+		name string
+		b    []byte
+		want netobs.Code
+	}{
+		{"a key twice at the top level", swap(`"kind":"flow"`, `"kind":"flow","kind":"flow"`), netobs.CodeDecode},
+		{"a key twice inside the citation", swap(`"frames_total":1`, `"frames_total":1,"frames_total":1`), netobs.CodeDecode},
+		{"the node's object on the channel", append(append([]byte{}, good[:len(good)-1]...), node...), netobs.CodeConflict},
+		{"frame bytes that do not hash to the citation", rehashed, netobs.CodeHash},
+		{"a record that says it is an alert", swap(`"type":"observation"`, `"type":"alert"`), netobs.CodeType},
 	} {
-		if _, err := netobs.DecodeChannel(b); err == nil {
-			t.Errorf("%s: the decoder accepted the record", name)
+		_, err := netobs.DecodeChannel(c.b)
+		if err == nil {
+			t.Errorf("%s: the decoder accepted the record", c.name)
+		} else if !slices.Contains(netobs.Codes(err), c.want) {
+			t.Errorf("%s: refused as %v, want %s: %v", c.name, netobs.Codes(err), c.want, err)
 		}
+	}
+
+	// The run's two heartbeats, the wrong way round: the opening one, with
+	// its lower seq and its zero counters, does not follow the closing one.
+	var beats []*netobs.Heartbeat
+	for r = bytes.NewReader(raw); len(beats) < 2; {
+		b, err := netobs.ReadFrame(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rec, err := netobs.DecodeChannel(b); err != nil {
+			t.Fatal(err)
+		} else if rec.Heartbeat != nil {
+			beats = append(beats, rec.Heartbeat)
+		}
+	}
+	if beats[0].RunID != beats[1].RunID || beats[1].Counters.Packets == 0 {
+		t.Fatalf("the stream's first two heartbeats should open and close one run")
+	}
+	if err := beats[1].Follows(beats[0]); err != nil {
+		t.Errorf("the closing heartbeat does not follow the opening one: %v", err)
+	}
+	if err := beats[0].Follows(beats[1]); err == nil {
+		t.Error("a heartbeat whose seq and counters fall within its run was accepted")
+	} else if !slices.Contains(netobs.Codes(err), netobs.CodeOrder) {
+		t.Errorf("falling counters refused as %v, want %s", netobs.Codes(err), netobs.CodeOrder)
 	}
 }
 

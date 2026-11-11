@@ -111,11 +111,34 @@ def test_latency_is_a_known_delay_after_the_triggering_frame():
     print(f"MEASURED latency: {got} ns for a {delay} ns delay, on the runner's wall clock (CLOCK_REALTIME)")
 
 
-def start_standin(rig, mode):
-    p = subprocess.Popen([sys.executable, os.path.join(HERE, "standin_sensor.py"), rig.sensor_ns, MON, mode],
+RUNNING = []  # stand-ins started by the test in hand
+
+
+@pytest.fixture(autouse=True)
+def no_standin_outlives_its_test():
+    """A test that fails between a stand-in's start and its stop would
+    leave it running until pytest exits (D5 on #626)."""
+    yield
+    while RUNNING:
+        p = RUNNING.pop()
+        if p.poll() is None:
+            p.kill()
+            p.wait()
+
+
+def start_standin(rig, mode, *more):
+    p = subprocess.Popen([sys.executable, os.path.join(HERE, "standin_sensor.py"), rig.sensor_ns, MON, mode, *more],
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    RUNNING.append(p)
     assert p.stdout.readline().strip() == "ready"
     return p
+
+
+def ask(p, command):
+    """One command to a stand-in, and its one-line answer."""
+    p.stdin.write(command + "\n")
+    p.stdin.flush()
+    return p.stdout.readline().strip()
 
 
 def stop_standin(p):
@@ -136,10 +159,14 @@ def test_c11_a_quiet_monitoring_interface_sends_nothing_over_the_whole_replay():
             stop_sensor=lambda p: seen.update(zip(("frames", "reopen"), stop_standin(p))),
             replay=lambda sock, fr: rig_replay.replay(sock, fr, max_gap_ns=2_000_000))
     assert got["from_mon0"] == [], got["kinds"]
-    # Zero frames means something only if the link carried the replay.
+    # Zero frames means something only if the link carried the replay, and
+    # only if this capture, in this run, could see a frame from mon0: the
+    # rig's own marker, sent from mon0 after the stand-in stopped.
     assert [rig_netns.sha(d) for d in got["replayed"]] == [rig_netns.sha(f.data) for f in frames]
     assert seen["frames"] == len(frames)
-    print(f"MEASURED C-11: {len(frames)} frames replayed, {seen['frames']} seen on mon0, 0 sent from mon0")
+    assert got["end_marker_seen"], "the capture could not see a frame sent from mon0 at the end of the run"
+    print(f"MEASURED C-11: {len(frames)} frames replayed, {seen['frames']} seen on mon0, 0 sent from mon0, "
+          f"and the rig's end marker from mon0 seen")
 
 
 def test_c11_negative_control_a_misconfigured_interface_is_seen_to_send():
@@ -307,3 +334,72 @@ def test_capabilities_a_process_that_dropped_them_passes_and_one_that_kept_them_
     assert bad == [] and frames == 5 and reopen == "denied", result["drop"]
     bad, frames, reopen = result["keep"]
     assert any("CAP_NET_RAW" in b for b in bad) and frames == 5 and reopen == "ok", result["keep"]
+
+
+# What each stand-in does with the socket it already holds: (its name in the
+# output, its arguments, the steps asked of it).
+OPEN_SOCKET = [
+    ("kept its capabilities (the control)", ("keep",), ("send", "bypass", "send")),
+    ("dropped everything", ("drop",), ("send", "bypass", "send")),
+    ("set the bypass option, then dropped everything", ("drop", "pre-bypass"), ("send",)),
+]
+
+
+@pytest.mark.parametrize("behind", ["no rule", "nft", "tc"])
+def test_capabilities_what_a_process_with_none_can_still_do_with_its_open_socket(behind):
+    """D3 on #626: the capability check shows that a process which dropped
+    everything can't open a second packet socket. It says nothing of the
+    socket it already holds. So a stand-in sends on that socket after the
+    drop, sets PACKET_QDISC_BYPASS on it and sends again, and a third sets
+    the option before it drops. Each is run on the quiet mon0 and behind
+    each of the two egress rules. What the kernel allows is the measurement:
+    it is printed and recorded, and nothing here assumes it. The control is
+    the stand-in that kept its capabilities, which must behave as the rig's
+    own root sender did."""
+    if behind == "nft" and not shutil.which("nft"):
+        if REQUIRED:
+            pytest.fail("OTSEC_RIG_REQUIRED=1, and the runner has no nft")
+        pytest.skip("no nft")
+    rows = []
+    try:
+        with rig_netns.Rig() as rig:
+            cap = rig_netns.Capture(rig.rig_ns, TAP).start()
+            rig.up()
+            time.sleep(0.5)
+            if behind == "nft":
+                rig.nft_egress_drop()
+            elif behind == "tc":
+                rig.tc_egress_drop()
+            for i, (who, args, steps) in enumerate(OPEN_SOCKET):
+                p = start_standin(rig, *args)
+                held = bool(rig_caps.problems(rig_caps.status(p.pid)))
+                bypass = "pre-bypass" in args
+                for step in steps:
+                    if step == "bypass":
+                        rows.append((who, held, "set PACKET_QDISC_BYPASS", ask(p, "bypass"), None))
+                        bypass = True
+                    else:
+                        tag = f"{behind.replace(' ', '')}-{i}-{'bypass' if bypass else 'plain'}"
+                        rows.append((who, held, "send with the bypass option" if bypass else "send", ask(p, f"send {tag}"), tag))
+                stop_standin(p)
+            time.sleep(0.5)
+            cap.stop()
+    except rig_netns.Unavailable as e:
+        unknown_on_this_runner(e)
+    got = [f[3] for f in cap.arrived()]
+    result = {}
+    for who, held, what, told, tag in rows:
+        arrived = None if tag is None else rig_netns.marker_frame(tag) in got
+        result[(who, what)] = (told, arrived)
+        print(f"MEASURED open socket behind {behind}: a process that {who} (holds a capability: {held}): {what}: "
+              f"{told}" + ("" if tag is None else f", frame arrived {arrived}"))
+        assert told == "accepted" or not arrived, f"{who}: {what} was refused and the frame still arrived"
+    # The stand-ins are what they say they are.
+    assert {who: held for who, held, *_ in rows} == {OPEN_SOCKET[0][0]: True, OPEN_SOCKET[1][0]: False,
+                                                    OPEN_SOCKET[2][0]: False}
+    # The control: with no rule both of its sends arrive, and behind a rule
+    # its ordinary send does not, or the rule is not in force.
+    control = OPEN_SOCKET[0][0]
+    assert result[(control, "send")][1] == (behind == "no rule")
+    if behind == "no rule":
+        assert result[(control, "send with the bypass option")] == ("accepted", True)

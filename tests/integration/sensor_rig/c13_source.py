@@ -72,7 +72,9 @@ class Source:
 
     def heartbeat(self, ns, **counters):
         return {**self._head("heartbeat"), "at_utc": utc(ns), "coverage": self.coverage,
-                "counters": {**dict.fromkeys(COUNTERS, 0), **counters}, "interface_check": "ok"}
+                "counters": {**dict.fromkeys(COUNTERS, 0), **counters},
+                # No binding was read: the source reads a file, not an interface (D4 on #626).
+                "interface_check": "unknown"}
 
     def _observation(self, kind, row, nums, total, first_sight, body):
         cited = nums[:MAX_CITED]

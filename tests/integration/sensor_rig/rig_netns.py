@@ -34,6 +34,7 @@ import time
 ETH_P_ALL = 0x0003
 SOL_PACKET = 263
 PACKET_QDISC_BYPASS = 20
+PACKET_STATISTICS = 6
 PACKET_OUTGOING = 4
 TAP, MON = "tap0", "mon0"
 MON_TEST_ADDR = "192.0.2.99/24"  # TEST-NET-1; only the misconfigured control gets an address
@@ -140,9 +141,15 @@ class Capture:
         time.sleep(settle_s)  # let the last frames cross the pair
         self._stop.set()
         self._thread.join()
+        # The kernel's own count of frames this socket had no room for. A
+        # full buffer is the one way a frame can be missed, so it fails the
+        # run: a missed frame must not read as a frame that was never sent.
+        _, dropped = struct.unpack("II", self.sock.getsockopt(SOL_PACKET, PACKET_STATISTICS, 8))
         self.sock.close()
         if self.error:
             raise self.error
+        if dropped:
+            raise RuntimeError(f"the capture socket dropped {dropped} frames")
         return self
 
     def arrived(self):
@@ -168,6 +175,13 @@ class Rig:
         self.rig_ns, self.sensor_ns, self.misconfigured = f"otsec-rig-{tag}", f"otsec-sen-{tag}", misconfigured
 
     def __enter__(self):
+        try:
+            return self._make()
+        except BaseException:
+            self.__exit__()  # a set-up that failed part-way leaves no namespace behind
+            raise
+
+    def _make(self):
         sh("ip", "netns", "add", self.rig_ns)
         sh("ip", "netns", "add", self.sensor_ns)
         # Set before the pair exists, so each end starts with the setting.
@@ -308,6 +322,12 @@ def c11(rig, frames, start_sensor=None, stop_sensor=None, replay=None, settle_s=
     start the sensor, replay `frames` onto tap0, stop the sensor, and only
     then stop the capture. Returns what mon0 sent and what the replay sent.
     The verdict is the caller's: C-11 passes only on zero frames from mon0.
+
+    The run ends with one marker frame that the rig itself sends from mon0,
+    after the sensor has stopped. It is not counted in `from_mon0`, and
+    `end_marker_seen` says whether the capture saw it: a zero count means
+    something only if the same capture, in the same run, could see a frame
+    from mon0 (D3 on #626).
     """
     cap = Capture(rig.rig_ns, TAP).start()
     rig.up()
@@ -319,9 +339,15 @@ def c11(rig, frames, start_sensor=None, stop_sensor=None, replay=None, settle_s=
     if stop_sensor:
         stop_sensor(handle)
     time.sleep(settle_s)
+    marker = marker_frame("c11-end")
+    end = packet_socket(rig.sensor_ns, MON)
+    end.send(marker)
+    end.close()
     cap.stop()
-    return {"from_mon0": [f[3] for f in cap.arrived()], "replayed": [f[3] for f in cap.sent()], "log": log,
-            "kinds": sorted({classify(f[3]) for f in cap.arrived()})}
+    arrived = [f[3] for f in cap.arrived()]
+    from_mon0 = [d for d in arrived if d != marker]
+    return {"from_mon0": from_mon0, "replayed": [f[3] for f in cap.sent()], "log": log,
+            "kinds": sorted({classify(d) for d in from_mon0}), "end_marker_seen": arrived.count(marker) == 1}
 
 
 def sha(data):

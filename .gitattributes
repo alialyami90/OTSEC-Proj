@@ -3,3 +3,6 @@
 # endings (A4 proposal, docs/phase1/A4-contracts.md; EP-1).
 tests/fixtures/** -text
 contracts/**/testdata/** -text
+# The test-only C13 source's committed stream is length-prefixed binary
+# (D5 on #626, authorized by D1).
+tests/contract/testdata/c13-source/*.stream -text

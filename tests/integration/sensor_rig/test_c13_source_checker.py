@@ -7,7 +7,9 @@ tests/contract/c13_source_d6_test.go."""
 
 import base64
 import copy
+import csv
 import hashlib
+import os
 import socket
 import threading
 
@@ -28,13 +30,11 @@ def records(name):
 def test_the_checker_passes_the_sources_records_for_every_labelled_case(name):
     rows, frames, sha = c13_stream.load(name)
     recs = c13_source.Source(rows, frames, sha).records()
-    # A capture whose outstation is off port 20000 is judged by the moved-port rule.
-    moved = dnp3_cases.DECODE.get(name, {}).get("port", 20000) != 20000
-    assert moved == (name == "dnp3-moved-port")
-    got = gt_checker.check(rows, recs, moved_port=moved)
+    assert moved(name) == (name == "dnp3-moved-port")
+    got = gt_checker.check(rows, recs, moved_port=moved(name))
     assert got["problems"] == []
     assert got["recall"] == 1 and got["precision"] == 1 and got["extra"] == 0
-    assert got["labelled"] == sum(r["kind"] in ("flow", "service", "function") for r in rows) > 0
+    assert got["labelled"] == sum(r["kind"] in ("flow", "service", "function", "insecure") for r in rows) > 0
     # The stream's own form: heartbeats around the capture, seq from 1, and
     # every first sight's bytes hashing to what it cites.
     assert recs[0]["type"] == recs[-1]["type"] == "heartbeat"
@@ -141,23 +141,113 @@ def no_end(recs):
     recs.remove(find(recs, "flow", phase="end"))
 
 
+def no_start(recs):
+    recs.remove(find(recs, "flow", phase="start"))  # the record the node's detector reads (D4 on #626)
+
+
+def syn_only_on_a_flow_with_data(recs):
+    find(recs, "flow", phase="end")["flow"]["syn_only"] = True  # only a dial that carried nothing may say so
+
+
+def cites_only_its_response(recs):
+    cited = find(recs, "function", code=1)["citation"]
+    cited["frames"], cited["frames_total"] = cited["frames"][-1:], 1  # C13: it cites the request first
+
+
+def second_service_by_port(recs):
+    again = copy.deepcopy(find(recs, "service"))
+    again["service"]["basis"] = "port"  # beside the one found by content, on a moved port
+    recs.insert(-1, again)
+
+
+# (the wrong record, what the checker must say, the capture it is planted in)
 PLANTED = [
-    (drop_service, "missed service"), (wrong_sa, "recorded with sa none"), (wrong_port, "missed service"),
-    (doubled_packets, "packets and"), (wrong_citation, "does not show it"), (wrong_frame_number, "the label has that frame as"),
-    (extra_function, "extra function"), (response_as_function, "extra function"), (missing_objects, "missed function"),
-    (reversed_client, "the client is recorded as"), (no_end, "no end record"),
+    (drop_service, "missed service", "dnp3-sa"), (wrong_sa, "recorded with sa none", "dnp3-sa"),
+    (wrong_port, "missed service", "dnp3-sa"), (doubled_packets, "packets and", "dnp3-sa"),
+    (wrong_citation, "does not show it", "dnp3-sa"), (wrong_frame_number, "the label has that frame as", "dnp3-sa"),
+    (extra_function, "extra function", "dnp3-sa"), (response_as_function, "extra function", "dnp3-sa"),
+    (missing_objects, "missed function", "dnp3-sa"), (reversed_client, "the client is recorded as", "dnp3-sa"),
+    (no_end, "no end record", "dnp3-sa"), (no_start, "no start record", "dnp3-sa"),
+    (syn_only_on_a_flow_with_data, "an end says syn_only", "dnp3-sa"),
+    (cites_only_its_response, "does not cite the request first", "dnp3-sa"),
+    (second_service_by_port, "not by content, on a moved port", "dnp3-moved-port"),
 ]
 
 
-@pytest.mark.parametrize("plant,says", PLANTED, ids=[p.__name__ for p, _ in PLANTED])
-def test_the_checker_fails_on_a_planted_wrong_record(plant, says):
+def moved(name):
+    """A capture whose outstation is off port 20000 is judged by the moved-port rule."""
+    return dnp3_cases.DECODE.get(name, {}).get("port", 20000) != 20000
+
+
+@pytest.mark.parametrize("plant,says,name", PLANTED, ids=[p.__name__ for p, _, _ in PLANTED])
+def test_the_checker_fails_on_a_planted_wrong_record(plant, says, name):
+    rows, frames, sha = c13_stream.load(name)
+    recs = c13_source.Source(rows, frames, sha).records()
+    assert gt_checker.check(rows, recs, moved_port=moved(name))["problems"] == []
+    plant(recs)
+    got = gt_checker.check(rows, recs, moved_port=moved(name))
+    assert any(says in p for p in got["problems"]), got["problems"]
+    assert len(PLANTED) == 15
+
+
+def test_a_flow_with_no_start_is_not_matched():
     rows, frames, sha = c13_stream.load("dnp3-sa")
     recs = c13_source.Source(rows, frames, sha).records()
-    assert gt_checker.check(rows, recs)["problems"] == []
-    plant(recs)
+    whole = gt_checker.check(rows, recs)
+    no_start(recs)
     got = gt_checker.check(rows, recs)
-    assert any(says in p for p in got["problems"]), got["problems"]
-    assert got["recall"] < 1 or got["precision"] < 1 or got["problems"]
+    assert got["matched"] == whole["matched"] - 1 and got["recall"] < 1
+
+
+MODBUS_LABEL = os.path.join(c13_stream.LABELS, "..", "modbus", "modbus-moved-port.tsv")
+
+
+def modbus_records(rows):
+    """The derived Modbus capture's observations, built from its label by
+    hand: its frames are not in the repository, so the source can't make
+    them. Only what the checker reads is filled in."""
+    def obs(kind, r, body, nums=None):
+        pairs = list(zip(r["frames"].split(","), r["frame_sha256"].split(",")))[:nums]
+        return {"type": "observation", "kind": kind, "protocol": r["protocol"], "direction": r["direction"],
+                "ip": {"src": r["src"], "dst": r["dst"], "l4": r["l4"], "sport": int(r["sport"]), "dport": int(r["dport"])},
+                "citation": {"capture_id": "file:" + "0" * 64, "frames": [{"n": int(n), "sha256": h} for n, h in pairs]},
+                kind: body}
+
+    flow = next(r for r in rows if r["kind"] == "flow")
+    out = [obs("flow", flow, {"phase": "start", "packets": 1, "bytes": 60}, 1),
+           obs("service", flow, {"basis": "content"}, 1)]
+    for r in rows:
+        if r["kind"] == "function":
+            out.append(obs("function", r, {"code": int(r["code"]), "objects": [], "unit": int(r["note"].split("=")[1])}))
+        elif r["kind"] == "insecure":
+            out.append(obs("insecure", r, {"reason": r["note"].split("=")[1]}))
+    out.append(obs("flow", flow, {"phase": "end", "packets": int(flow["packets"]), "bytes": int(flow["bytes"]),
+                                  "end": "idle", "syn_only": False}, 8))
+    return out
+
+
+def test_the_modbus_label_is_judged_with_its_insecure_row_and_its_unit():
+    """D4 on #626: `modbus-moved-port.tsv` holds an `insecure` row, V-M6's
+    "every insecure use flagged", and a unit in its function row."""
+    with open(MODBUS_LABEL, encoding="utf-8", newline="") as f:
+        lines = [ln for ln in f.read().split("\n") if ln and not ln.startswith("#")]
+    rows = list(csv.DictReader(lines, delimiter="\t", quoting=csv.QUOTE_NONE))
+    assert sorted(r["kind"] for r in rows) == ["flow", "function", "insecure", "service"]
+    recs = modbus_records(rows)
+    got = gt_checker.check(rows, recs, moved_port=True)
+    assert got["problems"] == [] and got["labelled"] == got["matched"] == 4 and got["precision"] == 1
+
+    unflagged = [r for r in recs if r["kind"] != "insecure"]
+    assert any(p.startswith("missed insecure modbus-tcp") for p in gt_checker.check(rows, unflagged, moved_port=True)["problems"])
+
+    wrong = copy.deepcopy(recs)
+    find(wrong, "insecure")["insecure"]["reason"] = "telnet"
+    bad = gt_checker.check(rows, wrong, moved_port=True)["problems"]
+    assert any(p.startswith("missed insecure") for p in bad) and any(p.startswith("extra insecure") for p in bad)
+
+    wrong = copy.deepcopy(recs)
+    find(wrong, "function")["function"]["unit"] = 2
+    assert any(p.startswith("missed function 3") for p in gt_checker.check(rows, wrong, moved_port=True)["problems"])
 
 
 def test_recall_and_precision_count_what_was_missed_and_what_was_extra():

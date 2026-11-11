@@ -218,13 +218,18 @@ jobs:
       # replayer, the C-11 run with its negative control, and the capability
       # check. They run as root, because they make namespaces and open packet
       # sockets. Every interface is a virtual one in a namespace made for the
-      # test, never the runner's NIC. The leg installs no package, and
-      # OTSEC_RIG_REQUIRED=1 turns a test that can't run into a failure.
+      # test, never the runner's NIC. The leg installs no system package (pip
+      # installs pytest above, as for every leg), and OTSEC_RIG_REQUIRED=1
+      # turns a test that can't run into a failure. Only the tests that need
+      # root run as root: the rig's logic tests, the C13 source's and the
+      # checker's run unprivileged in the python job (D5 on #626). A
+      # measurement that this runner's kernel can't make is a skip that says
+      # UNKNOWN and why, and -rA prints it.
       - name: The sensor rig's self-tests, as root in network namespaces of their own
         if: matrix.file == 'sensor_rig'
         run: |
-          uname -r; ip -V; command -v nft && sudo nft --version || echo "no nft on this runner"
-          sudo env "PATH=$PATH" OTSEC_RIG_REQUIRED=1 python -m pytest -q -rA -p no:cacheprovider tests/integration/sensor_rig
+          uname -r; ip -V; command -v nft && nft --version || echo "no nft on this runner"
+          sudo env "PATH=$PATH" OTSEC_RIG_REQUIRED=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -rA -p no:cacheprovider tests/integration/sensor_rig/test_rig_selftest.py
       - name: V-M1 over GT-MIB, then M3's key search over this step's own output
         if: matrix.file == 'test_slice_vm1_e2e.py'
         run: |

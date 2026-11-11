@@ -8,30 +8,36 @@ sensor's output:
 - every labelled `service` is recorded: server address, transport, port and
   protocol; against its asset, where the record has the node's object; and
   never by port alone on a capture whose port was moved (C13 section 11);
-- every labelled `flow` is recorded once: its `end` records, summed by key,
-  give the label's packets and bytes (so a PRP duplicate counted twice
-  fails), and its direction and client are the label's;
+- every labelled `flow` is recorded once, with both of its observations
+  (C13 section 4.3): a `start`, which is what the node's detector reads, and
+  its `end` records, which summed by key give the label's packets and bytes
+  (so a PRP duplicate counted twice fails). Its direction and client are
+  the label's, and a TCP flow that carried a labelled function never ends
+  with `syn_only: true`, which only a dial that carried nothing may;
 - every labelled `function` is recorded with its code, its objects (unless
-  the label holds `?`), its `sa` and `sa_error_from`. An empty `sa` in the
-  label means the record carries none;
+  the label holds `?`), its `sa` and `sa_error_from`, and for Modbus its
+  unit. An empty `sa` in the label means the record carries none. It cites
+  the request first;
+- every labelled `insecure` use is flagged, with its reason (V-M6's list;
+  today the derived Modbus capture's `modbus-tcp`);
 - every observation cites its packets: each cited frame's hash is one of
   the frames the label row lists (for a service, any frame of its flow),
   and its number too when the product read the GT file itself (`file:`
   capture IDs);
-- nothing is recorded that no label holds: an extra service, flow or
-  function is listed, and counts against precision.
+- nothing is recorded that no label holds: an extra service, flow,
+  function or insecure record is listed, and counts against precision.
 
 A missed row is listed by kind, never left out (R6.1). check() returns the
 problems and the counts; V-M6's target is recall and precision of 1 on the
 labelled set. The observations may be channel records or the node's stored
 form. Stdlib only, and it shares no code with any product package.
 
-Not checked here, because the labels' `flow`, `service` and `function` rows
-do not hold it: the node's `dnp3_no_sa` flag and the alerts each `case` row
-expects (they are judged at the node, against the `case` rows), redactions
-against `secret-slot` rows (no labelled capture holds a secret yet), and
-`insecure`, `encrypted`, `identity` and `undecoded` records, which have no
-label rows on `main` to be compared with.
+Not checked here: the node's `dnp3_no_sa` flag, which is how DNP3 without
+Secure Authentication is flagged, and the alerts each `case` row expects
+(both are judged at the node, against the `case` rows); redactions against
+`secret-slot` rows (no labelled capture holds a secret yet); and
+`encrypted`, `identity` and `undecoded` records, which have no label rows
+on `main` to be compared with.
 """
 
 
@@ -94,24 +100,36 @@ def check(rows, observations, moved_port=False):
                 continue
             matched += 1
             used.update(hit)
-            o = obs[hit[0]]
-            if moved_port and o["service"]["basis"] != "content":
-                bad.append(f"{what}: found by {o['service']['basis']}, not by content, on a moved port")
-            asset = o.get("node", {}).get("dst_asset")
-            if asset is not None and asset != r["asset"]:
-                bad.append(f"{what}: recorded against {asset}, the label says {r['asset']}")
             flow = next(f for f in flows if (f["dst"], f["dport"], f["l4"]) == (r["dst"], r["dport"], r["l4"]))
-            _cites(o, flow, what, bad)
+            for o in (obs[i] for i in hit):  # every record of the key, not the first alone
+                if moved_port and o["service"]["basis"] != "content":
+                    bad.append(f"{what}: found by {o['service']['basis']}, not by content, on a moved port")
+                asset = o.get("node", {}).get("dst_asset")
+                if asset is not None and asset != r["asset"]:
+                    bad.append(f"{what}: recorded against {asset}, the label says {r['asset']}")
+                _cites(o, flow, what, bad)
         elif r["kind"] == "flow":
             labelled += 1
             what = f"flow {r['src']}:{r['sport']} {r['dst']}:{r['dport']}/{r['l4']}"
             hit = [i for i, o in enumerate(obs) if o["kind"] == "flow" and _obs_key(o) == _row_key(r)]
             ends = [obs[i] for i in hit if obs[i]["flow"]["phase"] == "end"]
+            starts = [obs[i] for i in hit if obs[i]["flow"]["phase"] == "start"]
+            if not hit:
+                bad.append(f"missed {what}")
+                continue
+            used.update(hit)
+            if not starts:
+                # The detector reads the start: with none, unknown-pair and
+                # unresolved-address never fire on this flow (D4 on #626).
+                bad.append(f"{what}: no start record")
             if not ends:
-                bad.append(f"missed {what}" if not hit else f"{what}: no end record")
+                bad.append(f"{what}: no end record")
+            if not starts or not ends:
                 continue
             matched += 1
-            used.update(hit)
+            carried = any(f["kind"] == "function" and _row_key(f) == _row_key(r) for f in rows)
+            if carried and any(o["flow"].get("syn_only") for o in ends):
+                bad.append(f"{what}: an end says syn_only, and the flow carried a labelled function")
             got = (sum(o["flow"]["packets"] for o in ends), sum(o["flow"]["bytes"] for o in ends))
             if got != (int(r["packets"]), int(r["bytes"])):
                 bad.append(f"{what}: {got[0]} packets and {got[1]} bytes over its end records, the label has "
@@ -128,9 +146,11 @@ def check(rows, observations, moved_port=False):
             labelled += 1
             objects = None if r["objects"] == "?" else sorted(x for x in r["objects"].split(",") if x)
             what = f"function {r['code']} {r['objects']} sa={r['sa'] or 'unknown'} on {r['src']}:{r['sport']} to {r['dst']}:{r['dport']}"
+            unit = r["note"][len("unit="):] if r["note"].startswith("unit=") else None  # Modbus: in the key (C13 4.2)
             same = [i for i, o in enumerate(obs) if o["kind"] == "function" and _obs_key(o) == _row_key(r)
                     and str(o["function"]["code"]) == r["code"]
-                    and (objects is None or sorted(o["function"]["objects"]) == objects)]
+                    and (objects is None or sorted(o["function"]["objects"]) == objects)
+                    and (unit is None or str(o["function"].get("unit")) == unit)]
             hit = [i for i in same if i not in used and obs[i]["function"].get("sa", "") == r["sa"]
                    and obs[i]["function"].get("sa_error_from", "") == r["sa_error_from"]]
             if not hit:
@@ -142,14 +162,31 @@ def check(rows, observations, moved_port=False):
             o = obs[hit[0]]
             if (o["ip"]["src"], str(o["ip"]["sport"])) != (r["src"], r["sport"]):
                 bad.append(f"{what}: the request is recorded as sent by {o['ip']['src']}:{o['ip']['sport']}")
+            if o["citation"]["frames"][0]["sha256"] != r["frame_sha256"].split(",")[0]:
+                bad.append(f"{what}: does not cite the request first")
             _cites(o, r, what, bad)
+        elif r["kind"] == "insecure":
+            labelled += 1
+            reason = r["note"][len("reason="):] if r["note"].startswith("reason=") else ""
+            what = f"insecure {reason} on {r['src']}:{r['sport']} to {r['dst']}:{r['dport']}/{r['l4']}"
+            hit = [i for i, o in enumerate(obs) if o["kind"] == "insecure" and _obs_key(o) == _row_key(r)
+                   and o["insecure"]["reason"] == reason]
+            if not hit:
+                bad.append(f"missed {what}")
+                continue
+            matched += 1
+            used.update(hit)
+            flow = next(f for f in flows if _row_key(f) == _row_key(r))
+            for o in (obs[i] for i in hit):
+                _cites(o, flow, what, bad)
 
-    extra = [o for i, o in enumerate(obs) if i not in used and o["kind"] in ("service", "flow", "function")]
+    judged_kinds = ("service", "flow", "function", "insecure")
+    extra = [o for i, o in enumerate(obs) if i not in used and o["kind"] in judged_kinds]
     for o in extra:
         ip, body = o["ip"], o[o["kind"]]
         bad.append(f"extra {o['kind']} with no label row: {ip['src']}:{ip['sport']} {ip['dst']}:{ip['dport']}/{ip['l4']} "
                    f"{o['protocol']} {body}")
-    judged = [o for o in obs if o["kind"] in ("service", "flow", "function")]
+    judged = [o for o in obs if o["kind"] in judged_kinds]
     return {"problems": bad, "labelled": labelled, "matched": matched, "observations": len(judged), "extra": len(extra),
             "recall": matched / labelled if labelled else None,
             "precision": (len(judged) - len(extra)) / len(judged) if judged else None}
