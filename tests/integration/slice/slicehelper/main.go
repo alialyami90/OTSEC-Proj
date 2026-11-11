@@ -5,7 +5,7 @@
 // (D2-3). Every value it writes is a test value (D2-5), and every endpoint
 // is a loopback simulator (D2-10).
 //
-//	slicehelper setup -root DIR -sim-port N -relp-port N [-every S] [-programdata DIR]
+//	slicehelper setup -root DIR -sim-port N -relp-port N [-every S] [-programdata DIR] [-durable-ack-ref REF]
 //	slicehelper install-credential -root DIR      (secret from OTSEC_SLICE_SECRET)
 //
 // setup writes the node configuration through A5's nodeconfigtest (D2-6),
@@ -117,11 +117,12 @@ type Layout struct {
 	TLSDir           string `json:"tls_dir,omitempty"`
 	// AdminKey is the test administrator's Ed25519 seed, made by setup.
 	AdminKey string `json:"admin_key"`
-	// Syslog listeners (#154), when -syslog-udp or -syslog-tls is set: the
-	// asset sends from SyslogSender; the TLS sender proves SenderCert,
-	// issued by CA.
+	// Syslog listeners (#154), when -syslog-udp, -syslog-tcp or -syslog-tls
+	// is set: the asset sends from SyslogSender; the TLS sender proves
+	// SenderCert, issued by CA.
 	SyslogSender string `json:"syslog_sender,omitempty"`
 	SyslogUDP    string `json:"syslog_udp,omitempty"`
+	SyslogTCP    string `json:"syslog_tcp,omitempty"`
 	SyslogTLS    string `json:"syslog_tls,omitempty"`
 	SenderCert   string `json:"sender_cert,omitempty"`
 	SenderKey    string `json:"sender_key,omitempty"`
@@ -187,6 +188,8 @@ func main() {
 	quotas := fs.String("quota", "", "setup: store quotas to change, class=bytes[,class=bytes] (V-S9, V-S12)")
 	syslogUDP := fs.Int("syslog-udp", 0, "setup: a syslog-udp listener on this port of 127.0.0.1 (plaintext)")
 	syslogTLS := fs.Int("syslog-tls", 0, "setup: a syslog-tls listener on this port of 127.0.0.1, sender certificate required")
+	syslogTCP := fs.Int("syslog-tcp", 0, "setup: a syslog-tcp listener on this port of 127.0.0.1 (RFC 6587, plaintext)")
+	ackRef := fs.String("durable-ack-ref", durableAckRef, "setup: the evidence reference of the upstream collector's durable-acknowledgement check, when the collector is not A6's receiver")
 	programData := fs.String("programdata", "", "setup: write the Windows installer's inputs for this %ProgramData%")
 	gtinj := fs.String("gtinj-events", "", "setup: add the GT-INJ Syslog asset, sending from 127.0.0.4 to the syslog-udp listener, with an event baseline whose params are this events.json's (V-M4)")
 	kind := fs.String("kind", "install", "admin-file: install, revoke, baseline-ack or change-approval")
@@ -225,7 +228,7 @@ func main() {
 	var err error
 	switch os.Args[1] {
 	case "setup":
-		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *syslogUDP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators, *vm8On, *assetOn, *gtmibFile, *gtmibEvery)
+		err = setup(*root, *repo, *simPort, *relpPort, *every, *quotas, *ackRef, *syslogUDP, *syslogTCP, *syslogTLS, *programData, *gtinj, *gtinjSER, *configEvery, *snmpPort, *snmpUnlisted, *gtadvRow, *gtadvOperators, *vm8On, *assetOn, *gtmibFile, *gtmibEvery)
 	case "advisory-file":
 		err = advisoryFile(*root, *repo, *setCase, *setVersion)
 	case "install-credential":
@@ -264,7 +267,7 @@ func main() {
 	}
 }
 
-func setup(root, repo string, simPort, relpPort, every int, quotas string, syslogUDP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators, vm8On, assetOn bool, gtmibFile string, gtmibEvery int) error {
+func setup(root, repo string, simPort, relpPort, every int, quotas, ackRef string, syslogUDP, syslogTCP, syslogTLS int, programData, gtinj, gtinjSER string, configEvery, snmpPort int, snmpUnlisted bool, gtadvRow string, gtadvOperators, vm8On, assetOn bool, gtmibFile string, gtmibEvery int) error {
 	if root == "" || simPort == 0 || relpPort == 0 {
 		return errors.New("setup needs -root, -sim-port and -relp-port")
 	}
@@ -321,14 +324,14 @@ func setup(root, repo string, simPort, relpPort, every int, quotas string, syslo
 	}
 	nc.AddSEL751(assetID, "127.0.0.1", simPort, every)
 	setSerial(nc.Assets[0], simSerial)
-	nc.AddRELPTarget("upstream", "127.0.0.1", relpPort, anchorRef, clientRef, durableAckRef, false)
+	nc.AddRELPTarget("upstream", "127.0.0.1", relpPort, anchorRef, clientRef, ackRef, false)
 	pki, err := nc.WritePKI("127.0.0.1", anchorRef, clientRef)
 	if err != nil {
 		return err
 	}
 	// In the installed layout the listener's credential is staged with
 	// the rest, and reaches config\tls the same way.
-	if err := listeners(nc, pki, &l, syslogUDP, syslogTLS); err != nil {
+	if err := listeners(nc, pki, &l, syslogUDP, syslogTCP, syslogTLS); err != nil {
 		return err
 	}
 	if err := gtinjAsset(nc, &l, gtinj); err != nil {
@@ -1027,8 +1030,8 @@ func configReads(nc *nodeconfigtest.Config, l *Layout, payload []byte, revision 
 // listeners adds the Syslog listeners asked for (#154): the asset sends
 // from syslogSender on each; the TLS listener's certificate and the
 // sender's are issued by the run's test CA, which is also the sender CA set.
-func listeners(nc *nodeconfigtest.Config, pki *nodeconfigtest.PKI, l *Layout, udp, tlsPort int) error {
-	if udp == 0 && tlsPort == 0 {
+func listeners(nc *nodeconfigtest.Config, pki *nodeconfigtest.PKI, l *Layout, udp, tcp, tlsPort int) error {
+	if udp == 0 && tcp == 0 && tlsPort == 0 {
 		return nil
 	}
 	l.SyslogSender = syslogSender
@@ -1036,6 +1039,11 @@ func listeners(nc *nodeconfigtest.Config, pki *nodeconfigtest.PKI, l *Layout, ud
 		l.SyslogUDP = fmt.Sprintf("127.0.0.1:%d", udp)
 		nc.AddListener("a6-udp", "syslog-udp", l.SyslogUDP)
 		nc.AddSyslogSender(assetID, "syslog-udp-a6", "syslog-udp", syslogSender, 0)
+	}
+	if tcp != 0 {
+		l.SyslogTCP = fmt.Sprintf("127.0.0.1:%d", tcp)
+		nc.AddListener("a6-tcp", "syslog-tcp", l.SyslogTCP)
+		nc.AddSyslogSender(assetID, "syslog-tcp-a6", "syslog-tcp", syslogSender, 0)
 	}
 	if tlsPort == 0 {
 		return nil
