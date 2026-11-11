@@ -2,7 +2,7 @@
 
 Copyright (c) 2026 the owner of this repository (GitHub account `alialyami90`). All rights reserved.
 
-This repository is public so that its automated tests can run. **It is not open-source software, and no licence is granted.**
+This repository is public so that its automated tests can run. **It is not open-source software, and no licence is granted beyond what this file says.**
 
 - You may read the source on GitHub, and fork it there, as GitHub's Terms of Service allow.
 - You may not use, copy, modify, merge, publish, distribute, sublicense or sell this software, or any part of it, without the owner's written permission.
