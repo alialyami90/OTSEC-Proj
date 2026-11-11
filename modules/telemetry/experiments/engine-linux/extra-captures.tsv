@@ -4,8 +4,14 @@
 # redistribution terms are not stated; fetched at run time and checked.
 # The SHA-256s are first-use pins: D4 downloaded each file on 2026-11-11.
 # They carry no GT-PCAP label, so no pass condition reads them.
+# No FTP capture: Wireshark's FTP samples are in Microsoft Network Monitor
+# format, which libpcap does not read (rehearsal run 43080066361: Zeek
+# "unknown file format" on FTPv6-1.cap, Suricata no output).
+# No SNMPv3 capture: snmp_usm.pcap, the one SNMPv3 sample, is a big-endian
+# BSD-loopback (link type 0) capture whose address-family word both pinned
+# engines read as little-endian, so they drop every packet with no error
+# (D6 on #630, from Zeek's Null.cc and Suricata's decode-null.c; in the
+# rehearsal every configuration exited 0 with no flow). SNMPv3 is not shown.
 # name	sha256	url	protocol
-snmp_usm.pcap	151c048d623e9fe510f8de8f842b8c13eebd203af74049936c6b0e6a947c58ea	https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/snmp_usm.pcap	snmpv3
 telnet-raw.pcap	7a2fdd843b401fb945b0604b9d760424541b045dac6424361f14d276db2b05a3	https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/telnet-raw.pcap	telnet
-FTPv6-1.cap	6ef8184b5770ee7a59853db213a2394a4eef72f7b245a31bb7f86c21c987aa1f	https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/FTPv6-1.cap	ftp
 http_gzip.cap	79e0ae3b23c0de4289b4cb73901091ac0b744dc417532a84dcd3fb882eaec12e	https://gitlab.com/wireshark/wireshark/-/wikis/uploads/__moin_import__/attachments/SampleCaptures/http_gzip.cap	http

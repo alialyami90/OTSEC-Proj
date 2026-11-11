@@ -14,7 +14,10 @@
 #                             against its hash, with modbus.pcap as its
 #                             control; all against the committed labels and,
 #                             where it is in the checkout, D6's
-#                             engine-pass-conditions.tsv
+#                             engine-pass-conditions.tsv. The same captures
+#                             then reach each Zeek configuration through a
+#                             pipe, and Suricata through a FIFO (the pipe
+#                             case, D4-87)
 #   run.sh public WORK CACHE  MANIFEST.tsv's captures (already fetched into
 #                             CACHE by fetch_captures.sh) and the captures in
 #                             extra-captures.tsv
@@ -71,7 +74,13 @@ docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base
   echo "icsnpp-dnp3:   $ICSNPP_DNP3_COMMIT (every file checked against icsnpp.sha256)"
   echo "icsnpp-modbus: $ICSNPP_MODBUS_COMMIT (every file checked against icsnpp.sha256)"
   echo "suricata.yaml: the image's own, with eve types dnp3 and modbus added (sha256 $(sha256sum < "$work/suricata.yaml" | cut -c1-64))"
+  # The engines' own words for reading a capture, cited by the pipe case.
+  echo "zeek --help, -r: $(docker run --rm --network none "$ZEEK_IMAGE" zeek --help 2>&1 | grep -e '--readfile' | head -1 || true)"
+  echo "suricata --help, -r: $(docker run --rm --network none --entrypoint suricata "$SURICATA_IMAGE" --help 2>&1 | grep -e '-r <path>' | head -1 || true)"
 } > "$work/versions.txt"
+# A later mode rewrites versions.txt, so the pipe case's options are kept in
+# a file of their own and copied in each time.
+cat "$work/pipe-options.txt" >> "$work/versions.txt" 2> /dev/null || true
 
 # Every table opens with what ran and whether it counts (D1 and D6 on #625):
 # a run counts only on refs/heads/main with D6's pass conditions present and
@@ -91,24 +100,56 @@ header() {
 }
 
 # 2. Every configuration over one directory of captures.
+# Each takes the in-container mode first (zeek or zeek-pipe; suricata or
+# suricata-fifo), then the configuration's name and its arguments.
+# The pipe case adds $locked: every capability dropped, no new privileges,
+# and the runner's own user, which is not root (D3 on #630). The file runs
+# keep Docker's defaults, which is what E-D4-03 first ran.
+locked=
 zeek_run() {
-  docker run --rm --network none -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
-    "$ZEEK_IMAGE" sh /exp/in-container.sh zeek "$@"
+  docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
+    "$ZEEK_IMAGE" sh /exp/in-container.sh "$@"
 }
 suricata_run() {
-  docker run --rm --network none -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
-    -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh suricata \
+  docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
+    -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh \
     "$@" --set app-layer.protocols.dnp3.enabled=yes --set app-layer.protocols.modbus.enabled=yes
 }
 engines() {
   pcaps=$1
   out=$2
   mkdir -p "$out"
-  zeek_run zeek
-  zeek_run zeek-probe /exp/probe.zeek
-  zeek_run zeek-icsnpp /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
-  suricata_run suricata
-  suricata_run suricata-midstream --set stream.midstream=true
+  zeek_run zeek zeek
+  zeek_run zeek zeek-probe /exp/probe.zeek
+  zeek_run zeek zeek-icsnpp /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
+  suricata_run suricata suricata
+  suricata_run suricata suricata-midstream --set stream.midstream=true
+}
+# The pipe case (D4-87): the same three Zeek configurations, each reading
+# its capture from stdin through a pipe, and Suricata from a FIFO, as a
+# note. Still --network none.
+# Its own output directory, created by the runner's user so that the
+# unprivileged containers can write there. If an engine fails under these
+# options, that is a finding and the row stays: the options are not relaxed.
+pipes() {
+  pcaps=$1
+  out=$2
+  mkdir -p "$out"
+  locked="--cap-drop ALL --security-opt no-new-privileges --user $(id -u):$(id -g)"
+  echo "pipe case containers (Zeek pipe and Suricata FIFO): --network none $locked" > "$work/pipe-options.txt"
+  cat "$work/pipe-options.txt" >> "$work/versions.txt"
+  zeek_run zeek-pipe zeek-pipe
+  zeek_run zeek-pipe zeek-probe-pipe /exp/probe.zeek
+  zeek_run zeek-pipe zeek-icsnpp-pipe /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
+  locked=
+}
+# Suricata through a FIFO, as a note, run after the judged tables are written.
+fifos() {
+  pcaps=$1
+  out=$2
+  locked="--cap-drop ALL --security-opt no-new-privileges --user $(id -u):$(id -g)"
+  suricata_run suricata-fifo suricata-fifo
+  locked=
 }
 
 case $mode in
@@ -132,7 +173,10 @@ case $mode in
       rm -f "$work/dnp3/modbus-moved-port.pcap"
     fi
     engines "$work/dnp3" "$work/out-dnp3"
+    pipes "$work/dnp3" "$work/out-dnp3-pipe"
     { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; } > "$work/dnp3.md"
+    fifos "$work/dnp3" "$work/out-dnp3-pipe"
+    python3 -I "$here/table.py" fifo "$work/out-dnp3" "$work/out-dnp3-pipe" >> "$work/dnp3.md"
     ;;
   public)
     cache=$3

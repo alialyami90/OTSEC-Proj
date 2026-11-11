@@ -33,7 +33,8 @@ dnp3 mode prints, per configuration:
 public mode prints, per capture and configuration, the protocol names, the
 logs with their row counts and the SNMP field names logged.
 
-Usage: python -I table.py dnp3 OUT GT_PCAP_DIR WORK ROOT
+Usage: python -I table.py dnp3 OUT GT_PCAP_DIR WORK ROOT   (pipe runs in OUT-pipe)
+       python -I table.py fifo OUT OUT-pipe
        python -I table.py public OUT
 """
 import collections
@@ -55,6 +56,8 @@ LABELS = {
     "suricata-midstream": "Suricata with stream.midstream=true (the comparison, not the choice)",
 }
 PENDING = "pending D6's pass conditions"
+# The pipe case (D4-87): these configurations also read each capture from a pipe.
+PIPED = ("zeek", "zeek-probe", "zeek-icsnpp")
 CONDITIONS = "tests/integration/gt_pcap/engine-pass-conditions.tsv"
 RESPONSES = (129, 130, 131)
 # modbus-moved-port is modbus.pcap with port 502 moved to 15020
@@ -91,7 +94,8 @@ def one(table, name):
 
 
 def ran(d):
-    """None if the engine exited 0 on this capture, else why it did not run."""
+    """None if the engine exited 0 on this capture, else why it did not run
+    (an exit code, or `skipped` after an earlier time-out)."""
     try:
         rc = open(os.path.join(d, "exit-code")).read().strip()
     except OSError:
@@ -109,6 +113,20 @@ class Logs:
         self.notes = 0
         self.flow_notes = collections.defaultdict(list)  # (l4, ends) -> ["file:line text"]
 
+    def in_content_order(self):
+        """Puts flows and messages in an order taken from their own content,
+        never from their line in a log, whose order the engine does not fix
+        (D6 and D1 on #630). Every place the judge takes the first record
+        that satisfies a row (a Service row's flow, rule 6's wrong server, a
+        Protocol row's records, a group 120 message, rule 9's matching) then
+        takes the same record from the file run and from the pipe run.
+        Flows: start time, transport, ends, then the engine's own id (Zeek's
+        uid, Suricata's flow_id). Messages: time, protocol, transport, ends,
+        a request before a response at the same time, sender, code, objects."""
+        self.flows.sort(key=lambda f: (f["first"][0], f["l4"], f["orig"], f["resp"], f["first"][1]))
+        self.msgs.sort(key=lambda m: (m["ts"], m["proto"], m["l4"], m["ends"], not m["request"], str(m["sender"]),
+                                      str(m["fc"]), tuple(m["objs"])))
+
     def msg(self, cite, ts, proto, l4, e, sender, request, fc, objs=()):
         self.msgs.append({"cite": cite, "ts": ts, "proto": proto, "l4": l4, "ends": e, "sender": sender,
                           "request": request, "fc": fc, "objs": list(objs)})
@@ -120,16 +138,18 @@ def zeek(d, cfg, t):
     for i, r in lines(os.path.join(d, "conn.log")):
         o, p = (r["id.orig_h"], str(r["id.orig_p"])), (r["id.resp_h"], str(r["id.resp_p"]))
         conn[r["uid"]] = (r["proto"], o, p)
-        s.flows.append({"cite": f"conn.log:{i}", "l4": r["proto"], "orig": o, "resp": p,
+        s.flows.append({"cite": f"conn.log:{i}", "l4": r["proto"], "orig": o, "resp": p, "first": (r["ts"], r["uid"]),
                         "names": {x for x in (r.get("service") or "").split(",") if x}})
     # dnp3.log's requests. Its replies are not read: a reply is not a
     # function (D6's note), and dnp3.log stamps it with the request's time.
     # zeek-probe reads every DNP3 application header from its own log instead.
+    dnp3_rows = collections.defaultdict(list)  # uid -> [(ts, code, message)], in log order
     for i, r in lines(os.path.join(d, "dnp3.log")):
         fc = one(t["zeek_fc"], r.get("fc_request"))
         if r["uid"] in conn and cfg != "zeek-probe" and fc is not None:
             l4, o, p = conn[r["uid"]]
             s.msg(f"dnp3.log:{i}", r["ts"], "dnp3", l4, ends(*o, *p), o[0], True, fc)
+            dnp3_rows[r["uid"]].append((r["ts"], fc, s.msgs[-1]))
     for i, r in lines(os.path.join(d, "modbus.log")):
         fc = one(t["zeek_modbus_fc"], r.get("func"))
         if r["uid"] in conn and r.get("pdu_type") == "REQ" and fc is not None:
@@ -150,40 +170,102 @@ def zeek(d, cfg, t):
                 cur[side]["objs"].append(f"g{r['group']}v{r['variation']}")
                 cur[side]["cite"] += f",{i}"
     if cfg == "zeek-icsnpp":
+        # ICSNPP's two logs. dnp3_objects.log: object headers of READ requests
+        # and RESPONSE replies, named through ICSNPP's dnp3_objects table.
+        # dnp3_control.log: one row per control block, which Zeek raises as
+        # dnp3_crob (group 12 variation 1) or dnp3_pcb (group 12 variation 2)
+        # (events.bif at v9.0.1), named in `block_type`. ICSNPP stamps a row
+        # with its message's arrival, so the rows of one message share
+        # (uid, is_orig, ts, function_code) and form one message here.
         obj = {n: next(iter(c)) for n, c in t["icsnpp_obj"].items() if len(c) == 1}
+        blocks = {"Control Relay Output Block": 0x0C01, "Pattern Control Block": 0x0C02}
         group = {}
-        for i, r in lines(os.path.join(d, "dnp3_objects.log")):
-            code = obj.get(r.get("object_type"))
-            fc = one(t["icsnpp_fc"], r.get("function_code"))
-            if r["uid"] not in conn or code is None or fc is None:
-                continue
-            l4, o, p = conn[r["uid"]]
-            k = (r["uid"], r["is_orig"], r["ts"], r["function_code"])
-            if k not in group:
-                s.msg(f"dnp3_objects.log:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
-                      fc not in RESPONSES, fc)
-                group[k] = s.msgs[-1]
-            else:
-                group[k]["cite"] += f",{i}"
-            group[k]["objs"].append(f"g{code // 256}v{code % 256}")
+        for log, code_of in (("dnp3_objects.log", lambda r: obj.get(r.get("object_type"))),
+                             ("dnp3_control.log", lambda r: blocks.get(r.get("block_type")))):
+            for i, r in lines(os.path.join(d, log)):
+                code = code_of(r)
+                fc = one(t["icsnpp_fc"], r.get("function_code"))
+                if r["uid"] not in conn or code is None or fc is None or r.get("is_orig") is None:
+                    continue
+                l4, o, p = conn[r["uid"]]
+                k = (r["uid"], r["is_orig"], r["ts"], r["function_code"])
+                if k not in group:
+                    s.msg(f"{log}:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
+                          fc not in RESPONSES, fc)
+                    group[k] = s.msgs[-1]
+                    group[k]["rows"] = []
+                else:
+                    group[k]["cite"] += f",{log}:{i}"
+                group[k]["objs"].append(f"g{code // 256}v{code % 256}")
+                group[k]["rows"].append(f"{log}:{i}")
+        # The join (D6 on #630). Zeek writes a dnp3.log row for the last request
+        # before its reply, stamped with the reply's time when it is answered
+        # (base/protocols/dnp3/main.zeek at v9.0.1). So an ICSNPP request
+        # message is that row's request when it is on the same connection,
+        # with the same code, and the latest such message after the
+        # connection's previous dnp3.log row and not after this one. It then
+        # joins that row: one request, one message, citing both logs, at the
+        # request's own time. Every other ICSNPP message stays its own.
+        for (uid, is_orig, ts, _), g in list(group.items()):
+            g["uid"], g["is_orig"], g["gts"] = uid, is_orig, ts
+        removed = set()
+        for uid, rows in dnp3_rows.items():
+            prev = None
+            for ts, fc, m in rows:
+                cands = [g for g in group.values() if g["uid"] == uid and g["is_orig"] and g["fc"] == fc
+                         and g["gts"] <= ts and (prev is None or g["gts"] > prev) and id(g) not in removed]
+                prev = ts
+                if not cands:
+                    continue
+                g = max(cands, key=lambda x: x["gts"])
+                m["objs"] += g["objs"]
+                m["cite"] += "," + g["cite"]
+                m["ts"] = g["gts"]
+                m.setdefault("rows", []).extend(g["rows"])
+                removed.add(id(g))
+        s.msgs = [x for x in s.msgs if id(x) not in removed]
+        # Self-check: every ICSNPP row of a request is in exactly one message,
+        # and that message is a request; otherwise the table is not written.
+        held = collections.Counter(row for x in s.msgs if x["request"] for row in x.get("rows", []))
+        for g in group.values():
+            for row in g["rows"] if g["is_orig"] else ():
+                if held[row] != 1:
+                    sys.exit(f"ICSNPP join: {row} under {d} is in {held[row]} request messages, not one")
     for f, field in (("weird.log", "name"), ("analyzer.log", "failure_reason")):
         for i, r in lines(os.path.join(d, f)):
             s.notes += 1
             if r.get("uid") in conn:
                 l4, o, p = conn[r["uid"]]
                 s.flow_notes[(l4, ends(*o, *p))].append(f"{f}:{i} {r.get(field) or r.get('name') or '?'}")
-    s.msgs.sort(key=lambda m: m["ts"])
+    s.in_content_order()
     return s
 
 
 def suricata(d):
+    """Suricata's eve.json. An app-layer event (dnp3, modbus) is tied to its
+    flow record by `flow_id` (D6's rule 2), and its sender is the flow
+    record's originator for a request and its responder for a response, never
+    the event's own source fields (D6 on #625). An event whose flow record is
+    missing has no sender, so it can pass no row."""
     s = Logs(True)
-    for i, r in lines(os.path.join(d, "eve.json")):
+    rows = lines(os.path.join(d, "eve.json"))
+    flow_of = {}
+    for i, r in rows:
+        if r.get("event_type") == "flow" and r.get("flow_id") is not None:
+            o, p = (r.get("src_ip"), str(r.get("src_port"))), (r.get("dest_ip"), str(r.get("dest_port")))
+            flow_of[r.get("flow_id")] = (o, p)
+
+    def sender(r, request):
+        f = flow_of.get(r.get("flow_id")) if r.get("flow_id") is not None else None
+        return (f[0] if request else f[1])[0] if f else None
+
+    for i, r in rows:
         ev = r.get("event_type")
         l4 = str(r.get("proto", "")).lower()
         o, p = (r.get("src_ip"), str(r.get("src_port"))), (r.get("dest_ip"), str(r.get("dest_port")))
         if ev == "flow":
             s.flows.append({"cite": f"eve.json:{i}", "l4": l4, "orig": o, "resp": p,
+                            "first": (str(r.get("flow", {}).get("start", "")), str(r.get("flow_id"))),
                             "names": {r["app_proto"]} if r.get("app_proto") else set()})
         elif ev == "anomaly":
             s.notes += 1
@@ -193,11 +275,12 @@ def suricata(d):
             for m in msgs:
                 app = m.get("application", {})
                 request = m.get("type") == "request"
-                s.msg(f"eve.json:{i}", r.get("timestamp", ""), "dnp3", l4, ends(*o, *p), (o if request else p)[0], request,
+                s.msg(f"eve.json:{i}", r.get("timestamp", ""), "dnp3", l4, ends(*o, *p), sender(r, request), request,
                       app.get("function_code"), [f"g{x.get('group')}v{x.get('variation')}" for x in app.get("objects", [])])
         elif ev == "modbus" and isinstance(r["modbus"].get("request"), dict):
-            s.msg(f"eve.json:{i}", r.get("timestamp", ""), "modbus", l4, ends(*o, *p), o[0], True,
+            s.msg(f"eve.json:{i}", r.get("timestamp", ""), "modbus", l4, ends(*o, *p), sender(r, True), True,
                   r["modbus"]["request"].get("function_raw"))
+    s.in_content_order()
     return s
 
 
@@ -280,7 +363,8 @@ def judge_flow(row, s, flow_rows):
     """
     l4, proto = row["l4"], (row.get("protocol") or "dnp3")
     if row["condition"] == "service":
-        others = {(r["src"], r["sport"]) for r in flow_rows if r["l4"] == l4}
+        servers = {(r["dst"], r["dport"]) for r in flow_rows if r["l4"] == l4}
+        others = {(r["src"], r["sport"]) for r in flow_rows if r["l4"] == l4} - servers
         wrong = [f for f in s.flows if f["l4"] == l4 and f["resp"] in others and named(f["names"], proto)]
         if wrong:
             f = wrong[0]
@@ -373,7 +457,9 @@ def judge_capture(rows, s):
         elif c == "function":
             k = pos[id(row)]
             if k not in fn:
-                out[n] = ("fail", "")
+                orphan = [m for m in s.msgs if m["sender"] is None and m["request"] and m["l4"] == row["l4"]
+                          and m["fc"] == int(row["code"]) and m["ends"] == ends(row["src"], row["sport"], row["dst"], row["dport"])]
+                out[n] = ("fail (event has no flow record)", orphan[0]["cite"]) if orphan else ("fail", "")
                 continue
             if want_objs(row) is None:
                 obj = "objects skipped (? or none labelled)"
@@ -466,6 +552,10 @@ def dnp3(out, gt, work, root):
         for c in cases + [CONTROL]:
             d = os.path.join(out, c, cfg)
             loaded[(cfg, c)] = ran(d) or (suricata(d) if cfg.startswith("suricata") else zeek(d, cfg, t))
+    for cfg in PIPED:
+        for c in cases + [CONTROL]:
+            d = os.path.join(out + "-pipe", c, cfg + "-pipe")
+            loaded[(cfg + "-pipe", c)] = ran(d) or zeek(d, cfg, t)
     print("## 1. What each configuration logged, per case\n")
     print("Counts against GT-PCAP's labels. Each labelled function row needs a distinct logged request (rule 9). "
           "`g120 messages` lists `code:variation from sender` for every DNP3 message the configuration logged with a "
@@ -502,6 +592,7 @@ def dnp3(out, gt, work, root):
     print("## 2. D6's pass conditions\n")
     if not conds:
         print(f"Verdict: {PENDING}. `{CONDITIONS}` is not in this checkout.")
+        pipe_case(conds, loaded, cases)
         return
     print("Each row is `pass`, `fail` or `unknown`, and each column counts the three apart. A capture or configuration "
           "that did not run is `unknown`. Rows that share a capture, a flow and a code are matched one to one with logged "
@@ -534,6 +625,98 @@ def dnp3(out, gt, work, root):
                   f"| {row['dst']}:{row['dport']}/{row['l4']} | {row.get('direction', '')} | {row['code']} | {row['objects']} "
                   f"| {row['show']} | {r} | {cite} |")
         print()
+    pipe_case(conds, loaded, cases)
+
+
+CITE = re.compile(r"[\w.]+\.(?:log|json):[\w.:,]*")
+
+
+def records(logs):
+    """cite -> the record it names, for the logs of one capture under one
+    configuration: a flow by its transport and ends, a message by its
+    protocol, flow, sender, direction, code, time and objects. Line numbers
+    are not part of it, because the order of records in a log is not fixed."""
+    out = {}
+    for x in [] if isinstance(logs, str) else logs.flows:
+        out[x["cite"]] = ("flow", x["l4"], x["orig"], x["resp"])
+    for x in [] if isinstance(logs, str) else logs.msgs:
+        out[x["cite"]] = ("msg", x["proto"], x["l4"], x["ends"], x["sender"], x["request"], x["fc"], x["ts"], tuple(x["objs"]))
+    return out
+
+
+def matched(text, table):
+    """The records that a citation, or every citation inside a result text,
+    names; a citation found in no record stays as text."""
+    found = []
+    for c in CITE.findall(text):
+        for part in c.split(".."):
+            found += [table[part]] if part in table else [table.get(q, q) for q in part.split(",")]
+    return sorted(map(repr, found))
+
+
+def pipe_case(conds, loaded, cases):
+    """The pipe case (D4-87): each Zeek configuration again, reading every
+    capture of this run from stdin through a pipe (`cat FILE | zeek -r -`),
+    judged with the same functions, and compared row for row with its file
+    run, by the result with its citations taken out and by the records those
+    citations name (D6 on #630). Suricata through a FIFO is a note only."""
+    caps = cases + [CONTROL]
+    print("## 3. The pipe case\n")
+    print("Each Zeek configuration reads every capture above from stdin through a pipe (`cat FILE | zeek -r -`), in a "
+          "container with `--network none`, `--cap-drop ALL`, `--security-opt no-new-privileges` and a user that is not "
+          "root (`versions.txt` records them), and is judged by the same functions as its file run. A pipe row equals its "
+          "file row when the result, with its citations taken out, is the same, and the citations name the same records "
+          "(a flow by its transport and ends; a message by its flow, sender, code, time and objects), whatever their line "
+          "numbers. **Reads a pipe** is `yes` only when every capture exits 0 with at least one flow record and every one "
+          "of D6's rows equals the file run's; `no` when no capture does; otherwise `partly`. An exit 0 with no flow "
+          "record never counts. Rows that cite the same records at other line numbers are listed as a note, not as a "
+          "difference. **A pipe of a finished capture is not a live stream:** it ends, it never stalls, and nothing pushes "
+          "back, so this shows neither a stream that never ends, nor back-pressure, nor a writer that stalls or dies, nor "
+          "a malformed record on the pipe.\n")
+    print("| configuration | reads a pipe | captures with exit 0 and a flow record | rows equal to the file run (result and records) | rows that differ | note: same records at other line numbers |")
+    print("| --- | --- | --- | --- | --- | --- |")
+    for cfg in PIPED:
+        pc = cfg + "-pipe"
+        ok = sum(1 for c in caps if not isinstance(loaded[(pc, c)], str) and loaded[(pc, c)].flows)
+        if not conds:
+            reads = "no" if ok == 0 else "unknown (no conditions to compare rows)"
+            print(f"| {LABELS[cfg]} | {reads} | {ok} of {len(caps)} | {PENDING} | | |")
+            continue
+        a, b = evaluate(conds, loaded, cfg), evaluate(conds, loaded, pc)
+        diff, moved = [], []
+        for (row, fr, fc), (_, pr, pcite) in zip(a, b):
+            cap = row["capture"]
+            ft = {**records(loaded[(cfg, CONTROL)]), **records(loaded[(cfg, cap)])}
+            pt = {**records(loaded[(pc, CONTROL)]), **records(loaded[(pc, cap)])}
+            same = (CITE.sub("", fr) == CITE.sub("", pr)
+                    and matched(fr + " " + fc, ft) == matched(pr + " " + pcite, pt))
+            if not same:
+                diff.append((row, (fr, fc), (pr, pcite)))
+            elif (fr, fc) != (pr, pcite):
+                moved.append(row)
+        reads = "yes" if ok == len(caps) and not diff else "no" if ok == 0 else "partly"
+        shown = "; ".join(f"{r['capture']} {r['condition']} {r['code']}: file `{f[0]}` {f[1]}, pipe `{q[0]}` {q[1]}"
+                          for r, f, q in diff) or "-"
+        note = "; ".join(f"{r['capture']} {r['condition']} {r['code']}" for r in moved) or "-"
+        print(f"| {LABELS[cfg]} | {reads} | {ok} of {len(caps)} | {len(a) - len(diff)} of {len(a)} | {shown} | {note} |")
+    print()
+
+
+def fifo(out, out_pipe):
+    """Suricata through a FIFO (D4-87), a note and not a condition. Written
+    last, after the judged tables, so that a hang here cannot cost them."""
+    caps = sorted(c for c in os.listdir(out_pipe) if os.path.isdir(os.path.join(out_pipe, c, "suricata-fifo")))
+    print("**Suricata through a FIFO, a note and not a condition** (`suricata -r FIFO`, a writer `cat FILE > FIFO`, "
+          "with the pipe case's container options; the engine has 60 s and the writer 30 s per capture, and after the "
+          "first time-out the rest are skipped):\n")
+    print("| capture | exit (FIFO) | flow records (FIFO) | flow records (file) |")
+    print("| --- | --- | --- | --- |")
+    for c in caps:
+        f, d = os.path.join(out_pipe, c, "suricata-fifo"), os.path.join(out, c, "suricata")
+        fw, sw = ran(f), ran(d)
+        nf = "" if fw else len(suricata(f).flows) or "0: no flow record, capture not decoded"
+        print(f"| {c} | {fw or '0'} | {nf} | {sw or len(suricata(d).flows)} |")
+    print()
 
 
 def public(out):
@@ -578,11 +761,18 @@ def public(out):
                         snmp.update(f"probe:{k}" for r in rs if r.get("kind") == "snmp" for k in r if k.startswith(("snmp_", "v3_")))
                         snmp.update(f"probe event:{r['ev']}" for r in rs if r.get("kind") == "snmp")
             fmt = lambda c: ", ".join(f"{k}={v}" for k, v in sorted(c.items())) or "-"
+            if not svc:
+                # The engine exited 0 and logged no flow at all: the capture
+                # was not decoded, which is not a negative result (D6 on #630).
+                print(f"| {name} | {LABELS[cfg]} | no flow record: capture not decoded | {fmt(logs)} | - | {notes} |")
+                continue
             print(f"| {name} | {LABELS[cfg]} | {fmt(svc)} | {fmt(logs)} | {', '.join(sorted(snmp)) or '-'} | {notes} |")
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "dnp3":
         dnp3(*sys.argv[2:6])
+    elif sys.argv[1] == "fifo":
+        fifo(sys.argv[2], sys.argv[3])
     else:
         public(sys.argv[2])
