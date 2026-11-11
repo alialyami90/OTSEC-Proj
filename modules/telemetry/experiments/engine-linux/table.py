@@ -129,13 +129,13 @@ def zeek(d, cfg, t):
     # dnp3.log's requests. Its replies are not read: a reply is not a
     # function (D6's note), and dnp3.log stamps it with the request's time.
     # zeek-probe reads every DNP3 application header from its own log instead.
-    by_request = {}  # (uid, ts, code) -> the dnp3.log message of that request
+    dnp3_rows = collections.defaultdict(list)  # uid -> [(ts, code, message)], in log order
     for i, r in lines(os.path.join(d, "dnp3.log")):
         fc = one(t["zeek_fc"], r.get("fc_request"))
         if r["uid"] in conn and cfg != "zeek-probe" and fc is not None:
             l4, o, p = conn[r["uid"]]
             s.msg(f"dnp3.log:{i}", r["ts"], "dnp3", l4, ends(*o, *p), o[0], True, fc)
-            by_request[(r["uid"], r["ts"], fc)] = s.msgs[-1]
+            dnp3_rows[r["uid"]].append((r["ts"], fc, s.msgs[-1]))
     for i, r in lines(os.path.join(d, "modbus.log")):
         fc = one(t["zeek_modbus_fc"], r.get("func"))
         if r["uid"] in conn and r.get("pdu_type") == "REQ" and fc is not None:
@@ -160,8 +160,9 @@ def zeek(d, cfg, t):
         # and RESPONSE replies, named through ICSNPP's dnp3_objects table.
         # dnp3_control.log: one row per control block, which Zeek raises as
         # dnp3_crob (group 12 variation 1) or dnp3_pcb (group 12 variation 2)
-        # (events.bif at v9.0.1), named in `block_type`. Rows of one message
-        # share (uid, is_orig, ts, function_code) and are joined into it.
+        # (events.bif at v9.0.1), named in `block_type`. ICSNPP stamps a row
+        # with its message's arrival, so the rows of one message share
+        # (uid, is_orig, ts, function_code) and form one message here.
         obj = {n: next(iter(c)) for n, c in t["icsnpp_obj"].items() if len(c) == 1}
         blocks = {"Control Relay Output Block": 0x0C01, "Pattern Control Block": 0x0C02}
         group = {}
@@ -174,19 +175,48 @@ def zeek(d, cfg, t):
                     continue
                 l4, o, p = conn[r["uid"]]
                 k = (r["uid"], r["is_orig"], r["ts"], r["function_code"])
-                same = by_request.get((r["uid"], r["ts"], fc)) if r["is_orig"] else None
-                if k not in group and same is not None:
-                    # The request dnp3.log already holds: one message, not two,
-                    # so that rule 9 cannot count one request twice (D6 on #630).
-                    group[k] = same
-                    same["cite"] += f",{log}:{i}"
-                elif k not in group:
+                if k not in group:
                     s.msg(f"{log}:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
                           fc not in RESPONSES, fc)
                     group[k] = s.msgs[-1]
+                    group[k]["rows"] = []
                 else:
                     group[k]["cite"] += f",{log}:{i}"
                 group[k]["objs"].append(f"g{code // 256}v{code % 256}")
+                group[k]["rows"].append(f"{log}:{i}")
+        # The join (D6 on #630). Zeek writes a dnp3.log row for the last request
+        # before its reply, stamped with the reply's time when it is answered
+        # (base/protocols/dnp3/main.zeek at v9.0.1). So an ICSNPP request
+        # message is that row's request when it is on the same connection,
+        # with the same code, and the latest such message after the
+        # connection's previous dnp3.log row and not after this one. It then
+        # joins that row: one request, one message, citing both logs, at the
+        # request's own time. Every other ICSNPP message stays its own.
+        for (uid, is_orig, ts, _), g in list(group.items()):
+            g["uid"], g["is_orig"], g["gts"] = uid, is_orig, ts
+        removed = set()
+        for uid, rows in dnp3_rows.items():
+            prev = None
+            for ts, fc, m in rows:
+                cands = [g for g in group.values() if g["uid"] == uid and g["is_orig"] and g["fc"] == fc
+                         and g["gts"] <= ts and (prev is None or g["gts"] > prev) and id(g) not in removed]
+                prev = ts
+                if not cands:
+                    continue
+                g = max(cands, key=lambda x: x["gts"])
+                m["objs"] += g["objs"]
+                m["cite"] += "," + g["cite"]
+                m["ts"] = g["gts"]
+                m.setdefault("rows", []).extend(g["rows"])
+                removed.add(id(g))
+        s.msgs = [x for x in s.msgs if id(x) not in removed]
+        # Self-check: every ICSNPP row of a request is in exactly one message,
+        # and that message is a request; otherwise the table is not written.
+        held = collections.Counter(row for x in s.msgs if x["request"] for row in x.get("rows", []))
+        for g in group.values():
+            for row in g["rows"] if g["is_orig"] else ():
+                if held[row] != 1:
+                    sys.exit(f"ICSNPP join: {row} under {d} is in {held[row]} request messages, not one")
     for f, field in (("weird.log", "name"), ("analyzer.log", "failure_reason")):
         for i, r in lines(os.path.join(d, f)):
             s.notes += 1
@@ -582,36 +612,77 @@ def dnp3(out, gt, work, root):
     pipe_case(conds, loaded, cases)
 
 
+CITE = re.compile(r"[\w.]+\.(?:log|json):[\w.:,]*")
+
+
+def records(logs):
+    """cite -> the record it names, for the logs of one capture under one
+    configuration: a flow by its transport and ends, a message by its
+    protocol, flow, sender, direction, code, time and objects. Line numbers
+    are not part of it, because the order of records in a log is not fixed."""
+    out = {}
+    for x in [] if isinstance(logs, str) else logs.flows:
+        out[x["cite"]] = ("flow", x["l4"], x["orig"], x["resp"])
+    for x in [] if isinstance(logs, str) else logs.msgs:
+        out[x["cite"]] = ("msg", x["proto"], x["l4"], x["ends"], x["sender"], x["request"], x["fc"], x["ts"], tuple(x["objs"]))
+    return out
+
+
+def matched(text, table):
+    """The records that a citation, or every citation inside a result text,
+    names; a citation found in no record stays as text."""
+    found = []
+    for c in CITE.findall(text):
+        for part in c.split(".."):
+            found += [table[part]] if part in table else [table.get(q, q) for q in part.split(",")]
+    return sorted(map(repr, found))
+
+
 def pipe_case(conds, loaded, cases):
     """The pipe case (D4-87): each Zeek configuration again, reading every
     capture of this run from stdin through a pipe (`cat FILE | zeek -r -`),
     judged with the same functions, and compared row for row with its file
-    run. Suricata through a FIFO is a note only, not a condition."""
+    run, by the result with its citations taken out and by the records those
+    citations name (D6 on #630). Suricata through a FIFO is a note only."""
     caps = cases + [CONTROL]
     print("## 3. The pipe case\n")
     print("Each Zeek configuration reads every capture above from stdin through a pipe (`cat FILE | zeek -r -`), in a "
           "container with `--network none`, `--cap-drop ALL`, `--security-opt no-new-privileges` and a user that is not "
-          "root (`versions.txt` records them), and is judged by the same functions as its file run. **Reads a pipe** is "
-          "`yes` only when every capture exits 0 with at least one flow record and every one of D6's rows equals the "
-          "file run's, result and citation; `no` when no capture does; otherwise `partly`. An exit 0 with no flow record "
-          "never counts. **A pipe of a finished capture is not a live stream:** it ends, it never stalls, and nothing "
-          "pushes back, so this shows neither a stream that never ends, nor back-pressure, nor a writer that stalls or "
-          "dies, nor a malformed record on the pipe.\n")
-    print("| configuration | reads a pipe | captures with exit 0 and a flow record | rows equal to the file run (result and citation) | rows that differ |")
-    print("| --- | --- | --- | --- | --- |")
+          "root (`versions.txt` records them), and is judged by the same functions as its file run. A pipe row equals its "
+          "file row when the result, with its citations taken out, is the same, and the citations name the same records "
+          "(a flow by its transport and ends; a message by its flow, sender, code, time and objects), whatever their line "
+          "numbers. **Reads a pipe** is `yes` only when every capture exits 0 with at least one flow record and every one "
+          "of D6's rows equals the file run's; `no` when no capture does; otherwise `partly`. An exit 0 with no flow "
+          "record never counts. Rows that cite the same records at other line numbers are listed as a note, not as a "
+          "difference. **A pipe of a finished capture is not a live stream:** it ends, it never stalls, and nothing pushes "
+          "back, so this shows neither a stream that never ends, nor back-pressure, nor a writer that stalls or dies, nor "
+          "a malformed record on the pipe.\n")
+    print("| configuration | reads a pipe | captures with exit 0 and a flow record | rows equal to the file run (result and records) | rows that differ | note: same records at other line numbers |")
+    print("| --- | --- | --- | --- | --- | --- |")
     for cfg in PIPED:
         pc = cfg + "-pipe"
         ok = sum(1 for c in caps if not isinstance(loaded[(pc, c)], str) and loaded[(pc, c)].flows)
         if not conds:
             reads = "no" if ok == 0 else "unknown (no conditions to compare rows)"
-            print(f"| {LABELS[cfg]} | {reads} | {ok} of {len(caps)} | {PENDING} | |")
+            print(f"| {LABELS[cfg]} | {reads} | {ok} of {len(caps)} | {PENDING} | | |")
             continue
         a, b = evaluate(conds, loaded, cfg), evaluate(conds, loaded, pc)
-        diff = [(x[0], x[1:], y[1:]) for x, y in zip(a, b) if x[1:] != y[1:]]
+        diff, moved = [], []
+        for (row, fr, fc), (_, pr, pcite) in zip(a, b):
+            cap = row["capture"]
+            ft = {**records(loaded[(cfg, CONTROL)]), **records(loaded[(cfg, cap)])}
+            pt = {**records(loaded[(pc, CONTROL)]), **records(loaded[(pc, cap)])}
+            same = (CITE.sub("", fr) == CITE.sub("", pr)
+                    and matched(fr + " " + fc, ft) == matched(pr + " " + pcite, pt))
+            if not same:
+                diff.append((row, (fr, fc), (pr, pcite)))
+            elif (fr, fc) != (pr, pcite):
+                moved.append(row)
         reads = "yes" if ok == len(caps) and not diff else "no" if ok == 0 else "partly"
-        shown = "; ".join(f"{r['capture']} {r['condition']} {r['code']}: file `{fr[0]}` {fr[1]}, pipe `{pr[0]}` {pr[1]}"
-                          for r, fr, pr in diff) or "-"
-        print(f"| {LABELS[cfg]} | {reads} | {ok} of {len(caps)} | {len(a) - len(diff)} of {len(a)} | {shown} |")
+        shown = "; ".join(f"{r['capture']} {r['condition']} {r['code']}: file `{f[0]}` {f[1]}, pipe `{q[0]}` {q[1]}"
+                          for r, f, q in diff) or "-"
+        note = "; ".join(f"{r['capture']} {r['condition']} {r['code']}" for r in moved) or "-"
+        print(f"| {LABELS[cfg]} | {reads} | {ok} of {len(caps)} | {len(a) - len(diff)} of {len(a)} | {shown} | {note} |")
     print()
 
 
