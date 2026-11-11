@@ -28,7 +28,10 @@ def records(name):
 def test_the_checker_passes_the_sources_records_for_every_labelled_case(name):
     rows, frames, sha = c13_stream.load(name)
     recs = c13_source.Source(rows, frames, sha).records()
-    got = gt_checker.check(rows, recs)
+    # A capture whose outstation is off port 20000 is judged by the moved-port rule.
+    moved = dnp3_cases.DECODE.get(name, {}).get("port", 20000) != 20000
+    assert moved == (name == "dnp3-moved-port")
+    got = gt_checker.check(rows, recs, moved_port=moved)
     assert got["problems"] == []
     assert got["recall"] == 1 and got["precision"] == 1 and got["extra"] == 0
     assert got["labelled"] == sum(r["kind"] in ("flow", "service", "function") for r in rows) > 0

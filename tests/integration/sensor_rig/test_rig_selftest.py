@@ -45,6 +45,13 @@ def need_rig():
         pytest.skip(why)
 
 
+def unknown_on_this_runner(why):
+    """A measurement that this runner's kernel cannot make. It is a counted
+    skip with its reason, in required mode too (D1 on #626): the result is
+    unknown here, and it is never a pass."""
+    pytest.skip(f"UNKNOWN on this runner, not measured: {why}")
+
+
 def gt_frames():
     """Every frame of GT-PCAP's DNP3 cases, in case order."""
     return [f for _, frames, _ in dnp3_cases.cases() for f in frames]
@@ -152,6 +159,30 @@ def test_c11_negative_control_a_misconfigured_interface_is_seen_to_send():
     assert "arp" in kinds and "dhcp" in kinds and any(k.startswith("ipv6") for k in kinds), kinds
 
 
+@pytest.mark.parametrize("how", ["master", "upper"])
+def test_c11_negative_control_a_quiet_interface_still_sends_through_a_master_or_an_upper_device(how):
+    """D2 on #627: an interface whose own settings pass can still transmit
+    through a master it is a port of, or through a device stacked on it. So
+    the rig must see such frames: here mon0 keeps the quiet arrangement, and
+    a bridge it is enslaved to, or a VLAN device on top of it, has the
+    address, the ARP and the IPv6 that mon0 lacks. One master kind (a
+    bridge) and one upper kind (a VLAN) stand for the others."""
+    def attach(rig):
+        (rig.enslave_to_bridge if how == "master" else rig.stack_vlan)()
+        rig_netns.reach_neighbour(rig.sensor_ns)
+
+    try:
+        with rig_netns.Rig() as rig:
+            got = rig_netns.c11(rig, gt_frames()[:20], start_sensor=lambda: attach(rig), settle_s=2.0)
+            own = rig.mon0_own_settings()
+    except rig_netns.Unavailable as e:
+        unknown_on_this_runner(e)
+    print(f"MEASURED C-11 negative control, {how}: {len(got['from_mon0'])} frames from mon0: {got['kinds']}; "
+          f"mon0's own settings: {own}")
+    assert own == {"ipv4_address": False, "ipv6_off": True, "arp_off": True}, "the control changed mon0 itself"
+    assert got["from_mon0"], f"mon0 sent nothing the rig could see through its {how}"
+
+
 def test_a_packet_socket_send_is_seen_with_and_without_qdisc_bypass():
     """A quiet IP configuration does not stop a process that writes to the
     interface itself, and the rig must see it on either send path."""
@@ -196,29 +227,25 @@ def test_the_bypass_sender_really_skips_the_queueing_layer():
     assert sent["bypass"], "the bypass sender did not skip the queueing layer"
 
 
-def test_an_nftables_egress_rule_measured_against_each_send_path():
-    """A netdev egress chain that drops everything on mon0, then three ways
-    to send: the host's own stack, a packet socket, and a packet socket with
-    PACKET_QDISC_BYPASS. The rule must stop the stack, or it isn't in
-    force. What it does to the two packet-socket paths is the measurement
+def measure_egress_block(name, install):
+    """Three ways to send from mon0 with a block installed: the host's own
+    stack, a packet socket, and a packet socket with PACKET_QDISC_BYPASS.
+    The block must stop the stack, or it isn't in force: that is its
+    control. What it does to the two packet-socket paths is the measurement
     this rig exists to make, so it is printed and recorded, not assumed."""
-    if not shutil.which("nft"):
-        if REQUIRED:
-            pytest.fail("OTSEC_RIG_REQUIRED=1, and the runner has no nft")
-        pytest.skip("no nft")
     with rig_netns.Rig(misconfigured=True) as rig:
         rig.up()
         time.sleep(2.0)
-        rig.nft_egress_drop()
+        install(rig)
         cap = rig_netns.Capture(rig.rig_ns, TAP).start()
-        told = {}  # what each sender was told: the kernel may refuse a send the rule drops
+        told = {}  # what each sender was told: the kernel may refuse a send the block drops
 
-        def attempt(name, send):
+        def attempt(who, send):
             try:
                 send()
-                told[name] = "accepted"
+                told[who] = "accepted"
             except OSError as e:
-                told[name] = errno.errorcode.get(e.errno, str(e.errno))
+                told[who] = errno.errorcode.get(e.errno, str(e.errno))
 
         attempt("neighbour", lambda: rig_netns.reach_neighbour(rig.sensor_ns))
         attempt("dhcp", lambda: rig_netns.dhcp_discover(rig.sensor_ns, MON))
@@ -232,13 +259,33 @@ def test_an_nftables_egress_rule_measured_against_each_send_path():
     got = [f[3] for f in cap.arrived()]
     stack = [rig_netns.classify(f) for f in got if not f[14:].startswith(b"otsec-rig:")]
     arrived = {t: rig_netns.marker_frame(t) in got for t in ("plain", "bypass")}
-    print(f"MEASURED nft egress drop on mon0, kernel {kernel}: stack frames that passed: {stack} "
+    print(f"MEASURED {name} on mon0, kernel {kernel}: stack frames that passed: {stack} "
           f"(sends: neighbour {told['neighbour']}, dhcp {told['dhcp']}); "
           f"packet socket: send {told['plain']}, frame arrived {arrived['plain']}; "
           f"packet socket with PACKET_QDISC_BYPASS: send {told['bypass']}, frame arrived {arrived['bypass']}")
-    assert stack == [], "the egress rule is not in force: the host's own frames passed it"
+    assert stack == [], f"the {name} is not in force: the host's own frames passed it"
     for tag in ("plain", "bypass"):
         assert told[tag] == "accepted" or not arrived[tag], f"{tag}: the send was refused and the frame still arrived"
+
+
+def test_an_nftables_egress_rule_measured_against_each_send_path():
+    """A netdev egress chain on mon0 that drops everything."""
+    if not shutil.which("nft"):
+        if REQUIRED:
+            pytest.fail("OTSEC_RIG_REQUIRED=1, and the runner has no nft")
+        pytest.skip("no nft")
+    measure_egress_block("nft egress drop", lambda rig: rig.nft_egress_drop())
+
+
+def test_a_tc_egress_filter_measured_against_each_send_path():
+    """A clsact egress filter on mon0 that drops everything (D1 on #626).
+    It sits at a different point from the nftables hook, so its result is
+    its own. If this runner's kernel lacks clsact or the filter, the result
+    is unknown here, loudly, and H-18 carries it."""
+    try:
+        measure_egress_block("tc clsact egress drop-all filter", lambda rig: rig.tc_egress_drop())
+    except rig_netns.Unavailable as e:
+        unknown_on_this_runner(e)
 
 
 def test_capabilities_a_process_that_dropped_them_passes_and_one_that_kept_them_is_flagged():

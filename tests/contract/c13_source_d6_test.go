@@ -4,7 +4,7 @@ package contract
 // P4-4-R1 deliverable 3). tests/integration/sensor_rig/c13_source.py turns
 // GT-PCAP's labels into C13 records, from the contract's text and with no
 // code from contracts/netobs. testdata/c13-source/gt-pcap-dnp3.stream is
-// what it sends for four GT-PCAP captures, each as a run of its own, and a
+// what it sends for five GT-PCAP captures, each as a run of its own, and a
 // Python test pins the file to the source. Here every record of that stream
 // must read as C13's framing, pass DecodeChannel, and follow the heartbeat
 // before it. If the source and the decoder read C13 differently, one of
@@ -115,20 +115,20 @@ func TestC13SourceStreamIsAcceptedByTheContract(t *testing.T) {
 			t.Fatalf("record %d carries the node's object", n)
 		}
 	}
-	// What the four captures' labels hold: a flow start and end each, a
-	// service each, and seven function rows over every sa outcome, two of
+	// What the five captures' labels hold: a flow start and end each, a
+	// service each, and nine function rows over every sa outcome, two of
 	// them with sa unknown: the request with no response, and the request
 	// completed early by a reused sequence number.
-	if len(runs) != 4 || heartbeats != 8 {
-		t.Errorf("%d runs and %d heartbeats, want 4 and 8", len(runs), heartbeats)
+	if len(runs) != 5 || heartbeats != 10 {
+		t.Errorf("%d runs and %d heartbeats, want 5 and 10", len(runs), heartbeats)
 	}
-	if kinds[netobs.KindFlow] != 8 || kinds[netobs.KindService] != 4 || kinds[netobs.KindFunction] != 7 {
-		t.Errorf("kinds %v, want 8 flow, 4 service and 7 function records", kinds)
+	if kinds[netobs.KindFlow] != 10 || kinds[netobs.KindService] != 5 || kinds[netobs.KindFunction] != 9 {
+		t.Errorf("kinds %v, want 10 flow, 5 service and 9 function records", kinds)
 	}
-	if firstSights != 4+4+7 {
-		t.Errorf("%d first sights, want 15: every record but the four flow ends", firstSights)
+	if firstSights != 5+5+9 {
+		t.Errorf("%d first sights, want 19: every record but the five flow ends", firstSights)
 	}
-	want := map[string]int{netobs.SANone: 2, netobs.SAChallenged: 1, netobs.SAAggressive: 1, netobs.SAFailed: 1, "": 2}
+	want := map[string]int{netobs.SANone: 4, netobs.SAChallenged: 1, netobs.SAAggressive: 1, netobs.SAFailed: 1, "": 2}
 	for k, v := range want {
 		if sa[k] != v {
 			t.Errorf("sa %q on %d function records, want %d (all: %v)", k, sa[k], v, sa)

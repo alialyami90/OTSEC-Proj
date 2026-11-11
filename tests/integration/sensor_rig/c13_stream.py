@@ -3,7 +3,7 @@
 load() gives one capture's frames, label rows and pinned hash: the frames
 from GT-PCAP's own writer (dnp3_cases.py), the rows from the committed label
 file, the hash from dnp3.sha256. stream() is the byte stream the Go contract
-test reads (tests/contract/c13_source_d6_test.go): four captures, each as a
+test reads (tests/contract/c13_source_d6_test.go): five captures, each as a
 run of its own, so `seq` starts again and the heartbeats' counters do too.
 
 Usage: python c13_stream.py OUT   (rewrites the committed stream)
@@ -22,8 +22,10 @@ import dnp3_cases  # noqa: E402
 LABELS = os.path.join(HERE, "..", "..", "fixtures", "network", "gt-pcap", "dnp3")
 COMMITTED = os.path.join(HERE, "..", "..", "contract", "testdata", "c13-source", "gt-pcap-dnp3.stream")
 # A challenged, an aggressive and an unchallenged exchange; a reused
-# sequence number; a request with no response; an error from the master.
-STREAMED = ("dnp3-sa", "dnp3-reused-seq", "dnp3-unauthorized-operate-no-response", "dnp3-sa-failed-master")
+# sequence number; a request with no response; an error from the master; and
+# DNP3 over UDP, whose flow has no direction and whose end has no syn_only.
+STREAMED = ("dnp3-sa", "dnp3-reused-seq", "dnp3-unauthorized-operate-no-response", "dnp3-sa-failed-master",
+            "dnp3-udp")
 
 
 def rows(name):

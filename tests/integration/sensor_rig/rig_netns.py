@@ -57,6 +57,23 @@ def sh(*args):
     return p.stdout
 
 
+class Unavailable(RuntimeError):
+    """The runner's kernel lacks what a measurement needs, such as a module
+    for a queueing discipline or a device type. The result is then unknown
+    on that runner. It is never a pass."""
+
+
+def need(*args):
+    """Run a command that may fail only because the kernel lacks a module.
+    That failure is Unavailable; any other failure is an error."""
+    p = subprocess.run(args, capture_output=True, text=True)
+    if p.returncode:
+        msg = f"{' '.join(args)}: exit {p.returncode}: {p.stderr.strip()}"
+        missing = ("unknown", "not found", "not supported", "no such file", "failed to load")
+        raise (Unavailable if any(m in p.stderr.lower() for m in missing) else RuntimeError)(msg)
+    return p.stdout
+
+
 @contextlib.contextmanager
 def in_ns(name):
     """Run the body with this thread in the named network namespace. A
@@ -178,6 +195,45 @@ class Rig:
     def __exit__(self, *exc):
         for ns in (self.rig_ns, self.sensor_ns):
             subprocess.run(["ip", "netns", "del", ns], capture_output=True)
+
+    def tc_egress_drop(self):
+        """A clsact queueing discipline on mon0 with one egress filter that
+        drops everything: the `tc` form of a host rule against sending. It
+        sits in the queueing layer's egress hook, a different point from
+        nftables' netdev egress hook, so it is measured on its own."""
+        need("tc", "-n", self.sensor_ns, "qdisc", "add", "dev", MON, "clsact")
+        need("tc", "-n", self.sensor_ns, "filter", "add", "dev", MON, "egress", "matchall", "action", "drop")
+
+    def enslave_to_bridge(self, name="br0"):
+        """Make mon0 a port of a bridge that has what mon0 itself lacks:
+        IPv6, ARP and an IPv4 address. Nothing is changed on mon0 but its
+        master. Call after up()."""
+        ns = self.sensor_ns
+        need("ip", "-n", ns, "link", "add", name, "type", "bridge")
+        sysctl(ns, f"net.ipv6.conf.{name}.disable_ipv6", 0)
+        sh("ip", "-n", ns, "addr", "add", MON_TEST_ADDR, "dev", name)
+        sh("ip", "-n", ns, "link", "set", MON, "master", name)
+        sh("ip", "-n", ns, "link", "set", name, "up")
+
+    def stack_vlan(self, name="monv10", vid="10"):
+        """Stack a VLAN device on mon0 that has what mon0 itself lacks:
+        IPv6, ARP and an IPv4 address. Nothing is changed on mon0. Call
+        after up(): an upper device comes up only on a lower one that is."""
+        ns = self.sensor_ns
+        need("ip", "-n", ns, "link", "add", "link", MON, "name", name, "type", "vlan", "id", vid)
+        sysctl(ns, f"net.ipv6.conf.{name}.disable_ipv6", 0)
+        sh("ip", "-n", ns, "addr", "add", MON_TEST_ADDR, "dev", name)
+        sh("ip", "-n", ns, "link", "set", name, "arp", "on", "up")
+
+    def mon0_own_settings(self):
+        """mon0's own settings, the ones C-11's quiet arrangement sets: no
+        IPv4 address, IPv6 off, ARP off. A master or an upper device leaves
+        all three as they were."""
+        ns = self.sensor_ns
+        with in_ns(ns), open(f"/proc/sys/net/ipv6/conf/{MON}/disable_ipv6") as f:
+            ipv6_off = f.read().strip() == "1"
+        return {"ipv4_address": bool(sh("ip", "-n", ns, "-o", "-4", "addr", "show", "dev", MON).strip()),
+                "ipv6_off": ipv6_off, "arp_off": "NOARP" in sh("ip", "-n", ns, "link", "show", MON)}
 
     def qdisc_drop_all(self):
         """A queue on mon0 that holds nothing, so the queueing layer drops
