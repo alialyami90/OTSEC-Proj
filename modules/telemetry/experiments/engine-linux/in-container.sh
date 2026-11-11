@@ -43,4 +43,7 @@ for p in /pcaps/*; do
   rc=$?
   echo "$rc" > exit-code
   [ "$rc" = 0 ] || { echo "$eng failed on $n ($cfg), exit $rc:"; tail -5 "$eng.stderr"; }
+  # An engine that exits 0 can still warn about the capture (truncated,
+  # unsupported, unreadable): print its first such lines either way.
+  grep -iE '^[WE]: |warn|error|truncat|unknown file format' "$eng.stderr" 2> /dev/null | head -3 | sed "s|^|$eng $n ($cfg) says: |"
 done
