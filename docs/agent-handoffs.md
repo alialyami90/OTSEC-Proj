@@ -1463,7 +1463,7 @@ The item 4 exit gate is set in the sensor brief. It holds every criterion the St
 
 Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HANDOFF.md`, its own agent file and the files its brief names before it starts. Where a brief lets a role change a path that it does not own, D1 authorizes that change by the brief, for what the brief names and no more. Common rules: the repository is public; stage by explicit path; never force-push; no contact with any device or network; nothing is installed on the owner's PC; a failing job is re-run at most once and a failure is a finding, not a flake.
 
-### P4-4-A6 (D4): the engine and the capture path under option (a), from evidence
+### P4-4-S1 (D4): the engine and the capture path under option (a), from evidence
 
 - **Objective.** Fill the `unknown` cells of ADR-0009 that a GitHub-hosted Windows runner and primary documents can fill, so that D1 and D4 can choose the engine and the owner can answer the Npcap question with the real terms in front of them. It builds no sensor.
 - **Deliverables:**
@@ -1474,7 +1474,7 @@ Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HAND
 - **Inputs.** `docs/decisions/ADR-0009-passive-sensor.md`, D4-66 to D4-68 and D4-78, and the experiment's own folder and workflow.
 - **May change:** `modules/telemetry/experiments/sensor-windows/`, `docs/phase4/D4-*.md`, and, authorized by D1 here, `.github/workflows/d4-sensor-eval.yml` and `docs/decisions/ADR-0009-passive-sensor.md` (evidence and D4's view only).
 - **Acceptance.** Every new claim has a run URL or a cited source with its date. The workflow stays dispatch-only, pins every download by SHA-256 and checks the hash before it runs anything it downloaded.
-- **Exclusions.** No sensor and no product code. No Npcap install anywhere, the runner included. No capture of a real network. No change to `ci.yml`.
+- **Exclusions.** No sensor and no product code. No Npcap install anywhere, the runner included. No capture of a real network: `pktmon` captures only the runner's own traffic, and the workflow reports counts, not the capture. No binary and no installer is committed or uploaded as an artifact. Where the vendor publishes no hash for a download, the SHA-256 of the first download is recorded with its URL and date and pinned from then on, and the record says that it is a first-use pin. No change to `ci.yml`.
 - **Branch:** `agent/telemetry-sensor-engine-eval`. **Reviewers:** D6 (testability), D3 (the boundary and the downloads), D7 (the licence rows).
 
 ### P4-D7-1 (D7): `docs/release.md`, the first inventory
@@ -1503,17 +1503,17 @@ Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HAND
   4. A framing fault and a malformed message sent to the real binaries, each stored raw and flagged, with no message lost (R4.1).
   5. One mutant for each new test, never committed.
   6. New `integration-long` matrix entries in `ci.yml`, with the packages they install and their versions printed.
-- **May change:** `tests/integration/`, `tests/security/`, and, authorized by D1 here, `ci.yml` for those entries. Not `docs/verification.md`: the status cells follow in a later PR, after the legs pass on `main`.
+- **May change:** `tests/integration/`, `tests/security/`, `docs/phase4/D6-closing-legs.md`, and, authorized by D1 here, `ci.yml` for those entries. Not `docs/verification.md`: the status cells follow in a later PR, after the legs pass on `main`.
 - **Inputs.** The matrix's legend and the five rows' cells in #613, V-S6's and V-S9's criteria with their ground truths, and D4-82.
-- **Acceptance.** Each leg is green on the PR's head, or red for a reason reported as a finding. A product failure is a result: the test is not loosened, and no product code changes. The oracle in each test is not the product's code.
+- **Acceptance.** Each leg is green on the PR's head, or red for a reason reported as a finding. A product failure is a result: the test is not loosened, and no product code changes. **A failing leg is never removed, skipped or marked as an expected failure.** If the product fails, the PR stays open with the leg red, D6 writes the finding in `docs/phase4/D6-closing-legs.md` and reports it to D1, and the owner of the code fixes the product in its own PR. The oracles are rsyslog's own output and the store's contents, never the product's code or D6's own receiver.
 - **Exclusions.** No product code. No lowering of any criterion. Loopback only. No new CI job outside `integration-long`'s matrix.
 - **Branch:** `agent/verification-closing-legs`. **Reviewers:** D4, D5 and D1.
 
 ### P4-PC-1 (D5 and D6): the six tests that pass only on a CI runner
 
 - **Objective.** `go test ./...` passes on a Windows machine that is not elevated, not on UTC, and holds `reference/`, `tools/` and `.claude/worktrees/` inside the checkout, with nothing left behind, and each test still fails when it should (D4-83's first local run).
-- **D5's half** (`agent/platform-pc-run-fixes`): the test that formats a C7 time from a local time, after checking that no product path does the same; the `nodeconfigtest` helper, so that a test which needs elevation skips with a message, fails under `OTSEC_REQUIRE_ELEVATED=1`, and leaves no folder its cleanup cannot remove. **May change:** tests and test helpers under `platform/` and `cmd/otsec/`. **Reviewers:** D6 and D3.
-- **D6's half** (`agent/verification-pc-run-fixes`): every test that walks the repository tree, with one stated rule for what a walker skips and a test of that rule. **May change:** `tests/` (not `tests/integration/slice/`), and, authorized by D1 here, the walk's skip rule in `contracts/advisory/testkeys_test.go`, a C11 test that D3 drafted. **Reviewers:** D3, D5 and D1.
+- **D5's half** (`agent/platform-pc-run-fixes`): the test that formats a C7 time from a local time, after checking that no product path does the same; the `nodeconfigtest` helper, so that a test which needs elevation and skips leaves no folder its cleanup cannot remove. The tests already skip when not elevated, and already fail instead when `GITHUB_ACTIONS` is `true` or `OTSEC_REQUIRE_ELEVATED` is set; both conditions stay. **May change:** tests and test helpers under `platform/` and `cmd/otsec/`. **Reviewers:** D6 and D3.
+- **D6's half** (`agent/verification-pc-run-fixes`): every test that walks the repository tree, with one stated rule for what a walker skips and a test of that rule. The rule is anchored at the repository root, and an unreadable folder anywhere else still fails the test. **May change:** `tests/` (not `tests/integration/slice/`), and, authorized by D1 here, the walk's skip rule in `contracts/advisory/testkeys_test.go`, a C11 test that D3 drafted. **Reviewers:** D3, D5 and D1.
 - **Inputs.** D4-83's account of the first local run, and `HANDOFF.md`'s section on the project folder.
 - **Acceptance.** On the owner's PC, not elevated, the affected packages pass, or skip the elevation-only tests with their message, and no folder is left in the temp directory. Each fixed test fails again when its fix is reverted or its rule is broken. All nineteen `ci` jobs and `govulncheck` are green, and on CI the elevation tests still run.
 - **Exclusions.** No weakening of what any test asserts. No elevated run.
