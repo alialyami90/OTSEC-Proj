@@ -662,7 +662,7 @@ The node's alarm codes are D5's to name. This note as merged in #624 used draft 
 
 - `sensor-dial-limit` (SL-30): the node has made its three dials to a pair that has not answered, or reads the count as spent. It stands until an administrator acts.
 - `sensor-transmitted` (SL-26, AP-32): any non-zero `frames_outgoing` in a run's first heartbeat, or any rise after it. It stands until an administrator acts.
-- `sensor-egress-absent` (SL-26): the sensor reports its egress rule not in force or unreadable, or drops the field within a run.
+- `sensor-egress-absent` (SL-26): the sensor states its egress rule absent, or drops the field within a run after it was present. **A sensor that cannot read the rule without a capability leaves the field out from the start of the run, and that raises no alarm.** It is a stated visibility limit, and status shows the egress state as unknown (C13 0.2, CH-27, with D4's condition that D3 accepted).
 - `sensor-link-key` (§11.4, NK-5): a fault in the node's link-key file. It holds back the sensor links only.
 
 None is in the C6 or C8 enumerations.
