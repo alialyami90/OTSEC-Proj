@@ -1536,7 +1536,7 @@ Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HAND
 
 ## Phase 4 item 4, second part: the sensor under option (b) (issued 2026-11-11, D4-86)
 
-The owner chose option (b) on 2026-11-11 (D4-85): a separate Linux machine at each site runs the engine and feeds the node. ADR-0009 records the decision and what it commits the project to. This part covers the evidence for the engine, the contracts for the link between sensor and node, and the test rig (CLAUDE.md §5.1, stages A and B). **No sensor code, no dialer and no enrolment code merges until D1 approves the link's contracts.** **And nothing that feeds the node's intake merges before the couplings F1 to F10 on `main` are closed** (`docs/phase4/D5-sensor-node.md` §1.0; D4-87). The implementation briefs follow that approval, as the third part.
+The owner chose option (b) on 2026-11-11 (D4-85): a separate Linux machine at each site runs the engine and feeds the node. ADR-0009 records the decision and what it commits the project to. This part covers the evidence for the engine, the contracts for the link between sensor and node, and the test rig (CLAUDE.md §5.1, stages A and B). **No sensor code, no dialer and no enrolment code merges until D1 approves the link's contracts.** **And nothing that feeds the node's intake merges before F-027's couplings, F1 to F11, are closed** (`docs/verification.md`; `docs/phase4/D5-sensor-node.md` §1.0; D4-87, D4-88). The implementation briefs follow that approval, as the third part.
 
 Common rules, beside those of every Phase 4 brief:
 
@@ -1662,7 +1662,7 @@ Common rules, beside those of every Phase 4 brief:
 1. **First, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them. L1 is done (#624), and the two cases are merged (#623).
 2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4). Both started on 2026-11-11 (D4-87). L2 was to wait for S2's result. D1 started it first, because the channel does not depend on which engine is chosen and the engine run was waiting on the hosted runners. L2 marks each clause that the engine's result could change. **Then P4-4-L4 (D3),** against the reviewed channel and node's side.
 3. **D1 approves** the engine (from S2) and the link's contracts (from L1, L2 and L3), and brings the owner a recommendation on the sensor's host: its hardware, its operating system, and whether the project ships an image or the site installs the engine (D7's review of #618 gives what each costs in licence duties).
-4. **The third part:** first, D5 closes the couplings F1 to F10 on `main`, each with its test and its control, reviewed by D6 and D3 (D4-87). Then the implementation briefs for the sensor, the node's dialer and enrolment, each against the approved contracts, with D6's contract tests.
+4. **The third part:** first, D5 closes the couplings F1 to F11 on `main` (F-027), each with its test and its control, reviewed by D6 and D3 (D4-87). Then the implementation briefs for the sensor, the node's dialer and enrolment, each against the approved contracts, with D6's contract tests.
 
 ### Phase 4 item 4 exit gate (D1 decides)
 
@@ -1676,7 +1676,43 @@ It holds every criterion that the Stage A brief listed under "What item 4 must s
 - AP-33's key search finds no test secret on the sensor's disk, in the link's bytes, in the node's store, or in anything forwarded.
 - On the real link: a record under another `sensor_id` is refused and alarmed, and a replayed stream is refused.
 - A sensor that heartbeats but is blind raises its alarm, and a sensor clock outside the bound raises the skew alarm.
-- The sensor holds no capability after its capture socket is open (`CAP_NET_RAW` dropped), shown by a test.
+- **The process that holds the packet socket cannot send** (D4-88, replacing "the sensor holds no capability after its capture socket is open", which a measurement on #626 showed would pass on a sensor that can still transmit): it runs under a system-call allow-list with no send call and no `setsockopt` on that socket, apart from the frame stage, behind the nftables egress chain, each shown by a test with a control (SL-T21, SL-T22).
+- **F-027's couplings, F1 to F11, are closed,** each with its test and its control (D4-87, D4-88), and **SL-30's dial limit** is shown by SL-T23.
 - C13 0.2 and the C7 and C8 additions are merged, with their reviewers' records and D6's contract tests.
 - No safety or security objection is open, and the report says what remains `simulated` and which H-rows wait for a lab machine.
 - The engine and its packages are pinned, and D7's inventory covers the sensor.
+
+## After D4-88: the last step before the link's contracts are approved, and the owed evidence (issued 2026-11-11, D4-88)
+
+Common rules as in "Phase 4 item 4, second part". Each PR body is written from a file with a name of the role's own, and read back with `gh pr view <n> --json body` after it is created or edited.
+
+### P4-4-L5 (D4 and D5): the two documents amended for #631
+
+- **Objective.** Bring C13 0.2 and the node's design in line with D3's note as merged in #631, so that the four documents can be approved together.
+- **Inputs.** #631's description, which lists the amendments: 16 for `docs/phase4/D4-c13-0.2-proposal.md` (D4), plus a 17th that D4 added in its review of `1889d929` (CH-13 row 5, the cursor on a `renew`), and 14 for `docs/phase4/D5-sensor-node.md` (D5); D1's comments on #631; D4-88.
+- **Deliverables.** One PR each, Markdown only, each item of its list applied and named in the description. D5's includes F11 in §1.0, the link key in a file of its own in §1.1, a §1.9 item 11 with its tests, SL-30's count and re-arm, and the health event `sensor.revocation-applied`. D4's includes the four programs (CH-12, CH-26, CH-42), the socket holder's counts, `interface_check`, CH-32's digest lines, and the alarms and counters of CH-35 and CH-45.
+- **Acceptance.** `records-auditor`, then D3 and D6 on each, and D4 and D5 on each other's. No rule shared between the two changes its value. Nothing is written as built.
+- **Exclusions.** No code.
+
+### P4-D6-RR (D6): the other rows of the matrix, re-read under one rule
+
+- **Objective.** Apply D4-82's rule to every row of `docs/verification.md` that #613 and #632 did not re-read: a row is `e2e` only when its run used the ground truth its criterion and its method name. Take D6's reservation on #632 (R3.3 is `e2e` on synthesized settings, while R4.1 stays `e2e-part` for want of device fixtures) and settle it by applying one reading to both.
+- **Deliverables.** One PR changing `docs/verification.md` only: each row's cell says which ground truth it used, and each Status that moves says why. R4.2 and R4.3 first.
+- **Acceptance.** `records-auditor`, then D4 and D2 on the rows they own. D1 updates `docs/requirements.md` from it.
+
+### P4-D6-I100 (D6): at least 100 interruptions on GT-RX
+
+- **Objective.** V-S6 asks for at least 100 interruptions with a receiver that is not project code. The closing legs ran 6, with a seed that is not fixed, and one run killed neither the simulator nor the collector.
+- **Deliverables.** A dispatch-only workflow that runs the V-S6 leg against the stock rsyslogd for at least 100 interruptions, with a set of fixed seeds that between them kill each of the receiver, the node, the collector and the simulator at least once, and with a control of the leg's own checks. Its result, with the run's link, in the matrix cells of R4.6, R4.7 and R8.6.
+- **Exclusions.** No change to `ci.yml`. No interruption the leg cannot reconcile is called a flake.
+
+### P4-D6-MUT (D6): mutants M1 to M4
+
+- **Objective.** No closing leg has a product mutant. D4-85 decided how mutants live in the repository.
+- **Deliverables.** M1 to M4 as committed patch files, with a dispatch-only workflow, on D6's four conditions of D4-85: the unmutated test passes first in the same job; a patch that fails to apply or to build is an error and never a kill; a kill is the named test's own failure; and `ci.yml` never applies a patch. D6's file changes its line that mutant scripts stay out of the commit.
+- **Acceptance.** D4 (the mutated code is D4's), D5 (the workflow).
+
+### P4-D7-2 (D7): the next change to `docs/release.md`
+
+- **Deliverables.** The seven notes carried from P4-D7-1's reviews; §5 item 8 now that `LICENSE.md` exists; ICSNPP's `NOTICE.txt`; AP-31 as it now reads for the sensor host; two rollback floors (the build with the detector checkpoint reader for a later minor, and the build with the C8 0.13 reader); and a release blocker: no release ships before F-027's couplings, F1 to F11, are closed.
+- **Acceptance.** D3 and D6. Markdown only.

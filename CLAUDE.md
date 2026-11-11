@@ -13,7 +13,7 @@ Where the work stands (D1 keeps this list current):
 
 - **Phases 0 to 3 are accepted by the owner:** the evidence phase, contracts C1 to C8, the simulated SEL-751 SER-to-Syslog slice, and its hardening. The reports are `docs/phase-0-exit.md` to `docs/phase-3-exit.md`.
 - **Phase 4 items 1 to 3 are accepted:** configuration monitoring, the event-behaviour baseline, and vulnerability applicability with the asset module. The reports are `docs/phase-4a-exit.md` and `docs/phase-4-item3-exit.md`.
-- **Phase 4 item 4, the network IDS, is in progress.** Its contracts are approved and the node side is merged. The owner chose option (b) for the sensor on 2026-11-11: a separate Linux machine at each site that feeds the node (D4-85, which supersedes the choice of option (a) in D4-78). ADR-0009 is accepted for option (b), with Zeek as the provisional engine until the engine run decides it. The link's trust design, its channel contract (C13 0.2) and the node's side are merged as reviewed designs, and none of them is approved as a contract yet (D4-87). No sensor is built.
+- **Phase 4 item 4, the network IDS, is in progress.** Its contracts are approved and the node side is merged. The owner chose option (b) for the sensor on 2026-11-11: a separate Linux machine at each site that feeds the node (D4-85, which supersedes the choice of option (a) in D4-78). ADR-0009 is accepted for option (b), with Zeek as the provisional engine until the engine run decides it. The link's trust design, its channel contract (C13 0.2), the node's side and the C7 and C8 additions are merged as reviewed designs, and none of them is approved as a contract yet (D4-88). No sensor is built.
 - `HANDOFF.md` has the next action, the questions waiting on the owner, and the folder layout on the owner's PC. Read it after this file.
 
 Every result so far is `desk` or `simulated`. No device has been contacted, and no device family may be called supported.
@@ -51,7 +51,7 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 
 ## Testing and merging
 
-- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs nineteen jobs on every pull request: Go on Linux and Windows, pytest, `integration`, and fifteen `integration-long` legs. `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
+- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs twenty-four jobs on every pull request: Go on Linux and Windows, pytest, `integration`, and twenty `integration-long` legs. `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
 - **A PR merges when its reviewers accept it and every job in both workflows is green on its head.** Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). A reviewer's verdict names a head, and the merge is at that head.
 - A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both workflows and merges on review. A push to `main` with only such changes skips `ci.yml` too.
 - A PR that touches GT-PCAP (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) or `.github/workflows/a6-gt-pcap.yml` also needs `a6-gt-pcap` green.
