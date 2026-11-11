@@ -13,7 +13,7 @@ Where the work stands (D1 keeps this list current):
 
 - **Phases 0 to 3 are accepted by the owner:** the evidence phase, contracts C1 to C8, the simulated SEL-751 SER-to-Syslog slice, and its hardening. The reports are `docs/phase-0-exit.md` to `docs/phase-3-exit.md`.
 - **Phase 4 items 1 to 3 are accepted:** configuration monitoring, the event-behaviour baseline, and vulnerability applicability with the asset module. The reports are `docs/phase-4a-exit.md` and `docs/phase-4-item3-exit.md`.
-- **Phase 4 item 4, the network IDS, is in progress.** Its contracts are approved and the node side is merged. The owner chose option (b) for the sensor on 2026-11-11: a separate Linux machine at each site that feeds the node (D4-85, which supersedes the choice of option (a) in D4-78). ADR-0009's decision is being written, and the sensor is not briefed.
+- **Phase 4 item 4, the network IDS, is in progress.** Its contracts are approved and the node side is merged. The owner chose option (b) for the sensor on 2026-11-11: a separate Linux machine at each site that feeds the node (D4-85, which supersedes the choice of option (a) in D4-78). ADR-0009 is accepted for option (b), with Zeek as the provisional engine. The link's contracts, the engine run and the test rig are briefed (D4-86). No sensor is built.
 - `HANDOFF.md` has the next action, the questions waiting on the owner, and the folder layout on the owner's PC. Read it after this file.
 
 Every result so far is `desk` or `simulated`. No device has been contacted, and no device family may be called supported.
