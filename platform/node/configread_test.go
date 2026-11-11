@@ -187,10 +187,12 @@ func (n *cfgNode) approve(baseline string) {
 	n.approveWindow(baseline, now.Add(-time.Hour), now.Add(time.Hour))
 }
 
+// approveWindow approves a change in the window from start to end, written
+// in UTC as C7 requires whatever zone the times are in (P4-PC-1).
 func (n *cfgNode) approveWindow(baseline string, start, end time.Time) {
 	n.decide(authz.KindNodeChangeApproval, &audit.Record{Action: audit.ActionConfigChangeApproved,
-		Config: &audit.Config{BaselineDigest: baseline, WindowStart: start.Format(time.RFC3339),
-			WindowEnd: end.Format(time.RFC3339), Reason: "Replace CT ratio (work order 4711)"}})
+		Config: &audit.Config{BaselineDigest: baseline, WindowStart: start.UTC().Format(time.RFC3339),
+			WindowEnd: end.UTC().Format(time.RFC3339), Reason: "Replace CT ratio (work order 4711)"}})
 }
 
 // results are the chain's configuration read results, and the chain must
@@ -707,16 +709,23 @@ func TestConfigReadDecisionNotInChain(t *testing.T) {
 }
 
 // An approval whose window ended before the last unchanged read covers
-// nothing: the change is unapproved.
+// nothing: the change is unapproved. The window's times are also given in a
+// zone east of UTC, as on a node whose clock is on local time, which CI's
+// UTC runners never are: the approval is the same (P4-PC-1).
 func TestConfigReadApprovalWindowEnded(t *testing.T) {
-	n := newCfgNode(t)
-	base := n.snapshotOf("ok")
-	n.read("ok")
-	n.ack(base, "")
-	n.approveWindow(base, time.Now().Add(-3*time.Hour), time.Now().Add(-2*time.Hour))
-	n.read("ok-all-present")
-	if res := n.results(); len(res) != 1 || res[0].ReasonCode != audit.ReasonUnapprovedChange || res[0].Config.ApprovalSeq != 0 {
-		t.Fatalf("%+v", res)
+	for _, loc := range []*time.Location{time.UTC, time.FixedZone("UTC+3", 3*60*60)} {
+		t.Run(loc.String(), func(t *testing.T) {
+			n := newCfgNode(t)
+			base := n.snapshotOf("ok")
+			n.read("ok")
+			n.ack(base, "")
+			now := time.Now().In(loc)
+			n.approveWindow(base, now.Add(-3*time.Hour), now.Add(-2*time.Hour))
+			n.read("ok-all-present")
+			if res := n.results(); len(res) != 1 || res[0].ReasonCode != audit.ReasonUnapprovedChange || res[0].Config.ApprovalSeq != 0 {
+				t.Fatalf("%+v", res)
+			}
+		})
 	}
 }
 

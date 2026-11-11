@@ -3,6 +3,7 @@
 package nodeconfigtest
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 // node: owner Administrators, and a protected DACL on tls_dir with full
 // control for SYSTEM and Administrators and read for this account, which
 // the files inherit. Making Administrators the owner needs an elevated
-// process; a non-elevated test gets ErrNeedsElevation.
+// process; a non-elevated test gets ErrNeedsElevation. A LockTLS that fails
+// leaves tls_dir as UnlockTLS does, so the test's TempDir cleanup can still
+// remove it however the test ends.
 func (c *Config) LockTLS() error { return c.lock("") }
 
 // ShareTLS is LockTLS for a directory another service also reads, as the
@@ -22,10 +25,21 @@ func (c *Config) LockTLS() error { return c.lock("") }
 // SID string) read and traverse, inherited by the files.
 func (c *Config) ShareTLS(reader string) error { return c.lock("(A;OICI;0x1200a9;;;" + reader + ")") }
 
-func (c *Config) lock(extra string) error {
+func (c *Config) lock(extra string) (err error) {
 	if err := c.setDACL(c.TLSDir, true, "FR", extra); err != nil {
 		return err
 	}
+	// The DACL above leaves this account read only. If a later step fails,
+	// as making Administrators the owner does without elevation, give the
+	// account full control again: a test that then skips or fails must
+	// leave nothing its TempDir cleanup cannot remove (P4-PC-1).
+	defer func() {
+		if err != nil {
+			if uerr := c.UnlockTLS(); uerr != nil {
+				err = errors.Join(err, uerr)
+			}
+		}
+	}()
 	// An empty, unprotected DACL leaves each file only what it inherits.
 	// (ACLFromEntries cannot build one: it dereferences its nil old ACL.)
 	emptySD, err := windows.SecurityDescriptorFromString("D:")
