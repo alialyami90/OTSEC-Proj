@@ -35,6 +35,28 @@ Each `condition` value of the TSV is one column.
 
 **Why group 120 is asked per message and not per connection.** C13's `sa` is a fact about one exchange (§4.3), and the node sets `dnp3_no_sa` from it for one request. `dnp3-sa` holds, in one connection, a read with no SA, a challenged operate and an aggressive-mode operate. An engine that reports "this connection carried group 120" can't say which request was challenged, so it can't show an unchallenged operate that follows a challenged one, which is the downgrade C13 §4.2 keeps apart. The variation is needed because a challenge (v1) and an error (v7) are different outcomes, and the sender because `sa_error_from` records it. A weaker result is written as `fail (group only)` or `fail (no sender)`, so D1 sees how far the engine got.
 
+**D1 accepted this reading on #623** (2026-11-11), as D6's, with its reason from the manuals. On the SEL RTAC, "By default, read commands do not prompt challenges", and which commands are challenged is configurable (S23 p. 74; D2 on #618). So a session that holds no group 120 object is not evidence that Secure Authentication is off, and one that holds some is not evidence that every command was challenged. The "DNP3 without SA" flag has to key on a critical function that goes unchallenged, one request at a time. D2 reviews the protocol reading and may correct it.
+
+**Which functions are critical.** These conditions class no function themselves. The node does, from one table, `fc-classes/1` (`docs/phase4/D4-network-baseline.md` §4), and sets `dnp3_no_sa` on a request whose class is `write`, `control` or `session-setup` and whose `sa` is `none` (C13 §5). In GT-PCAP's captures that is:
+
+| Code | Objects | Class | Source, as the class table gives it |
+| --- | --- | --- | --- |
+| 5 | g12v1 | `control` | S33 Table F.2 p. F.3; S22 p. D.15; S23 pp. 80 to 82 |
+| 2 | g80v1 only | `session-setup` | S22 p. D.18; S23 Table 2.30 p. 82 |
+| 20, 21, 22 | g60 class objects | `session-setup` | S22 Table D.9 p. D.18; S23 Table 2.30 pp. 79 to 82 |
+| 2 | g50v1 only | `time-sync`, not critical | S33 Table F.2 p. F.2; S22 Table D.9 |
+| 1 | g60 class objects | `read`, not critical | S33 Table F.2 p. F.2 |
+
+Every group 120 row of the TSV that asks for an object is on function 5, the one critical function that the SA captures challenge. The seventh row is the unchallenged read. So an engine is shown on a challenged, an aggressive-mode and a failed direct operate, and on no other challenged function.
+
+**What is `unknown`, and waits on the DNP3 SA text the project does not hold** (IEEE 1815's SA clause or IEC 62351-5; D4-68):
+
+- which functions an outstation must challenge. The held sources give the RTAC's default for reads and no other default (S23 §12.3.1, p. 88), so the critical set above is D4's choice, consistent with the sources and not confirmed by them (C13 §5);
+- the layout of every group 120 object after its header, and so whether a real challenge, reply or error would be decoded by an engine that passes on these filler bodies;
+- every error code in g120v7, and whether an error can come in a message other than function 33 or 131;
+- whether aggressive mode always carries g120v3 first and g120v9 last, as these frames have it. D6 read no held source for the order;
+- the width of the application sequence number, which the pairing of a challenge with its request rests on.
+
 **Group 120 bodies are filler** (plan §2B, D2 on #542). The project holds no SA specification and no real SA capture, so each object's group, variation and qualifier are real and its body is not. An engine that drops such a message as malformed, and shows no object for it, is written `fail (filler body refused)`. That is not a pass. It is also not evidence that the engine fails on real SA traffic, and the table says both.
 
 ## 3. The moved port
@@ -44,7 +66,7 @@ Each `condition` value of the TSV is one column.
 - **The engine must find DNP3 by content.** The row fails as `fail (told the port)` if the configuration under test names 20001 anywhere: a port list, a decode-as setting, a signature or a script that keys on it. Content detection that is on for every port is allowed, and the table says which setting enabled it.
 - **Why:** V-M6 asks for every labelled service to be recorded, a relay's port is a setting (`DNPNUM`, 1 to 65534), and C13 §11 fails a `service` found by port alone on these rows. A sensor that must be told each relay's port sees nothing of a port nobody told it about.
 - **GT-PCAP's own labeller is told the port,** with tshark's `-d tcp.port==20001,dnp3`, and the label file's header says so. That is the plan's rule: a label comes from the asset table's settings (§2B). It is not a condition the engine may borrow.
-- **Modbus on a moved port has no GT-PCAP capture.** P4-4-R1 asked for the two DNP3 cases. ADR-0009 also names Modbus on a moved port, so that row of P4-4-S2's table is `unknown` until a capture and its label exist (plan §2B's Modbus rows are not built).
+- **Modbus on a moved port has no GT-PCAP capture, and that is a gap.** GT-PCAP has no Modbus/TCP writer, and writing one was not in P4-4-R1, which asked for the two DNP3 cases. ADR-0009 names "no DNP3 or Modbus on a moved port" as something that would turn the engine choice. So the Modbus half of that row is `unknown` in P4-4-S2's table. It is not a pass, a public Modbus capture on port 502 does not stand in for it, and D1 reads it as `unknown` when ruling on the engine (D1 on #623). The case is listed as owed in the plan (§2B).
 
 ## 4. Per capture
 
