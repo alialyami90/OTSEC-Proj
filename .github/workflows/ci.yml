@@ -33,6 +33,9 @@ permissions:
 jobs:
   go:
     strategy:
+      # A red leg does not cancel the other one, so the Windows leg always
+      # gives its own result (D1, on #619).
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
