@@ -47,7 +47,7 @@ The role exists because the threat model names signed updates, an anti-rollback 
 
 - A licence statement cites the licence file that was read, with its SHA-256, as ADR-0009's table does. A price or a term that was not read is `unknown`.
 - No signing key goes into the repository, and no test key that could be mistaken for a real one. The release key is offline and is not present on central (TB9). HR-18's recommendation, which the owner has not yet decided, is that the advisory key is never the release key.
-- A third-party component that a node runs is shipped in the signed release, is never fetched at install time, and is listed in the inventory. The threat model requires this of the capture driver (AP-31).
+- A third-party component that a node runs is shipped in the signed release, is never fetched at install time, and is listed in the inventory. Under option (b), the threat model requires this of the engine, each engine package and the project's sensor programs on the sensor host (AP-31).
 - libiec61850 and lib60870 are GPLv3 or commercial, and are not linked into the shipped binary without a licence decision (ADR-0003). A GPL program shipped as a separate process still brings the licence's distribution duties: the source offer and the licence text (ADR-0009).
 - A change that a rolled-back node must understand is named in the release record before any node writes the new form (D4-61).
 - Upgrade order is readers before writers (`deploy/README.md`).

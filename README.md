@@ -11,7 +11,7 @@ The full project brief, engineering principles, team structure, and operating pr
 | Phases 0 to 3: evidence, contracts C1 to C8, the simulated SEL-751 SER-to-Syslog slice, and its hardening | Accepted by the owner. Reports: [docs/phase-0-exit.md](docs/phase-0-exit.md) to [docs/phase-3-exit.md](docs/phase-3-exit.md) |
 | Phase 4, items 1 and 2: configuration monitoring and the event-behaviour baseline | Accepted. Report: [docs/phase-4a-exit.md](docs/phase-4a-exit.md) |
 | Phase 4, item 3: vulnerability applicability with the asset module | Accepted. Report: [docs/phase-4-item3-exit.md](docs/phase-4-item3-exit.md) |
-| Phase 4, item 4: network IDS | In progress. The node side is merged. The owner chose option (b) for the sensor, a separate Linux machine at each site (D4-85). The link's contracts, the engine run and the test rig are briefed (D4-86), and the sensor is not built; [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md)'s decision for option (b) is reviewed in #618 and merges when its checks are green |
+| Phase 4, item 4: network IDS | In progress. The node side is merged. The owner chose option (b) for the sensor, a separate Linux machine at each site (D4-85). The link's trust design is merged, its channel contract and the node's side are in review (D4-87), and the sensor is not built; [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md)'s decision for option (b) is reviewed in #618 and merges when its checks are green |
 | Phase 4, items 5 and 6: secure engineering access and the central role | Not started |
 
 There are two Go binaries. `cmd/otsec` is the site node. `cmd/otsec-collector` is the privileged collector, which alone holds device credentials and opens device sessions.

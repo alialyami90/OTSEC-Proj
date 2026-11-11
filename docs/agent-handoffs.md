@@ -1606,7 +1606,7 @@ Common rules, beside those of every Phase 4 brief:
 ### P4-4-L3 (D5): the node's side of the link
 
 - **Objective.** Say what the node must become to dial a sensor on another machine, and mark what was written for a sensor on the node as history.
-- **Inputs.** `docs/phase4/D5-sensor-node.md`, `platform/node` and `platform/sensorlink` on `main`, D5's review of #618, D3's note from P4-4-L1.
+- **Inputs.** `docs/phase4/D5-sensor-node.md`, `platform/node` and `platform/sensorlink` on `main`, D5's review of #618, D3's note from P4-4-L1 (`docs/phase4/D3-sensor-link.md`), and the reviews on #624. Added by D4-87, from D6's review of `f9d3a1d1`: a bound on `sensor.coverage-gap` events and on stalled handshakes, so that a sensor cannot fill the platform class, with the test named; and the node's read of the audit chain at start is conditional today (it is skipped when there is no event baseline), so an unreadable or future-dated time must hold the cap on `sensor.link_refused` and never fail the start.
 - **Deliverables:** `docs/phase4/D5-sensor-node.md` revised for option (b), as a design for D1's approval:
   1. the mutual-TLS dialer with backoff, and the node's outbound firewall rule to the sensor's one address;
   2. the `network_sensor` configuration: address, trust anchor, credential and permitted peer, and whether a node has one sensor or several (a PRP network may need one for each LAN), with what each choice costs in the intake, the store classes and the baseline;
@@ -1642,7 +1642,7 @@ Common rules, beside those of every Phase 4 brief:
 ### Order
 
 1. **Now, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them.
-2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4), the second also with S2's result.
+2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4). Both started on 2026-11-11 (D4-87). L2 was to wait for S2's result. D1 started it first, because the channel does not depend on which engine is chosen and the engine run was waiting on the hosted runners. L2 marks each clause that the engine's result could change.
 3. **D1 approves** the engine (from S2) and the link's contracts (from L1, L2 and L3), and brings the owner a recommendation on the sensor's host: its hardware, its operating system, and whether the project ships an image or the site installs the engine (D7's review of #618 gives what each costs in licence duties).
 4. **The third part:** the implementation briefs for the sensor, the node's dialer and enrolment, each against the approved contracts, with D6's contract tests.
 

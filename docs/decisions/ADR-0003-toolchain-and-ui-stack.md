@@ -22,7 +22,7 @@ Go, Rust, Python, Java, TypeScript/Node (A5 §3 table). UI: plain server-rendere
 
 ## Decision
 
-- **Runtime language: Go**, toolchain pinned in `go.mod` (`go` and `toolchain` directives; currently 1.26, required by `modernc.org/sqlite`). Release builds use a pre-installed pinned toolchain, not an automatic download.
+- **Runtime language: Go**, toolchain pinned in `go.mod` (`go` and `toolchain` directives; currently 1.26, required by `modernc.org/sqlite`). Release builds use a pre-installed pinned toolchain, not an automatic download. *Correction, 2026-11-11 (D4-87):* `go.mod` carries a `go` line only, now at 1.27.3, and no `toolchain` line. `go mod tidy` removes a `toolchain` line that equals the `go` line (D3's review of #615), and CI installs the version that `go.mod` names. The pin is the `go` line.
 - **Build:** `CGO_ENABLED=0 go build -trimpath`; linux/amd64 and linux/arm64 targets; windows only if the owner confirms Windows site hosts. *(Confirmed 2026-10-23: windows/amd64 is the site-node target, ADR-0007.)*
 - **Test:** `go test ./...` with `-race` in CI; golden-file parser tests from fixtures with `SOURCE.md`; `go test -fuzz` targets for every parser of device output.
 - **Lint and supply chain:** `gofmt` enforced, `go vet`, `staticcheck`, `govulncheck`; every new third-party module is justified in a PR description and listed in the next ADR touching dependencies.
