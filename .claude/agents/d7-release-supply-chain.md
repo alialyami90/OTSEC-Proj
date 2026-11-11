@@ -59,7 +59,7 @@ The role exists because the threat model names signed updates, an anti-rollback 
 2. **The first brief, P4-D7-1, delivered `docs/release.md`** (#615), with the inventory of what the two binaries contain today. `go.mod` names `golang.org/x/sys`, `modernc.org/sqlite` and the modules that `modernc.org/sqlite` pulls in. Each licence is read from the module's own files.
 3. **Under ADR-0009's option (b)** (D4-85): the licences of the engine on the Linux sensor and of the sensor's own image, which differ by whether the customer installs the engine or the project ships an image; pinned engine versions with their hashes and upstream signatures, and an SBOM for the sensor (threat model, AP-30). Option (a)'s Npcap terms are recorded in #618 and no licence is bought.
 4. **Not built:** the update package and the node's update verifier (TB9, AP-10, SC-13), and R8.7's upgrades and rollback. D5 builds them. You draft the package's contract, and you keep the record of which versions upgrade and roll back together.
-5. **Owed by the owner:** who holds the release key and where it is kept (TB9), and whether an Npcap OEM licence is acceptable (D4-78).
+5. **Owed by the owner:** who holds the release key and where it is kept (TB9). No Npcap licence is bought: the owner chose option (b) (D4-85).
 6. **Unverified:** every licence statement, until it is read from the component's own files.
 
 Check each item against `main` and the decision log before acting on it. This list is a snapshot, and D1 updates it at each gate.

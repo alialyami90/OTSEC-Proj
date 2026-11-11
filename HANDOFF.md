@@ -65,7 +65,7 @@ Limits on the PC:
 - A run that creates Windows services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.
 - Every endpoint is the simulator on loopback. No device, and no site network.
 
-Other rules that hold: re-run a failing job at most once; never push an empty commit to retrigger CI; never call a timeout or a property failure a flake; a failure in code the PR doesn't touch is a finding to reproduce against `main`; before opening a code PR, check the latest scheduled run on `main`.
+Other rules that hold: re-run a failing job at most once (one exception, for D1 alone: a job that failed in a set-up step before any project code ran, with its failing line quoted on the PR, may be re-run again once the same step has passed in another run in this repository, or 60 minutes after it last failed; each such re-run is recorded on the PR, D4-85); never push an empty commit to retrigger CI; never call a timeout or a property failure a flake; a failure in code the PR doesn't touch is a finding to reproduce against `main`; before opening a code PR, check the latest scheduled run on `main`.
 
 The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared target (D4-72).
 

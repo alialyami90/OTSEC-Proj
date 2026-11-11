@@ -22,7 +22,7 @@ This is a small project with no release yet, so no response time is promised. Re
 
 ## What you may test
 
-- **Your own copy of the code,** built and run on machines you own, against the simulators in this repository or against lab equipment you own. The code has only ever been run against simulators, so treat any real device as untested.
+- **Your own copy of the code,** built and run on machines you own, against the simulators in this repository or against lab equipment you own that is out of service and isolated. The code has only ever been run against simulators, so treat any real device as untested.
 - **The workflows, in your own fork only.**
 - **Never** equipment, networks or systems that you do not own or are not authorized to test.
 - **Never** an operational substation or any industrial network that is in service. A read-only command can still disturb a protective relay.
@@ -39,7 +39,7 @@ This permission covers security research for the purpose of reporting to this pr
 
 ## What is not a vulnerability here
 
-- **Test keys and test credentials in the repository.** They are public on purpose. The repository holds test credentials only, and a release build refuses the test advisory keys. Two things **are** vulnerabilities: a build made without the test tag that accepts a test key, and a real secret committed by mistake.
+- **Test keys and test credentials in the repository.** They are public on purpose. The repository holds test credentials only, and a build made without the test tag refuses the test advisory keys. Two things **are** vulnerabilities: a build made without the test tag that accepts a test key, and a real secret committed by mistake.
 - **Plaintext Telnet to the SEL-751.** It is the device family's own limit, and the collection path is labelled insecure. The owner accepted it for the first slice, with the controls that [ADR-0005](docs/decisions/ADR-0005-first-slice-scenario-and-transport.md) lists, and not for production use. A report that one of those controls fails is wanted.
 - **A limit that the project's own records already state.** The threat model ([docs/threat-model.md](docs/threat-model.md)) and the exit reports under `docs/` list the known risks. A report that shows one of them is worse than recorded is still welcome.
 

@@ -52,7 +52,7 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 ## Testing and merging
 
 - **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs nineteen jobs on every pull request: Go on Linux and Windows, pytest, `integration`, and fifteen `integration-long` legs. `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
-- **A PR merges when its reviewers accept it and every job in both workflows is green on its head.** Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85).
+- **A PR merges when its reviewers accept it and every job in both workflows is green on its head.** Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). A reviewer's verdict names a head, and the merge is at that head.
 - A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both workflows and merges on review. A push to `main` with only such changes skips `ci.yml` too.
 - A PR that touches GT-PCAP (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) or `.github/workflows/a6-gt-pcap.yml` also needs `a6-gt-pcap` green.
 - **The owner's PC is the second Windows run**, and the fallback when GitHub Actions is unavailable. The owner resumed ordinary local test runs on it on 2026-11-11 (D4-83). A run that creates Windows services happens only in the owner's own elevated session. Never register the PC as a GitHub self-hosted runner. The limits on what may be installed and run there are in `HANDOFF.md`.
