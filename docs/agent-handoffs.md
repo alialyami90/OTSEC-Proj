@@ -1696,23 +1696,32 @@ Common rules as in "Phase 4 item 4, second part". Each PR body is written from a
 
 ### P4-D6-RR (D6): the other rows of the matrix, re-read under one rule
 
+- **Inputs.** `docs/verification.md` on `main`; D4-82; D1's ruling on R4.1 and D6's reservation on #632; the exit reports under `docs/`.
 - **Objective.** Apply D4-82's rule to every row of `docs/verification.md` that #613 and #632 did not re-read: a row is `e2e` only when its run used the ground truth its criterion and its method name. Take D6's reservation on #632 (R3.3 is `e2e` on synthesized settings, while R4.1 stays `e2e-part` for want of device fixtures) and settle it by applying one reading to both.
 - **Deliverables.** One PR changing `docs/verification.md` only: each row's cell says which ground truth it used, and each Status that moves says why. R4.2 and R4.3 first.
 - **Acceptance.** `records-auditor`, then D4 and D2 on the rows they own. D1 updates `docs/requirements.md` from it.
+- **Exclusions.** No test is run or changed; a row that needs a run to move stays where it is and says so.
 
 ### P4-D6-I100 (D6): at least 100 interruptions on GT-RX
 
 - **Objective.** V-S6 asks for at least 100 interruptions with a receiver that is not project code. The closing legs ran 6, with a seed that is not fixed, and one run killed neither the simulator nor the collector.
+- **Inputs.** `tests/integration/slice/test_slice_rsyslog_interruptions_e2e.py` and `docs/phase4/D6-closing-legs.md` on `main`; V-S6 in `docs/verification.md`; D4's review of #619.
 - **Deliverables.** A dispatch-only workflow that runs the V-S6 leg against the stock rsyslogd for at least 100 interruptions, with a set of fixed seeds that between them kill each of the receiver, the node, the collector and the simulator at least once, and with a control of the leg's own checks. Its result, with the run's link, in the matrix cells of R4.6, R4.7 and R8.6.
+- **Acceptance.** D4 (the forwarder under test) and D5 (the workflow); the run's link in the three matrix cells.
 - **Exclusions.** No change to `ci.yml`. No interruption the leg cannot reconcile is called a flake.
 
 ### P4-D6-MUT (D6): mutants M1 to M4
 
 - **Objective.** No closing leg has a product mutant. D4-85 decided how mutants live in the repository.
+- **Inputs.** D4-85; the closing legs and their notes on `main`; the matrix cells that name M1 to M4.
 - **Deliverables.** M1 to M4 as committed patch files, with a dispatch-only workflow, on D6's four conditions of D4-85: the unmutated test passes first in the same job; a patch that fails to apply or to build is an error and never a kill; a kill is the named test's own failure; and `ci.yml` never applies a patch. D6's file changes its line that mutant scripts stay out of the commit.
 - **Acceptance.** D4 (the mutated code is D4's), D5 (the workflow).
+- **Exclusions.** No patch is applied by `ci.yml`, and no mutant is pushed as a branch.
 
 ### P4-D7-2 (D7): the next change to `docs/release.md`
 
+- **Objective.** Bring the release record up to what D4-87 and D4-88 decided, so that the first release has its floors and its blocker written down.
+- **Inputs.** `docs/release.md` on `main`; P4-D7-1's reviews; D4-87; D4-88; #637's licence lines when it merges.
 - **Deliverables.** The seven notes carried from P4-D7-1's reviews; §5 item 8 now that `LICENSE.md` exists; ICSNPP's `NOTICE.txt`; AP-31 as it now reads for the sensor host; two rollback floors (the build with the detector checkpoint reader for a later minor, and the build with the C8 0.13 reader); and a release blocker: no release ships before F-027's couplings, F1 to F11, are closed.
 - **Acceptance.** D3 and D6. Markdown only.
+- **Exclusions.** No signing key, no build and no release.
