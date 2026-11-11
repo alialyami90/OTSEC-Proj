@@ -225,6 +225,7 @@ jobs:
       fail-fast: false
       matrix:
         file:
+          - sensor_rig
           - test_slice_interruptions_e2e.py
           - test_slice_buffer_e2e.py
           - test_slice_store_full_e2e.py
@@ -256,10 +257,30 @@ jobs:
         with:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp openssl
+        if: matrix.file != 'sensor_rig'
       - run: rsyslogd -v && openssl version
+        if: matrix.file != 'sensor_rig'
       - run: python -m pip install pytest==9.1.1 asyncssh==2.24.1
       - run: python -m pytest -q -rs tests/integration/slice/${{ matrix.file }}
-        if: matrix.file != 'test_slice_vm8_paired_e2e.py' && matrix.file != 'test_slice_vm1_e2e.py'
+        if: matrix.file != 'test_slice_vm8_paired_e2e.py' && matrix.file != 'test_slice_vm1_e2e.py' && matrix.file != 'sensor_rig'
+      # sensor_rig (D6, P4-4-R1, authorized by D1 in the brief): the self-tests
+      # of the rigs that the sensor's tests will run on, written before any
+      # sensor exists: the veth pair across two network namespaces, the timed
+      # replayer, the C-11 run with its negative control, and the capability
+      # check. They run as root, because they make namespaces and open packet
+      # sockets. Every interface is a virtual one in a namespace made for the
+      # test, never the runner's NIC. The leg installs no system package (pip
+      # installs pytest above, as for every leg), and OTSEC_RIG_REQUIRED=1
+      # turns a test that can't run into a failure. Only the tests that need
+      # root run as root: the rig's logic tests, the C13 source's and the
+      # checker's run unprivileged in the python job (D5 on #626). A
+      # measurement that this runner's kernel can't make is a skip that says
+      # UNKNOWN and why, and -rA prints it.
+      - name: The sensor rig's self-tests, as root in network namespaces of their own
+        if: matrix.file == 'sensor_rig'
+        run: |
+          uname -r; ip -V; command -v nft && nft --version || echo "no nft on this runner"
+          sudo env "PATH=$PATH" OTSEC_RIG_REQUIRED=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -rA -p no:cacheprovider tests/integration/sensor_rig/test_rig_selftest.py
       - name: V-M1 over GT-MIB, then M3's key search over this step's own output
         if: matrix.file == 'test_slice_vm1_e2e.py'
         run: |

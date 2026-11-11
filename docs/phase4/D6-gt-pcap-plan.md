@@ -6,7 +6,7 @@ D6, 2026-11-07. This note answers P4-4-A6 in `docs/agent-handoffs.md` (item 4, S
 - the C-11 test design;
 - what D6's testability review of ADR-0009, C13 and the baseline note will check.
 
-Revised the same day for P4-4-B6, with the cases that C13 0.1, D4's baseline note and D4-68 added. Nothing here is built yet, and nothing in it is evidence. Every capture named below is either public, from `tests/fixtures/network/public-ot-captures/`, or recorded from this project's own simulators. No real network is captured, and nothing scans or probes (P1).
+Revised the same day for P4-4-B6, with the cases that C13 0.1, D4's baseline note and D4-68 added. Nothing in it is evidence. **What is built, on 2026-11-11:** the PRP derived captures and the DNP3 sources with their labels (`tests/fixtures/network/gt-pcap/SOURCE.md`), and the rigs of sections 5, 6 and 8: the veth pair, the timed replayer, the C-11 run with its negative control, the test-only C13 source and the checker (`docs/phase4/D6-sensor-rig.md`, P4-4-R1). That note also plans the cases this one lacked: a link cut and resumed, a revoked credential, no inbound port on the node, and the key search over the sensor's disk and the link. No sensor exists, so no V-M6, R6.4 or C-11 result does either. Every capture named below is either public, from `tests/fixtures/network/public-ot-captures/`, or recorded from this project's own simulators. No real network is captured, and nothing scans or probes (P1).
 
 ## 1. What GT-PCAP is
 
