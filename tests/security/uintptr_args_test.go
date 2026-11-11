@@ -47,10 +47,12 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 // conversions and of files it read.
 //
 // The walk's rule (brief P4-PC-1): a directory below root that holds a
-// go.mod is another module, as the go command has it, and is not entered. On
-// the owner's PC that is a worktree's copy of the repository under .claude/,
-// and the two local folders that Git ignores; in the repository it is
-// platform/experiments/phase0. A directory that is entered and cannot be
+// go.mod file is another module, as the go command has it, and is not
+// entered. The go command builds none of it into this module, so the rule
+// hides no code of the module. On the owner's PC that is a worktree's copy
+// of the repository under .claude/, and the two local folders that Git
+// ignores; in the repository it is platform/experiments/phase0. Nothing is
+// skipped by its name alone, and a directory that is entered and cannot be
 // read is an error, never a silent skip.
 func checkUintptrConversions(root string, errorf func(format string, args ...any)) (checked, nfiles int, err error) {
 	fset := token.NewFileSet()
@@ -72,7 +74,7 @@ func checkUintptrConversions(root string, errorf func(format string, args ...any
 				return filepath.SkipDir
 			}
 			if path != root {
-				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+				if fi, err := os.Stat(filepath.Join(path, "go.mod")); err == nil && !fi.IsDir() {
 					return filepath.SkipDir
 				}
 			}
