@@ -1,0 +1,85 @@
+# D6: the rig for the sensor's tests (P4-4-R1)
+
+D6, 2026-11-11. Brief P4-4-R1 (`docs/agent-handoffs.md`, "Phase 4 item 4, second part", D4-86) asks for the rigs that V-M6, R6.4 and C-11 need, built before the sensor exists, so that the sensor is tested by something that was not shaped by it. This note says what was built, what each rig's self-test showed, what is planned and not built, and why.
+
+- **No sensor exists.** Nothing here is V-M6, R6.4 or C-11 evidence. Each result is a result about the rig: it shows that the rig can tell a pass from a fail.
+- **Evidence classes.** `CI-Linux` for what ran on the hosted runner, which is `simulated`: every interface is a virtual one in a network namespace made for the test, and `standin_sensor.py` stands in for the sensor and decodes nothing. `desk` for what ran on the owner's PC.
+- **Safety.** Nothing captures a real network, nothing scans or probes, and no device or lab machine is contacted. The runner's own NIC is never a monitoring interface. What needs a lab machine is an H-row that nobody runs without the owner's authorization (section 6).
+- The code is `tests/integration/sensor_rig/`. Deliverable 0, the two GT-PCAP cases and the engine run's pass conditions, is #623.
+
+## 1. What was built
+
+| Rig | File | Its self-test, which fails when the rig is broken |
+| --- | --- | --- |
+| **The veth pair** across two network namespaces: `tap0` for the rig, `mon0` as the monitoring interface | `rig_netns.py` | Every test below runs on it. A capture that died would read as zero frames, so the C-11 run also asserts that the capture saw the whole replay. |
+| **The timed replayer** | `rig_replay.py` | Its timing is checked against its own clock (no frame early, none more than the tolerance late) and against the receiver's clock on `mon0` (the gaps between arrivals equal the capture's). The broken rig: the same frames at fifty times the pace must fail the receiver's check on every gap. |
+| **R6.4's latency measure:** the alert's time minus the triggering frame's send time, on the host's wall clock, with the frame found by its hash | `rig_replay.py` | A known answer: a stand-in alerts 200 ms after one named frame reaches `mon0`. The measure must give that delay plus the crossing, and 100 ms more for the frame sent 100 ms earlier. |
+| **The C-11 run:** capture on `tap0`, both ends up, the sensor started, GT-PCAP replayed, the sensor stopped, and only then the capture stopped | `rig_netns.py`, `c11()` | The negative control (plan §6): the same run with `mon0` given an IPv4 address, IPv6 and ARP, a neighbour to look for and a DHCP client's first message. It must show frames, and of each kind. |
+| **The `PACKET_QDISC_BYPASS` sender,** and an nftables egress rule to measure it against | `rig_netns.py`, `packet_socket()`, `nft_egress_drop()` | A control of its own: with a queue on `mon0` that drops everything, an ordinary packet-socket send must not arrive and a bypass send must. Otherwise the rule would be tested against the ordinary path twice. |
+| **The capability check:** does a capturing process still hold a capability | `rig_caps.py` | Two stand-ins: one drops everything after its socket is open and must pass, still receiving; one stays root and must be flagged, with `CAP_NET_RAW` named. |
+| **The test-only C13 source:** GT-PCAP's labels as C13 0.1 records, with C13's framing, onto any byte stream | `c13_source.py`, `c13_stream.py` | The product's own decoder reads a committed stream of it and accepts every record (`tests/contract/c13_source_d6_test.go`), and refuses four records broken on purpose. A Python test pins the committed stream to the source, and sends the records across a TCP connection on loopback. |
+| **The checker:** a product's observations against a capture's labels | `gt_checker.py` | It passes the source's records for each of the 17 labelled cases on `main`, and fails on each of 11 planted wrong records, naming it. |
+
+`dnp3_cases.py`, `pcapfile.py` and the label files are GT-PCAP's own, reused as they stand. The source is written from C13's text and shares no code with `contracts/netobs`. Nothing under `cmd/`, `platform/` or `modules/` imports anything under `tests/`, so neither binary links the source.
+
+**How a frame is known to come from `mon0`.** A packet socket on `tap0` gets each frame with the kernel's packet type. A frame the rig sent on `tap0` is `PACKET_OUTGOING`. Anything else arrived from `mon0`. So C-11's count is read from the kernel, not inferred by subtracting the replay.
+
+## 2. Results of the self-tests
+
+Run [43060988168](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43060988168), job `integration-long (sensor_rig)` (130663174168), at `7063b5ea`, on `ubuntu-24.04` with kernel 7.0.0-1017-azure, iproute2 6.1.0 and nftables 1.0.9: **56 passed** (`CI-Linux`, `simulated`). The leg installs no package, so the runners' package-archive fault of 2026-11-11 does not reach it.
+
+| What | Measured | Reading |
+| --- | --- | --- |
+| Replay timing | 15 frames 100 ms apart; worst lateness 123,479 ns; tolerance 50 ms | The replayer keeps its schedule on a hosted runner, by both clocks. The tolerance is the runner's scheduling, and is far above what was seen. |
+| Latency on a known answer | 200,076,468 ns for a 200,000,000 ns delay, on `CLOCK_REALTIME` | The crossing of the pair adds about 76 µs. That is the floor of what this rig can measure, not a product figure. |
+| C-11, the quiet arrangement | 212 frames replayed (the 17 DNP3 cases), 212 seen on `mon0`, 0 sent from `mon0` | With no IPv4 address, IPv6 off and ARP off, a listening process sends nothing, and the link did carry the replay. |
+| C-11, the negative control | 11 frames from `mon0`: ARP, DHCP, IPv6 MLD report, neighbour solicitation and router solicitation | The rig sees each kind of frame that C-11 forbids. |
+| A packet socket on the quiet `mon0` | Both sends arrived, ordinary and bypass | A quiet IP configuration does not stop a process that writes to the interface itself. This is why the zero-frames test is the evidence and the settings are not (ADR-0009, AP-32). |
+| The control for the bypass sender: a queue on `mon0` that drops everything (`pfifo limit 0`), from run [43061500844](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43061500844), job 130664998272, at `cd6b686a`, 57 passed | Ordinary packet socket: send refused with `ENOBUFS`, no frame arrived. With `PACKET_QDISC_BYPASS`: send accepted, frame arrived | The bypass sender does skip the queueing layer. So the row below tests the rule against a path that skips a queue, as the brief asks. |
+| The nftables egress rule (`netdev`, hook `egress`, `policy drop`, on `mon0`), the same in both runs | The host's own frames: none passed. Ordinary packet socket: send refused with `ENOBUFS`, no frame arrived. With `PACKET_QDISC_BYPASS`: send refused with `ENOBUFS`, no frame arrived | On this kernel, the rule stopped all three paths. See the limits below. |
+| Capabilities | Dropped: all four sets empty, `NoNewPrivs` 1, 5 of 5 frames still received, a second packet socket denied. Kept: flagged on `CapPrm`, `CapEff` and the bounding set | The check passes the process that the gate asks for and flags the one it forbids. |
+
+**Two faults of the rig's own were found by its first runs** and fixed before the result above. A packet socket bound while its interface is down reports `ENETDOWN` once, and the capture thread died on it, so the capture held nothing. The C-11 run's cross-check, that the capture saw the replay, caught it (job 130653824135). And a send that the egress rule drops is refused with `ENOBUFS`, which the test first took for a crash (job 130660537965).
+
+**The source and the decoder** (`desk`: owner's PC, Go 1.27.3 on `windows/amd64`, the two tests run by name at the PR's last code commit; `CI-Linux`: the acceptance test in `go (ubuntu-latest)` of run 43060988168): the committed stream is 27 records over four captures, 8 heartbeats, 8 flow, 4 service and 7 function records, with every `sa` outcome. `netobs.DecodeChannel` accepted all 27 at the first attempt, and refused each of the four broken ones: a key twice at the top level, a key twice inside the citation, the node's object on a channel record, and frame bytes that no longer hash to their citation.
+
+### Limits
+
+- **The nftables result is one kernel on a veth pair.** It says that on 7.0.0-1017-azure a `netdev` egress chain is not skipped by `PACKET_QDISC_BYPASS`. It says nothing of another kernel, of a real NIC's driver, of an XDP socket, or of a process that removes the rule. Against a compromised sensor host, only a TAP, or the switch refusing ingress on the mirror port, keeps it from sending (D3, D4-86). H-18 (d) repeats it on hardware.
+- **What the two rows together say:** a queue that drops everything does not stop a `PACKET_QDISC_BYPASS` sender, and an nftables `netdev` egress chain did. A `tc` egress filter was not measured. That is one result for P4-4-L1's design to weigh, not a design.
+- **The stand-in is not a sensor.** The C-11 pass says that the arrangement is quiet and the rig can see. It says nothing about an engine, which may send: Zeek and Suricata link libpcap, which can, and Suricata transmits by design in `reject` and IPS modes (ADR-0009's text for option (b), in #618).
+- **The replay in the C-11 self-test is the 17 DNP3 cases with gaps cut to 2 ms,** not the whole GT-PCAP set at its recorded pace: the two R6.2 series are an hour each. The gate's run replays the whole set, and says what pace it used.
+- **Latency is measured on one host's clock.** Under option (b) the alert's time is the node's and the sensor is another machine. In CI both are on the runner. On two machines the measure needs both clocks compared first, which C13 0.2's skew fields are for (P4-4-L2).
+- **The checker covers `flow`, `service` and `function` rows.** It does not judge `dnp3_no_sa`, alerts against `case` rows, redactions, or `insecure`, `encrypted`, `identity` and `undecoded` records: no labelled capture on `main` holds rows for those yet.
+- **The source reads labels, so it cannot be wrong where the labels are wrong.** It is a way to run the node's side before a sensor exists, and a known-good input for the checker's self-test. It is not a second opinion on the labels.
+
+## 3. How the gate's tests will use the rigs
+
+| Gate line (item 4, option (b)) | Rig | What is still needed |
+| --- | --- | --- |
+| C-11 on the sensor's monitoring interface, with its negative control | `c11()` with the sensor's start and stop in place of the stand-in's, `mon0` set by the sensor's own installer | The sensor, and its installer's settings for `mon0` (ADR-0009) |
+| R6.4's latency from the timed replay, with its clock | `replay()` onto `tap0`, `latency_ns()` over the node's alert times, `summary()` per rule | The sensor, the node on the link, and the alert's citation to find the triggering frame by hash |
+| V-M6 over GT-PCAP on the real sensor and node | `gt_checker.check()` over the node's stored observations | The sensor. Labels for the kinds the checker does not cover yet |
+| The sensor holds no capability after its socket is open | `rig_caps.problems()` on the sensor's process, read while it captures | The sensor's process ID from its service |
+
+## 4. Cases that had no plan (deliverable 5)
+
+Each case says what it must show, how it will be tested, and whether it is built.
+
+1. **`CAP_NET_RAW` dropped after the socket opens. Built.** The rule: the process's permitted, effective, inheritable and ambient sets are all empty, and either `NoNewPrivs` is 1 or its bounding set is empty, read from `/proc/<pid>/status` while it is receiving frames. The self-test also shows that such a process cannot open a second packet socket. On the sensor it is read after the first heartbeat and again at the end of the replay, for every process and thread of the sensor's service.
+2. **A link cut and resumed. Planned, not built.** A third namespace holds the node, joined to the sensor's by a second veth pair, the link. Mid-replay the link goes down for longer than the sensor's send timeout and comes back. Pass: the node's stored observations equal the uninterrupted run's, compared by key and cited hashes; nothing is stored twice; `sensor-unreachable` is raised once and cleared; a buffer overflow on the sensor is counted and shows as a gap, never as silence; SER and Syslog collection lose nothing meanwhile. **Not built because** acknowledgement and resume are C13 0.2's (P4-4-L2), and the node has no dialer (P4-4-L3). The GT-PCAP plan's §5 has the node-side half, a kill and restart at intake level.
+3. **A revoked sensor credential refused and alarmed. Planned, not built.** Enrol a test key, run, revoke it with the admin-signed request, and reconnect. Pass: the link closes at once; the next connection is refused and alarmed; records already stored are kept and marked; a record sent after the revocation is in no store class; the network baseline needs acknowledging again. The same rig runs the two refusals beside it: a sensor with no enrolled credential, and a record under another `sensor_id`. **Not built because** the credential, the C7 kind and the C8 actions are P4-4-L1's proposals and are not approved.
+4. **No inbound port on the node. Planned, not built.** In the node's namespace, list every listening socket (from `/proc/net`, read inside the namespace) before the sensor is configured and while the link is up. Pass: the set is the same, and the link's connection was opened by the node, which the capture on the link shows by the SYN's sender. It reads the node's own socket table and scans nothing. **Not built because** the node has no dialer and no `network_sensor` link settings yet.
+5. **The spoofing flood. Planned in the GT-PCAP plan §5, not built.** Under option (b) it runs through the link, so it also shows that a flood from the sensor never stops SER or Syslog collection (D5, D3 on #618). **Not built because** it needs a flood generator on the source, the node with its quotas, and GT-INJ's feed in one run, which is a leg of its own. The source here sends label-derived records only.
+6. **AP-33's key search over the sensor's disk and the link's bytes. Planned, not built.** Every test secret is unique to its capture (plan §2D). After the replay, search for each one, raw, as hex in either case and as base64 (the forms V-M1's M3 searches), in: every file under the sensor's state, log, temporary and core-dump directories, and its swap if it has any; the bytes of the link as captured on the link's veth, and the C13 stream inside the TLS session as the node reads it; the node's store; and everything forwarded. A control secret planted in each place must be found, so an empty result means something. **Not built because** no labelled capture holds a secret yet (plan §2D's cases are not built), and there is no sensor disk to search.
+
+## 5. The queue of plan edits
+
+`reference/carried/d6-gt-pcap-next-plan-edits.md` held 24 queued edits to the GT-PCAP plan (last added to on 2026-11-08) and four contract-test cases. D6 checked each against `docs/phase4/D6-gt-pcap-plan.md` on `main` at `1f5b307f` (`desk`):
+
+- **All 24 plan edits are in the plan already.** D6 compared each queued item with the plan's text by reading, and found each one there. Nothing is left to fold, and the plan is now the list.
+- **The four contract-test cases** (a duplicate key refused at the top level and nested; a channel record that carries `node` refused; 17 redactions on a frame refused and 16 accepted; Modbus 8 and 43 too short for their sub-function classed `control` and `write`, and 43/13 `write`): the first two now have D6's rows in `c13_source_d6_test.go`. The redaction bound is pinned by value in `c13_bounds_d6_test.go`, and D4's package tests cover its refusal. **The Modbus classification rows are still owed** as D6's own.
+
+## 6. H-rows (deliverable 6)
+
+Written in `docs/verification.md`, "Tests that require real equipment", and not run: H-18 (a real NIC on a SPAN port and on a TAP, with the bypass sender), H-19 (VLAN tags under NIC offload), H-20 (PRP live on both LANs), H-21 (HSR) and H-22 (the 24 h run of H-06 for the sensor host). Each needs a lab machine and the owner's authorization.
