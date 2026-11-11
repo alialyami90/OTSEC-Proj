@@ -2,7 +2,7 @@
 
 D4, 2026-11-11. Brief P4-4-S2 in `docs/agent-handoffs.md` ("Phase 4 item 4, second part", D4-86). ADR-0009 names Zeek as the provisional engine under option (b), and D1 approves it or turns the choice on this run.
 
-**Status: built, not run.** No engine has run under this experiment yet, so this note holds no `CI-Linux` result. What it holds is the experiment, its pins, and what D4 read in the engines' own sources (`desk`, each with its file's SHA-256). What waits is in section 6. When the counted run is done, its run URL and tables go into section 5, and ADR-0009's evidence follows. **Any dispatch from a ref other than `main`, or with a conditions file other than the pinned one, is a rehearsal,** and is recorded here as one: its tables are not the counted result (D1 on #625). Each table's header says which it is (section 1).
+**Status: run.** The counted run is [run 43092601088](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43092601088), from `main` at `8f23629d` (`CI-Linux`). Its results, against ADR-0009's three turning conditions, and D4's recommendation are in section 5; ADR-0009's evidence carries them. Sections 1 to 4 describe the experiment, its pins, and what D4 read in the engines' own sources beforehand (`desk`, each with its file's SHA-256). **Any dispatch from a ref other than `main`, or with a conditions file other than the pinned one, is a rehearsal,** and is recorded here as one: its tables are not the counted result (D1 on #625). Each table's header says which it is (section 1).
 
 **This is evidence for the engine choice, not V-M6 evidence.** V-M6 runs on the real sensor, over the real link, with the checker of P4-4-R1 (brief, acceptance).
 
@@ -137,15 +137,140 @@ Read from `raw.githubusercontent.com` at the tags and commits pinned above. Thes
 - **Offline decoding of files is not live capture** on a SPAN or TAP port, and a hosted runner is not the sensor host. Both stay `unknown` (brief, risk).
 - **Modbus on a moved port is one derived capture** (D6's note, section 3): one midstream conversation, one function code, one unit, from a public capture of unknown origin. It shows whether Modbus/TCP is found by content off port 502, and little else.
 - **What the rehearsal showed about the harness** (run 43080066361, at `45daf8d7` from a branch, labelled `rehearsal`; its numbers are not results and are not written here). Both jobs ran to the end, and every table carried its header. Three faults were the harness's, and this follow-up fixes them. The FTP sample tried, `FTPv6-1.cap`, is in Microsoft Network Monitor format, which libpcap does not read (Zeek exited 1, "unknown file format"; Suricata exited 0 with no output), so it is removed. An engine's warnings reached the job log only when it failed, so `in-container.sh` now prints the first warning lines of every run. **D4's own reading of the rehearsal missed the third, which D6 found:** every configuration exited 0 on `snmp_usm.pcap` and logged nothing, because neither engine decodes its link layer, and the table would have shown that as `-`, reading as "no analyzer fires". It is removed, and `public.md` now prints `no flow record: capture not decoded` for any such run. No other capture had no flow under every configuration. No container pulled anything beyond the two pinned images, and no step took more than a minute. **A second rehearsal** (run 43084842333, at `c4e3b541`, labelled `rehearsal`) ran the pipe case and the locked container options (`--network none --cap-drop ALL --security-opt no-new-privileges` and a user that is not root) for the first time, to the end. It showed two faults in the judge, fixed since: the ICSNPP join matched on time, which an answered `dnp3.log` row does not share with its request, and the pipe comparison compared line numbers, whose order Zeek does not fix.
-- **`table.py`, `run.sh` and `in-container.sh` are parse-checked only.** Nothing here has been run, on the runner or on the owner's PC (no test and no install on the PC). They run for the first time at dispatch. If one fails there for its own reason, that is a defect in the experiment and is fixed in a commit, not re-run.
+- **`table.py`, `run.sh` and `in-container.sh` were parse-checked only before they ran on the runner,** in four rehearsals and the counted run (section 5). Nothing ran on the owner's PC (no test and no install there). The faults the rehearsals found were fixed in commits, not re-run away.
 
 ## 5. Results
 
-None yet. The counted run's URL, the tables and the versions go here, each `CI-Linux`.
+**The counted run:** [run 43092601088](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43092601088). D1 dispatched it from `main` at `8f23629d` on 2026-11-11, and both jobs succeeded. Every table opens "Run: counted" and "Ref: refs/heads/main", and the conditions file's SHA-256 equals its pin (`38e6c081…acc80e`). Evidence class `CI-Linux`, `simulated`: offline files on a hosted `ubuntu-24.04` runner.
 
-**D2's reading of unsolicited reporting, beside the cases owed** (D2 on #625 and #623; S22 Table D.7 p. D.11, behaviour p. D.9). On a SEL-751, unsolicited reporting is off by default (`UNSOLn := N`, `PUNSOLn := N`), a per-session setting. With `UNSOLn := Y`, D2's `inference` is that the relay sends function 130 with UNS and CON set, and the master confirms with function 0. No GT-PCAP capture holds it. Zeek parses DNP3 by `is_orig` (section 3), so a UDP flow that the relay starts, with an unsolicited response or a reply sent to port 20000 while the master sent from another port, is expected to be parsed backwards. The ports of GT-PCAP's `dnp3-udp` (both ends on 20000) are by inference, settled by H-23 (D2 on #623). **Cases owed to D6** (D1 passed them on): a master that sends from a temporary UDP port while the relay replies to `DNPUDPn` 20000, so the reply is a second 5-tuple; `DNPUDPn := REQ`; and an unsolicited response that starts a flow. This run shows none of them.
+Versions, from the run's `versions.txt`: Zeek 9.0.1 (`zeek/zeek@sha256:71c1d6b6…dfdc92`), Suricata 8.0.8 (`jasonish/suricata@sha256:a8277a84…be1f`), ICSNPP-DNP3 `b31dbade` and ICSNPP-Modbus `6dd3dab1` (every file checked), and tshark 4.2.2 for the PRP labels. The four rehearsals before it are not results. Its section 2 tallies equal the second, third and fourth rehearsals'.
+
+### 5.1 D6's 110 rows, per configuration
+
+Each cell counts D6's rows (`tests/integration/gt_pcap/engine-pass-conditions.tsv`) as pass / fail / unknown, judged as `docs/phase4/D6-engine-run-pass-conditions.md` says. **Moved port** counts 7 rows: 4 on `dnp3-moved-port` and 3 on `modbus-moved-port`, read apart below. "Zeek with the project's script" is its own configuration. Its `otsec_probe.log` is the project's, not the engine's own log (D6's rule 8; D1 on #625).
+
+| Configuration | Protocol (26) | Service (22) | Function (51) | Objects (44) | Moved port (7) | Group 120 (11) | UDP (4) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Zeek, stock | 25 / 1 / 0 | 21 / 1 / 0 | 49 / 2 / 0 | 0 / 44 / 0 | 4 / 3 / 0 | 0 / 10 / 1 | 4 / 0 / 0 |
+| Zeek with the project's script | 25 / 1 / 0 | 21 / 1 / 0 | 50 / 1 / 0 | 44 / 0 / 0 | 4 / 3 / 0 | 11 / 0 / 0 | 4 / 0 / 0 |
+| Zeek with ICSNPP | 25 / 1 / 0 | 21 / 1 / 0 | 50 / 1 / 0 | 26 / 18 / 0 | 4 / 3 / 0 | 0 / 10 / 1 | 4 / 0 / 0 |
+| Suricata (comparison) | 23 / 3 / 0 | 19 / 3 / 0 | 46 / 5 / 0 | 40 / 4 / 0 | 0 / 7 / 0 | 11 / 0 / 0 | 0 / 4 / 0 |
+| Suricata, midstream (comparison) | 23 / 3 / 0 | 19 / 3 / 0 | 46 / 5 / 0 | 40 / 4 / 0 | 0 / 7 / 0 | 11 / 0 / 0 | 0 / 4 / 0 |
+
+**The rows that did not pass,** by configuration:
+
+- **Every Zeek configuration** fails `modbus-moved-port`'s Protocol, Service and Function rows. It names nothing on port 15020 (`not named modbus`), and its control, `modbus.pcap` on port 502, passes all three. So each fails because of the port.
+- **Stock Zeek also fails:**
+  - one of `dnp3-reused-seq`'s two Function rows, because `dnp3.log` keeps one of the two operates;
+  - every Objects row, because `dnp3.log` holds no object;
+  - every named group 120 row, `fail (no object logged)`. The read's "no group 120" row is `unknown`, because a configuration that logs no object has not shown the absence.
+- **Zeek with ICSNPP:**
+  - It passes both `dnp3-reused-seq` operates, through `dnp3_control.log`.
+  - It fails 18 Objects rows. Its object log covers only READ requests and RESPONSE replies, and its control log only group 12.
+  - It passes no group 120 row. Eight fail with no group 120 message shown, two fail as `message shown, no group 120 object` (`5:g120v3` and `33:g120v7`, requests ICSNPP logs without their group 120 object), and the read's row is `unknown`.
+- **Zeek with the project's script** fails only the three `modbus-moved-port` rows.
+- **Suricata, both ways,** fails:
+  - all four rows of `dnp3-moved-port` (`not named dnp3` on 20001);
+  - all four of `dnp3-udp` (`not named dnp3` over UDP);
+  - the three of `modbus-moved-port`. Without midstream it also fails its control on 502 (`fail (also fails on port 502)`: the capture has no handshake). With midstream the control passes, so it fails because of the port.
+  - The four Objects failures are the four function rows of those two DNP3 captures.
+
+### 5.2 ADR-0009's three turning conditions
+
+| Configuration | DNP3 group 120 per message (11 rows) | DNP3 on a moved port (4 rows) | Modbus on a moved port (3 rows) | DNP3 over UDP (4 rows) | All three |
+| --- | --- | --- | --- | --- | --- |
+| Zeek, stock | **fails**: 0 pass, 10 fail, 1 unknown | meets: 4 of 4 | **fails**: 0 of 3; control passes | meets: 4 of 4 | no |
+| Zeek with the project's script | meets: 11 of 11 | meets: 4 of 4 | **fails**: 0 of 3; control passes | meets: 4 of 4 | no |
+| Zeek with ICSNPP | **fails**: 0 pass, 10 fail, 1 unknown | meets: 4 of 4 | **fails**: 0 of 3; control passes | meets: 4 of 4 | no |
+| Suricata | meets: 11 of 11 | **fails**: 0 of 4 | **fails**: 0 of 3; control fails too | **fails**: 0 of 4 | no |
+| Suricata, midstream | meets: 11 of 11 | **fails**: 0 of 4 | **fails**: 0 of 3; control passes | **fails**: 0 of 4 | no |
+
+**No configuration meets all three.** The nearest is Zeek with the project's script. It meets group 120 and UDP, and meets the moved-port condition for DNP3 and not for Modbus. Every configuration fails Modbus on a moved port.
+
+### 5.3 The pipe case
+
+All three Zeek configurations read a pipe: `yes`, 23 of 23 captures with exit 0 and a flow record, and 110 of 110 rows equal to the file run in result and in the records cited. No row differed, and none cited the same records at other line numbers. The containers ran with `--network none --cap-drop ALL --security-opt no-new-privileges --user 1001:1001`. The run's `versions.txt` records these options, and Zeek's own `--help` line for `-r`: "pass '-' as the filename to read from stdin". **Suricata through a FIFO** (a note, not a condition) exited 0 on all 23 captures, with the same flow-record count as its file run on each.
+
+In D3's words on #630, adapted: the run shows that the engine reads a finished capture from a pipe on its standard input, in a network namespace with only loopback, with no capability and as a user that is not root, and that it gives the same judged rows as from the file. It does not show the engine under the sensor's own account, a stream that does not end, or the stage that writes the pipe (section 1a).
+
+### 5.4 The PRP pairs
+
+All 45 rows (9 pairs, 5 configurations) record each flow once, with its service and its labelled packets on the LAN A capture. Each counts every packet of both LAN copies, so the totals on `-ab` are exactly twice those on `-a`. That is E-D4-02's result, now on Zeek 9.0.1 and Suricata 8.0.8, and with ICSNPP and the project's script. The PRP duplicate-discard stage stays required.
+
+### 5.5 The public captures
+
+No pass condition reads this table (D6's note, section 6). Each line below is what the engines logged.
+
+- **Telnet** (`telnet-raw.pcap`): Zeek, in every configuration, names no service and writes one `weird.log` row. Suricata names `telnet`.
+- **HTTP** (`http_gzip.cap`): every configuration names `http` and logs the file.
+- **IEC 104** (`iec104`, `iec104-sq`) and **MMS** (`mms`): no configuration names either. Zeek names no service, and Suricata `failed` or `none`.
+- **GOOSE** (the nine `goose-*` captures): no configuration logs GOOSE. Zeek records their DHCP and DNS, and Suricata their DHCP and mDNS.
+- **The public DNP3 and Modbus captures:**
+  - Zeek names `dnp3_tcp` and `modbus` as E-A4-01 found.
+  - Without midstream, Suricata names no protocol on `modbus.pcap`.
+  - With midstream, Suricata names it but writes 51 `anomaly` events.
+- **FTP and SNMPv3 are on no capture**, so what any engine logs of them is not shown. The FTP sample is in Network Monitor format, and the SNMPv3 sample's link layer is read by neither engine (section 1).
+- No capture is `no flow record: capture not decoded` under any configuration.
+
+### 5.6 D4's recommendation (D4's, not a decision; D1 approves in review)
+
+**The engine: Zeek 9.0.1, with the project's own script on Zeek's documented DNP3 events, as the sensor's engine.**
+
+- It is the only configuration that meets the group 120 condition and the UDP condition, and DNP3 on a moved port.
+- It reads a pipe with no capability.
+- Its objects are complete on these captures (44 of 44).
+
+**ICSNPP is not recommended for the sensor on this evidence.** It adds no group 120 visibility and fewer objects than the project's script. It would be one more package to pin, review and carry. Its control log is the one thing it adds over stock Zeek here.
+
+**Suricata stays the comparison.** It fails DNP3 on a moved port and DNP3 over UDP with its stock detection ports.
+
+The script is sensor code that the project must write, test and keep (D6's rule 8). Zeek's own stock logs do not meet the group 120 condition, by construction.
+
+**What closes the Modbus moved-port gap: two ways, neither built.**
+
+1. **A list of Modbus server ports per site, from the asset table, in the sensor's site configuration** (Zeek's `Modbus::ports`, or ICSNPP-Modbus's `additional_tcp_ports`). A SEL relay's Modbus/TCP port is a setting (`MODNUM1`, D6's note, section 3), so the asset table can carry it, as GT-PCAP's own labeller is told the port. D6's rule 8 forbids naming a port in the experiment's configuration. A sensor's site configuration could carry one, as a stated dependency: a Modbus server on a port nobody listed is a stated visibility limit (R6.1), never a silent gap.
+   - **The test that would show it:** `modbus-moved-port` run with a site list naming 15020 passes its three rows; the same run with an empty list fails them and reports the limit; and no other capture's flow is named Modbus.
+2. **A Modbus/TCP content signature in the project's script.** Zeek has none (section 3), so this would be the project's. Modbus/TCP's header is weak content: a transaction ID, a protocol ID of zero and a length. So a signature risks naming other traffic as Modbus. It is worth adding only with its false-positive rate measured.
+   - **The test:** the same three rows pass with no port named, and no flow in GT-PCAP's DNP3 captures, the public captures or the PRP pairs is named Modbus by it.
+
+D4 recommends the site port list first, because it is deterministic and follows the asset table. The signature should be considered only as an addition, after its false-positive measurement. Either way the rows are owed again by a run.
+
+**Not changed:** ADR-0009's engine line. D1 decides on this run.
+
+### 5.7 Limits of this result
+
+- **Offline files, not live capture** on a SPAN or TAP port, on a hosted runner and not on the sensor host. The DNP3 captures are synthesized, the Modbus moved-port capture is derived from a public capture of unknown origin, and nothing is a real relay's traffic.
+- **The pipe case is a finished capture through a pipe** (section 1a; D3 on #630). It does not show:
+  - a stream that never ends;
+  - back-pressure;
+  - a writer that stalls or dies;
+  - a malformed record on the pipe;
+  - the engine's own file writes and state directory;
+  - the engine under the sensor's own account.
+
+  The namespace and the user are Docker's.
+- **Stock Zeek's and ICSNPP's group 120 failures are by construction of their logs.** `dnp3.log` holds no object. ICSNPP's object log is written only for READ requests and RESPONSE replies, which function 131 is not. So they do not show that Zeek's parser misses group 120: the project's script, on the same parser, passes all 11 rows.
+- **The group 120 bodies are filler** (D6's note). The pass shows header-level parsing on function 5's exchanges, not decoding of a real challenge, reply or error.
+- **DNP3 over UDP is one arrangement:** the master starts, and both ends are on 20000, with the ports by inference until H-23. An outstation that starts a UDP flow is expected to be parsed backwards by Zeek (section 3), and is not tested.
+- **The Modbus moved-port case is one midstream conversation,** one function code and one unit.
+- **FTP and SNMPv3 are not shown** on any capture. Telnet, HTTP, IEC 104, MMS and GOOSE are reported with no pass condition.
+- **This is evidence for the engine choice, not V-M6 evidence.**
+
+**D2's reading of unsolicited reporting, beside the cases owed** (D2 on #625 and #623; S22 Table D.7 p. D.11, behaviour p. D.9).
+- On a SEL-751, unsolicited reporting is off by default (`UNSOLn := N`, `PUNSOLn := N`), a per-session setting.
+- With `UNSOLn := Y`, D2's `inference` is that the relay sends function 130 with UNS and CON set, and the master confirms with function 0. No GT-PCAP capture holds it.
+- Zeek parses DNP3 by `is_orig` (section 3). So a UDP flow that the relay starts, with an unsolicited response or a reply sent to port 20000 while the master sent from another port, is expected to be parsed backwards.
+- The ports of GT-PCAP's `dnp3-udp` (both ends on 20000) are by inference, settled by H-23 (D2 on #623).
+- **Cases owed to D6** (D1 passed them on):
+  - a master that sends from a temporary UDP port while the relay replies to `DNPUDPn` 20000, so the reply is a second 5-tuple;
+  - `DNPUDPn := REQ`;
+  - an unsolicited response that starts a flow.
+
+  This run shows none of them.
 
 ## 6. What waits
+
+Nothing now. The record of what waited:
 
 1. **Done:** D6's cases and pass conditions are on `main` (#623 as `96c35ef8`), and this branch has merged `main`.
 2. **The workflow on `main`.** GitHub finds a `workflow_dispatch` workflow only on the default branch, so `gh workflow run d4-engine-linux-eval.yml --ref agent/telemetry-engine-linux-eval` cannot start it before this PR's workflow file is on `main`. It has no `pull_request` or `push` trigger, by the brief. This PR merges on its reviews and green checks; then D1 dispatches the counted run from `main`, or tells D4 to.
@@ -166,7 +291,7 @@ None yet. The counted run's URL, the tables and the versions go here, each `CI-L
 2. AP-31 as it now reads (D3, P4-4-L1, #624) covers the sensor host; GPLv2's source offer is valid for "at least" three years (D7).
 3. GT-PCAP now holds DNP3 on a moved outstation port and over UDP (#623), and the derived Modbus moved-port case (D6 and D2).
 
-Still to come, with the counted run: the engine's evidence from section 5, and D4's recommendation. The ADR's engine line changes only on D1's approval.
+With the counted run (brief P4-4-S2, deliverable 4), ADR-0009's evidence gains "E-D4-03 results", from section 5: the run, the results against the three turning conditions, and D4's recommendation as D4's. The ADR's engine line changes only on D1's approval.
 
 ## 9. Files
 
