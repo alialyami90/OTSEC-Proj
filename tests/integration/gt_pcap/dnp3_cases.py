@@ -26,8 +26,14 @@ import synth
 # administered; asset IDs are fixed UUIDs made for GT-PCAP. C1 has no DNP3
 # transport, so each enrolled host resolves through one direct endpoint on
 # its IP that C1 does have (c1_endpoint, D1 on #548): Telnet 23 for O1, SSH
-# 22 for M1 to M3. No capture here holds a session on those endpoints. M4
-# is enrolled nowhere.
+# 22 for M1 to M3 and M5. No capture here holds a session on those endpoints.
+# M4 is enrolled nowhere.
+#
+# A relay has one DNP3 port, for TCP and UDP alike, and a transport for each
+# master's session (DNPNUM, 1 to 65534, default 20000; DNPTRn, UDP or TCP;
+# S22 Table D.7, p. D.11). So the moved port is a second relay, O2, and DNP3
+# over UDP is a fifth master's session on O1's own port. Neither is in the
+# R6.2 series, so the baseline has never seen them.
 NET = {
     "outstation": {"name": "O1", "ip": "192.0.2.20", "mac": "02:00:00:00:00:20", "port": 20000, "link": 10,
                    "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a20",
@@ -47,8 +53,22 @@ NET = {
                "c1_endpoint": {"transport": "ssh", "port": 22, "path": "direct"}, "writes": []},
         # Not enrolled and never seen in learning: the new master.
         "M4": {"ip": "192.0.2.13", "mac": "02:00:00:00:00:13", "link": 4, "asset": None, "writes": []},
+        # O1's UDP session (DNPTRn := UDP), authorized to control it. With
+        # DNPUDPn at its default the relay answers to UDP 20000, so this
+        # master sends from 20000 too.
+        "M5": {"ip": "192.0.2.14", "mac": "02:00:00:00:00:14", "link": 5,
+               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a14",
+               "c1_endpoint": {"transport": "ssh", "port": 22, "path": "direct"}, "writes": ["control"]},
     },
-    "authorized_writers": [["M1", "O1", "write"], ["M1", "O1", "control"]],
+    # Outstations beside O1. O2's DNPNUM is moved off the default; M1 is its
+    # master, authorized to control it.
+    "outstations": {
+        "O2": {"name": "O2", "ip": "192.0.2.21", "mac": "02:00:00:00:00:21", "port": 20001, "link": 11,
+               "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a21",
+               "c1_endpoint": {"transport": "telnet", "port": 23, "path": "direct"}},
+    },
+    "authorized_writers": [["M1", "O1", "write"], ["M1", "O1", "control"],
+                           ["M1", "O2", "control"], ["M5", "O1", "control"]],
     "sa_reply_timeout_ms": 5000,
 }
 
@@ -58,13 +78,17 @@ TIME_MS = 1_762_545_600_000  # 2025-11-07T20:00:00Z, the series' wall clock in m
 
 
 class Session:
-    """One master's TCP connection to O1, with DNP3 helpers."""
+    """One master's TCP connection to an outstation (O1 unless named), or
+    its UDP conversation with it, with DNP3 helpers. Over UDP each datagram
+    holds one link frame, and nothing below DNP3 is acknowledged."""
 
-    def __init__(self, master, clock, sport, isn=1000):
-        m, o = NET["masters"][master], NET["outstation"]
+    def __init__(self, master, clock, sport, isn=1000, outstation="O1", l4="tcp"):
+        m = NET["masters"][master]
+        o = NET["outstation"] if outstation == "O1" else NET["outstations"][outstation]
         self.m, self.o = m, o
-        self.conv = synth.TCPConv(synth.Host(m["mac"], m["ip"], sport), synth.Host(o["mac"], o["ip"], o["port"]),
-                                  clock, isn_c=isn, isn_s=isn + 50_000, ident=isn)
+        ends = synth.Host(m["mac"], m["ip"], sport), synth.Host(o["mac"], o["ip"], o["port"])
+        self.conv = (synth.UDPConv(*ends, clock, ident=isn) if l4 == "udp" else
+                     synth.TCPConv(*ends, clock, isn_c=isn, isn_s=isn + 50_000, ident=isn))
         self.tseq = {True: 0, False: 0}
         self.app = 0
 
@@ -106,11 +130,13 @@ class Session:
         return reqs
 
 
-def _case(clock, master, sport, body):
-    s = Session(master, clock, sport)
-    s.conv.handshake()
+def _case(clock, master, sport, body, outstation="O1", l4="tcp"):
+    s = Session(master, clock, sport, outstation=outstation, l4=l4)
+    if l4 == "tcp":
+        s.conv.handshake()
     marks = body(s) or {}
-    s.conv.close()
+    if l4 == "tcp":
+        s.conv.close()
     return s.conv.frames, marks
 
 
@@ -125,9 +151,9 @@ def cases():
     out = []
     t0 = 1_762_560_000_000_000_000  # after both series
 
-    def add(name, master, sport, body, rows):
+    def add(name, master, sport, body, rows, **where):
         clock = synth.Clock(start_ns=t0 + len(out) * 60_000_000_000)
-        frames, marks = _case(clock, master, sport, body)
+        frames, marks = _case(clock, master, sport, body, **where)
         resolved = []
         for r in rows:
             r = dict(r)
@@ -267,6 +293,33 @@ def cases():
         {"marks": ["second", "resp"], "rules": [], "context": "acknowledged", "sa": "none",
          "note": "the reuse pairs with the response; dnp3_seq_reused exactly 1 for this capture"}])
 
+    # Plan section 2B (P4-4-R1): DNP3 on a port where a port-only decoder
+    # does not look for it, and DNP3 over UDP. Each is a poll, then a direct
+    # operate with no SA from the authorized master. The baseline has seen
+    # neither service nor pair, so each is a new-service sample as well.
+    def poll_then_operate(s):
+        m = {}
+        m["req"], seq = s.request(dnp3.READ, INTEGRITY)
+        m["resp"] = s.reply(seq)
+        m["op"], seq = s.request(dnp3.DIRECT_OPERATE, dnp3.crob(3))
+        m["op_resp"] = s.reply(seq, objects=dnp3.crob(3))
+        return m
+
+    def decode_rows(what):
+        return [
+            {"marks": ["req", "resp"], "rules": ["new-service", "unknown-pair"], "context": "acknowledged",
+             "sa": "none", "note": what + ": a service and a pair the baseline never saw, one alert from each "
+                                         "rule for the flow"},
+            {"marks": ["op", "op_resp"], "rules": [], "context": "acknowledged", "sa": "none",
+             "note": "the authorized master's operate on the same flow; dnp3_no_sa, and no alert beyond the "
+                     "flow's two"}]
+
+    add("dnp3-moved-port", "M1", 41016, poll_then_operate,
+        decode_rows("DNP3 on TCP %d, the port O2's DNPNUM is set to" % NET["outstations"]["O2"]["port"]),
+        outstation="O2")
+    add("dnp3-udp", "M5", NET["outstation"]["port"], poll_then_operate,
+        decode_rows("DNP3 over UDP 20000 on O1, both ends on 20000 (DNPUDPn at its default)"), l4="udp")
+
     # Derived (plan section 2C): the unauthorized operate with its response,
     # and that response's bare ACK, removed (D3 on #536), and the later
     # frames renumbered so the request is unanswered, not a capture gap
@@ -326,6 +379,14 @@ def series(seed, start_ns, duration_s):
     return sorted((f for s in sess.values() for f in s.conv.frames), key=lambda f: f.ns)
 
 
+# What the labeller is told about a capture that is not DNP3 on TCP 20000:
+# the transport, and the outstation's port as its settings give it (plan
+# section 2B: labelled from the asset table's settings, not from the port).
+DECODE = {
+    "dnp3-moved-port": {"l4": "tcp", "port": NET["outstations"]["O2"]["port"]},
+    "dnp3-udp": {"l4": "udp", "port": NET["outstation"]["port"]},
+}
+
 SERIES = {
     # (seed, start, seconds). The held-out series is recorded after the
     # training series, and is as long (plan section 3).
@@ -336,7 +397,7 @@ SERIES = {
 
 def main(outdir):
     os.makedirs(outdir, exist_ok=True)
-    meta = {"net": NET, "series": {}, "cases": {}}
+    meta = {"net": NET, "decode": DECODE, "series": {}, "cases": {}}
     for name, (seed, start, secs) in SERIES.items():
         pcapfile.write(os.path.join(outdir, name + ".pcap"), series(seed, start, secs))
         meta["series"][name] = {"seed": seed, "start_ns": start, "seconds": secs}
