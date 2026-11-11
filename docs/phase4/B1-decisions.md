@@ -1529,3 +1529,34 @@ The owner's words are from the CLI session, at about 11:05Z. Evidence class: `de
   - **Follow-up, not briefed (D1 recommends it).** Tests that would close the five rows, each for what it names and no more: one slice leg in which the real node forwards to a stock rsyslog (R4.6); V-S6's interruption run, with its kills, against a receiver that is not project code (R4.7 and R8.6); V-S9's run with a direct read of the store, or against such a receiver (R8.8, and R4.7's V-S9 half); a framing fault sent to the real binaries (R4.1). It is D6's work with new CI legs, and it hardens what is built, so it waits for the owner's word, as the earlier hardening items did (D4-59, D4-62).
 - **What "continue work" does not start.** The owner's list of 2026-11-10 holds four items until their word: test runs on the PC (D4-12), the sensor (D4-78), D7's first brief and D8's first brief. D1 reads "continue work on the project" as the work that is not held, and asks the owner about each of the four. Nothing on them has started.
 - **Still owed by the owner:** their answer on the branch list, their word on each of the four held items, the Npcap OEM licence answer (D4-78), and the rest of the list in `HANDOFF.md`.
+
+## D4-83: the owner's go-ahead: the branch cleanup, local test runs, the sensor's evidence, D7's first brief and the closing tests (owner and D1, 2026-11-11)
+
+The owner's words are from the CLI session, at about 11:40Z: "go with your recommendation. i want to continue progress on project phases or gates". Evidence class: `desk`, and `simulated` for the run on the owner's PC.
+
+- **What D1 had recommended,** in the message the owner answered:
+  1. approve groups A and B of the branch list (D4-82);
+  2. the tests that would close the five rows lowered for a testing gap (D4-82's follow-up);
+  3. lift the pause on test runs on the owner's PC (D4-12) for ordinary local runs, and keep runs that create Windows services for the owner's own elevated session;
+  4. start D7's first brief, and leave D8's until a workflow needs a screen;
+  5. confirm that a PR which D1 wrote merges on D6's acceptance and the owner's word, and put that in CLAUDE.md.
+- **How D1 reads the second sentence.** It is the word to start on the work that leads to item 4's gate, which D4-78 had held. It is not an answer on the Npcap OEM licence. So ADR-0009 stays `proposed`, no sensor is briefed, and D4 gathers the evidence that the engine choice and the owner's answer need (brief P4-4-A6).
+- **#612 and #613 are still not merged.** D1 tried to merge #612 on these words, and the session's permission check refused it again as a merge without review. So "go with your recommendation" does not count as the word to merge. D1 asked the owner for the explicit words.
+- **The branch cleanup ran** on 2026-11-11 from about 11:45Z, after D1 checked all 207 SHAs against `git ls-remote` and against the open PRs. `reference/carried/delete-merged-branches-2026-11-06.ps1` deleted its 150 branches (approved in D4-62), and `reference/carried/delete-merged-branches-2026-11-11.ps1` its 57 (groups A and B, and the two `d1/` branches merged since). Each delete was leased to its SHA, and none was refused. The remote then had 49 branches: `main`, 46 of group C (its 47th, `d1/gitignore-local-folders`, had merged and was deleted with the 57), and the two branches of the open PRs. The logs are `reference/carried/branch-delete-2026-11-11-part1.log` and `-part2.log`.
+- **Test runs on the owner's PC are resumed** (D4-12 is lifted for ordinary local runs). A run that creates Windows services still happens only in the owner's own elevated session. The other limits in `HANDOFF.md` stand.
+- **The first local run** (D1, 2026-11-11 from 11:52Z, not elevated, at `main` `b383a242`, Go 1.27.3 on `windows/amd64`, Windows 11 build 26300, time zone UTC+3; `simulated`, a desktop). The log is `reference/pc-logs/pc-run-2026-11-11-go.txt` (SHA-256 `b4d723133b500a28242e0fdce566d680592568d899bf49c0a9c2f8043bd9db9d`).
+  - **Before it could run:** `go list ./...` failed with "Access is denied" on a folder under `reference/pc-logs/`, so Go does walk into the ignored folders, as `HANDOFF.md` warned. D1 gave `reference/` and `tools/` a one-line `go.mod` each (local files, ignored by Git). `go list ./...` then names 63 packages, all of the project's.
+  - `gofmt` over the tracked files: clean. `go vet ./...`: clean.
+  - `go test -timeout 30m ./...`: 56 packages pass, and 3 fail with six tests. **None of the six is a flake, and none shows a product defect so far.** Each passes on CI for a reason that does not hold on a site machine:
+    - **The time zone (1 test).** `platform/node` `TestConfigReadApprovalWindowEnded` formats an approval window from a local time, and C7 rightly refuses a time that is not UTC. CI runners are on UTC. Whether any product path does the same is D5's first check.
+    - **No elevation (3 tests).** `platform/node` `TestRunStartsWithExpiredLinks` and `TestStatusNeverCollectsBeforeLinksAreHeldBack`, and `tests/security` `TestB6HeldLinksDialAndBindNothing`, fail in D5's helper `nodeconfigtest` ("making Administrators the owner needs an elevated process"), and do not skip as the older elevation tests do. Each left a temp folder that its own cleanup could not remove. D1 reset the access lists and removed the three folders.
+    - **The layout (2 tests).** `tests/security` `TestUintptrConversionsInCallArgs` and `contracts/advisory` `TestNoOtherAdvisoryTestKey` walk the repository tree. They met the unreadable folder under `reference/`, and the second also reported a subagent's worktree under `.claude/worktrees/` as a second copy of the code.
+  - `platform/node` took 179 s here, against 558 s to 1,526 s on the hosted Windows runner (D4-44). It is one run, with three of its tests ending early, so it is an observation and not a like-for-like figure.
+  - Claude Code keeps each subagent's worktree in `.claude/worktrees/` inside the checkout. D1 listed that folder in `.git/info/exclude` on the PC. `pytest` was not run, and `tools/venv` does not exist yet.
+- **Briefs issued,** all in `docs/agent-handoffs.md`, each worked in its own worktree and branch:
+  - **P4-4-A6 (D4):** the engine and the capture path under option (a), from evidence. No sensor is built, and Npcap is installed nowhere.
+  - **P4-D7-1 (D7):** `docs/release.md`, the first inventory of what the two binaries contain and under which licences.
+  - **P4-D6-H5 (D6):** the closing legs for R4.1, R4.6, R4.7, R8.6 and R8.8.
+  - **P4-PC-1 (D5 and D6):** the six tests that pass only on a CI runner.
+- **D8 is not briefed.** No workflow needs a screen yet.
+- **Still owed by the owner:** the words to merge #612 and #613; their answer on the Npcap OEM licence, which D1 puts to them with D4's findings; and the rest of the list in `HANDOFF.md`.

@@ -22,18 +22,18 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## The one blocker, and the next action
 
-**The owner chose option (a) for the passive sensor on 2026-11-10, and said not to start work on it yet** (D4-78). [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
+**The owner chose option (a) for the passive sensor on 2026-11-10** (D4-78), **and on 2026-11-11 said to continue toward the gate** (D4-83). D4 is gathering the evidence for the engine choice under brief P4-4-A6. No sensor is briefed. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**NEXT ACTION (D1):** wait for the owner's word to start. Then get their answer on the Npcap OEM licence, choose the engine with D4 (D4-78), mark ADR-0009 accepted with D4, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
+**NEXT ACTION (D1):** review D4's findings under P4-4-A6, put the Npcap OEM licence question to the owner with the real terms, choose the engine with D4 (D4-78), mark ADR-0009 accepted with D4, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
 
 ## Open PRs and branches
 
-- **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance and the owner's word (D4-82). D6 has one task in flight: brief P4-D6-M1, the verification matrix's Status column (D4-82). Each role's open items are in its file in `.claude/agents/`.
-- **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner has not approved that list. D1 recommends approving the first two groups, and wrote `reference/carried/delete-merged-branches-2026-11-11.ps1` for them; it is not approved and has not been run (D4-82).
+- **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance and the owner's word (D4-82). In flight on 2026-11-11 (D4-83): D4 on P4-4-A6, D7 on P4-D7-1, D6 on P4-D6-H5, and D5 and D6 on P4-PC-1. D6's P4-D6-M1 is done and waits in #613. Each role's open items are in its file in `.claude/agents/`.
+- **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner approved the first two groups on 2026-11-11, and both scripts ran that day: 207 branches deleted, 49 left (D4-83). The third group stays.
 
 ## Waiting on the owner
 
-1. **The sensor under option (a)** (ADR-0009, D4-78): the word to start, and whether an Npcap OEM licence is acceptable. This blocks item 4.
+1. **The sensor under option (a)** (ADR-0009, D4-78): whether an Npcap OEM licence is acceptable. D1 asks with D4's findings (D4-83). This blocks item 4.
 2. **The sites' networks:** which protocols run on them, whether a site can give a SPAN port or a TAP, and whether the station network is PRP (D4-66).
 3. **R6.7's insecure list:** should it add IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68)?
 4. **May the DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5) be given to the project, in `reference/` (D4-68)?
@@ -41,8 +41,8 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 6. **Item 3's questions:** severity scores in reports; the v1/v2c approval key if such a path is ever added (HR-17); which SEL switches the sites run; model naming for set authors (`SEL-2731M`).
 7. **From D4-65:** should the reserve fail on volumes that can't hold real space (compressed or copy-on-write)? Should the store get a Windows folder flush? Should the rare starts over 6 s be briefed?
 8. **Authorization for any device contact:** a lab relay or switch before any H-test or Q3, and any SNMPv3 contact.
-9. **Test runs on the owner's PC** are paused (D4-12). Working in the CLI on the PC makes local `go vet`, `gofmt` and `go test` the natural first check. Recommended: lift the pause for ordinary local runs under the limits below, and keep service-creating runs for the owner's elevated session.
-10. **Running the branch-cleanup script, and approving the 2026-11-10 branch list** (above, D4-81).
+9. **Test runs on the owner's PC** are resumed for ordinary local runs (D4-83, 2026-11-11). Runs that create Windows services stay in the owner's elevated session. Nothing is owed here.
+10. **The branch cleanup is done** (D4-83). Nothing is owed here.
 11. **ADR-0007** (Windows site node) is still `proposed`.
 12. **D7 and D8** (D4-79): the word to start each one's first brief, and who holds the release key and where it is kept (TB9).
 
@@ -89,12 +89,13 @@ OTSEC-Proj/          the only checkout of this repository; start `claude` here
 
 - **`reference/` and `tools/` are inside the checkout since 2026-11-10 (D4-80), and neither is ever committed.** The repository is public, and `reference/` holds vendor manuals and logs from the owner's PC. `.gitignore` lists both since #609 merged, and `.git/info/exclude` on the PC still lists them too. Stage by explicit path, as always.
 - **Never run `git clean -x`, `git clean -X` or `git stash --all` in this checkout.** Each removes or moves ignored files, so each would take both folders, and `reference/carried/` holds files that are in use.
-- **Go, `gofmt` and pytest do not read `.gitignore`,** so from the repository root they can walk into the two folders. This is not tested on the PC yet, because runs are paused (D4-12). `tools/go/src` has no `go.mod` there, so do not assume that Go skips it. Before the first run:
+- **Go, `gofmt` and pytest do not read `.gitignore`,** so from the repository root they can walk into the two folders. The first run on 2026-11-11 showed it: `go list ./...` failed on a folder under `reference/` that the user cannot read, until `reference/` and `tools/` each got a one-line `go.mod` (local files, D4-83). Tests that walk the tree met the same folder, and brief P4-PC-1 fixes them. Before a run:
   - Check that `go list ./...` names only `otsec.local/otsec` packages. If it names anything under `tools/` or `reference/`, give each of the two folders a one-line `go.mod`, so that Go treats it as another module, and check again.
   - Run `gofmt` on tracked files only, as CI does, and not `gofmt -l .`: `gofmt -l $(git ls-files '*.go' | grep -v '^platform/experiments/')`.
   - Run `python -m pytest -q --ignore=tools --ignore=reference`.
   - CI is not affected, because neither folder is in the repository.
-- `tools/go` has not been run on the PC yet. Go is not on the PATH: call `tools\go\bin\go.exe`, or set `PATH` for the session only.
+- `tools/go` ran on the PC on 2026-11-11 (Go 1.27.3, `windows/amd64`). Go is not on the PATH: call `tools\go\bin\go.exe`, or set `PATH` for the session only, with `GOCACHE`, `GOPATH` and `APPDATA` pointing into `tools/` and `GOTOOLCHAIN=local`.
+- Claude Code keeps each subagent's worktree in `.claude/worktrees/` inside the checkout. `.git/info/exclude` on the PC lists it. Each worktree has the repository's own `go.mod`, so `go list ./...` skips it, and a test that walks the tree does not (P4-PC-1).
 - The Python venv does not exist yet. Create it as `tools/venv` (step 3 below).
 - Eleven test files still carry paths into a shared folder that no longer exists (the eight SEL-751 register goldens, two files under `tests/integration/gt_mib/`, and `contracts/adapter/testdata/snmp/README.md`). The goldens are pinned by checksum, so the owner left them. The paths are citations only, and nothing opens them.
 
@@ -103,6 +104,6 @@ OTSEC-Proj/          the only checkout of this repository; start `claude` here
 1. In `OTSEC-Proj`, run `git status` and `git log -1`, and compare with `origin/main`.
 2. Check the toolchain: `go version` must report 1.27.3 on `windows/amd64`. Use `$(go env GOROOT)/bin/gofmt`.
 3. If `tools/venv` is missing, create it with `python -m venv tools/venv` and install `pytest` and `asyncssh==2.24.1` into it. Nothing else is installed.
-4. If the owner has lifted D4-12, make the `go list` check above, then run `go vet ./...`, `gofmt` and `go test ./...` in the forms given above for the PC, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
+4. The owner lifted D4-12 on 2026-11-11 (D4-83). Make the `go list` check above, then run `go vet ./...`, `gofmt` and `go test ./...` in the forms given above for the PC, and say plainly which packages need a longer timeout on Windows (`platform/node`, D4-44).
 5. Check the latest `ci` and `govulncheck` runs on `main`.
 6. Follow the next action above. The owner answered the ADR-0009 question on 2026-11-10 (D4-78).
