@@ -658,7 +658,14 @@ The outcome is `succeeded`, or `denied` with one reason code. **The checks run i
 
 ### 11.3 Not a contract: the alarms
 
-The node's alarm codes are D5's to name. This note as merged in #624 used draft names, and they give way to the names in the node's design and in C13 0.2's CH-45: `sensor-not-enrolled`, `sensor-identity` (SL-10), `sensor-gap-undeclared` (SL-14), `sensor-baseline-void` (SL-R5), `sensor-enrolment-expiring` and `sensor-enrolment-expired` (SL-8), `sensor-revoke-pending` (SL-R2), `sensor-address-is-asset` (SL-9), `sensor-pinned-by-console` (SL-5), `sensor-state-unknown` and `sensor-state-unread` (SL-6), `sensor-clock-skew` (SL-17), `sensor-blind` and `sensor-unreachable`. Two have no name in either document yet, and are D5's to name: the stop of SL-30 (here `sensor-dial-limit`, a draft), and a link key that cannot be loaded (§11.4). None is in the C6 or C8 enumerations.
+The node's alarm codes are D5's to name. This note as merged in #624 used draft names, and they give way to the names in the node's design and in C13 0.2's CH-45: `sensor-not-enrolled`, `sensor-identity` (SL-10), `sensor-gap-undeclared` (SL-14), `sensor-baseline-void` (SL-R5), `sensor-enrolment-expiring` and `sensor-enrolment-expired` (SL-8), `sensor-revoke-pending` (SL-R2), `sensor-address-is-asset` (SL-9), `sensor-pinned-by-console` (SL-5), `sensor-state-unread` (SL-6), `sensor-clock-skew` (SL-17), `sensor-blind` and `sensor-unreachable`. `sensor-state-unread` is the one name for sensor state or a position that cannot be read or parsed; C13 0.2's `sensor-state-unknown` becomes it. Four more are final by D1's ruling 4 on #633 and #634:
+
+- `sensor-dial-limit` (SL-30): the node has made its three dials to a pair that has not answered, or reads the count as spent. It stands until an administrator acts.
+- `sensor-transmitted` (SL-26, AP-32): any non-zero `frames_outgoing` in a run's first heartbeat, or any rise after it. It stands until an administrator acts.
+- `sensor-egress-absent` (SL-26): the sensor reports its egress rule not in force or unreadable, or drops the field within a run.
+- `sensor-link-key` (§11.4, NK-5): a fault in the node's link-key file. It holds back the sensor links only.
+
+None is in the C6 or C8 enumerations.
 
 ### 11.4 Not a contract: the node's link key, in a file of its own
 
