@@ -33,8 +33,8 @@ D5 wrote this note on 2026-11-07 for brief P4-4-A5. **D5 revised it on 2026-11-1
 | Server check | no system roots and no name check. `VerifyConnection` takes the leaf's `SubjectPublicKeyInfo`, computes its pin, and accepts only the pin of the enrolment in force at that moment, read through an atomic pointer that a revocation replaces before it closes the link (§1.3) | SL-2, SL-12, SL-R2 |
 | Client certificate | `GetClientCertificate` returns a self-signed certificate made in memory at each node start, whose key is the node's link key, a `crypto.Signer` from the key register. Nothing is written to disk. Its dates mean nothing: the node enforces the enrolment's `not_after` (SL-8) | SL-2 |
 | Protocol name | ALPN `otsec.netobs/0.2` on both ends, refused if it isn't negotiated, so the link agent's port can't be mistaken for another TLS service (asked of C13 0.2) | SL-19 |
-| Timeouts | TCP connect 5 s; handshake 10 s; read deadline 30 s, three missed heartbeats; write deadline 10 s for each node message | SL-12, SL-20 |
-| Back-off | 1 s, doubling to 60 s, with ±20 % jitter. It resets after a connection whose hello was accepted and which lasted 60 s | SL-20 |
+| Timeouts | TCP connect 5 s; then C13 0.2's own (#627, CH-4): handshake 10 s, `sensor-hello` 10 s, idle 30 s, three missed ticks; and a write deadline of 10 s for each node message. An `ack` keepalive at least every 10 s (CH-9) | SL-12, SL-20 |
+| Back-off | 1 s, doubling to 60 s, with ±20 % jitter. It resets after a connection whose hello was accepted and which lasted 60 s. After `run-complete` (CH-10) the redial is immediate | SL-20 |
 | Connections | At most one per sensor. The dialer is the only caller, and the intake refuses a second concurrent connection for the same sensor (`second-connection`, counted) | SL-12 |
 | Memory | One frame at a time, at most `MaxChannelFrame` (64 KiB) and its decoded record, as `Link.Serve` reads now | SL-20 |
 | When it dials | Only while §1.2's configuration equals the live enrolment, the enrolment is not revoked, not fork-held and not expired, and the sensor's state is known (§1.3). Otherwise it does not dial, and the alarm says why | SL-4, SL-9 |
@@ -107,7 +107,7 @@ With two sensors the node's work doubles, and nothing else changes. **Whether a 
 
 - **At an accepted hello**, the position for the new run is saved with `SaveSourceCursor` before the hello is accepted, and the run is written to `sensors.json` too. A save that fails closes the connection, is counted, and raises `sensor-position-not-saved`. At start the node takes the higher of the two copies. Two copies with one run counter and two `run_id`s are a fork (`fork-held`).
 - **The hello checks** are SL-14's table, from the position: `run-regressed`, `run-forked` and `binding`. Each closes the connection and writes `sensor.link_refused` under the cap (§1.8). `run-forked` also writes `fork-held` to `sensors.json` and stops the dialer until a new enrolment with a new key, or a revocation (SL-16).
-- **The acknowledgement** names the run and `durable_through`: the highest seq of the run such that every record at or below it is committed, held by the intake hold (its save has returned), or dropped or refused with the position saved. It is sent at most once a second or every 256 records, after the save, never before. Its only effect at the sensor is the trim (SL-15, SL-19). A dropped or refused tail moves the position by `SaveSourceCursor`, at most once a second.
+- **The acknowledgement** names the run and the taken position T (C13 0.2's CH-17): the highest seq of the run such that every record at or below it is committed, held by the intake hold (its save has returned), a duplicate, never received and counted in the gap, or refused or dropped for a final reason with its count durable (§1.14, D5-1 and D5-2). It is sent within 1 s of T moving and at least every 10 s, after the save, never before. Its only effect at the sensor is the trim (SL-15, SL-19). A refused or dropped tail moves T when the `intake.drop-counted` event that counts it commits: that event carries the position it covers.
 - **Resume.** After a restart the node's hello carries the higher of the source cursor's seq and the highest seq the restored hold holds for that run. A resent record at or below it is a duplicate: dropped, counted as `duplicates`, never stored twice. A gap is counted as today (`SeqGaps`). A gap the sensor does not declare (C13 0.2's evicted-record counter) raises `sensor-gap-undeclared` once a stretch (SL-14).
 - **Room in the record.** The cursor counts in `Record.Bytes`. C13 §10 pins the worst stored observation at about 34 KiB of the 64 KiB cap, so 160 bytes fit, and `TestWorstStoredObservationFits` adds them.
 - **Tests**, in `platform/sensorlink`: `TestHelloRunRegressed`, `TestHelloRunForked`, `TestHelloBinding`; `TestPositionSavedBeforeHello`, whose control saves after accepting and, with a kill between, sees a fork at the next start; `TestResumeNoDuplicate`, cut after a commit and before the acknowledgement; `TestAckOnlyDurable`, whose control acknowledges on receipt and, after a kill, has acknowledged a record that is not stored; `TestPositionMonotoneOnRelease`. On the rig, SL-T9 (a) to (k), and (g) with the fork hold after a node restart (D6 on #624).
@@ -116,12 +116,12 @@ With two sensors the node's work doubles, and nothing else changes. **Whether a 
 
 **Why it matters** (`desk`). The hold ties a flow whose start, on the sensor's clock, falls within the session's start and end, on the node host's clock, widened by `g` = `DefaultTieGraceS`, 30 s (`hold.go` `Result`). The detector's clock is the latest `first_utc` it has read, the sensor's clock, and it judges a session once that clock passes its end plus `g` (`netdetect` `Observe`, `judge`). Skew moves both.
 
-**The measure.** At each accepted heartbeat, and at the hello, the node takes `o` = its wall time at receipt minus the sensor's send time. C13 0.2 must stamp that time when the record is written to the connection, not when it was queued (§1.10). So `o` is the clock difference plus the delay, and the delay is never negative. The estimate `E` is the smallest `o` of the last 30 heartbeats, five minutes: the least delayed sample, as NTP takes its least delayed one.
+**The measure.** At each `sensor-hello` and each `tick` (C13 0.2's CH-7, CH-8 and CH-22, #627), never at a buffered heartbeat, the node takes `o` = its wall time at receipt minus the message's `sensor_utc`. So `o` is the clock difference plus the delay, and the delay is never negative. The estimate `E` is the smallest `o` of the connection's last 6 ticks, one minute, the least delayed sample, as NTP takes its least delayed one; on a new connection it is the hello's alone, so the first tick already decides.
 
-**The bound: |E| at most 5 s.** `sensor-clock-skew` is raised above 5 s and cleared at 4 s or less, so an estimate near the line does not flap. The reasons:
+**The bound: |E| at most 2,000 ms,** D4's figure (CH-22), which D5 takes in place of the 5 s of its first text. `sensor-clock-skew` is raised above 2,000 ms and cleared at 1,500 ms or less, so an estimate near the line does not flap. The reasons:
 
-- 5 s is a sixth of `g`, and leaves 25 s of `g` for what it is for: the time between the collector's recorded start and its first frame, and the run's own timing.
-- A site clock under NTP on a LAN keeps well within a second, so 5 s is a fault, not jitter.
+- It is an order below `g`, so a sensor within it cannot move a flow out of a session's window.
+- A site clock under NTP on a LAN keeps well within a second, so 2 s is a fault, not jitter, and the one-minute minimum removes a delay spike from a busy link.
 - R6.4's latency is measured on one host's clock in the timed replay (D6's plan §5), so the bound does not touch it.
 
 **Past the bound** (SL-17):
@@ -133,7 +133,7 @@ With two sensors the node's work doubles, and nothing else changes. **Whether a 
 
 While skewed, comparisons against the node's times use the sensor's time less `E`. Before the first estimate, which the hello gives, the hold works as today.
 
-**Tests.** `TestSkewEstimateTakesLeastDelay`, with synthetic delays; `TestSkewAlarmHysteresis` (5 s and 4 s); `TestSkewTiesNothing`, whose control makes the tie, so the flow commits tied; and D4's `TestSkewAlertsAggregated`: 50 sessions while skewed give at most 4 records a window, where the control, keyed by asset, gives at least 50. On the rig: the sensor's clock offset by 10 s raises the alarm within a minute of the hello (the gate's skew line).
+**Tests.** `TestSkewEstimateTakesLeastDelay`, with synthetic delays; `TestSkewAlarmHysteresis` (2,000 ms and 1,500 ms); `TestSkewIgnoresBufferedHeartbeat`; `TestSkewTiesNothing`, whose control makes the tie, so the flow commits tied; and D4's `TestSkewAlertsAggregated`: 50 sessions while skewed give at most 4 records a window, where the control, keyed by asset, gives at least 50. On the rig: the sensor's clock offset by 10 s raises the alarm within a minute of the hello (the gate's skew line).
 
 ## 1.6 Records that arrive late after an outage (brief item 5)
 
@@ -150,7 +150,7 @@ While skewed, comparisons against the node's times use the sensor's time less `E
 
 - **Records lost are not late.** The sensor must declare the capture interval of records it evicted as degraded coverage (asked of C13 0.2). `covers` then keeps `own-session-unseen` from judging sessions in it (`own.go`).
 - **The barrier does not wait** (`intakeRecords.barrier`, `netintake.go`). Waiting would hold every session's handover for the length of an outage. The late index gets the same result with nothing held.
-- **The buffer the sensor must cover: `outage_hours` of records at the site's normal rate.** The hello declares the oldest record the sensor holds. If the sensor's buffer covers less than `outage_hours`, the node raises `sensor-buffer-short`. How the sensor counts what overflows is D4's (C13 0.2 item 4).
+- **The buffer the sensor must cover: `outage_hours` of records at the site's normal rate.** C13 0.2 bounds it in bytes, 2 GiB by default, never by age (CH-20), and no station's rate is measured, so this is a sizing rule for each site (`buffer_bytes` at least the rate times `outage_hours`) that cannot be checked yet. The node shows `buffered_bytes` against `buffer_bytes` from each tick, and raises `sensor-buffer-filling` once a stretch when a backlog passes three quarters of it. What overflows is counted in `drops_channel` (CH-15).
 
 **Tests.** In `platform/sensorlink`: `TestLateRecordTied`, a result with nothing held and the flow's records after it, committed tied, whose control, with no late index, commits them untied; `TestLateIndexRebuiltAtStart`; `TestLatePastHorizon`; `TestLateIndexBound`. At the node: `TestLateRecordsNoOwnSessionUnseen`, the session handed over and its tied records after its `after_seq`, no alert; the control, untied, alerts. On the rig: the link cut for 10 minutes across 5 scheduled runs, then restored, with no `own-session-unseen` and no `own-session-outside-record`.
 
@@ -163,9 +163,9 @@ While skewed, comparisons against the node's times use the sensor's time less `E
 
 ## 1.8 `sensor-blind`, and why a sensor never stops collection (brief items 7 and 8)
 
-**`sensor-blind`** (item 7). Today status shows the last heartbeat's counters and nothing compares them over time (`sensor.go`). **Requirement, not built:** while heartbeats are accepted, a C13 `packets` counter unchanged for `SensorBlindAfter` = 300 s of the node's monotonic time raises `sensor-blind`, as does C13 0.2's capture-state signal when it says the interface has no carrier. The counters run per run, so the comparison starts again at the first heartbeat of a new run. It is raised once a stretch, opens a coverage gap with cause `blind`, and clears at the first heartbeat whose `packets` has risen. `sensor-unreachable` (no heartbeat for 60 s) and `sensor-blind` (heartbeats, and no packets for 300 s) never stand together: blindness is judged only while heartbeats arrive.
+**`sensor-blind`** (item 7). Today status shows the last heartbeat's counters and nothing compares them over time (`sensor.go`). **Requirement, not built,** per interface as C13 0.2 gives it (`interfaces[]`, CH-31, #627): an interface whose `packets` has not risen across the heartbeats of the last `blind_after_s` of the node's monotonic time, or whose `carrier` is `down`, is blind, judged from heartbeats that are not late (CH-23) only. `sensor-blind` is raised when **any** interface is blind, and names the interfaces, so a PRP sensor with one LAN dark alarms. The counters run per run, so the comparison starts again at the first heartbeat of a new run. It is raised once a stretch, opens a coverage gap with cause `blind` when every interface is blind, and clears at the first heartbeat whose blind interfaces have risen. `sensor-unreachable` and `sensor-blind` never stand together: blindness is judged only while the link carries live frames (§1.14, D5-8).
 
-- **Why 300 s. Assumption:** a mirrored station LAN always carries something within five minutes, such as GOOSE retransmissions, PTP, SCADA polling or ARP. It is not shown for any site, the owner has not yet said which protocols run (D4-66), and D2 can check it against the SEL manuals. It is not configurable until a site needs it.
+- **`blind_after_s`: a node setting, `network_sensor.blind_after_s`, from 60 s to 3,600 s, 300 s by default.** D4 proposes 60 s as the default (CH-31). D5 proposes 300 s, for the difference list (§1.14). **Assumption:** a mirrored station LAN always carries something within the bound, such as GOOSE retransmissions, PTP, SCADA polling or ARP. It is not shown for any site, the owner has not yet said which protocols run (D4-66), and D2 can check it against the SEL manuals.
 - **Tests.** `TestSensorBlindFlatPackets` on the test clock, whose control compares counters across runs and raises a false alarm at a run change; `TestSensorBlindClears`. On the rig: heartbeats with flat counters raise the alarm within 300 s and one tick.
 
 **A sensor never stops SER or Syslog collection** (item 8, SL-20). Each coupling of §1.0, and what changes:
@@ -210,14 +210,14 @@ Node-level legs on the test clock go in a new package, not in `platform/node`, w
 | Back-off | 1 s to 60 s, ±20 % | Bounded redial | — |
 | `MaxSensors` | 2 | One for each PRP LAN | Load refused |
 | Retired sensors | 4 | Withdrawals waiting to prune | Load refused |
-| Skew | 5 s raise, 4 s clear, over 30 heartbeats | §1.5 | Alarm, no ties, aggregated alerts |
+| Skew | 2,000 ms raise, 1,500 ms clear, the least `o` of 6 ticks | §1.5, D4's figure | Alarm, no ties, aggregated alerts |
 | Late index | `outage_hours`, and 4,096 sessions | §1.6 | Untied and counted, alerts |
-| Sensor buffer | `outage_hours` at the site's rate | The node's planned outage | `sensor-buffer-short`; losses declared |
-| Acknowledgement | at most 1 a second, or every 256 records | Bounded node-to-sensor traffic | — |
-| Position | 160 bytes; a save of its own at most 1 a second | Within the record cap | — |
+| Sensor buffer | `outage_hours` at the site's rate, as a sizing rule for C13 0.2's `buffer_bytes` | The node's planned outage | `sensor-buffer-filling` at 3/4; losses in `drops_channel` |
+| Acknowledgement | within 1 s of T moving, and at least every 10 s (CH-9) | C13 0.2's figures | — |
+| Position | 160 bytes, with G and D | Within the record cap | — |
 | `HoldLockWait` | 2 s | §1.8 item 3 | Untied, or no session, counted |
 | Detector per tick | 5,000 observations or 10 s | §1.8 item 2 | Next tick; `backlog` |
-| `SensorBlindAfter` | 300 s | §1.8, an assumption | Alarm and gap |
+| `blind_after_s` | 300 s by default, 60 s to 3,600 s, per interface | §1.8, an assumption; D4 proposes 60 s | Alarm; a gap when every interface is blind |
 | `SensorHealthCeiling` | 3/4 of the platform quota | §1.8 item 4 | Held, counted, carried |
 | Coverage-gap records | 4 an hour for each sensor | §1.8 item 5 | Merged into one closing record |
 | Skew, blind and expiry events | one a stretch, at most one an hour each | — | Status only |
@@ -227,7 +227,7 @@ Node-level legs on the test clock go in a new package, not in `platform/node`, w
 
 ## 1.10 What the node needs from other contracts and roles
 
-**From C13 0.2 (D4, P4-4-L2), so the two designs meet:**
+**From C13 0.2 (D4, P4-4-L2), so the two designs meet.** Written before PR #627. Its hellos, `ack`, `tick`, per-interface counts and `config_digest` meet items 1 to 3, 6 and 11. §1.14 lists what still differs, items 4, 5, 7 and 8 among them.
 
 1. SL-13's hellos. The node's carries the position of §1.4. The sensor's carries its clock, the oldest seq it holds with its capture time, and how its end was pinned, by signature or by hand (SL-5), which status shows.
 2. The acknowledgement: a run and a seq, meaning "durable at the node" as §1.4 defines it. The node sends nothing else (SL-19).
@@ -284,6 +284,42 @@ SL-R5's "acknowledged again" and the baseline legs of SL-T10 wait on it. What it
 - **Not designed here:** a merge of two sensors' records; the sensor itself; its update path; a central role.
 - **`sensors.json` has the limit of `suspensions.json`:** whether a rename on Windows is durable without a folder flush is D4-65's open question for the owner.
 - **Accepted limits that carry over** (Part 2 §9, `D5-c5-0.9.md`): drop counts can lose the last minute in a crash; one full alarm per fill.
+
+## 1.14 Meeting C13 0.2 (PR #627 at `674ce453`, a proposal, not approved)
+
+D4's proposal `docs/phase4/D4-c13-0.2-proposal.md` (CH-1 to CH-35) puts twelve points to D5 in its §13. D5's answers, by number, all requirements and not built:
+
+| | D4's point | D5's answer |
+| --- | --- | --- |
+| D5-1 | Which outcomes are final | **As D4 proposes:** final are a C13 refusal, and a drop by the unresolved budget, at a full class or at the record cap. **Not final:** any other store error (drain-only, a closed database, an I/O fault). On such an error the link takes nothing further: it closes the connection with a node reason **`store`** (an addition to CH-11's closed set), does not move T, and redials with back-off, so the sensor's buffer holds the records. Code: `Link.storeDrop`'s `DropStore` branch (`link.go`), which today drops and counts them |
+| D5-2 | A refused or dropped record's count durable before the `ack` passes it | **Durable.** T passes a refused or dropped record only once an `intake.drop-counted` event that counts it has committed. That event gains the refusal counts by reason and the position it covers (`reportDrops`, `dropDetails`, `sensor.go`). It is written at most once a minute, so in a pure flood T moves once a minute, and the sensor's buffer holds about a minute of the flood. Under the sensor ceiling (§1.8 item 4) T can stall on drops, and the sensor's eviction then declares the rest in `drops_channel`: counted twice in two places, never lost. At start T is the highest of the source cursor, the last such event's position and the restored hold |
+| D5-3 | What the node keeps, and G and D | **All of it:** generation, run counter, `run_id`, taken seq, and G and D, in the observation stream's source cursor (§1.4), well within 160 bytes; the run counter and `run_id` also in `sensors.json`. Keeping G and D means an undeclared gap that straddles a node restart still alarms |
+| D5-4 | Where the expected `config_digest` comes from | **As D4 proposes:** `sensors[].config_digest` in the `network_sensor` section, read at the sensor's console at commissioning, required. A different digest raises `sensor-coverage-mismatch` and never refuses a record or fails a start. **Its cost:** each patch of the sensor needs an edit of the node's configuration and a restart, and until then the alarm stands, which is the point |
+| D5-5 | `pinned_by` | **Shown in status,** with the first value for each generation kept in `sensors.json` (CH-33). Whether a node may refuse `console` is D1's call |
+| D5-6 | The dialer | **Built as CH-4, CH-9 and CH-10,** with D5's additions: a 5 s TCP connect and a 10 s write deadline, which are node-local (§1.1) |
+| D5-7 | The hold waits for `newest_seq` | **Not adopted. D5 uses the late index of §1.6.** A wait by `newest_seq` covers a run dispatched while a backlog drains. It does not cover a run that ends while the link is down, the usual case after an outage: the node knows no `newest_seq` then, and the hold's deadline (`HoldRunLimit` + `g`, about 10.5 min) passes before the link returns. The late index ties both. `newest_seq` is used for status (backlog left) and for `sensor-buffer-filling` |
+| D5-8 | `sensor-unreachable` from any frame | **Adopted,** with one condition: from the last `tick` or record on a connection whose hello was accepted, never from a connect or a handshake, so D4-73's rule (a reconnect never resets it) holds. Code: `tickSensor`'s timer (`sensor.go`) |
+| D5-9 | Health events from the new heartbeat fields; the intake checkpoint's reader | **No event for each heartbeat:** that would be 8,640 a day for each sensor. The new counters go to status. One `sensor.counters` health event when `prp_mismatched`, `prp_table_full`, `engine_lines_refused` or a `drops_*` counter rises, at most once every 10 minutes for each sensor, carrying the rises, under the sensor ceiling. `prior.records_lost` and `runs_skipped` (CH-16) give one `sensor.run-loss` health event for each new run that declares one, at most 4 an hour, merged past that. **The intake checkpoint:** a held observation is kept as raw JSON (`HeldRecord.Observation`, `hold.go`) and decoded with `json.Unmarshal` (`Link.record`), so a 0.2 body passes and `netcheckpoint.intake` keeps `otsec.netcheckpoint.intake/0.1`. **Limit:** a node rolled back to 0.1 that commits a held 0.2 body with a tie re-encodes it with 0.1's type and loses `made_utc` and `late` |
+| D5-10 | One sensor or several | **At most two,** a database each (§1.2), which is CH-30's option (ii). O-12 is the owner's |
+| D5-11 | Names, bounds and caps | `sensor-clock-skew` at 2,000 ms (§1.5); `sensor-blind` (§1.8); `sensor-gap-undeclared` and `sensor-records-late` as D4 names them, with `late_bound_s` a node setting, 120 s by default, as CH-23 proposes. **Each is a status alarm once a stretch,** for `sensor-records-late` once a connection, as D4 proposes, and **at most 4 health events an hour for each sensor and name,** merged past that, all under the sensor ceiling (§1.8 items 4 and 5) |
+| D5-12 | `ServeSensor` two-way | **Built as §1.1 says:** `ServeSensor(ctx, peer, conn io.ReadWriter)` sends `node-hello` and the `ack`s. The read loop is synchronous (`Link.Serve`, `handle`), so when a connection ends, every record it read is finished or, for a non-final store error, untaken; the next `node-hello` is sent only after that |
+
+**The 0.1 rollback and the detector's checkpoint.** CH-35 says a 0.1 node refuses a 0.2 checkpoint, raises `network-detector-not-restored` and starts again from the oldest retained observation. **The node can do that within its start-up rules:** the detector starts in the sensor's tick, not in `Start`, and a checkpoint that does not restore is an alarm, never a start failure (`startDetector`, `netdetector.go`), and C5 checks a configuration document at its commit only, not at start (`platform/store/commit.go`). **But it is not what `main`'s code does** (`desk`): `detectorCheckpoints` keeps only documents whose schema equals `otsec.netcheckpoint/0.1`, so a 0.1 node does not see a 0.2 checkpoint at all. It starts as if for the first time, with no alarm, raises again the alerts of the retained observations and stores them again, and never removes the 0.2 checkpoint, which stays in the configuration class, at most 1,354,752 bytes each. **So R-4's second half fails against `main`.** To make it hold, the reader change goes in first, in a node build that a 0.2 node can be rolled back to: `detectorCheckpoints` recognises any `otsec.netcheckpoint/` detector document, raises `network-detector-not-restored` for a minor it cannot read, and removes it once its own first checkpoint is stored. That is the third part's, before 0.2's writer.
+
+**Where the two designs differ, for D1 to rule on:**
+
+1. **The backlog and the hold (D5-7).** D4: wait by `newest_seq`. D5: the late index, because the wait does not cover a run that ends during the outage.
+2. **The design of §1.6 rests on an ordering D4's A6 may break.** D5 needs that a record whose `first_utc` is after a session's end plus `g` is never sent before the records of the session's own flows. If the engine writes a connection's record only at its end (A6, S2), a long flow's record can follow a later short one, and the detector may judge the session first. If E-D4-03 shows that, the detector needs a later judging point, for example its clock past the end plus `g` plus `flow_idle_s`: D4's change.
+3. **Lost records and `own-session-unseen`.** D5 asked for the capture interval of evicted records as degraded coverage, so a session in a loss is not judged. 0.2 declares counts (`drops_channel`, `prior`) and no interval. Without it, a session inside a declared loss raises `own-session-unseen`: a loud false alert, with `sensor-gap-undeclared` not raised, since the loss is declared. D1 chooses: the interval in 0.2, or a node mark on the first record after a gap that the detector reads as degraded (D4's detector change), or the alert stands as a stated limit.
+4. **The skew mark and key.** CH-22 aggregates the skewed alerts but defines no field for it. D5 asks for the node's mark on an observation committed while skewed and the detector's `clock-skew` key (§1.5).
+5. **The skew estimator.** D4: each message's offset against the bound. D5: the least offset of the last 6 ticks, so a delay spike on a busy link does not raise the alarm. D5 takes D4's 2,000 ms.
+6. **`blind_after_s`'s default.** D4: 60 s. D5: 300 s, for fewer false alarms on a quiet segment while A7 is unshown. Both make it a node setting. **And who is blind:** D4 calls the sensor blind when every interface is; D5 raises `sensor-blind` when any is, since a dark LAN on a PRP sensor is the case per-interface counts are for, and opens a coverage gap only when every interface is blind.
+7. **A node close reason `store`** (D5-1), not in CH-11's set.
+8. **ALPN `otsec.netobs/0.2`** (§1.1), not in CH-1.
+9. **The sensor's buffer.** D4 bounds it in bytes. D5 kept its rule that it must cover `outage_hours`, now a sizing rule that cannot be checked until a station's rate is measured, with `sensor-buffer-filling`. D3's "oldest seq" in the hello is replaced by `newest_seq` and `drops_channel`, which D5 accepts.
+10. **The `tick`,** a fourth message beyond SL-19's list. D5 uses it for skew and for reachability, and has no objection. D3 reviews it.
+11. **The position's room.** G and D join the source cursor, so the worst stored observation gains up to 160 bytes beyond CH-35's sizes. R-5 runs with them.
+12. **Health events from the heartbeat.** 0.1's table says heartbeats become health events. D5 writes none for each heartbeat, only the capped events of D5-9.
 
 # Part 2: the note of 2026-11-07 (P4-4-A5)
 
