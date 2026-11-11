@@ -59,7 +59,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 Limits on the PC:
 
-- **Run no package in full that holds a listener on an address other than loopback** (`tests/security`, `tests/integration/syslogreceive`). Each run raises a Windows Firewall prompt for the owner, and one test listens on the PC's own LAN address. Run tests by name with `-run`; GitHub Actions runs the full set (D4-84).
+- **Run no package in full that holds a listener on an address other than loopback** (`tests/security`, `tests/integration/syslogreceive`). Each run raises a Windows Firewall prompt for the owner, and one test listens on the PC's own LAN address. Run tests by name with `-run`, and never with a pattern that matches `TestD210CollectorRefusesNonLoopback` (`tests/security/collector_lock_test.go`) or `TestDualStackKeysByIPv4` (`tests/integration/syslogreceive/receive_test.go`); GitHub Actions runs the full set (D4-84). D6 owes a change so that those tests bind off loopback only on CI, and fail there if skipped, before the next local run of either package.
 - A run that is not elevated skips 162 of `platform/node`'s tests. State the skip count with any result from the PC (D4-84).
 - Install nothing beyond what the owner approved: a portable Go inside the project folder, and a Python venv inside it with `pytest` and `asyncssh==2.24.1`. No installer, no admin rights requested, no system settings, no permanent PATH change, no pip install outside the venv.
 - A run that creates Windows services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.

@@ -1528,5 +1528,7 @@ Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HAND
   3. The result. If the forwarder fails a test, that is a product finding: D4 stops, loosens nothing, and reports to D1.
 - **May change:** `modules/telemetry/forward/rsyslog_test.go`, and, authorized by D1 here for those lines only, `.github/workflows/ci.yml`.
 - **Acceptance.** Every check green on the PR's head, with the Linux `go` log showing each of the three tests' `--- PASS`. With rsyslog absent and the variable set, the tests fail.
-- **Exclusions.** No change under `tests/`. No weakening of what the tests assert.
+- **Exclusions.** No change under `tests/`. No weakening of what the tests assert. A failing test is never skipped, removed or marked as an expected failure.
+- **Risk.** A copy of the binary runs outside the vendor's AppArmor profile, and the Linux `go` job's rsyslog is a newer build than the one the closing legs use. Both are stated with the result.
 - **Branch:** `agent/telemetry-rsyslog-tests-run`. **Reviewers:** D6 and D5.
+- This brief was given to D4 at about 13:30Z on 2026-11-11 and written here afterwards, in D4-84's PR.
