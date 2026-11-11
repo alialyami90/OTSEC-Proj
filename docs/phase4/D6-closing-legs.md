@@ -1,0 +1,64 @@
+# D6: the closing legs, their results and one finding (P4-D6-H5)
+
+D6, 2026-11-11. This note records what brief P4-D6-H5 (D1, D4-83) found, for the later update of the matrix in `docs/verification.md`. It is on PR #619. Evidence class: `simulated` (`CI-Linux`) for every run below. Every endpoint was a simulator or a test socket on loopback. No device was contacted, and nothing here is hardware evidence.
+
+## 1. The four legs
+
+Each leg runs the real binaries (`otsec node`, `otsec-collector`) against the ground truth its criterion names. The upstream collector in all four is the `rsyslogd` that Ubuntu packages, with imrelp over mutual TLS: rsyslogd 8.2312.0 and librelp0 1.11.0-1ubuntu3 on `ubuntu-24.04`. `relp_receiver.py` is not started in any of them.
+
+The runs below are on commit `18f01b1d`, [run 43022774150](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43022774150). The same four legs also passed on `66b87ff0` ([run 43019563611](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43019563611)), before the tests of the checks themselves were added. The PR's description names the run on its final head.
+
+| Row | Test | Oracle | Result |
+| --- | --- | --- | --- |
+| R4.6 | `test_slice_rsyslog_e2e.py` | The file rsyslog wrote | Pass, 7 tests ([job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43022774150/job/130529825848)). 12 records. rsyslog's own parser read each as RFC 5424 with the message's own header fields. The 8 SER messages are the 8 rows of Figure 10.16 in print order, each once. Every confirmed event is in the file |
+| R4.7, R8.6 (V-S6) | `test_slice_rsyslog_interruptions_e2e.py` | The file rsyslog wrote | Pass, 9 tests ([job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43022774150/job/130529826097)). Seed 688094, 6 interruptions: rsyslog killed mid-burst, the node killed mid-burst, rsyslog killed, the simulator killed, the node killed twice. 48 records, none torn |
+| R8.8 (V-S9) | `test_slice_rsyslog_store_full_e2e.py` | The store's contents, and the file rsyslog wrote | Pass, 10 tests ([job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43022774150/job/130529826472)). While full: SER events 1 to 208 numbered, 208 in the store, none in rsyslog's file. At the end: 308 numbered, 100 pruned, 208 in the store, 308 in rsyslog's file |
+| R4.1 | `test_slice_framing_e2e.py` | The bytes the test sent, against the store's contents and the file rsyslog wrote | Pass, 6 tests ([job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43022774150/job/130529826004)). 10 events on the TCP listener's stream, 10 on the TLS listener's, 4 on the UDP listener's, each as sent or as cut at 8192 octets, with its flag and parse status |
+
+What each run leaves out:
+
+- **V-S6 ran 6 interruptions, not 100.** The first two are set (rsyslog mid-burst, then the node mid-burst), so no schedule leaves out the kills the leg is for. The other four are the scheduler's seeded choices. Six is what the existing interruptions leg runs on every pull request. Its 100-interruption soak was a single 87-minute run. A soak against rsyslog needs `OTSEC_SLICE_INTERRUPTIONS=100` and a time limit of about two hours on one job. That is a change to `ci.yml` beyond the four entries D1 authorized, so it was not made and the soak was not run.
+- **V-S9's limit is the quota, not the disk** (F-013, F-014), as in the existing leg. The store checks cover the asset's SER stream, which holds the native records. They do not cover the health stream.
+- **R4.1's senders are test sockets.** No device fixture exists. The flags and the 8192-octet limit that the test expects are the listener's documented ones.
+- **RELP is the only transport built.** rsyslog 8.2312.0 with librelp 1.11.0 is the only collector version run.
+- The store is read from a copy of the database and its write-ahead log, taken while the node is SIGKILLed, with Python's `sqlite3`. It is not read while the node runs.
+
+## 2. Are the checks able to fail?
+
+**The product mutants were written and not run.** The suites are Linux only, the owner's PC is Windows and may run no test now, and the session was not permitted to push a second branch for GitHub Actions to run them on. So no mutant result exists, and none is claimed. The four mutants, each one line, are:
+
+| Mutant | Change | The test expected to fail |
+| --- | --- | --- |
+| M1 | `contracts/syslog/render.go`, `assemble`: the RFC 5424 TIMESTAMP with a lowercase `t` | `test_rsyslog_reads_every_message_as_rfc5424` in the R4.6 leg. `reconcile.py`'s parser accepts that time, so only rsyslog's reading can catch it |
+| M2 | `modules/telemetry/forward/forward.go`, `loadCursors`: a new session reads from one event after its saved cursor | The V-S6 leg: a row never arrives after the first reconnection, so the run does not settle |
+| M3 | `platform/store/outbox.go`, `PruneStep`: three events past the boundary are removed | `test_the_full_store_held_every_unforwarded_record` in the V-S9 leg |
+| M4 | `modules/telemetry/receive/frame.go`, `line`: a line over the limit is kept without `frame-truncated` | `test_the_store_holds_every_message_raw_and_flagged` in the R4.1 leg |
+
+Running them needs D1's or the owner's word on where: for example a scratch branch whose pull request is against the feature branch and is closed unmerged.
+
+**What was run instead** is weaker, because it breaks the check's input and not the product. Each new check has a test that feeds it a broken input, and all of them passed in CI on `18f01b1d`:
+
+- `test_rsyslogrun.py` (4 tests, in the `integration` job, [job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43022774150/job/130529825510): 167 passed, against 163 on `main`). The file reader counts a record cut short as torn and never as a message. The RFC 5424 check fails on eleven broken readings. **The negative control:** a real rsyslog with the legs' configuration is sent three messages that are not RFC 5424 (a lowercase `t` in TIMESTAMP, VERSION 2, an RFC 3164 message), and its own reading of each fails the check, while a well-formed message passes. This is the part of M1 that can run without a mutated product.
+- `test_the_store_checks_fail_on_a_broken_store` in the V-S9 leg: the two store checks on small stores made by the test, with an unforwarded event evicted, the newest event evicted, a row that was never printed, a row stored twice, nothing pruned, a pruned event that rsyslog lacks, and other bytes under the same event.
+- `test_the_check_fails_on_a_lost_flag_a_lost_message_and_other_bytes` in the R4.1 leg: the comparison on views with a flag missing from each of the three frame faults, a fault read as `ok`, an unparseable message not marked `failed`, a good message flagged, other bytes, the over-long line kept whole, and a lost message.
+
+## 3. Finding (proposed F-026): the forwarder's rsyslog tests never ran in CI, and they fail when they do
+
+This is the extension D1 added to the brief on 2026-11-11. The number is proposed: `docs/verification.md` is not changed by this PR.
+
+- **What was claimed.** The matrix cell of R4.6 (PR #613) says that the forwarder meets a stock rsyslog at unit level, in `TestRsyslogExactlyOnce`. The Phase 2 status table lists `TestRsyslogKilledMidStream` and `TestRsyslogExactlyOnce` under V-S6.
+- **What `main` does.** `modules/telemetry/forward/rsyslog_test.go` (`needRsyslog`) skips its three tests unless `rsyslogd` and `imrelp.so` are on the machine, and fails them instead only when `OTSEC_RSYSLOG_REQUIRED=1`. No workflow set that variable. The Linux `go` job installs nothing and runs `go test ./...` without `-v`. On `main` at `cdbf61e8` ([run 42911349143, the Linux `go` job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/42911349143/job/130162506936)) the log shows no install step and `ok otsec.local/otsec/modules/telemetry/forward 5.311s`, which does not say whether a test skipped.
+- **Shown directly.** On this PR at `4776b0da` ([run 43023340359, the Linux `go` job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43023340359/job/130531735153)), a temporary step ran `go test -count=1 -v -run Rsyslog ./modules/telemetry/forward/` on the runner as it comes, which is the state of `main`. The runner has `/usr/sbin/rsyslogd` and no `imrelp.so`. All three tests skipped: `TestRsyslogExactlyOnce`, `TestRsyslogKilledMidStream` and `TestRsyslogRefusesAnotherNode`, each with "rsyslogd with imrelp not found". **So these tests had not been running in CI.**
+- **Made to run, they fail.** In the same job, after `rsyslog-relp` was installed (rsyslogd 8.2512.0, librelp0 1.12.0-1, on `ubuntu-26.04`, which `ubuntu-latest` now is) and with `OTSEC_RSYSLOG_REQUIRED=1`, all three failed after 10 s each with "rsyslogd did not listen". The test printed no output of rsyslogd.
+- **Why.** On `1a9439f3` ([run 43025443153, the Linux `go` job](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43025443153/job/130538874480)) a temporary step started the installed `rsyslogd` against a configuration in a temporary directory, as the test does. rsyslogd answered "could not open config file ... Permission denied", and the kernel log has AppArmor's denial: `apparmor="DENIED" operation="open" profile="rsyslogd" name="/tmp/.../rsyslog.conf"`. A copy of the same binary, run from the temporary directory, opened the file. This is the confinement that `tests/integration/slice/harness.py` (`rsyslogd()`) already works around for D6's own rsyslog tests by running a copy.
+- **What it is, and what it is not.** It is a failure of the test's set-up on the hosted runner: rsyslogd never starts, so the forwarder is not exercised and no forwarder behaviour is shown wrong. It is not evidence against the product. It does mean that no CI run stood behind the unit-level claim. Whether the tests passed on a machine of A4's in Phase 2 is not something this note can check.
+- **What stands in its place.** The legs of section 1: the real node forwards to a stock rsyslog, with rsyslog killed mid-burst, and rsyslog's file reconciles. That is rsyslog 8.2312.0 with librelp 1.11.0. The forwarder has not met rsyslog 8.2512.0 with librelp 1.12.0 in any test.
+- **State of the PR.** `ci.yml`'s Linux `go` job now installs `rsyslog` and `rsyslog-relp`, prints their versions and sets `OTSEC_RSYSLOG_REQUIRED=1` for `go test ./...`, as D1 authorized. Windows is unchanged. Measured on `1a9439f3`: the install step took 8 s. The `go test ./...` step took 3 min 49 s, against 3 min 44 s on `main`: the three tests wait 10 s each before they fail. The job took 4 min 58 s of its 15-minute limit, which is unchanged. **The job is red, and stays red** until the test can start rsyslogd on the runner. The product and the test are not changed here: `modules/telemetry/forward/` is D4's.
+- **For D4.** The test needs a way to start rsyslogd that AppArmor's path-attached profile does not confine. D6's harness copies the binary. The test should also print rsyslogd's output when it does not listen.
+- **For the matrix.** R4.6's cell should stop citing `TestRsyslogExactlyOnce` as run evidence until it runs green in CI, and should cite the R4.6 leg.
+
+## 4. Other things seen
+
+- **`ubuntu-latest` and `ubuntu-24.04` are now different images.** The `go` and `python` jobs run on `ubuntu-latest`, which is `ubuntu-26.04` (image 20261101.186.1). The `integration` and `integration-long` jobs are pinned to `ubuntu-24.04`. So the collector that the legs run against is one release older than the one the `go` job installs.
+- **Counts in other files.** `ci.yml` now runs twenty-three jobs, with nineteen `integration-long` legs. `CLAUDE.md` and `HANDOFF.md` say nineteen and fifteen. Those files are D1's.
+- **The four legs are kept out of the `integration` job by `tests/integration/slice/conftest.py`** (`collect_ignore`), not by more `--ignore` flags in that job, because the brief allowed no change to another job. Its count went from 163 to 167 tests, the four being `test_rsyslogrun.py`'s, and its pytest time was 17 min 27 s, against 17 min 28 s on `main`. If D1 prefers the `--ignore` list that the other long files use, it is a one-line change in each place.

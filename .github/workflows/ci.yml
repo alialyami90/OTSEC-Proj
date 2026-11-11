@@ -78,27 +78,15 @@ jobs:
       # OTSEC_RSYSLOG_REQUIRED=1 makes a missing rsyslogd or imrelp fail
       # those tests instead of skipping them (D6, P4-D6-H5, authorized by
       # D1). Linux only: rsyslog does not run on Windows, and the variable
-      # is not set there.
+      # is not set there. On the hosted runner the three tests now fail,
+      # because AppArmor keeps the installed rsyslogd from the test's
+      # configuration (docs/phase4/D6-closing-legs.md, section 3).
       - name: rsyslog with imrelp, for the forwarder's rsyslog tests
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp
           rsyslogd -v
           dpkg-query -W rsyslog rsyslog-relp librelp0
-      - name: TEMPORARY, removed in the next commit - why rsyslogd does not listen when a test starts it from a temporary directory
-        if: runner.os == 'Linux'
-        run: |
-          d=$(mktemp -d)
-          printf 'module(load="imrelp")\ninput(type="imrelp" port="20514" address="127.0.0.1")\n' > "$d/rsyslog.conf"
-          echo "--- the installed rsyslogd, started as the forwarder's tests start it:"
-          rsyslogd -N1 -f "$d/rsyslog.conf" || echo "exit $?"
-          echo "--- a copy of the same binary, as tests/integration/slice/harness.py runs it:"
-          cp "$(command -v rsyslogd)" "$d/rsyslogd"
-          "$d/rsyslogd" -N1 -f "$d/rsyslog.conf" || echo "exit $?"
-          echo "--- AppArmor's profiles that name rsyslogd:"
-          sudo aa-status 2>&1 | grep -i rsyslog || echo "aa-status names no rsyslogd profile"
-          echo "--- AppArmor's denials for rsyslogd in the kernel log:"
-          sudo dmesg 2>&1 | grep -i apparmor | grep -i rsyslog | tail -n 5 || echo "none"
       - if: runner.os == 'Linux'
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
