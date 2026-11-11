@@ -68,6 +68,21 @@ docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base
   echo "suricata.yaml: the image's own, with eve types dnp3 and modbus added (sha256 $(sha256sum < "$work/suricata.yaml" | cut -c1-64))"
 } > "$work/versions.txt"
 
+# Every table opens with what ran and whether it counts (D1 and D6 on #625):
+# a run counts only on refs/heads/main with D6's pass conditions present.
+header() {
+  commit=${GITHUB_SHA:-$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)}
+  ref=${GITHUB_REF:-local}
+  cond=$root/tests/integration/gt_pcap/engine-pass-conditions.tsv
+  if [ -f "$cond" ]; then ch=$(sha256sum < "$cond" | cut -c1-64); else ch=absent; fi
+  if [ "$ref" = refs/heads/main ] && [ "$ch" != absent ]; then
+    kind=counted
+  else
+    kind="rehearsal: not the counted result"
+  fi
+  printf '%s\n' "- Run: $kind" "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch" ""
+}
+
 # 2. Every configuration over one directory of captures.
 zeek_run() {
   docker run --rm --network none -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
@@ -96,21 +111,31 @@ case $mode in
     python3 "$root/tests/integration/gt_pcap/dnp3_cases.py" "$work/dnp3" > /dev/null
     (cd "$work/dnp3" && sha256sum -c --quiet "$gt/dnp3.sha256")
     engines "$work/dnp3" "$work/out-dnp3"
-    python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root" > "$work/dnp3.md"
+    { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; } > "$work/dnp3.md"
     ;;
   public)
     cache=$3
     rm -rf "$work/public"
     mkdir -p "$work/public"
-    grep -v '^#' "$root/tests/fixtures/network/public-ot-captures/MANIFEST.tsv" | cut -f1 | sed 's/\.gz$//' | while read -r n; do
-      cp "$cache/$n" "$work/public/" 2>/dev/null || echo "not fetched: $n"
+    # Each MANIFEST capture is checked against its SHA-256 here, whatever
+    # fetch_captures.sh left in the cache; a capture that fails is dropped,
+    # and its rows read "not run" (D7 on #625).
+    grep -v '^#' "$root/tests/fixtures/network/public-ot-captures/MANIFEST.tsv" | while IFS="$(printf '\t')" read -r n sha url proto label; do
+      if echo "$sha  $cache/$n" | sha256sum -c --status; then
+        case $n in
+          *.gz) gunzip -c "$cache/$n" > "$work/public/${n%.gz}" ;;
+          *) cp "$cache/$n" "$work/public/" ;;
+        esac
+      else
+        echo "MISMATCH or missing, dropped: $n"
+      fi
     done
     grep -v '^#' "$here/extra-captures.tsv" | while IFS="$(printf '\t')" read -r n sha url proto; do
       curl -fsSL --retry 5 --retry-delay 20 -o "$work/public/$n" "$url" || echo "not fetched: $n"
       echo "$sha  $work/public/$n" | sha256sum -c --status || { echo "MISMATCH or missing: $n"; rm -f "$work/public/$n"; }
     done
     engines "$work/public" "$work/out-public"
-    python3 -I "$here/table.py" public "$work/out-public" > "$work/public.md"
+    { header; python3 -I "$here/table.py" public "$work/out-public"; } > "$work/public.md"
     ;;
   prp)
     cache=$3
@@ -126,8 +151,9 @@ case $mode in
     # row, and every row fails while no stage discards PRP duplicates
     # (E-D4-02), so its exit code is recorded, not obeyed.
     rc=0
+    header > "$work/prp.md"
     python3 -I "$root/modules/telemetry/experiments/prp-engines/compare.py" "$work/out-prp" "$work/labels" \
-      zeek zeek-probe zeek-icsnpp suricata suricata-midstream > "$work/prp.md" || rc=$?
+      zeek zeek-probe zeek-icsnpp suricata suricata-midstream >> "$work/prp.md" || rc=$?
     echo "compare.py exit code: $rc" >> "$work/prp.md"
     ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;

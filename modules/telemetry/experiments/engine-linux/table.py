@@ -94,6 +94,7 @@ class Logs:
         self.msgs = []  # {"cite", "ts", "l4", "ends", "sender", "request", "fc", "objs"}
         self.objects_logged = objects_logged
         self.notes = 0
+        self.flow_notes = collections.defaultdict(list)  # (l4, ends) -> ["file:line text"]
 
     def msg(self, cite, ts, l4, e, sender, request, fc, objs=()):
         self.msgs.append({"cite": cite, "ts": ts, "l4": l4, "ends": e, "sender": sender,
@@ -152,7 +153,12 @@ def zeek(d, cfg, t):
             else:
                 group[k]["cite"] += f",{i}"
             group[k]["objs"].append(f"g{code // 256}v{code % 256}")
-    s.notes = len(lines(os.path.join(d, "weird.log"))) + len(lines(os.path.join(d, "analyzer.log")))
+    for f, field in (("weird.log", "name"), ("analyzer.log", "failure_reason")):
+        for i, r in lines(os.path.join(d, f)):
+            s.notes += 1
+            if r.get("uid") in conn:
+                l4, o, p = conn[r["uid"]]
+                s.flow_notes[(l4, ends(*o, *p))].append(f"{f}:{i} {r.get(field) or r.get('name') or '?'}")
     s.msgs.sort(key=lambda m: m["ts"])
     return s
 
@@ -168,6 +174,7 @@ def suricata(d):
                             "names": {r["app_proto"]} if r.get("app_proto") else set()})
         elif ev == "anomaly":
             s.notes += 1
+            s.flow_notes[(l4, ends(*o, *p))].append(f"eve.json:{i} {r.get('anomaly', {}).get('event', '?')}")
         elif ev == "dnp3":
             msgs = [r["dnp3"]] if "type" in r["dnp3"] else [v for v in r["dnp3"].values() if isinstance(v, dict)]
             for m in msgs:
@@ -197,73 +204,158 @@ def named(names, proto):
     return any(proto in n for n in names)
 
 
-def judge(row, s, proto):
-    """(result, citation) for one of D6's rows, as D4 reads D6's note.
+def assign(rows, msgs, fits):
+    """Each row gets a distinct message (D6 on #625): row index -> message.
 
-    proto is the capture's labelled protocol. Protocol and service rows read
-    it from the flow records; function and g120 rows are read for DNP3 only.
+    A maximum bipartite matching (augmenting paths), so two rows that share
+    a flow and a code need two logged messages, and one logged message can
+    never satisfy two rows.
     """
-    l4, e = row["l4"], ends(row["src"], row["sport"], row["dst"], row["dport"]) if row["src"] else None
-    if row["condition"] == "protocol":
-        recs = [f for f in s.flows if f["l4"] == l4 and ends(*f["orig"], *f["resp"]) == e]
-        if not recs:
-            return "fail (no flow record)", ""
-        if len(recs) > 1:
-            return f"fail ({len(recs)} records)", ",".join(f["cite"] for f in recs)
-        f = recs[0]
-        if not named(f["names"], proto):
-            return f"fail (not named {proto})", f["cite"]
-        if l4 == "tcp" and f["orig"] != (row["src"], row["sport"]):
-            return "fail (originator)", f["cite"]
-        return ("pass" if l4 == "tcp" else f"pass (originator {f['orig'][0]})"), f["cite"]
+    owner = {}  # message index -> row index
+
+    def take(i, seen):
+        for k, m in enumerate(msgs):
+            if k not in seen and fits(rows[i], m):
+                seen.add(k)
+                if k not in owner or take(owner[k], seen):
+                    owner[k] = i
+                    return True
+        return False
+
+    for i in range(len(rows)):
+        take(i, set())
+    return {i: msgs[k] for k, i in owner.items()}
+
+
+def want_objs(row):
+    return set(row["objects"].split(",")) if row["objects"] not in ("", "?") else None
+
+
+def fits_fn(row, m):
+    return (m["request"] and m["l4"] == row["l4"] and m["sender"] == row["src"] and m["fc"] == int(row["code"])
+            and m["ends"] == ends(row["src"], row["sport"], row["dst"], row["dport"]))
+
+
+def fits_obj(row, m):
+    return fits_fn(row, m) and want_objs(row) <= set(m["objs"])
+
+
+def match_functions(rows, s):
+    """(function matching, object matching) over one capture's function rows."""
+    reqs = [m for m in s.msgs if m["request"]]
+    with_objs = [r for r in rows if want_objs(r) is not None]
+    by_obj = assign(with_objs, reqs, fits_obj) if s.objects_logged else {}
+    return assign(rows, reqs, fits_fn), {id(with_objs[i]): m for i, m in by_obj.items()}
+
+
+def judge_flow(row, s, proto):
+    """A protocol or service row."""
+    l4 = row["l4"]
     if row["condition"] == "service":
         for f in s.flows:
             if f["l4"] == l4 and f["resp"] == (row["dst"], row["dport"]) and named(f["names"], proto):
                 return "pass", f["cite"]
         return "fail", ""
-    if proto != "dnp3":
-        return "unknown (this table reads DNP3 functions only)", ""
-    mine = [m for m in s.msgs if m["l4"] == l4 and m["ends"] == e]
-    code = int(row["code"])
-    req = [m for m in mine if m["request"] and m["fc"] == code and m["sender"] == row["src"]]
-    if row["condition"] == "function":
-        if not req:
-            return "fail", ""
-        want = set(row["objects"].split(",")) if row["objects"] not in ("", "?") else None
-        if want is None:
-            obj = "objects skipped (?)"
-        elif not s.objects_logged:
-            obj = "objects not logged"
-        else:
-            hit = next((m for m in req if want <= set(m["objs"])), None)
-            obj = f"objects pass {hit['cite']}" if hit else "objects fail"
-        return f"pass; {obj}", req[0]["cite"]
-    # g120: the message named in `show`, as a message of its own.
-    show = row["show"]
+    e = ends(row["src"], row["sport"], row["dst"], row["dport"])
+    recs = [f for f in s.flows if f["l4"] == l4 and ends(*f["orig"], *f["resp"]) == e]
+    if not recs:
+        return "fail (no flow record)", ""
+    if len(recs) > 1:
+        return f"fail ({len(recs)} records)", ",".join(f["cite"] for f in recs)
+    f = recs[0]
+    if not named(f["names"], proto):
+        return f"fail (not named {proto})", f["cite"]
+    if l4 == "tcp" and f["orig"] != (row["src"], row["sport"]):
+        return "fail (originator)", f["cite"]
+    return ("pass" if l4 == "tcp" else f"pass (originator {f['orig'][0]})"), f["cite"]
+
+
+def judge_g120(row, s, others_pass):
+    """A g120 row. others_pass: whether this configuration passed every other
+    g120 row of the capture (for the row that asks for no group 120 object)."""
     if not s.objects_logged:
         return "fail (no object logged)", ""
-    m = re.match(r"(\d+):(g120v\d+) from (\S+)$", show)
+    e = ends(row["src"], row["sport"], row["dst"], row["dport"])
+    mine = [m for m in s.msgs if m["l4"] == row["l4"] and m["ends"] == e]
+    notes = s.flow_notes.get((row["l4"], e), [])
+    m = re.match(r"(\d+):(g120v\d+) from (\S+)$", row["show"])
     if m:
         fc, obj, sender = int(m.group(1)), m.group(2), m.group(3)
         exact = [x for x in mine if x["fc"] == fc and x["sender"] == sender and obj in x["objs"]]
         if exact:
             return "pass", exact[0]["cite"]
-        if any(x["fc"] == fc and x["sender"] == sender for x in mine):
-            same = [x for x in mine if x["fc"] == fc and x["sender"] == sender]
-            g = [o for x in same for o in x["objs"] if o.startswith("g120")]
-            return (f"fail (variation: {','.join(g)})" if g else "fail (message shown, no group 120 object)"), same[0]["cite"]
+        same = [x for x in mine if x["fc"] == fc and x["sender"] == sender]
+        g = [o for x in same for o in x["objs"] if o.startswith("g120")]
+        if g:
+            return f"fail (variation: {','.join(g)})", same[0]["cite"]
+        if notes:
+            # Inferred: the engine wrote a parser note on this flow and shows
+            # no such group 120 object. The note's own text is printed so a
+            # reader can check it (D6 on #625).
+            return f"fail (filler body refused: {'; '.join(notes[:3])})", ",".join(x["cite"] for x in same[:1])
+        if same:
+            return "fail (message shown, no group 120 object)", same[0]["cite"]
         g120 = [x for x in mine if any(o.startswith("g120") for o in x["objs"])]
         return ("fail (group only)" if g120 else "fail"), (g120[0]["cite"] if g120 else "")
     # "no group 120 object between the request and its response"
+    req = [x for x in mine if fits_fn(row, x)]
     if not req:
         return "fail (request not shown)", ""
     a = mine.index(req[0])
-    b = next((j for j in range(a + 1, len(mine)) if not mine[j]["request"] and mine[j]["sender"] == row["dst"]), None)
+    b = next((k for k in range(a + 1, len(mine)) if not mine[k]["request"] and mine[k]["sender"] == row["dst"]), None)
     if b is None:
         return "fail (response not shown)", req[0]["cite"]
+    cite = f"{req[0]['cite']}..{mine[b]['cite']}"
     if any(o.startswith("g120") for x in mine[a:b + 1] for o in x["objs"]):
-        return "fail (group 120 between)", f"{req[0]['cite']}..{mine[b]['cite']}"
-    return "pass if this configuration shows the capture's other group 120 rows", f"{req[0]['cite']}..{mine[b]['cite']}"
+        return "fail (group 120 between)", cite
+    if not others_pass:
+        return "fail (cannot show group 120)", cite
+    return "pass", cite
+
+
+def evaluate(conds, loaded, protos, cfg):
+    """[(row, result, citation)] for every one of D6's rows, in D6's order."""
+    out = {}
+    by_cap = collections.defaultdict(list)
+    for n, row in enumerate(conds):
+        by_cap[row["capture"]].append((n, row))
+    for cap, rows in by_cap.items():
+        s = loaded.get((cfg, cap), "no such capture in dnp3.sha256")
+        if isinstance(s, str):
+            for n, _ in rows:
+                out[n] = (f"unknown ({s})", "")
+            continue
+        proto = protos.get(cap, "dnp3")
+        fn_rows = [r for _, r in rows if r["condition"] == "function"]
+        fn, ob = match_functions(fn_rows, s) if proto == "dnp3" else ({}, {})
+        pos = {id(r): k for k, r in enumerate(fn_rows)}
+        explicit = {}
+        for n, row in rows:
+            c = row["condition"]
+            if c in ("protocol", "service"):
+                out[n] = judge_flow(row, s, proto)
+            elif proto != "dnp3":
+                out[n] = ("unknown (this table reads DNP3 functions only)", "")
+            elif c == "function":
+                k = pos[id(row)]
+                if k not in fn:
+                    out[n] = ("fail", "")
+                    continue
+                if want_objs(row) is None:
+                    obj = "objects skipped (?)"
+                elif not s.objects_logged:
+                    obj = "objects not logged"
+                else:
+                    hit = ob.get(id(row))
+                    obj = f"objects pass {hit['cite']}" if hit else "objects fail"
+                out[n] = (f"pass; {obj}", fn[k]["cite"])
+            elif c == "g120" and not row["show"].startswith("no group 120"):
+                out[n] = explicit[n] = judge_g120(row, s, True)
+        others = all(r.startswith("pass") for r, _ in explicit.values()) and bool(explicit)
+        for n, row in rows:
+            if n not in out:
+                out[n] = judge_g120(row, s, others)
+    return [(row, *out[n]) for n, row in enumerate(conds)]
 
 
 def dnp3(out, gt, work, root):
@@ -287,6 +379,14 @@ def dnp3(out, gt, work, root):
     print("Generated by `run.sh dnp3`; do not edit by hand. Function names map to codes through Zeek's and ICSNPP's own "
           "`function_codes` tables (each name maps to one code). The engine logs are not uploaded; every citation is "
           "`file:line` in the run's own output for that capture and configuration.\n")
+    print("No configuration names a port, an address or a capture: `run.sh`, `in-container.sh` and `probe.zeek` hold none "
+          "(D6's rule 8). Content detection, where an engine finds a protocol off its port, comes only from each engine's "
+          "stock settings: Zeek's DPD signatures in `base/protocols/dnp3/dpd.sig`, loaded by default; Suricata's stock "
+          "`suricata.yaml` with `app-layer.protocols.dnp3.detection-ports` and `modbus.detection-ports` unchanged "
+          "(dp 20000 and 502), and the two parsers switched on.\n")
+    print("This table treats no function code as critical: it reports the codes that the labels and D6's rows name. "
+          "S22 Table D.2 lists write, select, operate, direct operate and direct operate with no reply (codes 2 to 6); "
+          "IEEE 1815's own list is not held, so any further code is `unknown`. D6's pass conditions are the authority.\n")
     source = f"`{CONDITIONS}` (D6), as D4 reads `docs/phase4/D6-engine-run-pass-conditions.md`" if conds else PENDING
     print(f"Pass conditions: {source}.\n")
     loaded = {}
@@ -295,8 +395,9 @@ def dnp3(out, gt, work, root):
             d = os.path.join(out, c, cfg)
             loaded[(cfg, c)] = ran(d) or (suricata(d) if cfg.startswith("suricata") else zeek(d, cfg, t))
     print("## 1. What each configuration logged, per case\n")
-    print("Counts against GT-PCAP's labels. `g120 messages` lists `code:variation from sender` for every message the "
-          "configuration logged with a group 120 object on a labelled flow.\n")
+    print("Counts against GT-PCAP's labels. Each labelled function row needs a distinct logged request. `g120 messages` "
+          "lists `code:variation from sender` for every message the configuration logged with a group 120 object on a "
+          "labelled flow.\n")
     for cfg in CONFIGS:
         print(f"### {cfg}: {LABELS[cfg]}\n")
         print("| case | labelled protocol, transport/port | flows named as labelled | services | request functions | objects | g120 messages | extra request codes | notes |")
@@ -319,50 +420,46 @@ def dnp3(out, gt, work, root):
                 print(f"| {c} | {proto} {', '.join(ports)} | {flows} of {len(keys)} | {svc} of {len(lab['service'])} "
                       f"| not read | not read | not read | not read | {s.notes} |")
                 continue
-            fn = {(r["l4"], ends(r["src"], r["sport"], r["dst"], r["dport"]), r["src"], int(r["code"]), r["objects"]) for r in lab["function"]}
+            fn_rows = lab["function"]
+            fn, ob = match_functions(fn_rows, s)
+            n_obj = sum(1 for r in fn_rows if want_objs(r) is not None)
+            objs = f"{len(ob)} of {n_obj}" if s.objects_logged else "not logged"
             reqs = [m for m in s.msgs if m["request"] and (m["l4"], m["ends"]) in keys]
-            fns = sum(1 for l4, e, src, code, _ in fn if any(m["ends"] == e and m["sender"] == src and m["fc"] == code for m in reqs))
-            want = [(e, src, code, set(o.split(","))) for _, e, src, code, o in fn if o not in ("", "?")]
-            objs = (f"{sum(1 for e, src, code, w in want if any(m['ends'] == e and m['sender'] == src and m['fc'] == code and w <= set(m['objs']) for m in reqs))} of {len(want)}"
-                    if s.objects_logged else "not logged")
             g120 = sorted({f"{m['fc']}:{o} from {m['sender']}" for m in s.msgs if (m["l4"], m["ends"]) in keys for o in m["objs"] if o.startswith("g120")})
-            extra = sorted({f"{m['fc']} from {m['sender']}" for m in reqs} - {f"{code} from {src}" for _, _, src, code, _ in fn})
-            print(f"| {c} | {proto} {', '.join(ports)} | {flows} of {len(keys)} | {svc} of {len(lab['service'])} | {fns} of {len(fn)} | {objs} "
+            extra = sorted({f"{m['fc']} from {m['sender']}" for m in reqs} - {f"{r['code']} from {r['src']}" for r in fn_rows})
+            print(f"| {c} | {proto} {', '.join(ports)} | {flows} of {len(keys)} | {svc} of {len(lab['service'])} | {len(fn)} of {len(fn_rows)} | {objs} "
                   f"| {'; '.join(g120) if s.objects_logged else 'not logged'} | {', '.join(extra) or '-'} | {s.notes} |")
         print()
     print("## 2. D6's pass conditions\n")
     if not conds:
         print(f"Verdict: {PENDING}. `{CONDITIONS}` is not in this checkout.")
         return
-    print("A capture or configuration that did not run is `unknown`. The g120 row \"no group 120 object between the "
-          "request and its response\" passes only if the same configuration passes the capture's other g120 rows "
+    print("A capture or configuration that did not run is `unknown`, and `unknown` is counted on its own. Rows that share "
+          "a flow and a code are each matched to a distinct logged request. The g120 row \"no group 120 object between "
+          "the request and its response\" passes only if the same configuration passes the capture's other g120 rows "
           "(D6's note: \"in the same session that holds the challenged and the aggressive operate\"); that reading is D4's. "
-          "Every condition is reported for each configuration, so each reads three ways for Zeek: stock, with ICSNPP, and "
-          "with the project's script. Only the first two are the engine's own log files (D1 on #625).\n")
+          "`fail (filler body refused)` is inferred: the engine shows no such group 120 object and wrote a parser note on "
+          "the same flow, whose text is printed beside it. Every condition is reported for each configuration, so each "
+          "reads three ways for Zeek: stock, with ICSNPP, and with the project's script. Only the first two are the "
+          "engine's own log files (D1 on #625).\n")
     for cfg in CONFIGS:
-        res = []
-        for row in conds:
-            s = loaded.get((cfg, row["capture"]), "no such capture in dnp3.sha256")
-            res.append((row, (f"unknown ({s})", "") if isinstance(s, str) else judge(row, s, protos.get(row["capture"], "dnp3"))))
-        for i, (row, (r, cite)) in enumerate(res):
-            if r.startswith("pass if"):
-                others = [x for x in res if x[0]["capture"] == row["capture"] and x[0]["condition"] == "g120" and x[0] is not row]
-                res[i] = (row, ("pass" if others and all(x[1][0] == "pass" for x in others) else "fail (cannot show group 120)", cite))
+        res = evaluate(conds, loaded, protos, cfg)
         print(f"### {cfg}: {LABELS[cfg]}\n")
         col = collections.OrderedDict()
-        for row, (r, _) in res:
-            ks = [(row["condition"], r.startswith("pass"))]
+        for row, r, _ in res:
+            v = "unknown" if r.startswith("unknown") else "pass" if r.startswith("pass") else "fail"
+            ks = [(row["condition"], v)]
             if row["condition"] in ("protocol", "service", "function"):
-                ks += [(x, r.startswith("pass")) for x, hit in (("moved port", "moved-port" in row["capture"]), ("udp", row["capture"].endswith("-udp"))) if hit]
-            if row["condition"] == "function" and row["objects"] not in ("", "?"):
-                ks.append(("objects", "objects pass" in r))
-            for k, ok in ks:
-                n, m = col.get(k, (0, 0))
-                col[k] = (n + ok, m + 1)
-        print("Columns: " + "; ".join(f"{k} {n} of {m}" for k, (n, m) in col.items()) + ".\n")
+                ks += [(x, v) for x, hit in (("moved port", "moved-port" in row["capture"]), ("udp", row["capture"].endswith("-udp"))) if hit]
+            if row["condition"] == "function" and want_objs(row) is not None:
+                ks.append(("objects", "pass" if "objects pass" in r else "unknown" if v == "unknown" else "fail"))
+            for k, x in ks:
+                col.setdefault(k, collections.Counter())[x] += 1
+        print("Columns: " + "; ".join(f"{k} {c['pass']} pass, {c['fail']} fail, {c['unknown']} unknown, of {sum(c.values())}"
+                                     for k, c in col.items()) + ".\n")
         print("| capture | condition | src | dst | code | objects | show | result | cited |")
         print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
-        for row, (r, cite) in res:
+        for row, r, cite in res:
             print(f"| {row['capture']} | {row['condition']} | {row['src']}:{row['sport']} | {row['dst']}:{row['dport']}/{row['l4']} "
                   f"| {row['code']} | {row['objects']} | {row['show']} | {r} | {cite} |")
         print()
@@ -408,6 +505,7 @@ def public(out):
                         snmp.update(k for r in rs for k in r)
                     if f == "otsec_probe.log":
                         snmp.update(f"probe:{k}" for r in rs if r.get("kind") == "snmp" for k in r if k.startswith(("snmp_", "v3_")))
+                        snmp.update(f"probe event:{r['ev']}" for r in rs if r.get("kind") == "snmp")
             fmt = lambda c: ", ".join(f"{k}={v}" for k, v in sorted(c.items())) or "-"
             print(f"| {name} | {LABELS[cfg]} | {fmt(svc)} | {fmt(logs)} | {', '.join(sorted(snmp)) or '-'} | {notes} |")
 
