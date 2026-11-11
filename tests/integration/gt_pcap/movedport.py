@@ -12,14 +12,16 @@ port OLD is to or from port NEW instead, and nothing else differs:
   source's;
 - a frame that is not IPv4 TCP, or uses neither port, is copied unchanged.
 
-A segment that already uses NEW, a non-first IPv4 fragment, and a frame too
-short to hold its TCP header are refused: the result would not be the
-source's conversation on another port.
+A segment that already uses NEW, any later fragment of an IPv4 TCP segment
+(whichever port its first fragment used), and a frame too short to hold its
+TCP header are refused: the result would not be the source's conversation
+on another port.
 
-A relay's Modbus/TCP port is a setting (`MODNUM1`, 502 by default; D2's
-note `docs/phase4/D2-sel-network-services.md`), so a server off 502 is a
-documented configuration. The label of the result is tshark's reading of it
-with the moved port decoded as Modbus/TCP (modbus_label.py).
+A SEL-751's Modbus/TCP port is a setting (`MODNUM1`, 1 to 65534, 502 by
+default; S22 Table 4.104, p. 4.250), so a server off 502 is a documented
+configuration. The source is a public capture of unknown origin, not a
+relay's traffic. The label of the result is tshark's reading of it with the
+moved port decoded as Modbus/TCP (modbus_label.py).
 
 Usage: python movedport.py INPUT.pcap OUTDIR [OLD NEW]   (default 502 15020)
 """
@@ -30,8 +32,9 @@ import sys
 
 import pcapfile
 
-# NEW is a port a relay accepts for MODNUM1 (1 to 65534, S22) and none of
-# its fixed ports (plan section 2B).
+# NEW is a port a SEL-751 accepts for MODNUM1 (1 to 65534; S22 Table 4.104,
+# p. 4.250): none of its fixed ports, and no other port setting's value
+# (p. 4.251; Table 4.105, p. 4.252; D2 on #623).
 OLD, NEW = 502, 15020
 
 
@@ -56,7 +59,10 @@ def move(data, old=OLD, new=NEW):
     if len(data) < off + 20 or data[off - 2:off] != b"\x08\x00" or data[off + 9] != 6:
         return data
     t = off + (data[off] & 0x0F) * 4
-    frag = struct.unpack("!H", data[off + 6:off + 8])[0] & 0x1FFF
+    if struct.unpack("!H", data[off + 6:off + 8])[0] & 0x1FFF:
+        # Its ports are in the first fragment, so which port it belongs to
+        # can't be read from it: refused, whatever its bytes look like.
+        raise ValueError("a later fragment of a TCP segment: its ports are not in it")
     if len(data) < t + 20:
         raise ValueError("a TCP segment cut short of its header")
     sport, dport = struct.unpack("!HH", data[t:t + 4])
@@ -64,8 +70,6 @@ def move(data, old=OLD, new=NEW):
         raise ValueError(f"the capture already uses port {new}")
     if old not in (sport, dport):
         return data
-    if frag:
-        raise ValueError("a fragment of a TCP segment: its ports are not in it")
     out = bytearray(data)
     csum = struct.unpack("!H", data[t + 16:t + 18])[0]
     for at, port in ((t, sport), (t + 2, dport)):

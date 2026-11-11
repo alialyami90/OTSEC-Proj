@@ -92,5 +92,8 @@ def test_refusals():
     struct.pack_into("!H", d, 20, 0x0010)  # a later fragment
     with pytest.raises(ValueError):
         movedport.move(bytes(d))
+    struct.pack_into("!HH", d, 34, 7, 9)  # and one whose bytes there name neither port
+    with pytest.raises(ValueError):
+        movedport.move(bytes(d))
     with pytest.raises(ValueError):  # cut inside the TCP header
         movedport.move(conversation()[0].data[:40])

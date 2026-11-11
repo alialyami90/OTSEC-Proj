@@ -15,9 +15,11 @@ One row per thing an engine must show:
   the server end (address, transport, port).
 - `function`: one per `function` label row. A record tied to the flow shows
   the request's function code. `objects` are reported beside it.
-- `g120`: one per `function` label row of the five dnp3-sa captures. `show`
-  lists each message that decides the row's `sa`, as <function code>:<object>
-  from <sender>, or says that the exchange holds no group 120 object.
+- `g120`: for each `function` label row of a capture whose labels show
+  Secure Authentication in use, one row per message that decides the row's
+  `sa`. `show` names the message, as <function code>:<object> from <sender>,
+  or says that the exchange holds no group 120 object. A failed exchange
+  has two rows: the challenge or aggressive-mode request, and the error.
 
 The captures are the DNP3 ones named in LABEL_DIR/dnp3-cases.json, and the
 derived Modbus/TCP capture on a moved port, whose label is beside that
@@ -35,8 +37,8 @@ COLUMNS = ["capture", "condition", "l4", "src", "sport", "dst", "dport", "code",
            "protocol", "direction"]
 # The derived Modbus/TCP capture on a moved port: its label, from LABEL_DIR.
 EXTRA = {"modbus-moved-port": os.path.join("..", "modbus", "modbus-moved-port.tsv")}
-SA_CAPTURES = ("dnp3-sa", "dnp3-sa-failed-outstation", "dnp3-sa-failed-before-ack",
-               "dnp3-sa-failed-unauthorized", "dnp3-sa-failed-master")
+SA_OUTCOMES = ("challenged", "aggressive", "failed")
+NO_G120 = "no group 120 object between the request and its response"
 
 
 def read_labels(path):
@@ -45,20 +47,32 @@ def read_labels(path):
     return list(csv.DictReader(lines, delimiter="\t", quoting=csv.QUOTE_NONE))
 
 
-def g120_show(row):
-    """The messages that decide a function row's sa (C13 section 4.3), from
-    the row's own columns."""
+def holds_sa(rows):
+    """Whether a capture's labels show Secure Authentication in use: any
+    function row whose sa is challenged, aggressive or failed. Every function
+    row of such a capture gets its g120 rows, the unchallenged ones too."""
+    return any(r["kind"] == "function" and r["sa"] in SA_OUTCOMES for r in rows)
+
+
+def g120_shows(row):
+    """The messages that decide a function row's sa (C13 section 4.3), one
+    per g120 row, from the row's own columns. A failed exchange is a
+    challenge, or an aggressive-mode request, followed by the error, so it
+    asks for both."""
     master, outstation = row["src"], row["dst"]
+    challenge = f"131:g120v1 from {outstation}"
+    aggressive = f"{row['code']}:g120v3 from {master}"
     if row["sa"] == "challenged":
-        return f"131:g120v1 from {outstation}"
+        return [challenge]
     if row["sa"] == "aggressive":
-        return f"{row['code']}:g120v3 from {master}"
+        return [aggressive]
     if row["sa"] == "failed":
         code, sender = ("33", master) if row["sa_error_from"] == "master" else ("131", outstation)
-        return f"{code}:g120v7 from {sender}"
+        first = aggressive if "g120v3" in row["objects"].split(",") else challenge
+        return [first, f"{code}:g120v7 from {sender}"]
     if row["sa"] == "none":
-        return "no group 120 object between the request and its response"
-    raise ValueError(f"a dnp3-sa function row with sa {row['sa']!r}")
+        return [NO_G120]
+    raise ValueError(f"a function row with sa {row['sa']!r} in a capture that holds Secure Authentication")
 
 
 def conditions(label_dir):
@@ -67,15 +81,18 @@ def conditions(label_dir):
     out = []
     paths = {name: name + ".tsv" for name in list(meta["series"]) + list(meta["cases"])}
     for name, path in sorted({**paths, **EXTRA}.items()):
-        for r in read_labels(os.path.join(label_dir, path)):
+        rows = read_labels(os.path.join(label_dir, path))
+        sa = holds_sa(rows)
+        for r in rows:
             if r["protocol"] not in ("dnp3", "modbus") or r["kind"] not in ("flow", "service", "function"):
                 continue
             base = [name, {"flow": "protocol"}.get(r["kind"], r["kind"]), r["l4"], r["src"], r["sport"], r["dst"],
                     r["dport"], r["code"], r["objects"], r["sa"]]
             # A flow row lists every frame; the condition needs none of them.
             out.append(base + ["", "" if r["kind"] == "flow" else r["frames"], r["protocol"], r["direction"]])
-            if r["kind"] == "function" and name in SA_CAPTURES:
-                out.append([name, "g120", *base[2:], g120_show(r), r["frames"], r["protocol"], r["direction"]])
+            if r["kind"] == "function" and sa:
+                out += [[name, "g120", *base[2:], show, r["frames"], r["protocol"], r["direction"]]
+                        for show in g120_shows(r)]
     return out
 
 

@@ -64,18 +64,22 @@ dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g120v3,g120v9,g12v1	aggress
 dnp3-sa-failed-before-ack	protocol	tcp	192.0.2.10	41003	192.0.2.20	20000						dnp3	client-server
 dnp3-sa-failed-before-ack	service	tcp			192.0.2.20	20000					1	dnp3	
 dnp3-sa-failed-before-ack	function	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed		4,6,8,10	dnp3	client-server
+dnp3-sa-failed-before-ack	g120	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed	131:g120v1 from 192.0.2.20	4,6,8,10	dnp3	client-server
 dnp3-sa-failed-before-ack	g120	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10	dnp3	client-server
 dnp3-sa-failed-master	protocol	tcp	192.0.2.10	41005	192.0.2.20	20000						dnp3	client-server
 dnp3-sa-failed-master	service	tcp			192.0.2.20	20000					1	dnp3	
 dnp3-sa-failed-master	function	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed		4,6,8	dnp3	client-server
+dnp3-sa-failed-master	g120	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed	131:g120v1 from 192.0.2.20	4,6,8	dnp3	client-server
 dnp3-sa-failed-master	g120	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed	33:g120v7 from 192.0.2.10	4,6,8	dnp3	client-server
 dnp3-sa-failed-outstation	protocol	tcp	192.0.2.10	41002	192.0.2.20	20000						dnp3	client-server
 dnp3-sa-failed-outstation	service	tcp			192.0.2.20	20000					1	dnp3	
 dnp3-sa-failed-outstation	function	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed		4,6,8,10	dnp3	client-server
+dnp3-sa-failed-outstation	g120	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed	131:g120v1 from 192.0.2.20	4,6,8,10	dnp3	client-server
 dnp3-sa-failed-outstation	g120	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10	dnp3	client-server
 dnp3-sa-failed-unauthorized	protocol	tcp	192.0.2.11	41004	192.0.2.20	20000						dnp3	client-server
 dnp3-sa-failed-unauthorized	service	tcp			192.0.2.20	20000					1	dnp3	
 dnp3-sa-failed-unauthorized	function	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed		4,6,8,10	dnp3	client-server
+dnp3-sa-failed-unauthorized	g120	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed	131:g120v1 from 192.0.2.20	4,6,8,10	dnp3	client-server
 dnp3-sa-failed-unauthorized	g120	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10	dnp3	client-server
 dnp3-train	protocol	tcp	192.0.2.10	51353	192.0.2.20	20000						dnp3	client-server
 dnp3-train	service	tcp			192.0.2.20	20000					1	dnp3	

@@ -196,9 +196,12 @@ def test_the_udp_case_is_one_link_frame_per_datagram():
 
 def test_the_baseline_series_never_holds_the_two_new_services():
     """Both captures are new-service samples only if the R6.2 series never
-    shows O2, O1 over UDP, or M5."""
+    shows O2, O1 over UDP, or M5. Checked on the two committed series
+    themselves, each a whole hour (D4 on #623)."""
     net = dnp3_cases.NET
-    for f in dnp3_cases.series(7, dnp3_cases.SERIES["dnp3-train"][1], 120):
+    frames = [f for spec in dnp3_cases.SERIES.values() for f in dnp3_cases.series(*spec)]
+    assert len(frames) > 6000
+    for f in frames:
         proto, sport, dport, _ = l4_payload(f.data)
         assert proto == synth.TCP and net["outstation"]["port"] in (sport, dport)
         ends = {f.data[26:30], f.data[30:34]}
