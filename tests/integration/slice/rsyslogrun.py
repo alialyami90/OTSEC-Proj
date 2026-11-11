@@ -148,6 +148,37 @@ def versions():
     return out
 
 
+def start_rsyslogd(d, port, ca, cert, key, peer, out):
+    """rsyslogd in the foreground with CONF, listening on port and appending
+    to out: a first start in d, or a start after a kill. Returns the
+    process and the path of its own output."""
+    conf = os.path.join(d, "rsyslog.conf")
+    if not os.path.exists(conf):
+        with open(conf, "w") as f:
+            f.write(CONF.format(dir=d, port=port, ca=ca, cert=cert, key=key, peer=peer, out=out))
+        check = subprocess.run([harness.rsyslogd(), "-N1", "-f", conf], capture_output=True, text=True)
+        assert check.returncode == 0, "rsyslogd refuses its configuration:\n" + check.stdout + check.stderr
+    # A killed rsyslogd leaves its PID file.
+    pid = os.path.join(d, "rsyslog.pid")
+    if os.path.exists(pid):
+        os.remove(pid)
+    with open(os.path.join(d, "receiver.log"), "ab") as log:
+        p = subprocess.Popen([harness.rsyslogd(), "-n", "-f", conf, "-i", pid], stdout=log, stderr=subprocess.STDOUT)
+
+    def accepting():
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            return True
+        except OSError:
+            return False
+
+    if not harness.wait_for(accepting, 10):
+        p.kill()
+        with open(log.name, "rb") as f:
+            raise RuntimeError("rsyslogd did not open its RELP port:\n" + f.read().decode("utf-8", "replace"))
+    return p, log.name
+
+
 class RsyslogSlice(Slice):
     """Slice, forwarding to a stock rsyslog."""
 
@@ -157,34 +188,12 @@ class RsyslogSlice(Slice):
         super().start(*args, setup_extra=(*setup_extra, "-durable-ack-ref", DURABLE_ACK_REF), **kw)
 
     def start_receiver(self):
-        """rsyslogd in the foreground on the run's port, appending to
-        rx_out: the first start, and every start after a kill."""
+        """rsyslogd on the run's port, appending to rx_out: the first
+        start, and every start after a kill."""
         l = self.layout
-        conf = os.path.join(self.d, "rsyslog.conf")
-        if not os.path.exists(conf):
-            with open(conf, "w") as f:
-                f.write(CONF.format(dir=self.d, port=self.relp_port, ca=l["ca"], cert=l["server_cert"],
-                                    key=l["server_key"], peer=l["node_id"], out=self.rx_out))
-            check = subprocess.run([harness.rsyslogd(), "-N1", "-f", conf], capture_output=True, text=True)
-            assert check.returncode == 0, "rsyslogd refuses its configuration:\n" + check.stdout + check.stderr
-        # A killed rsyslogd leaves its PID file.
-        pid = os.path.join(self.d, "rsyslog.pid")
-        if os.path.exists(pid):
-            os.remove(pid)
-        with open(os.path.join(self.d, "receiver.log"), "ab") as log:
-            self.logs["receiver"] = log.name
-            p = subprocess.Popen([harness.rsyslogd(), "-n", "-f", conf, "-i", pid], stdout=log, stderr=subprocess.STDOUT)
+        p, self.logs["receiver"] = start_rsyslogd(self.d, self.relp_port, l["ca"], l["server_cert"], l["server_key"],
+                                                  l["node_id"], self.rx_out)
         self.procs["receiver"] = p
-
-        def accepting():
-            try:
-                socket.create_connection(("127.0.0.1", self.relp_port), timeout=0.2).close()
-                return True
-            except OSError:
-                return False
-
-        if not harness.wait_for(accepting, 10):
-            raise RuntimeError("rsyslogd did not open its RELP port:\n" + self.text("receiver"))
         return p
 
     def rx_records(self):

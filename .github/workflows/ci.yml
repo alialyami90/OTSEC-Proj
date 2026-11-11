@@ -172,7 +172,7 @@ jobs:
   # D4-59 for D1's authorization: its step tees the output and then runs
   # M3's key search over it;
   # rsyslog, rsyslog_interruptions, rsyslog_store_full and framing, the
-  # closing legs, about 3, 8, 9 and 3 min, added by D6 under P4-D6-H5
+  # closing legs, about 3, 9, 8 and 1 min, added by D6 under P4-D6-H5
   # with D1's authorization: the node forwards to the rsyslogd installed
   # below, and tests/integration/slice/conftest.py keeps the four out of
   # the integration job's run of the directory).

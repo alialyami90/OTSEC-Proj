@@ -267,3 +267,34 @@ def test_rsyslogs_file_holds_every_message_with_its_flags(run):
                         [v for n, v in ps if n == "flag"], reconcile.first(ps, "parse")))
         problems += _problems(name, got, want)
     assert problems == [], problems
+
+
+def test_the_check_fails_on_a_lost_flag_a_lost_message_and_other_bytes():
+    """_problems on views made here, each broken in one way. No slice
+    runs."""
+    _, _, want = _stream_case("tcp")
+    status = {"ok": "ok", "failed": "failed", "not ok": "partial"}
+    good = [(i + 1, sent, hashlib.sha256(sent).hexdigest(), len(sent), flags, status[st])
+            for i, (sent, flags, st) in enumerate(want)]
+    assert _problems("tcp", good, want) == []
+
+    def one(i, **changed):
+        g = dict(zip(("seq", "data", "sha", "length", "flags", "status"), good[i]), **changed)
+        return _problems("tcp", good[:i] + [tuple(g.values())] + good[i + 1:], want)
+
+    # The over-long line, the octet count with no space and the cut frame,
+    # each kept without its flag; and a fault read as ok.
+    assert len(one(1, flags=[])) == 1 and len(one(3, flags=[])) == 1 and len(one(9, flags=[])) == 1
+    assert len(one(1, status="ok")) == 1
+    # A message with no PRI that is not marked failed, and a good message
+    # that is flagged.
+    assert len(one(4, status="ok")) == 1 and len(one(4, status="partial")) == 1
+    assert len(one(0, flags=[TRUNCATED])) == 1 and len(one(0, status="partial")) == 1
+    # Other bytes under the right hash, and the over-long line kept whole.
+    assert len(one(2, data=good[2][1] + b"x")) == 1
+    long_line = want[1][0] + b"L" * 808
+    assert len(one(1, data=long_line, sha=hashlib.sha256(long_line).hexdigest(), length=len(long_line))) == 2
+    # The message after the over-long line lost: the later events move up.
+    lost = good[:2] + [(seq - 1, *rest) for seq, *rest in good[3:]]
+    assert _problems("tcp", lost, want)
+    assert _problems("tcp", good[:-1], want) and _problems("tcp", [], want)
