@@ -2,7 +2,7 @@
 
 Owner: A6 (independent verification and OT safety). A6 writes this document independently of the implementing agents and actively attempts to disprove their claims.
 
-Status: **Phase 0 draft (2026-10-23).** No lab IED exists; every slice result can reach `simulated` at most. A1 accepted the criteria below as the Phase 0 baseline on 2026-10-23. Numeric thresholds marked *(proposed)* stay proposed until the owning agent confirms or replaces them with evidence in Phase 1. No product code exists, so nothing below has been verified against an implementation. Executed so far: experiment E-01, the recording simulator self-test, the A3 E1 reproduction with extra probes (all `simulated`), and the A2 register corpus review (`desk`).
+Status: **current to 2026-11-11 (D6).** No lab IED exists (B-01) and no device has been contacted, so every result is `desk` or `simulated` at most. Product code exists: the site node (`cmd/otsec`) and the privileged collector (`cmd/otsec-collector`). D6's status against it is in the four status tables under "First vertical slice acceptance criteria" and in the Status column of the verification matrix. Numeric thresholds marked *(proposed)* stay proposed until the owning agent confirms or replaces them with evidence. History: this document began as the Phase 0 draft of 2026-10-23, when no product code existed and nothing below had been verified against an implementation. A1 accepted the criteria below as the Phase 0 baseline on that day. Executed by then: experiment E-01, the recording simulator self-test, the A3 E1 reproduction with extra probes (all `simulated`), and the A2 register corpus review (`desk`).
 
 ## Rules
 
@@ -127,7 +127,7 @@ How each requirement in [requirements.md](requirements.md) will be verified. "Sl
 | --- | --- |
 | P1 OT safety | V-S7, V-S13, C-02, C-11 hardware tests; no test in this repository targets production equipment. |
 | P2 Read-only default | V-S5, V-S10; default configuration contains no state-changing command. |
-| P3 Evidence before assumptions | Every capability row and test result carries an evidence class; fixture lint rejects fixtures without `SOURCE.md`. |
+| P3 Evidence before assumptions | Every capability row and test result carries an evidence class. Every fixture carries a `SOURCE.md`: D6 checks this by review, because the fixture lint is not built (R5.6). |
 | P4 Least privilege | R2.4, R2.6, C-12. |
 | P5 Secure failure | V-S12 (telemetry failures observable), V-S14 (fail closed on identity mismatch), R2.5. |
 | P6 Deterministic verification | Tests run offline from committed fixtures with fixed seeds; flaky tests are failures, not retries. |
