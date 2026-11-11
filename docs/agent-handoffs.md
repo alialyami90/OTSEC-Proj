@@ -1476,6 +1476,7 @@ Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HAND
 - **Acceptance.** Every new claim has a run URL or a cited source with its date. The workflow stays dispatch-only, pins every download by SHA-256 and checks the hash before it runs anything it downloaded.
 - **Exclusions.** No sensor and no product code. No Npcap install anywhere, the runner included. No capture of a real network: `pktmon` captures only the runner's own traffic, and the workflow reports counts, not the capture. No binary and no installer is committed or uploaded as an artifact. Where the vendor publishes no hash for a download, the SHA-256 of the first download is recorded with its URL and date and pinned from then on, and the record says that it is a first-use pin. No change to `ci.yml`.
 - **Branch:** `agent/telemetry-sensor-engine-eval`. **Reviewers:** D6 (testability), D3 (the boundary and the downloads), D7 (the licence rows).
+- After this brief's evidence the owner chose option (b), and D4-78's choice of option (a) is superseded (D4-85). The same branch then carries ADR-0009's decision.
 
 ### P4-D7-1 (D7): `docs/release.md`, the first inventory
 

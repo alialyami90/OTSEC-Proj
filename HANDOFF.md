@@ -22,18 +22,18 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## The one blocker, and the next action
 
-**The owner chose option (a) for the passive sensor on 2026-11-10** (D4-78), **and on 2026-11-11 wrote "i want to continue progress on project phases or gates"**. D1 reads that as the word to start the evidence work, and the owner's confirmation is owed (D4-83). D4's evidence is in PR #618, and it weakens option (a): Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown. So D1 put the choice among (a), (b) and (c′) back to the owner (D4-84). No sensor is briefed. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
+**The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). No sensor is briefed. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**NEXT ACTION (D1):** wait for the owner's choice among (a), (b) and (c′), and their confirmation of the evidence work (D4-84). Then get D6's and D7's reviews of #618, merge it, record the choice in ADR-0009 with D4, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
+**NEXT ACTION (D1):** get ADR-0009's decision for option (b) written by D4 in #618, reviewed by D5, D3, D6, D7 and D2, and merged. Then issue the briefs for the link between sensor and node (D3 and D5) and for the sensor (D4), with D6's rig, and write the sensor's implementation brief in `docs/agent-handoffs.md`. The points that brief must carry are listed in `.claude/agents/d1-principal-architect.md`. After the sensor is built, D6 runs V-M6 over GT-PCAP, and D1 opens item 4's exit gate. Nothing on items 5 or 6 starts before the owner says so (D4-34).
 
 ## Open PRs and branches
 
-- **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance and the owner's word (D4-82). On 2026-11-11 at 15:10Z (D4-84): #615 (D7), #616 (D5) and #617 (D6) are merged. Open: #612, #613 and #614, reviewed, waiting for the owner's words; #618 (D4, the sensor's evidence), passed by D3, waiting for the owner's confirmation and choice; #619 (D6, the closing legs), four legs green, waiting for #620; #620 (D4, the forwarder's rsyslog tests), blocked by the hosted runners' failure to reach Ubuntu's package archive. Each role's open items are in its file in `.claude/agents/`.
+- **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). On 2026-11-11 at 15:10Z (D4-84): #615 (D7), #616 (D5) and #617 (D6) are merged. #612, #613 and #614 merged that day too (D4-85). Open: #618 (D4, the sensor's evidence, and now ADR-0009's decision for option (b)); #619 (D6, the closing legs), four legs green, waiting for #620; #620 (D4, the forwarder's rsyslog tests), blocked by the hosted runners' failure to reach Ubuntu's package archive. Each role's open items are in its file in `.claude/agents/`.
 - **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), with the script `reference/carried/delete-merged-branches-2026-11-06.ps1`, in which each delete is leased to a recorded SHA. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner approved the first two groups on 2026-11-11, and both scripts ran that day: 207 branches deleted, 49 left (D4-83). The third group stays.
 
 ## Waiting on the owner
 
-1. **The sensor** (ADR-0009): their confirmation that D4's evidence work may go on (D4-83), and their choice in item 14 below. This blocks item 4.
+1. **The sensor's host under option (b)** (D4-85): the hardware and the operating system of the Linux machine at each site, and who ships its image. D1 brings a recommendation. The choice of option (b) itself is made.
 2. **The sites' networks:** which protocols run on them, whether a site can give a SPAN port or a TAP, and whether the station network is PRP (D4-66).
 3. **R6.7's insecure list:** should it add IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68)?
 4. **May the DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5) be given to the project, in `reference/` (D4-68)?
@@ -45,11 +45,11 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 10. **The branch cleanup is done** (D4-83). Nothing is owed here.
 11. **ADR-0007** (Windows site node) is still `proposed`.
 12. **D7 and D8** (D4-79): D7's first brief is done (#615, D4-84). Still owed: the word to start D8's first brief, and who holds the release key and where it is kept (TB9).
-13. **The words to merge a PR that D1 wrote** (D4-82). On 2026-11-11 these are #612 and #613, which merge together, and then #614.
-14. **The sensor: the choice among (a), (b) and (c′)** with D4's findings and Npcap's prices in front of them, and whether the platform serves their own sites only or is delivered to others (D4-84).
-15. **Whether scratch mutant branches may be pushed** (D4-84). Until then D6's mutants for the closing legs are owed.
-16. **A `LICENSE` and a `SECURITY.md`** for the public repository (D4-84).
-17. **Optional, on the PC:** removing the fourteen `Allow` firewall rules that the approved prompts left for temporary test programs. It needs an elevated shell (D4-84).
+13. **Nothing: D1 merges its own reviewed PRs** (D4-85, which supersedes D4-82).
+14. **Nothing: the owner chose option (b)** (D4-85).
+15. **Nothing: D1 decided that mutants are committed as patch files with a dispatch-only workflow,** and no scratch branch is pushed (D4-85). D6's mutants for the closing legs are owed under a brief that follows #619.
+16. **Switching on GitHub's private vulnerability reporting,** which `SECURITY.md` relies on (D4-85). `LICENSE.md` and `SECURITY.md` are added.
+17. **Nothing: the owner leaves the fourteen firewall rules** that the approved prompts left for temporary test programs (D4-85).
 
 ## Test policy
 
@@ -65,7 +65,7 @@ Limits on the PC:
 - A run that creates Windows services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.
 - Every endpoint is the simulator on loopback. No device, and no site network.
 
-Other rules that hold: re-run a failing job at most once; never push an empty commit to retrigger CI; never call a timeout or a property failure a flake; a failure in code the PR doesn't touch is a finding to reproduce against `main`; before opening a code PR, check the latest scheduled run on `main`.
+Other rules that hold: re-run a failing job at most once (one exception, for D1 alone: a job that failed in a set-up step before any project code ran, with its failing line quoted on the PR, may be re-run again once the same step has passed in another run in this repository, or 60 minutes after it last failed, at most three times by the clock for one head; each such re-run is recorded on the PR, D4-85); never push an empty commit to retrigger CI; never call a timeout or a property failure a flake; a failure in code the PR doesn't touch is a finding to reproduce against `main`; before opening a code PR, check the latest scheduled run on `main`.
 
 The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared target (D4-72).
 
