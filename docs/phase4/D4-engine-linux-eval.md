@@ -8,7 +8,7 @@ D4, 2026-11-11. Brief P4-4-S2 in `docs/agent-handoffs.md` ("Phase 4 item 4, seco
 
 ## 1. What the experiment runs
 
-`modules/telemetry/experiments/engine-linux/`, started only by the dispatch-only workflow `.github/workflows/d4-engine-linux-eval.yml` on `ubuntu-24.04`. Every engine runs in a container pinned by digest, started with `--network none`, over capture files. Nothing captures a network, and no device or lab machine is contacted.
+`modules/telemetry/experiments/engine-linux/`, started only by the dispatch-only workflow `.github/workflows/d4-engine-linux-eval.yml` on `ubuntu-24.04`. Every engine runs in a container pinned by digest, started with `--network none`, so no engine has a network; the runner keeps its own, which fetches the images, ICSNPP and the captures. The engines read capture files, and in the pipe case (section 1a) a pipe. Nothing captures a network, and no device or lab machine is contacted.
 
 **Five configurations,** each judged alone:
 
@@ -41,7 +41,8 @@ Why the probe is a configuration of its own: Zeek's default `dnp3.log` records t
   | D6's rule or condition | Function |
   | --- | --- |
   | Protocol: one record, named as the row's `protocol`; the originator is `src` where `direction` is `client-server`, either orientation, stated, where it is `none` or `midstream`; two records fail | `judge_flow` |
-  | Service, and rule 6: the protocol at the server end the row names, and a service at another end of a labelled flow fails as `fail (service also at …)` | `judge_flow` (its `flow_rows` are the capture's Protocol rows) |
+  | Service, and rule 6: the protocol at the server end the row names, and a service at another end of a labelled flow fails as `fail (service also at …)` | `judge_flow` (its `flow_rows` are the capture's Protocol rows; an end that a labelled flow names as its server is never counted as another end, D6 on #625) |
+  | Rule 2: a record tied to its flow; for Suricata, a dnp3 or modbus event's sender is taken from its flow record by `flow_id`, the originator for a request and the responder for a response, never from the event's own source fields (D6 on #625) | `suricata` |
   | Rule 9: rows that share a capture, a flow and a code are matched one to one with logged requests, for Function and again for Objects | `assign`, used by `match_functions`, called from `judge_capture` |
   | Rule 7: a name counts only if it maps to one code | `one`, over Zeek's and ICSNPP's own `function_codes` tables |
   | Group 120: each named message as a message of its own; the "no group 120" row passes only if the configuration passes the capture's other group 120 rows and shows no group 120 object between the request and its response, fails on one, and is otherwise `unknown`; a `failed` exchange's challenge and error are separate rows | `judge_g120`, with `judge_capture` judging the named rows first |
@@ -52,6 +53,23 @@ Why the probe is a configuration of its own: Zeek's default `dnp3.log` records t
 - **in section 2's preamble,** which setting gives content detection: no configuration names a port, an address or a capture (`run.sh`, `in-container.sh` and `probe.zeek` hold none, D6's rule 8), so detection off a port comes only from Zeek's stock DPD signatures and Suricata's stock `detection-ports` with the two parsers switched on; and **which function codes are critical**: none is treated as critical by the table. S22 Table D.2 lists write, select, operate, direct operate and direct operate with no reply (codes 2 to 6); IEEE 1815's list is not held, so any further code is `unknown`. D6's pass conditions are the authority (D2 on #625).
 
 The engine logs are never uploaded, because they hold capture content. So the tables are computed in the job, and each verdict cites its log line there. The artifact holds `dnp3.md`, `public.md`, `prp.md` and `versions.txt` only.
+
+## 1a. The pipe case, and which stage of the sensor each part stands for
+
+**Why** (D4-87; D7 on #625). AP-31 and D3's note cite E-D4-03 for an engine that reads a pipe in an empty network namespace, and the first harness read files. Since D4-87 and D1's brief to D3 under P4-4-L4, **the sensor's shape, as a design to be shown,** is: a capture process that holds the packet socket, parses nothing and only copies frames to a pipe; a separate stage with no socket that redacts, reassembles and discards PRP duplicates; and the engine, which reads that stage's output through a pipe. A measurement in #626 had shown a process that dropped every capability still sending on its open packet socket.
+
+**What runs.** `run.sh dnp3` runs each Zeek configuration (stock, with the project's script, with ICSNPP) a second time over the same captures (GT-PCAP's 21 DNP3 captures, `modbus-moved-port` and its control), each read from stdin through a pipe: `cat FILE | zeek -r -`. Zeek's `-r` (`--readfile`) opens its argument with libpcap's offline reader, which D4 expects to take `-` as stdin (`desk`, from libpcap's documented behaviour, not read for this note). The run records the pinned image's own `zeek --help` line for `-r` in `versions.txt`, and that line and the exit codes are the evidence. Still `--network none`. The same functions judge the logs, and section 3 of `dnp3.md` gives a row per configuration: whether it reads a pipe (exit 0 on every capture), and how many of D6's rows equal the file run's, result and citation, with every row that differs. **Suricata** reads a FIFO that `cat` writes (`suricata -r FIFO`, its pcap file mode; its own `--help` line for `-r` is recorded), both under `timeout`, as a note with its exit and flow-record count per capture, and no condition.
+
+**Which stage each part stands for:**
+
+| Part of the experiment | Stage of the sensor | What it does not show |
+| --- | --- | --- |
+| `cat FILE` writing the pipe | The redacting stage's output (with the capture process behind it) | Any of that stage's work: no redaction, no reassembly, no PRP discard runs here. The capture process and its packet socket are not here at all. |
+| `zeek -r -` in a container with `--network none` | The engine reading the stage's output through a pipe, with no network | That the engine runs as its own account with no capability and no packet socket; that it cannot read the link key; the namespace is Docker's, not the sensor's own. |
+| The judge over the logs | The link agent's reading of the engine's logs, roughly | The mapping to C13 records, and the link. |
+| `--network none` | The engine's empty network namespace | No name lookup or connection was attempted and refused, only none possible. |
+
+**What a pipe of a finished capture does not show:** a live stream that never ends (log rotation, memory over hours), back-pressure (a slow engine with a full pipe, and what the stage drops or counts then), and a writer that stalls or dies (whether the engine waits, ends or reports). Each is for the sensor's own tests under the third part's briefs, or an H-row. It also does not show live capture on a SPAN or TAP port.
 
 ## 2. The pins
 
@@ -74,7 +92,7 @@ Every pin below is a **first-use pin**: D4 read the digest or hash on 2026-11-11
 
 **What a digest pins, and what is not pinned.** A digest pins the image's bytes, not what they were built from: each image's base layers and packages are unverified here. Not pinned at all: the hosted runner's image (`ubuntu-24.04`, as GitHub updates it), its Docker, and its system `python3`, which runs `dnp3_cases.py`, `prp.py`, `prp_check.py`, `compare.py` and `table.py`. Each run's versions are what `versions.txt` records.
 
-**A sensor may not fetch at run time.** The experiment fetches ICSNPP from GitHub and the images from Docker Hub, checked against these pins. A sensor may not: AP-31 (1) and `docs/release.md` §4 require the engine and its packages at a pinned version, carried in the sensor's image or package, never fetched at run time. Whether AP-31, which is proposed and was written for the node, covers the sensor host is D3's question under P4-4-L1.
+**A sensor may not fetch at run time.** The experiment fetches ICSNPP from GitHub and the images from Docker Hub, checked against these pins. A sensor may not: AP-31 (1) and `docs/release.md` §4 require the engine and its packages at a pinned version, carried in the sensor's image or package, never fetched at run time. AP-31 is proposed, and since #624 (D3, P4-4-L1) it covers the sensor host; if the site installs the engine itself, that rests on the site's procedure (HR-21).
 
 **Owed before a sensor can ship** (D7 on #625; ADR-0009's open list, "the engine's supply chain (D7 on #618)"): Zeek built from its signed source tarball, with the `.asc` checked, rather than a registry image whose build is unverified; a reviewed ICSNPP commit (ICSNPP-DNP3 has no tag, and ICSNPP-Modbus is pinned past its last tag, `v2.0.0`); an SBOM for the sensor; and who watches the engines' advisories, since `govulncheck` covers Go modules only. None of these is done here.
 
@@ -117,7 +135,7 @@ Read from `raw.githubusercontent.com` at the tags and commits pinned above. Thes
 
 None yet. The counted run's URL, the tables and the versions go here, each `CI-Linux`.
 
-**D2's reading of unsolicited reporting, beside the cases owed** (D2 on #625 and #623; S22 Table D.7 p. D.11, behaviour p. D.9). On a SEL-751, unsolicited reporting is off by default (`UNSOLn := N`, `PUNSOLn := N`), a per-session setting. With `UNSOLn := Y`, D2's `inference` is that the relay sends function 130 with UNS and CON set, and the master confirms with function 0. No GT-PCAP capture holds it. Zeek parses DNP3 by `is_orig` (section 3), so a UDP flow that the relay starts, with an unsolicited response or a reply sent to port 20000 while the master sent from another port, is expected to be parsed backwards. **Cases owed to D6** (D1 passed them on): a master that sends from a temporary UDP port while the relay replies to `DNPUDPn` 20000, so the reply is a second 5-tuple; `DNPUDPn := REQ`; and an unsolicited response that starts a flow. This run shows none of them.
+**D2's reading of unsolicited reporting, beside the cases owed** (D2 on #625 and #623; S22 Table D.7 p. D.11, behaviour p. D.9). On a SEL-751, unsolicited reporting is off by default (`UNSOLn := N`, `PUNSOLn := N`), a per-session setting. With `UNSOLn := Y`, D2's `inference` is that the relay sends function 130 with UNS and CON set, and the master confirms with function 0. No GT-PCAP capture holds it. Zeek parses DNP3 by `is_orig` (section 3), so a UDP flow that the relay starts, with an unsolicited response or a reply sent to port 20000 while the master sent from another port, is expected to be parsed backwards. The ports of GT-PCAP's `dnp3-udp` (both ends on 20000) are by inference, settled by H-23 (D2 on #623). **Cases owed to D6** (D1 passed them on): a master that sends from a temporary UDP port while the relay replies to `DNPUDPn` 20000, so the reply is a second 5-tuple; `DNPUDPn := REQ`; and an unsolicited response that starts a flow. This run shows none of them.
 
 ## 6. What waits
 
@@ -146,6 +164,7 @@ Still to come, with the counted run: the engine's evidence from section 5, and D
 
 - `modules/telemetry/experiments/engine-linux/`: `run.sh`, `in-container.sh`, `table.py`, `probe.zeek`, `pins.env`, `icsnpp.sha256`, `extra-captures.tsv`
 - `modules/telemetry/experiments/prp-engines/compare.py`: an optional list of configurations
+- The follow-up under D4-87 (`agent/telemetry-engine-linux-eval-2`): the pipe case in `in-container.sh`, `run.sh` and `table.py`; the Suricata sender from the flow record and rule 6's labelled servers in `table.py`; this note; ADR-0009's UDP ports and AP-31 (1)'s site-install sentence; the workflow's header
 - `modules/telemetry/experiments/README.md`: one row
 - `.github/workflows/d4-engine-linux-eval.yml` (new, dispatch-only)
 - `docs/decisions/ADR-0009-passive-sensor.md`: the three notes in section 8

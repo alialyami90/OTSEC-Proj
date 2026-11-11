@@ -55,6 +55,8 @@ LABELS = {
     "suricata-midstream": "Suricata with stream.midstream=true (the comparison, not the choice)",
 }
 PENDING = "pending D6's pass conditions"
+# The pipe case (D4-87): these configurations also read each capture from a pipe.
+PIPED = ("zeek", "zeek-probe", "zeek-icsnpp")
 CONDITIONS = "tests/integration/gt_pcap/engine-pass-conditions.tsv"
 RESPONSES = (129, 130, 131)
 # modbus-moved-port is modbus.pcap with port 502 moved to 15020
@@ -177,8 +179,24 @@ def zeek(d, cfg, t):
 
 
 def suricata(d):
+    """Suricata's eve.json. An app-layer event (dnp3, modbus) is tied to its
+    flow record by `flow_id` (D6's rule 2), and its sender is the flow
+    record's originator for a request and its responder for a response, never
+    the event's own source fields (D6 on #625). An event whose flow record is
+    missing has no sender, so it can pass no row."""
     s = Logs(True)
-    for i, r in lines(os.path.join(d, "eve.json")):
+    rows = lines(os.path.join(d, "eve.json"))
+    flow_of = {}
+    for i, r in rows:
+        if r.get("event_type") == "flow":
+            o, p = (r.get("src_ip"), str(r.get("src_port"))), (r.get("dest_ip"), str(r.get("dest_port")))
+            flow_of[r.get("flow_id")] = (o, p)
+
+    def sender(r, request):
+        f = flow_of.get(r.get("flow_id"))
+        return (f[0] if request else f[1])[0] if f else None
+
+    for i, r in rows:
         ev = r.get("event_type")
         l4 = str(r.get("proto", "")).lower()
         o, p = (r.get("src_ip"), str(r.get("src_port"))), (r.get("dest_ip"), str(r.get("dest_port")))
@@ -193,10 +211,10 @@ def suricata(d):
             for m in msgs:
                 app = m.get("application", {})
                 request = m.get("type") == "request"
-                s.msg(f"eve.json:{i}", r.get("timestamp", ""), "dnp3", l4, ends(*o, *p), (o if request else p)[0], request,
+                s.msg(f"eve.json:{i}", r.get("timestamp", ""), "dnp3", l4, ends(*o, *p), sender(r, request), request,
                       app.get("function_code"), [f"g{x.get('group')}v{x.get('variation')}" for x in app.get("objects", [])])
         elif ev == "modbus" and isinstance(r["modbus"].get("request"), dict):
-            s.msg(f"eve.json:{i}", r.get("timestamp", ""), "modbus", l4, ends(*o, *p), o[0], True,
+            s.msg(f"eve.json:{i}", r.get("timestamp", ""), "modbus", l4, ends(*o, *p), sender(r, True), True,
                   r["modbus"]["request"].get("function_raw"))
     return s
 
@@ -280,7 +298,8 @@ def judge_flow(row, s, flow_rows):
     """
     l4, proto = row["l4"], (row.get("protocol") or "dnp3")
     if row["condition"] == "service":
-        others = {(r["src"], r["sport"]) for r in flow_rows if r["l4"] == l4}
+        servers = {(r["dst"], r["dport"]) for r in flow_rows if r["l4"] == l4}
+        others = {(r["src"], r["sport"]) for r in flow_rows if r["l4"] == l4} - servers
         wrong = [f for f in s.flows if f["l4"] == l4 and f["resp"] in others and named(f["names"], proto)]
         if wrong:
             f = wrong[0]
@@ -466,6 +485,13 @@ def dnp3(out, gt, work, root):
         for c in cases + [CONTROL]:
             d = os.path.join(out, c, cfg)
             loaded[(cfg, c)] = ran(d) or (suricata(d) if cfg.startswith("suricata") else zeek(d, cfg, t))
+    for cfg in PIPED:
+        for c in cases + [CONTROL]:
+            d = os.path.join(out, c, cfg + "-pipe")
+            loaded[(cfg + "-pipe", c)] = ran(d) or zeek(d, cfg, t)
+    for c in cases + [CONTROL]:
+        d = os.path.join(out, c, "suricata-fifo")
+        loaded[("suricata-fifo", c)] = ran(d) or suricata(d)
     print("## 1. What each configuration logged, per case\n")
     print("Counts against GT-PCAP's labels. Each labelled function row needs a distinct logged request (rule 9). "
           "`g120 messages` lists `code:variation from sender` for every DNP3 message the configuration logged with a "
@@ -502,6 +528,7 @@ def dnp3(out, gt, work, root):
     print("## 2. D6's pass conditions\n")
     if not conds:
         print(f"Verdict: {PENDING}. `{CONDITIONS}` is not in this checkout.")
+        pipe_case(conds, loaded, cases)
         return
     print("Each row is `pass`, `fail` or `unknown`, and each column counts the three apart. A capture or configuration "
           "that did not run is `unknown`. Rows that share a capture, a flow and a code are matched one to one with logged "
@@ -534,6 +561,43 @@ def dnp3(out, gt, work, root):
                   f"| {row['dst']}:{row['dport']}/{row['l4']} | {row.get('direction', '')} | {row['code']} | {row['objects']} "
                   f"| {row['show']} | {r} | {cite} |")
         print()
+    pipe_case(conds, loaded, cases)
+
+
+def pipe_case(conds, loaded, cases):
+    """The pipe case (D4-87): each Zeek configuration again, reading every
+    capture of this run from stdin through a pipe (`cat FILE | zeek -r -`),
+    judged with the same functions, and compared row for row with its file
+    run. Suricata through a FIFO is a note only, not a condition."""
+    caps = cases + [CONTROL]
+    print("## 3. The pipe case\n")
+    print("Each Zeek configuration reads every capture above from stdin through a pipe (`cat FILE | zeek -r -`), with "
+          "`--network none`, and is judged by the same functions as its file run. **A pipe of a finished capture is not "
+          "a live stream:** it ends, it never stalls, and nothing pushes back, so this shows neither a stream that never "
+          "ends, nor back-pressure, nor a writer that stalls or dies.\n")
+    print("| configuration | reads a pipe (exit 0, of captures) | rows equal to the file run (result and citation) | rows that differ |")
+    print("| --- | --- | --- | --- |")
+    for cfg in PIPED:
+        pc = cfg + "-pipe"
+        ok = sum(1 for c in caps if not isinstance(loaded[(pc, c)], str))
+        reads = "yes" if ok == len(caps) else "no" if ok == 0 else "partly"
+        if not conds:
+            print(f"| {LABELS[cfg]} | {reads}, {ok} of {len(caps)} | {PENDING} | |")
+            continue
+        a, b = evaluate(conds, loaded, cfg), evaluate(conds, loaded, pc)
+        diff = [(x[0], x[1], y[1]) for x, y in zip(a, b) if x[1:] != y[1:]]
+        shown = "; ".join(f"{r['capture']} {r['condition']} {r['code']}: file `{fr}`, pipe `{pr}`" for r, fr, pr in diff) or "-"
+        print(f"| {LABELS[cfg]} | {reads}, {ok} of {len(caps)} | {len(a) - len(diff)} of {len(a)} | {shown} |")
+    print()
+    print("**Suricata through a FIFO, a note and not a condition** (`suricata -r FIFO`, a writer `cat FILE > FIFO`, both "
+          "under `timeout`):\n")
+    print("| capture | exit (FIFO) | flow records (FIFO) | flow records (file) |")
+    print("| --- | --- | --- | --- |")
+    for c in caps:
+        f, s = loaded[("suricata-fifo", c)], loaded[("suricata", c)]
+        print(f"| {c} | {f if isinstance(f, str) else '0'} | {'' if isinstance(f, str) else len(f.flows)} "
+              f"| {s if isinstance(s, str) else len(s.flows)} |")
+    print()
 
 
 def public(out):

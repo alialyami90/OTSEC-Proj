@@ -3,8 +3,11 @@
 # ICSNPP-Modbus packages, beside Suricata with and without midstream, over
 # GT-PCAP and the public captures. It can only be started by hand
 # (workflow_dispatch) and is not a project CI pipeline. Offline files only:
-# each engine runs in a container pinned by digest with --network none, and
-# nothing captures a network or contacts a device. Every fetched thing is
+# each engine runs in a container pinned by digest with --network none, so
+# no engine has a network; the runner keeps its own, which fetches the
+# images, ICSNPP and the captures. Nothing captures a network or contacts a
+# device. The DNP3 step also feeds each Zeek configuration through a pipe,
+# and Suricata through a FIFO (the pipe case, D4-87). Every fetched thing is
 # pinned and checked before it runs (modules/telemetry/experiments/
 # engine-linux/pins.env, icsnpp.sha256, extra-captures.tsv, MANIFEST.tsv).
 # Only the tables and versions are uploaded: no capture, no engine log, no

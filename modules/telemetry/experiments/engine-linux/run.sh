@@ -14,7 +14,10 @@
 #                             against its hash, with modbus.pcap as its
 #                             control; all against the committed labels and,
 #                             where it is in the checkout, D6's
-#                             engine-pass-conditions.tsv
+#                             engine-pass-conditions.tsv. The same captures
+#                             then reach each Zeek configuration through a
+#                             pipe, and Suricata through a FIFO (the pipe
+#                             case, D4-87)
 #   run.sh public WORK CACHE  MANIFEST.tsv's captures (already fetched into
 #                             CACHE by fetch_captures.sh) and the captures in
 #                             extra-captures.tsv
@@ -71,6 +74,9 @@ docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base
   echo "icsnpp-dnp3:   $ICSNPP_DNP3_COMMIT (every file checked against icsnpp.sha256)"
   echo "icsnpp-modbus: $ICSNPP_MODBUS_COMMIT (every file checked against icsnpp.sha256)"
   echo "suricata.yaml: the image's own, with eve types dnp3 and modbus added (sha256 $(sha256sum < "$work/suricata.yaml" | cut -c1-64))"
+  # The engines' own words for reading a capture, cited by the pipe case.
+  echo "zeek --help, -r: $(docker run --rm --network none "$ZEEK_IMAGE" zeek --help 2>&1 | grep -e '--readfile' | head -1 || true)"
+  echo "suricata --help, -r: $(docker run --rm --network none --entrypoint suricata "$SURICATA_IMAGE" --help 2>&1 | grep -e '-r <path>' | head -1 || true)"
 } > "$work/versions.txt"
 
 # Every table opens with what ran and whether it counts (D1 and D6 on #625):
@@ -91,24 +97,37 @@ header() {
 }
 
 # 2. Every configuration over one directory of captures.
+# Each takes the in-container mode first (zeek or zeek-pipe; suricata or
+# suricata-fifo), then the configuration's name and its arguments.
 zeek_run() {
   docker run --rm --network none -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
-    "$ZEEK_IMAGE" sh /exp/in-container.sh zeek "$@"
+    "$ZEEK_IMAGE" sh /exp/in-container.sh "$@"
 }
 suricata_run() {
   docker run --rm --network none -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
-    -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh suricata \
+    -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh \
     "$@" --set app-layer.protocols.dnp3.enabled=yes --set app-layer.protocols.modbus.enabled=yes
 }
 engines() {
   pcaps=$1
   out=$2
   mkdir -p "$out"
-  zeek_run zeek
-  zeek_run zeek-probe /exp/probe.zeek
-  zeek_run zeek-icsnpp /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
-  suricata_run suricata
-  suricata_run suricata-midstream --set stream.midstream=true
+  zeek_run zeek zeek
+  zeek_run zeek zeek-probe /exp/probe.zeek
+  zeek_run zeek zeek-icsnpp /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
+  suricata_run suricata suricata
+  suricata_run suricata suricata-midstream --set stream.midstream=true
+}
+# The pipe case (D4-87): the same three Zeek configurations, each reading
+# its capture from stdin through a pipe, and Suricata from a FIFO, as a
+# note. Still --network none.
+pipes() {
+  pcaps=$1
+  out=$2
+  zeek_run zeek-pipe zeek-pipe
+  zeek_run zeek-pipe zeek-probe-pipe /exp/probe.zeek
+  zeek_run zeek-pipe zeek-icsnpp-pipe /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
+  suricata_run suricata-fifo suricata-fifo
 }
 
 case $mode in
@@ -132,6 +151,7 @@ case $mode in
       rm -f "$work/dnp3/modbus-moved-port.pcap"
     fi
     engines "$work/dnp3" "$work/out-dnp3"
+    pipes "$work/dnp3" "$work/out-dnp3"
     { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; } > "$work/dnp3.md"
     ;;
   public)
