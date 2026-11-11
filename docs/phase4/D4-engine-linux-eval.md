@@ -2,7 +2,7 @@
 
 D4, 2026-11-11. Brief P4-4-S2 in `docs/agent-handoffs.md` ("Phase 4 item 4, second part", D4-86). ADR-0009 names Zeek as the provisional engine under option (b), and D1 approves it or turns the choice on this run.
 
-**Status: built, not run.** No engine has run under this experiment yet, so this note holds no `CI-Linux` result. What it holds is the experiment, its pins, and what D4 read in the engines' own sources (`desk`, each with its file's SHA-256). Three things wait, in section 6. When the counted run is done, its run URL and tables go into section 5, and ADR-0009's evidence follows.
+**Status: built, not run.** No engine has run under this experiment yet, so this note holds no `CI-Linux` result. What it holds is the experiment, its pins, and what D4 read in the engines' own sources (`desk`, each with its file's SHA-256). Three things wait, in section 6. When the counted run is done, its run URL and tables go into section 5, and ADR-0009's evidence follows. **Any dispatch before #623 is on `main` is a rehearsal,** and is recorded here as one: its tables are not the counted result (D1 on #625).
 
 **This is evidence for the engine choice, not V-M6 evidence.** V-M6 runs on the real sensor, over the real link, with the checker of P4-4-R1 (brief, acceptance).
 
@@ -15,16 +15,20 @@ D4, 2026-11-11. Brief P4-4-S2 in `docs/agent-handoffs.md` ("Phase 4 item 4, seco
 | Configuration | What runs |
 | --- | --- |
 | `zeek` | Zeek 9.0.1, stock: `zeek -C -r <file> LogAscii::use_json=T` |
-| `zeek-probe` | The same, with `probe.zeek`, the project's own script of 100 lines. It handles Zeek's documented DNP3 and SNMP events (`dnp3_application_request_header`, `dnp3_application_response_header`, `dnp3_object_header`, the SNMP PDU events) and writes `otsec_probe.log`. It changes no analyzer and registers no port. For SNMPv3 it logs which header fields are present and their lengths, never their bytes. |
+| `zeek-probe`, labelled "Zeek with the project's script" in every table | The same, with `probe.zeek`, the project's own script of 100 lines. It handles Zeek's documented DNP3 and SNMP events (`dnp3_application_request_header`, `dnp3_application_response_header`, `dnp3_object_header`, the SNMP PDU events) and writes `otsec_probe.log`. It changes no analyzer and registers no port. For SNMPv3 it logs which header fields are present and their lengths, never their bytes. |
 | `zeek-icsnpp` | The same as `zeek`, with ICSNPP-DNP3 and ICSNPP-Modbus loaded from their `scripts` folders |
 | `suricata` | Suricata 8.0.8, its image's own `suricata.yaml` with only the `dnp3` and `modbus` eve types added (the stock file comments out `dnp3` and lists no `modbus`), the DNP3 and Modbus parsers switched on, `--disable-detection`, `-k none` |
 | `suricata-midstream` | The same, with `stream.midstream=true` |
 
-Why the probe is a configuration of its own: Zeek's default `dnp3.log` records the request and reply function names and the IIN, and no object (section 3). Whether Zeek can show group 120 per message at all is then a question of what its events carry, and a sensor under option (b) is project code around the engine in any case. The probe answers that question without touching the stock and ICSNPP rows. Whether a probe log counts as "the engine's own log files" under D6's rule 1 is for D6 and D1 (section 7, question 2).
+Why the probe is a configuration of its own: Zeek's default `dnp3.log` records the request and reply function names and the IIN, and no object (section 3). Whether Zeek can show group 120 per message at all is then a question of what its events carry, and a sensor under option (b) is project code around the engine in any case. The probe answers that question without touching the stock and ICSNPP rows.
+
+**D1's ruling on #625:** `zeek-probe` is a configuration of its own and is labelled "Zeek with the project's script" in every table. It counts for the engine decision, because a sensor would ship that script and the project writes the capture stage and the mapping to C13 anyway. It does **not** count as "the engine's own log files" under D6's rule 1. So each pass condition is reported three ways for Zeek: stock, with ICSNPP, and with the project's script. D6 owns the pass conditions and may tighten this in review; if it does, D6's reading wins.
 
 **Three capture sets:**
 
 1. **GT-PCAP's DNP3 captures** (`run.sh dnp3`). D6's `dnp3_cases.py` rebuilds every capture named in `tests/fixtures/network/gt-pcap/dnp3/dnp3.sha256`, and the run fails unless each matches its hash. Today that is 19 captures: 17 labelled cases and the two R6.2 series. **D6's two new cases drop in with no change here**: `dnp3-moved-port` and `dnp3-udp` are in #623, and once they are on `main` they are in `dnp3.sha256` and have their label files.
+
+   **A derived Modbus case on a moved port** (D1 has asked D6 for one, if it can be labelled honestly) drops in the same way if D6 lists it in `dnp3.sha256` with its label file beside the others. `table.py` takes each case's protocol from its label file's `flow` rows, so protocol and service rows are read for Modbus as for DNP3, and a `moved port` column counts every capture whose name holds `moved-port`. Function rows are read for DNP3 only: a Modbus function row reads `unknown (this table reads DNP3 functions only)`. If D6 builds the case another way, for example from a fetched capture outside `dnp3_cases.py`, `run.sh` needs one line to build it, in a commit that names it. If D6 cannot make it, the row stays `unknown`, and D1 reads it as not shown.
 2. **GT-PCAP's 9 PRP pairs** (`run.sh prp`), rebuilt by `prp.py`, checked against `prp-derived.sha256`, labelled by tshark 4.2.2 through `prp_check.py`, and checked by E-D4-02's own `compare.py` for each configuration. `compare.py` gained an optional list of configurations, and with none it behaves as before.
 3. **The public captures** (`run.sh public`): the 21 in `MANIFEST.tsv`, and four Wireshark sample captures in `extra-captures.tsv` for what neither set holds: SNMPv3 with USM (`snmp_usm.pcap`), Telnet (`telnet-raw.pcap`), FTP over IPv6 (`FTPv6-1.cap`) and HTTP (`http_gzip.cap`). They carry no GT-PCAP label, so no pass condition reads them (D6's note, section 6).
 
@@ -42,7 +46,7 @@ Every pin below is a **first-use pin**: D4 read the digest or hash on 2026-11-11
 | What | Pin | Source of the pin | Checked how | Upstream signature |
 | --- | --- | --- | --- | --- |
 | Zeek 9.0.1 | `zeek/zeek@sha256:71c1d6b61cdcc25d306c091d32b3da15583485c0c9dfc45cdff48b088cdfdc92` (linux/amd64; the `lts` and `9.0.1` tags point to its index, `sha256:524cb0ce…49dd0`) | Docker Hub's tag listing for `zeek/zeek`, "the official Docker repository for Zeek releases" | Docker pulls by digest and checks the content against it; the run then requires `zeek --version` to print `zeek version 9.0.1` | None for the image: no signature tag in the repository. Zeek signs its source tarball (`zeek-9.0.1.tar.gz.asc` on the GitHub release), which the image does not carry. |
-| Suricata 8.0.8 | `jasonish/suricata@sha256:a8277a84662969927de6bf6fd1848f64f353e47dd498d1b7d11f75b89096be1f` (linux/amd64) | Docker Hub's tag listing for `jasonish/suricata`, whose page points to `github.com/jasonish/docker-suricata` | By digest, then `suricata -V` must name 8.0.8 | None found. **It is a personal account, not an OISF organisation one.** It was chosen because it needs no `apt-get` (section 6). It is the comparison engine only. |
+| Suricata 8.0.8 | `jasonish/suricata@sha256:a8277a84662969927de6bf6fd1848f64f353e47dd498d1b7d11f75b89096be1f` (linux/amd64) | Docker Hub's tag listing for `jasonish/suricata`, whose page points to `github.com/jasonish/docker-suricata` | By digest, then `suricata -V` must name 8.0.8 | None found. **A first-use pin of an image that OISF does not publish:** it is a personal account's, not an OISF organisation one. **It would not be acceptable in a sensor.** It is accepted for this comparison only, pinned by digest, run with `--network none` on a hosted runner, with tables only uploaded (D1 on #625). It was chosen because it keeps `apt-get` out of the `dnp3-public` job (section 6). **Suricata is the fallback, not the choice.** |
 | ICSNPP-DNP3 | commit `b31dbadeceb1cbcda16aef89c650559cd177dd7e` (2026-08-05; the repository has no tag) | GitHub's API for `cisagov/icsnpp-dnp3` | Six files fetched from that commit, each checked against `icsnpp.sha256` before Zeek loads them. `LICENSE.txt` hashes to `4c66ca60…e98d`, the hash D7 recorded (`docs/release.md` §4). | None: no signed tag or release |
 | ICSNPP-Modbus | commit `6dd3dab173169e454a73925d0426d3c019104852` (2026-10-17; its last tag, `v2.0.0`, is older) | GitHub's API for `cisagov/icsnpp-modbus` | As above, six files | None |
 | Four extra captures | SHA-256 per file in `extra-captures.tsv` | D4's own download from the Wireshark wiki | `sha256sum`; a mismatch removes the file, and its rows read `not run` | None |
@@ -71,7 +75,7 @@ Read from `raw.githubusercontent.com` at the tags and commits pinned above. Thes
 | `cisagov/icsnpp-modbus` `6dd3dab1` `scripts/main.zeek` | `111ef525…7178` | ICSNPP-Modbus adds detailed logs and an `additional_tcp_ports` option, which registers ports that an operator lists. That is configured ports, not detection by content. |
 | `OISF/suricata` `suricata-8.0.8` `suricata.yaml.in` | `6894b0618b7f948c93fbd99a403bc92eb1cf88facec5ace6a45181d5655353b6` | The DNP3 and Modbus parsers are off by default, with detection ports 20000 and 502. The `dnp3` eve type is commented out and `modbus` is not listed. |
 
-**What D4 expects, before the run.** Group 120 per message can come only from a script on `dnp3_object_header`, not from stock logs or ICSNPP, if Zeek's parser accepts the filler bodies of GT-PCAP's group 120 objects (D6's note: a refused filler body is neither a pass nor evidence about real SA traffic). DNP3 on a moved port and over UDP may be found by the content signatures. Modbus on a moved port is not expected without a configured port. The run decides each of these.
+**What D4 expects, before the run.** Group 120 per message can come only from a script on `dnp3_object_header`, not from stock logs or ICSNPP, if Zeek's parser accepts the filler bodies of GT-PCAP's group 120 objects (D6's note: a refused filler body is neither a pass nor evidence about real SA traffic). DNP3 on a moved port and over UDP may be found by the content signatures. Modbus on a moved port is not expected without a configured port. The run decides each of these. **These are expectations read from source, at the files and commits above. They stay in this section and never appear in a results table.**
 
 ## 4. What it cannot pin or check, and why
 
@@ -80,8 +84,8 @@ Read from `raw.githubusercontent.com` at the tags and commits pinned above. Thes
 - **ICSNPP has no signed release.** The pin is a commit and the hash of each file loaded.
 - **tshark's version is checked, not its hash,** because `apt` resolves it. `apt` checks the archive's signature.
 - **Offline decoding of files is not live capture** on a SPAN or TAP port, and a hosted runner is not the sensor host. Both stay `unknown` (brief, risk).
-- **No Modbus capture on a moved port exists** (D6's note, section 3), so that row is `unknown`.
-- Nothing here has been run, on the runner or on the owner's PC (no test and no install on the PC).
+- **No Modbus capture on a moved port exists yet** (D6's note, section 3), so that row is `unknown` until D6 adds the derived case (section 1).
+- **`table.py`, `run.sh` and `in-container.sh` are parse-checked only.** Nothing here has been run, on the runner or on the owner's PC (no test and no install on the PC). They run for the first time at dispatch. If one fails there for its own reason, that is a defect in the experiment and is fixed in a commit, not re-run.
 
 ## 5. Results
 
@@ -90,15 +94,15 @@ None yet. The counted run's URL, the tables and the versions go here, each `CI-L
 ## 6. What waits
 
 1. **D6's two cases and pass conditions on `main`** (#623, P4-4-R1 deliverable 0). The counted run needs both. Until then, the run counts 19 captures and its verdict column reads `pending D6's pass conditions`.
-2. **The workflow on `main`.** GitHub finds a `workflow_dispatch` workflow only on the default branch, so `gh workflow run d4-engine-linux-eval.yml --ref agent/telemetry-engine-linux-eval` cannot start it before this PR's workflow file is on `main`. It has no `pull_request` or `push` trigger, by the brief. How D1 wants the first dispatch handled is open (section 7, question 1).
+2. **The workflow on `main`.** GitHub finds a `workflow_dispatch` workflow only on the default branch, so `gh workflow run d4-engine-linux-eval.yml --ref agent/telemetry-engine-linux-eval` cannot start it before this PR's workflow file is on `main`. It has no `pull_request` or `push` trigger, by the brief. D1's order (on #625): this PR merges first, on its reviews and green checks; then #623; then D1 dispatches the counted run, or tells D4 to.
 3. **The hosted runners.** From 13:53Z on 2026-11-11, `apt-get` on the hosted Linux runners could not resolve Ubuntu's package archive (D4-84, D4-85). The `dnp3-public` job installs no package: Docker and Python come with the image, and the engines come as pinned images, so that fault does not reach it. The `prp` job installs tshark with `apt-get`, for the labeller `prp_check.py` pins, so it fails in set-up while the fault lasts. A set-up failure is D1's to re-run (D4-85).
 
-## 7. Questions for D1
+## 7. D1's rulings on D4's four questions (on #625, 2026-11-11)
 
-1. **The first dispatch.** The workflow must be on `main` before it can be started. Merge this PR first and dispatch from `main` (or from this branch with `--ref`) after #623, or another way that D1 prefers.
-2. **The probe configuration.** D6's rule 1 counts "only the engine's own log files". `zeek-probe`'s `otsec_probe.log` is written by Zeek in that run, from a script of the project's own. D4 reads it as a configuration of its own (rule 5), and the table reports it separately. Does it count for the engine choice, or only as evidence of what a sensor script could do?
-3. **Modbus on a moved port** has no capture (D6 and the brief). Is `unknown` acceptable for the engine decision, or should D6 add a case?
-4. **The Suricata image** is a personal account's (section 4). It is the comparison only. If D1 wants a signed source for it, the `dnp3-public` job would need `apt-get` again.
+1. **The first dispatch:** #625 merges first, then #623, then the counted run. A dispatch before #623 is on `main` is a rehearsal (status line, section 6).
+2. **The probe configuration:** a configuration of its own, labelled in every table. It counts for the engine decision and is not "the engine's own log files". D6 may tighten this (section 1).
+3. **Modbus on a moved port:** `unknown` is not good enough if a case can be made honestly. D1 has asked D6 for a derived case, and the table takes it (section 1). Without it, D1 reads the row as not shown.
+4. **The Suricata image:** acceptable for this comparison only, never in a sensor, and `apt-get` stays out of the `dnp3-public` job (section 2).
 
 ## 8. Carried to ADR-0009 after #618 merges
 
