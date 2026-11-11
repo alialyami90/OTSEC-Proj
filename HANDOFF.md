@@ -29,7 +29,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 ## Open PRs and branches
 
 - **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance and the owner's word (D4-82). In flight on 2026-11-11 (D4-83): D4 on P4-4-A6, D7 on P4-D7-1, D6 on P4-D6-H5, and D5 and D6 on P4-PC-1. D6's P4-D6-M1 is done and waits in #613. Each role's open items are in its file in `.claude/agents/`.
-- **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner approved the first two groups on 2026-11-11, and both scripts ran that day: 207 branches deleted, 49 left (D4-83). The third group stays.
+- **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), with the script `reference/carried/delete-merged-branches-2026-11-06.ps1`, in which each delete is leased to a recorded SHA. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner approved the first two groups on 2026-11-11, and both scripts ran that day: 207 branches deleted, 49 left (D4-83). The third group stays.
 
 ## Waiting on the owner
 
@@ -44,7 +44,8 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 9. **Test runs on the owner's PC** are resumed for ordinary local runs (D4-83, 2026-11-11). Runs that create Windows services stay in the owner's elevated session. Nothing is owed here.
 10. **The branch cleanup is done** (D4-83). Nothing is owed here.
 11. **ADR-0007** (Windows site node) is still `proposed`.
-12. **D7 and D8** (D4-79): the word to start each one's first brief, and who holds the release key and where it is kept (TB9).
+12. **D7 and D8** (D4-79): D7's first brief is in flight (D4-83). Still owed: the word to start D8's first brief, and who holds the release key and where it is kept (TB9).
+13. **The words to merge a PR that D1 wrote** (D4-82). On 2026-11-11 these are #612 and #613, which merge together, and then #614.
 
 ## Test policy
 

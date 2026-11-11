@@ -55,7 +55,7 @@ In older records A4, B4 and C4 mean the role D4 now holds. Contract names (C1 to
 ## Open items on 2026-11-10 (`main` at `82daa04`, after #604 and D4-76)
 
 1. **In flight: brief P4-4-A6** (D4-83, issued 2026-11-11), the engine and the capture path under option (a), from evidence. The node side of item 4 is merged (D4-70 to D4-76); your last PRs were #589, #593 and #596.
-2. **Blocked on the owner: ADR-0009.** When they choose where the sensor runs, update the ADR to accepted with D1, then build the sensor against D1's brief. Under every option the sensor needs: the PRP duplicate-discard stage before the engine (E-D4-02, `simulated`: stock Zeek and Suricata count both LAN copies), redaction by position with fail-closed (D4-67; D4-68 ruling 13), and C13's channel.
+2. **ADR-0009: the owner chose option (a)** (D4-78). After P4-4-A6, and the owner's answer on the Npcap OEM licence, update the ADR to accepted with D1, then build the sensor against D1's brief. Under every option the sensor needs: the PRP duplicate-discard stage before the engine (E-D4-02, `simulated`: stock Zeek and Suricata count both LAN copies), redaction by position with fail-closed (D4-67; D4-68 ruling 13), and C13's channel.
 3. **`unknown` cells in ADR-0009** matter only under options (a) and (c): offline decoding and `pktmon` on Windows (E-D4-01), and the Npcap licence terms.
 4. **C13's next change** carries the clause that a capture hash mismatch reads as missing (D1's ruling on #586; the node rule is already in `D5-sensor-node.md`).
 5. **Protocols.** The first set is DNP3, Modbus/TCP, R6.7's insecure list and the platform's own Telnet and SNMPv3 sessions. IEC 61850 and IEC 104 are added when the owner confirms the sites use them; no stock engine decodes them.
