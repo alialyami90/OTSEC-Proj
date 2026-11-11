@@ -83,13 +83,26 @@ jobs:
       # P4-D6-H5, authorized by D1). Linux only: rsyslog does not run on
       # Windows, and the variable is not set there. The tests run a copy of
       # the installed rsyslogd, because its AppArmor profile does not let
-      # the installed path read the test's configuration (F-026).
+      # the installed path read the test's configuration (F-026). The binary
+      # the tests copy is the first rsyslogd on PATH. Its SHA-256 is printed
+      # here so it can be matched to the hash each test logs. `dpkg --verify`
+      # then checks the two packages' installed files against dpkg's
+      # recorded checksums. A changed file fails the step, except a changed
+      # configuration file (dpkg marks it "c"), such as the image's own
+      # /etc/rsyslog.conf, because the tests read none of the packages'
+      # configuration files: they write their own (D6 on #620).
       - name: rsyslog with imrelp, for the forwarder's rsyslog tests
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp
           rsyslogd -v
           dpkg-query -W rsyslog rsyslog-relp librelp0
+          sha256sum "$(readlink -f "$(command -v rsyslogd)")"
+          v=$(dpkg --verify rsyslog rsyslog-relp || true)
+          echo "dpkg --verify rsyslog rsyslog-relp: ${v:-no changed files}"
+          if printf '%s\n' "$v" | grep -Ev '^[^ ]+ c /' | grep -q .; then
+            echo "::error::a packaged rsyslog file differs from dpkg's record"; exit 1
+          fi
       - if: runner.os == 'Linux'
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
