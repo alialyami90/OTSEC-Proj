@@ -1,7 +1,7 @@
 # ADR-0009: The passive sensor: which engine, and where it runs
 
-- Status: proposed. The owner chose option (a) on 2026-11-10 (D4-78). The engine, and the owner's answer on the Npcap OEM licence, are open (D4-83)
-- Date: 2026-11-07
+- Status: **accepted, 2026-11-11 (D4-85): the owner chose option (b)**, a separate Linux sensor at each site that feeds the node, on D1's recommendation and P4-4-S1's evidence. This supersedes D4-78's choice of option (a). The engine is D4's recommendation in "Decision", which D1 approves in this ADR's review. History: proposed from 2026-11-07. The owner chose (a) on 2026-11-10 (D4-78), with the engine and the Npcap licence left open (D4-83).
+- Date: 2026-11-07; decided 2026-11-11
 - Deciders: D1, with D4 (author), D5 (the process and the node's side) and D3 (the boundary). D2 reviews protocol interpretation, D6 testability. The owner decides the two questions in "What decides it".
 - Related: R6.1 to R6.7, V-M6, C-09, C-11, H-06; ADR-0002 item 2 (b), ADR-0007; `docs/phase0/A4-telemetry-feasibility.md` §3 and §4 (E-A4-01); threat model TB6, AP-30 to AP-36, SC-19, HR-20 (#523); D4-66, D4-67, D4-78; brief P4-4-A4 in `docs/agent-handoffs.md`, and brief P4-4-S1 (D4-83, #614)
 
@@ -148,6 +148,8 @@ The two engines gave identical rows, so each row stands for both.
 
 ## What decides it
 
+**Answered on 2026-11-11 (D4-85).** The owner allowed a second machine at each site by choosing (b) (question 1). So no Npcap licence is bought, and question 2 is answered by the choice. The record of what was asked is kept below.
+
 The options split on two questions only the owner can answer, and on two experiment results.
 
 1. **Owner: may a site have a second machine for the sensor?** If yes, (b) is the only option where the engine is already shown decoding the first protocols (E-A4-01, on Linux), with no Windows driver licence, and with hostile parsing off the machine that holds the store and the collector's route. Its costs are a second box to enrol, patch and protect (D3's row), and the owner's hardware budget.
@@ -157,7 +159,66 @@ The options split on two questions only the owner can answer, and on two experim
 
 ## Decision
 
-None yet. This is a draft for review.
+**Option (b): a separate Linux sensor at each site, which feeds the node** (the owner, 2026-11-11, D4-85, on D1's recommendation). The engine and the capture privilege are below, with what (b) commits the project to and what is left to later briefs.
+
+### Why (b), from this ADR's evidence
+
+- **(b) is the only option where an engine is shown decoding the first protocol set**: DNP3 and Modbus/TCP on the public captures (E-A4-01), and once per flow on GT-PCAP's PRP pairs (E-D4-02). Both are `simulated (Linux)`, on the OS the sensor would run.
+- **(a) had no shown path on Windows** (E-D4-01 part 2, P4-4-S1):
+  - Suricata's official Windows build does not start without Npcap. It imports `wpcap.dll` and exits `0xC0000135`, even to read a file. So nothing was decoded on Windows.
+  - There is no official Zeek binary or package for Windows (`desk`).
+  - Npcap needs an OEM licence for a fleet: from US$4,980 (Internal-Use, 100 installs) to $79,980 and maintenance (Redistribution). Its free edition has no silent install (`desk`, npcap.com).
+  - Npcap's install mode was undecided, and D3 made it a condition on (a): without `/admin_only` other accounts may capture and send on every bound adapter, including the collector's device-facing one, and with it the engine starts as an administrator (AP-31 (2)).
+  - Npcap's guide says 802.1Q VLAN support is "currently unsupported" (`desk`).
+- **(c′) rested on `pktmon`**, whose fitness on a SPAN or TAP port, under a less-privileged account and with layer-2 frames intact is `unknown`. It would also have brought forward decoder work for DNP3 and Modbus that stock engines already do.
+- **Under (b), hostile input is parsed off the machine that holds the node's store, its keys and the collector's route** (AP-30). A decoder exploit holds the sensor, not the node. It can still lie to the node (AP-34, AP-36).
+
+### The engine under (b): D4's recommendation, for D1's approval in review
+
+**Zeek, with the ICSNPP-DNP3 and ICSNPP-Modbus packages.** The reasons:
+
+1. **Decoding on the first protocol set** (E-A4-01, `simulated (Linux)`):
+   - Zeek 8.0.4 decoded all 6 DNP3 captures, including the 2 without a TCP handshake, with no setting, and Modbus as a service on 2 of 3.
+   - Suricata 7.0.3 decoded 4 of 6 DNP3 and 1 of 3 Modbus by default, and needs `stream.midstream=true` to reach 6 of 6 and 2 of 3. Polling sessions start long before a sensor does, so midstream matters, and the false-positive cost of Suricata's setting was never measured.
+   - On PRP duplicates the two engines behave identically (E-D4-02): one record per flow, every packet counted twice.
+2. **Zeek's logs are the baseline's input.** Its connection and protocol logs record who talks to whom with which function codes, which is what the network baseline note learns. Each row is citable evidence. Suricata is alert-centric, with flow and protocol events beside its alerts (A4 §3).
+3. **Licences.**
+   - Zeek's `COPYING` is BSD-3-Clause, and ICSNPP is BSD-3-Clause. Zeek's `COPYING-3rdparty` adds MIT, BSD, Boost-1.0, Apache-2.0, MPL-2.0, LGPL-3.0-or-later with its author's BSD permission, public domain, and the JSON licence, whose "shall be used for Good, not Evil" term D7 calls unusual (`docs/release.md` §4). Which of these reach the build the project ships is for D7 to settle against that build. Shipping Zeek means carrying `COPYING`, the applicable notices and the MPL-2.0 file's source.
+   - Suricata is GPLv2: its binary would carry the licence text and the source, or a written offer of it valid for three years (`docs/release.md` §4).
+   - Neither puts OTSEC's own binaries under its licence, because the engine is a separate program on a separate host.
+4. **Who installs and patches it.** Zeek publishes Linux binaries (through the openSUSE Build Service) and container images (`desk`, zeek.org, 2026-11-11; E-A4-01 and E-D4-02 ran `zeek/zeek`). Ubuntu's archive carries Suricata (E-D4-02 installed it with `apt`). Under AP-31 (1) and `docs/release.md` §4, whichever engine is chosen comes in the project's signed release at a pinned version, never fetched at install or run time. That includes ICSNPP, which `zkg` would otherwise download. Who builds and patches the sensor's Linux image is open (below).
+
+**Suricata stays a possible later addition** for signature rules, as A4 §3 proposed. It is not part of this decision.
+
+**Still `unknown` for the engine under (b):**
+- Whether Zeek and ICSNPP expose DNP3 group 120 per session (protocol point 3) and SNMPv3's header fields (point 4).
+- Whether Zeek finds DNP3 and Modbus by content on a non-standard port (point 2).
+- What Zeek decodes of any protocol beyond the first set that the sites turn out to use. IEC 61850 and IEC 104 need the project's own decoders under every option (A4 Q4).
+- Whether Zeek can run with `CAP_NET_RAW` only and drop it after its socket opens (AP-31 (4)).
+- Which Zeek and ICSNPP versions the release pins.
+
+### What (b) commits the project to (from this ADR's rows)
+
+- **A second device class at each site,** with its own enrollment, a revocable credential like a node's (SC-11), and an update path. Its management interface and update path count as attack surface (D5 and D3).
+- **The link: the node opens it, and gains no inbound port.** The sensor host's listener is bound to its management interface only, firewalled to the node's address, and never listens on the station LAN (D5, AP-34).
+- **Capture through Linux `AF_PACKET`, with `CAP_NET_RAW` only, dropped after the socket opens** (AP-31 (4)). The engine runs in IDS mode only, and a rule set holding any `reject*` or `drop` action is refused at load (AP-32).
+- **A PRP duplicate-discard stage before the engine where the station network is PRP,** keyed on (source MAC, RCT sequence number) (E-D4-02). It is reported in C13's `prp.duplicates_discarded`. Whether the station network is PRP is still asked of the owner.
+- **C-11's zero-frames evidence on Linux, with its negative control** (AP-32; D6's plan §6). The monitoring interface is up with no address, with ARP off, IPv6 disabled and no discovery daemons.
+- **A timed replay over a veth pair across network namespaces in CI, for R6.4's latency** (D6's plan §6). No project workflow does this yet.
+- **The redaction by position, with fail-closed,** before anything is stored (D4-67; D4-68 ruling 13).
+- **The open question of who ships the sensor's Linux image,** and who patches it.
+
+### Not decided here
+
+- The sensor's implementation brief, which D1 writes.
+- The link's contract (C13's channel on the network, its enrollment and its credential).
+- The sensor host's hardware and its Linux distribution and version.
+
+Each follows in D1's briefs.
+
+### Superseded: D4's provisional view under option (a)
+
+Kept as the record of what was weighed. D4-85 superseded it on 2026-11-11.
 
 **D4's provisional view under option (a), for review only** (2026-11-11, P4-4-S1; the owner chose (a) in D4-78). The reasons and costs in full are in [`docs/phase4/D4-sensor-engine-eval.md`](../phase4/D4-sensor-engine-eval.md) §7.
 
@@ -167,23 +228,36 @@ None yet. This is a draft for review.
 - **Not shown on Windows:** what Suricata decodes, Npcap on a SPAN or TAP port, which accounts can capture, and the LTSC floor. Each needs a lab machine with Npcap installed by an operator (the note's §6), which needs the owner's authorization.
 - **If the owner refuses an Npcap licence,** (a) has no shown path, because both ways around Npcap need the project to build an engine itself. D4's view is then that D1 should reopen (b) or (c′).
 
-Under every option the project writes its own IEC 61850 and IEC 104 decoders later. D1 records the choice here after review and the owner's answers.
+Under every option the project writes its own IEC 61850 and IEC 104 decoders later.
 
-**The supervised process and its boundary (ADR-0002 item 2).** Whatever is chosen, the sensor is one process under its own account. It has no access to the node's store, keys or the collector's credential store. Its only output is C13 records over the authenticated channel in AP-34. The node decodes those records strictly, under their own quota (C5 stream class, D5). D3's boundary rows and D5's supervision rows complete this before the ADR is accepted.
+### The supervised process and its boundary (ADR-0002 item 2)
+
+Under (b), the sensor runs on its own host, as one process under its own account. It has no access to the node's store, its keys or the collector's credential store, which are on another machine. Its only output is C13 records over the authenticated link (AP-34). The node decodes those records strictly, under their own quota (C5 stream class, D5). D3's boundary rows and D5's link rows are reviewed with this decision.
 
 ## Consequences
 
-- **Where a Windows timed replay stays `unknown`,** under (a) and (c), R6.4's CI latency would be measured on Linux, as a Linux number for the decoder, not for the Windows capture path. C-11's zero-frames evidence on Windows would rest on H-06's hardware run alone, with the installer check in CI (D6's plan §6).
-- **Under (a′) and (c′), latency is bounded below by `pktmon`'s file rotation interval,** because the decoder reads only closed files. R6.4 reports that interval with the latency figures (D6).
-- **GT-PCAP labels come from tshark under every option** (D6's plan §1). Tshark is the one labeller that no option uses as its engine.
-- C13 and the baseline note wait for the decision (brief, "Order"). One part doesn't depend on it, because every option produces the same records: C13's citation of packets as a capture ID and frame numbers. If (a′) or (c′) is chosen, the rotating capture files are themselves the citable capture IDs.
+### Under (b), the chosen option
+
+- **Enrollment, the credential and the update path of a second device class are new work for D5 and D3.** The sensor host's management interface and its update path are new attack surface, and the threat model gains them.
+- **R6.4's latency and C-11's zero frames are measured on Linux,** on the same OS the sensor runs: latency over a timed veth replay in CI, and C-11 on a virtual interface in a namespace of its own, with its negative control (D6's plan §6). H-06's hardware run is still owed for the 24 h run and a real SPAN or TAP port.
+- **The link is a network link,** not a named pipe. Whether an nftables `netdev` egress drop catches every `AF_PACKET` send is `unknown` until tested, and can be tested in CI in a namespace (D5).
+- **Whether the sensor reads the NIC directly or files from a capture stage** depends on the PRP discard stage, which is for the sensor's brief.
+- **GT-PCAP labels come from tshark** (D6's plan §1). Tshark is not the engine.
+- C13 and the baseline note do not change with the decision. C13's citation of packets as a capture ID and frame numbers holds under (b).
 - Tying the node's own session to one connection (AP-35) needs the collector's record to carry the connection's local address and connect time. C2 0.7 has neither: `started_at` is stamped before the dial, and the local port exists only at run time (D2). D2 proposes a C2 `SessionFacts` addition (`local_addr`, `connected_at`) in the next C2 revision, which D1 opens. Until then the tie is the collector's IP to the device's IP and port within the session's time window. That is ambiguous if two sessions to one endpoint overlap, and that stays AP-35's residual.
-- If (b) is chosen, enrollment, the credential and the update path of a second device class become new work for D5 and D3. If (a) or (c) is chosen, the Windows capture path and its privilege drop are the main risk.
-- Whichever option is chosen, the sensor's coverage is self-reported (AP-36), so it gets an independent check (D1 on #525 §3, from D3). Each of the node's own scheduled sessions, taken from the session record, must appear as an observation within its window. A missing one raises a coverage alarm. D4's baseline note specifies the check.
-- Whichever option is chosen, the coverage statement names the engine and its version, its decoded protocols, and SPAN or TAP. A protocol it cannot decode is a stated visibility limit (R6.1, R6.6), not a silent gap.
+- The sensor's coverage is self-reported (AP-36), so it gets an independent check (D1 on #525 §3, from D3). Each of the node's own scheduled sessions, taken from the session record, must appear as an observation within its window. A missing one raises a coverage alarm. D4's baseline note specifies the check.
+- The coverage statement names the engine and its version, its decoded protocols, and SPAN or TAP. A protocol it cannot decode is a stated visibility limit (R6.1, R6.6), not a silent gap.
+
+### Under (a) and (c), not chosen
+
+Kept because they explain why these options were not chosen.
+
+- **Where a Windows timed replay stays `unknown`,** under (a) and (c), R6.4's CI latency would be measured on Linux, as a Linux number for the decoder, not for the Windows capture path. C-11's zero-frames evidence on Windows would rest on H-06's hardware run alone, with the installer check in CI (D6's plan §6).
+- **Under (a′) and (c′), latency is bounded below by `pktmon`'s file rotation interval,** because the decoder reads only closed files. R6.4 would report that interval with the latency figures (D6). If (a′) or (c′) had been chosen, the rotating capture files would themselves have been the citable capture IDs.
+- If (a) or (c) had been chosen, the Windows capture path and its privilege drop would have been the main risk (E-D4-01 part 2; D3 on #618).
 
 ## Open objections
 
 None open. Option (b)'s link direction is settled: the node opens the link, and there is no listener on the node (D5 withdrew the inbound listener, which agrees with D3's AP-34).
 
-Reviewers: D5 (process rows), D3 (boundary rows, HR-20), D6 (testability), D2 (protocol rows).
+Reviewers of the decision: D5 (process and link rows), D3 (boundary rows, HR-20), D6 (testability), D7 (licence rows) and D2 (protocol rows). D1 arranges them.
