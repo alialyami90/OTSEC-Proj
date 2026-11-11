@@ -6,18 +6,16 @@
 # host. Results are `simulated` on a GitHub-hosted Windows Server VM, not on
 # ADR-0007's Windows 10/11 LTSC floor. They are printed to the job log and
 # uploaded as an artifact; raw capture files of the runner's traffic are not.
+#
+# P4-4-A6 (E-D4-01 part 2): the `suricata` job installs Suricata's official
+# Windows build, pinned below by URL and SHA-256 and checked for its
+# Authenticode signer before it runs. OISF publishes no checksum for its
+# Windows installers (suricata.io/download, read 2026-11-11), so the SHA-256
+# is the one D4 computed on 2026-11-11 from the same URL; the signer check is
+# the vendor's own assurance. Npcap is never installed.
 name: d4-sensor-eval
 on:
   workflow_dispatch:
-    inputs:
-      suricata_msi_url:
-        description: "Suricata Windows installer URL (optional; empty skips the Suricata job)"
-        required: false
-        default: ""
-      suricata_msi_sha256:
-        description: "SHA-256 of that installer, from the vendor's page"
-        required: false
-        default: ""
 permissions:
   contents: read
 jobs:
@@ -38,30 +36,46 @@ jobs:
           name: d4-sensor-eval-builtin
           path: ${{ runner.temp }}/e-d4-01/probe.json
   suricata:
-    if: ${{ inputs.suricata_msi_url != '' && inputs.suricata_msi_sha256 != '' }}
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      MSI_URL: https://www.openinfosecfoundation.org/download/windows/Suricata-8.0.8-1-64bit.msi
+      MSI_SHA256: 7c6b302e51a166c5b87b383ff2550406bc72faba9d690bd3a0532869a95dd084
+      MSI_SIGNER: "CN=Open Information Security Foundation Inc., O=Open Information Security Foundation Inc., L=Boston, C=US"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Fetch the public captures and check each SHA-256
+      - name: Fetch the public captures (each SHA-256 is checked again before use)
         shell: bash
-        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/captures" || echo "one or more captures did not match; those runs will show no eve.json"
-      - name: Offline decoding by Suricata's Windows build
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/captures" || echo "one or more captures did not match; those rows read unknown"
+      - name: Build GT-PCAP's PRP pairs and DNP3 cases (checked against the committed hashes before use)
+        shell: bash
+        run: |
+          for f in dnp3-read dnp3-write dnp3-select-operate dnp3-malformed dnp3-digitalbond-part1 dnp3-digitalbond-part2 modbus modbus-digitalbond-part1 modbus-digitalbond-part2; do
+            python tests/integration/gt_pcap/prp.py "$RUNNER_TEMP/captures/$f.pcap" "$RUNNER_TEMP/gt/prp" || echo "prp.py failed on $f"
+          done
+          python tests/integration/gt_pcap/dnp3_cases.py "$RUNNER_TEMP/gt/dnp3" || echo "dnp3_cases.py failed"
+      - name: Suricata's Windows build, with no Npcap, decoding offline
         shell: pwsh
-        env:
-          MSI_URL: ${{ inputs.suricata_msi_url }}
-          MSI_SHA256: ${{ inputs.suricata_msi_sha256 }}
-        run: ./modules/telemetry/experiments/sensor-windows/suricata.ps1 -Out "$env:RUNNER_TEMP\e-d4-01-suricata" -Python (Get-Command python).Source -Cache "$env:RUNNER_TEMP\captures" -MsiUrl $env:MSI_URL -MsiSha256 $env:MSI_SHA256
+        run: |
+          $fx = 'tests/fixtures/network'
+          ./modules/telemetry/experiments/sensor-windows/suricata.ps1 -Out "$env:RUNNER_TEMP\e-d4-01-suricata" -Python (Get-Command python).Source `
+            -CaptureDirs "$env:RUNNER_TEMP\captures", "$env:RUNNER_TEMP\gt\prp", "$env:RUNNER_TEMP\gt\dnp3" `
+            -HashLists "$fx/public-ot-captures/MANIFEST.tsv", "$fx/gt-pcap/prp-derived.sha256", "$fx/gt-pcap/dnp3/dnp3.sha256" `
+            -MsiUrl $env:MSI_URL -MsiSha256 $env:MSI_SHA256 -MsiSigner $env:MSI_SIGNER
+      - name: "The (a') pipeline: pktmon, etl2pcap, then the engine"
+        if: always()
+        shell: pwsh
+        run: ./modules/telemetry/experiments/sensor-windows/pipeline.ps1 -Out "$env:RUNNER_TEMP\e-d4-01-pipeline" -Python (Get-Command python).Source -Manifest tests/fixtures/network/public-ot-captures/MANIFEST.tsv -SuricataJson "$env:RUNNER_TEMP\e-d4-01-suricata\suricata.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: d4-sensor-eval-suricata
           path: |
             ${{ runner.temp }}/e-d4-01-suricata/suricata.json
-            ${{ runner.temp }}/e-d4-01-suricata/**/eve.json
+            ${{ runner.temp }}/e-d4-01-pipeline/pipeline.json
   prp-engines:
     # E-D4-02: Zeek and Suricata on GT-PCAP's PRP pairs (ADR-0009's PRP row),
     # on Linux as E-A4-01 ran. Reads public captures only. `simulated (Linux)`.
