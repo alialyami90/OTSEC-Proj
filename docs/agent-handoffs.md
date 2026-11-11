@@ -1553,12 +1553,12 @@ Common rules, beside those of every Phase 4 brief:
 - **Objective.** ADR-0009 names Zeek as the provisional engine. Produce the run that lets D1 approve it or turn the choice: Zeek on Linux, with and without the ICSNPP-DNP3 and ICSNPP-Modbus packages, over the labelled captures.
 - **Inputs.** E-A4-01 and E-D4-02 (`modules/telemetry/experiments/`), GT-PCAP and its labels (`tests/fixtures/network/gt-pcap/`, `tests/integration/gt_pcap/`), D6's plan, D2's review of #618 (what each SEL family puts on the wire), D7's `docs/release.md` §4 (written under option (a); its readings of Zeek's and ICSNPP's licences still apply).
 - **Deliverables:**
-  1. **A dispatch-only workflow and experiment folder** under `modules/telemetry/experiments/`, offline, on a Linux runner. It runs a pinned Zeek, once stock and once with the two ICSNPP packages, over: GT-PCAP's 19 DNP3 captures (17 labelled cases, and the training and held-out series), of which three hold group 120 objects (`dnp3-sa`, `dnp3-sa-failed-master` and `dnp3-sa-failed-outstation`); the two cases that D6 adds first under P4-4-R1, DNP3 on a moved outstation port and DNP3 over UDP, which GT-PCAP does not hold yet; the 9 PRP pairs; and the public captures. Suricata runs over the same set, with and without `stream.midstream=true`, as the comparison.
+  1. **A dispatch-only workflow and experiment folder** under `modules/telemetry/experiments/`, offline, on a Linux runner. It runs a pinned Zeek, once stock and once with the two ICSNPP packages, over: GT-PCAP's 19 DNP3 captures (17 labelled cases, and the training and held-out series), of which the five `dnp3-sa` cases hold group 120 objects (`dnp3-sa`, `dnp3-sa-failed-outstation`, `dnp3-sa-failed-before-ack`, `dnp3-sa-failed-unauthorized` and `dnp3-sa-failed-master`); the two cases that D6 adds first under P4-4-R1, DNP3 on a moved outstation port and DNP3 over UDP, which GT-PCAP does not hold yet; the 9 PRP pairs; and the public captures. Suricata runs over the same set, with and without `stream.midstream=true`, as the comparison.
   2. **A table per engine and configuration,** against GT-PCAP's labels, which come from tshark and not from an engine: per case, whether the protocol, the function and the service are recorded; whether DNP3 group 120 is visible per session; whether DNP3 and Modbus are found on a moved port; DNP3 over UDP; what the engine logs of SNMPv3's header fields and of Telnet, FTP and HTTP. A row that did not run is `unknown`.
   3. **Pins:** the engine images or packages and each ICSNPP package by version and hash, with the upstream signature checked where one is published, and a first-use pin called a first-use pin. `zkg` may fetch in the experiment; say in the note that a sensor may not fetch at run time (AP-31), so the packages must be carried.
   4. **A findings note** `docs/phase4/D4-engine-linux-eval.md`, and ADR-0009's evidence updated with the run. D4 states its recommendation; the ADR's engine line changes only on D1's approval in review.
 - **May change:** `modules/telemetry/experiments/`, a new dispatch-only workflow under `.github/workflows/` (authorized here), `docs/decisions/ADR-0009-passive-sensor.md` (evidence and D4's view), `docs/phase4/D4-*.md`.
-- **Acceptance.** Every claim has a run URL and its evidence class (`CI-Linux`). The workflow is dispatch-only, has `permissions: contents: read`, uploads no binary and no capture, and checks every pin before it runs what it fetched. The table's pass conditions are D6's, from the labels.
+- **Acceptance.** Every claim has a run URL and its evidence class (`CI-Linux`). The workflow is dispatch-only, has `permissions: contents: read`, uploads no binary and no capture, and checks every pin before it runs what it fetched. The table's pass conditions are D6's, from the labels, and D6 commits them before the counted run, with the two new cases. **The result is evidence for the engine choice. It is not V-M6 evidence:** V-M6 runs on the real sensor.
 - **Exclusions.** No sensor and no product code. No change to `ci.yml`. No capture of a real network.
 - **Risk.** Offline decoding of files is not live capture on a SPAN or TAP port, and a hosted runner is not the sensor host. Both stay `unknown` and are named.
 - **Branch:** `agent/telemetry-engine-linux-eval`. **Reviewers:** D6 (the pass conditions), D2 (the protocol reading), D7 (the pins and licences).
@@ -1593,13 +1593,13 @@ Common rules, beside those of every Phase 4 brief:
   2. acknowledgement of the committed sequence number, resume after a break, and a bound on how late a record may arrive, with what the node does past it;
   3. what binds a stream to one sensor and one run, so that replay and a cloned sensor are refused (from P4-4-L1);
   4. the sensor's buffer while the link is down: how much, for how long, and what is counted when it overflows (D5's note leaves this to D4);
-  5. time: the sensor host's clock in each record and heartbeat, so that the node can check the skew, and what R6.4's latency is measured against now that capture and intake are on two machines;
+  5. time: the sensor host's clock in each record and heartbeat, so that the node can check the skew. The proposal may add clock fields. It does not define R6.4's latency: that measure is D6's, the alert's time minus the triggering frame's send time (GT-PCAP plan §5);
   6. the wording left over from an on-node sensor: the local pipe, `drops_driver` in `pktmon` terms, and the Windows binding read in `interface_check`, each replaced by its Linux `AF_PACKET` meaning;
   7. the PRP stage's missing pieces: `prp_window_ms` in the coverage settings and the bounds table, and a counter for a "duplicate" that is not byte-identical apart from the LAN ID (D4-69);
   8. a signal for a sensor that heartbeats but is blind (flat packet counters, D4-74), so the node can raise `sensor-blind`.
 - **May change:** `docs/phase4/D4-c13-netobs.md` and a proposal file `docs/phase4/D4-c13-0.2-proposal.md`. The code in `contracts/netobs` changes only after D1 approves the proposal, under the third part's brief.
 - **Acceptance.** Every change bumps the minor and keeps a 0.1 reader. Each clause says which of D3's rules it meets. D6 can write a contract test for each clause from the text alone.
-- **Exclusions.** No change to what an observation, a citation or a coverage statement means. No code.
+- **Exclusions.** No change to what an observation, a citation or a coverage statement means. No change to how any criterion in `docs/verification.md` is measured. No code.
 - **Order.** After P4-4-S2, and with P4-4-L1's note in hand.
 - **Branch:** `agent/telemetry-c13-link`. **Reviewers:** D3, D5, D6 and D2.
 
@@ -1629,7 +1629,7 @@ Common rules, beside those of every Phase 4 brief:
 - **Deliverables:**
   0. **First, because P4-4-S2 waits for them: two GT-PCAP cases with their labels,** DNP3 on an outstation port other than TCP 20000, and DNP3 over UDP (the plan's §2B). Today the outstation listens only on TCP 20000, and `dnp3-known-master-new-port` moves the master's source port (D2 and D6 on #618).
   1. **The veth rig:** a pair of virtual interfaces across two network namespaces on a Linux runner, with a timed replayer on one end, for R6.4's latency.
-  2. **The C-11 rig:** zero frames from the monitoring interface over the whole GT-PCAP replay and the sensor's start and stop, with its negative control, a deliberately misconfigured interface that must show frames. It includes a sender that uses `PACKET_QDISC_BYPASS`, so that an nftables egress rule is tested against the path that skips it.
+  2. **The C-11 rig:** zero frames from the monitoring interface over the whole GT-PCAP replay and the sensor's start and stop, with its negative control, a deliberately misconfigured interface that must show frames. It includes a sender that uses `PACKET_QDISC_BYPASS`, so that an nftables egress rule is tested against a path that may skip it.
   3. **The test-only C13 source,** which turns GT-PCAP's labels into C13 records over a real byte stream. It is never linked into either binary.
   4. **The checker** that compares a product's records with the labels: the pass conditions for V-M6, written from `docs/verification.md` and not from an engine's output.
   5. **Cases with no plan yet, planned here and built where the rig allows:** `CAP_NET_RAW` dropped after the socket opens; a link cut and resumed; a revoked sensor credential refused and alarmed; no inbound port on the node; the spoofing flood; AP-33's key search over the sensor's disk and the link's bytes.
@@ -1651,11 +1651,14 @@ Common rules, beside those of every Phase 4 brief:
 It holds every criterion that the Stage A brief listed under "What item 4 must show at its gate", unchanged, and these, which option (b) adds:
 
 - V-M6 over GT-PCAP runs on **the real sensor and the real node, over the real link**, `simulated`, on the rig of P4-4-R1.
-- C-11's zero-frames result, with its negative control, on the sensor's monitoring interface in CI.
+- C-11 as the Stage A bullet states it, on the sensor's monitoring interface: the full GT-PCAP replay and the sensor's start and stop, the interface up throughout, a virtual interface in a network namespace of its own, with its negative control. The 24 h run stays with H-06 on hardware.
 - R6.4's latency from the timed replay, reported with the clock it was measured against.
 - The link refuses a sensor without the enrolled credential and a revoked one, and the node has no inbound port.
 - A sensor that is cut, blind or flooding never stops SER or Syslog collection.
-- AP-33's key search finds no test secret on the sensor's disk or in the link's bytes.
+- AP-33's key search finds no test secret on the sensor's disk, in the link's bytes, in the node's store, or in anything forwarded.
+- On the real link: a record under another `sensor_id` is refused and alarmed, and a replayed stream is refused.
+- A sensor that heartbeats but is blind raises its alarm, and a sensor clock outside the bound raises the skew alarm.
+- The sensor holds no capability after its capture socket is open (`CAP_NET_RAW` dropped), shown by a test.
 - C13 0.2 and the C7 and C8 additions are merged, with their reviewers' records and D6's contract tests.
 - No safety or security objection is open, and the report says what remains `simulated` and which H-rows wait for a lab machine.
 - The engine and its packages are pinned, and D7's inventory covers the sensor.
