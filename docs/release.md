@@ -1,6 +1,6 @@
 # Release record
 
-Owner: D7 (brief P4-D7-1). Reviewers: D3 (the update path and the supply-chain rows) and D6 (that every claim can be checked).
+Owner: D7 (brief P4-D7-1, in PR #614, not yet on `main`). Reviewers: D3 (the update path and the supply-chain rows) and D6 (that every claim can be checked).
 
 This file records what the two binaries contain and under which licences, and what a release still lacks. It is an inventory, not a release. Nothing here is compliant, certified or release-ready. No release of OTSEC has ever been built for distribution or shipped to a node.
 
@@ -22,7 +22,7 @@ export GOTOOLCHAIN=local GOFLAGS=-mod=readonly CGO_ENABLED=0
 for t in windows/amd64 linux/amd64 linux/arm64; do
   for b in otsec otsec-collector; do
     GOOS=${t%/*} GOARCH=${t#*/} go list -deps \
-      -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Sum}}{{end}}{{end}}' \
+      -f '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Sum}}{{with .Replace}} => {{.Path}} {{.Version}}{{end}}{{end}}{{end}}' \
       ./cmd/$b | sort -u | sed "s#^#$t $b #"
   done
 done
@@ -159,7 +159,7 @@ Each row names the file that was read and its SHA-256. The SPDX identifier is D7
 | `modernc.org/memory@v1.12.1` | `LICENSE-GO` (The Go Authors) | BSD-3-Clause | `2d36597f7117c38b006835ae7f537487207d8ec407aa9d9980794b2030cbc067` |
 | `modernc.org/memory@v1.12.1` | `LICENSE-MMAP-GO` (Evan Shaw) | BSD-3-Clause | `c2eba69f20d05414538c3a5df7694dde392e065ff70882e1625e90f5d6659fff` |
 | `modernc.org/sqlite@v1.61.0` | `LICENSE` | BSD-3-Clause | `c6fe05491a60ae13bcd223088d2705e36dede24e5587226231d2459ada5c4822` |
-| `modernc.org/sqlite@v1.61.0` | `LICENSE-SQLITE` (SQLite, transpiled into `lib/`) | blessing (public-domain dedication) | `8438c9c89b849131ead81d5435cb97fcf052df5b0b286dda8a2d4c29e6cb3fd0` |
+| `modernc.org/sqlite@v1.61.0` | `LICENSE-SQLITE` (SQLite, transpiled into `lib/`) | public domain (the file is titled "SQLite Is Public Domain") | `8438c9c89b849131ead81d5435cb97fcf052df5b0b286dda8a2d4c29e6cb3fd0` |
 
 Files read and set aside:
 
@@ -191,7 +191,7 @@ No linked component asks for a source offer.
 
 ## 4. Third-party programs under ADR-0009's option (a), not shipped today
 
-The owner chose option (a) on 2026-11-10 and said no work starts on it yet (D4-78). None of these programs is in the repository or in either binary. Under AP-31, a program a node runs is shipped in the signed release, is never fetched at install time, and is listed in the inventory.
+The owner chose option (a) on 2026-11-10 and said no work starts on it yet (D4-78). None of these programs is in the repository or in either binary. AP-31, which is proposed, requires that a program a node runs be shipped in the signed release, never be fetched at install time, and be listed in the inventory. No signed release exists.
 
 The four files ADR-0009 hashed on 2026-11-07 were downloaded again on 2026-11-11 from `raw.githubusercontent.com`, and all four hashes are unchanged.
 
@@ -207,22 +207,37 @@ The four files ADR-0009 hashed on 2026-11-07 were downloaded again on 2026-11-11
 
 What shipping each beside the product would ask, from the text read:
 
-- **Npcap.** The file says Npcap "is not open source software and may not be redistributed or used in other software without special permission from the Nmap Project". The free licence allows five systems and forbids redistribution and transfer without written consent. Shipping it in the release needs the "Npcap OEM Redistribution License". It also names three BSD-style components (libpcap, WinPcap, `ieee80211_radiotap.h`) whose acknowledgement text "be added somewhere in the documentation", and points to `npcap.com/src/docs/Npcap-Third-Party-Open-Source.pdf` for that text. **Not read:** the OEM licence's price and terms (D4's work, pending, which D1's brief for this record calls P4-4-A6; on `main` at `b383a242`, P4-4-A6 in `docs/agent-handoffs.md` is D6's GT-PCAP brief), and the third-party PDF (on `npcap.com`, not fetched).
+- **Npcap.** The file says Npcap "is not open source software and may not be redistributed or used in other software without special permission from the Nmap Project". The free licence allows five systems and forbids redistribution and transfer without written consent. Shipping it in the release needs the "Npcap OEM Redistribution License". It also names three BSD-style components (libpcap, WinPcap, `ieee80211_radiotap.h`) whose acknowledgement text "be added somewhere in the documentation", and points to `npcap.com/src/docs/Npcap-Third-Party-Open-Source.pdf` for that text. **Not read:** the OEM licence's price and terms (pending: D4's brief P4-4-S1, which is in PR #614 and not yet on `main`), and the third-party PDF (on `npcap.com`, not fetched).
 - **Suricata.** GPLv2 §1 and §3: with each copy of the executable, give the licence text, and either the complete corresponding source, including "the scripts used to control compilation and installation", or a written offer of it valid for at least three years. §3(c), passing on the offer received, is for noncommercial distribution only. Running Suricata as a separate process does not put OTSEC's binaries under the GPL (ADR-0003, ADR-0009), but the Suricata binary that a release ships carries these duties. **Not read:** the third-party components inside Suricata's source and its Windows installer, and their licences.
 - **Zeek.** `COPYING` is BSD-3-Clause: carry the notice, the conditions and the disclaimer. `COPYING-3rdparty` says it "may not contain the licenses of all third party software contained in Zeek". It lists code under MIT, BSD, Boost-1.0, Apache-2.0, MPL-2.0 (`mozilla-ca-list.zeek`), LGPL-3.0-or-later with its author's permission to use it in Zeek under BSD (Multifast), public domain (SQLite) and the JSON licence, whose term "The Software shall be used for Good, not Evil" is unusual. Which of these reach a Zeek build for Windows is `unknown`: no official Zeek binary for Windows was found (ADR-0009). Shipping Zeek means carrying `COPYING`, the notices in `COPYING-3rdparty` that apply to the build, and the MPL-2.0 file's source.
 - **ICSNPP-DNP3 and ICSNPP-Modbus.** BSD-3-Clause: carry the notice, the conditions and the disclaimer. Their READMEs were not read again for this record.
+
+Security duties beside the licence duties, all **open** (from D3's review of #615). The hashes above are of licence files at branch tips, not of any program version.
+
+- **A pinned version and artifact hash for each program,** with the upstream signature checked when the artifact is taken in.
+- **Who watches each program's advisories.** `govulncheck` covers Go modules only, not Npcap, Suricata, Zeek or ICSNPP (AP-30 asks for a re-check of upstream advisories for each pinned version).
+- **The libraries each program bundles,** with their versions, in the inventory and the SBOM.
+- **Npcap's driver signature, and its installer,** which runs with administrator rights.
+- **Nothing fetched at run time:** no rule set, signature update or package (zkg for ICSNPP, for example) is downloaded by a node. Each comes in the signed release.
 
 ## 5. What does not exist yet
 
 A list only. No design is in this brief.
 
-1. **Release signing and the key's holder.** TB9 requires an offline release key that is not present on central. Who holds it and where it is kept is owed by the owner (`HANDOFF.md`, item 12). No key, real or test, exists for releases. HR-18 (the advisory set's key, recommended never to be the release key) is not decided either.
+1. **Signing of the update package, and the key's holder.** TB9 requires an offline release key that is not present on central. Who holds it and where it is kept is owed by the owner (`HANDOFF.md`, item 12). No key, real or test, exists for signing an update package. HR-18 (the advisory set's key, recommended never to be the release key) is not decided either.
+   - **A separate thing that does exist: the command register's signing** (C7, `contracts/authz/registersig.go`). Its code calls the register's signer a "release key": the node holds `TrustAnchor` release public keys, installed at enrollment or by a signed release and never by central policy. The collector keeps a `FamilyFloor` per device family and refuses a lower revision. The tests sign with keys derived from fixed seeds. That is register signing, not update-package signing. Neither may be cited as evidence for the other.
+   - The key the owner places therefore also decides which commands reach devices, because a register that verifies against a trust anchor names the operations the collector may run (C3, AP-27).
 2. **The SBOM.** None is generated. Proposed format, for D1 to decide: one CycloneDX 1.6 JSON document per release and target, built from `go version -m` of the release binaries, with the non-Go components of option (a) (Npcap, the engine, its decoders) added by hand, and signed with the release.
 3. **The update package's contract.** Not opened. D7 drafts it when D1 opens it, and D1 approves it. D5 builds the node's update verifier.
-4. **The anti-rollback floor.** Not designed. AP-10's three refusals (a tampered package, a signed package below the floor, an unsigned package) have no code and no test.
+4. **The update package's anti-rollback floor.** Not designed. (The register's per-family floor in item 1 is a different floor, and it exists.) AP-10's three refusals (a tampered package, a signed package below the floor, an unsigned package) have no code and no test.
 5. **The record of which versions upgrade and roll back together** (R8.7). No release exists, so it has no rows. One entry is already owed from D4-61: the node's refusal of an `otsec.finding/` minor that `finding.Known` does not name (#507, `3c6b8a7b`) must be in every build a node can roll back to before any node writes C12 0.2 (#511, `a37a5e8c`; `finding.Identifier` is `otsec.finding/0.2` on `main`). No build has ever been released, so no release before `3c6b8a7b` exists. The record must keep any such build out of a rollback set.
-6. **A release build.** ADR-0003 names `CGO_ENABLED=0 go build -trimpath` from a pre-installed pinned toolchain, pinned by `go.mod`'s `go` and `toolchain` lines. `go.mod` has a `go 1.27.3` line and no `toolchain` line. No workflow runs a release build. CI's integration job builds without `-trimpath`, and `cmd/otsec` with the test tag `otsec_testclock`. Neither is a release build.
-7. **The project's own licence.** The repository has no `LICENSE` file. It is the owner's decision, and it decides what the notices file says about OTSEC itself.
+6. **A release build.** ADR-0003 names `CGO_ENABLED=0 go build -trimpath` from a pre-installed pinned toolchain. No workflow runs a release build. CI's integration job builds without `-trimpath`, and builds `cmd/otsec` with the test tag `otsec_testclock`, under which the node accepts the advisory test keys as anchors (`platform/node/advisory_testbuild.go`). Neither is a release build.
+7. **What is pinned and what is not.** Facts and open items, not findings:
+   - **The toolchain.** ADR-0003 says it is pinned with `go.mod`'s `go` and `toolchain` lines. `go.mod` has `go 1.27.3` and no `toolchain` line. Every workflow's `setup-go` step reads `go-version-file: go.mod`. `go mod tidy` removes a `toolchain` line that equals the `go` line: I checked this with Go 1.27.3 in a scratch module, where `toolchain go1.27.3` beside `go 1.27.3` was dropped. So it is ADR-0003's wording that needs correcting, which is D1's job.
+   - **`govulncheck`** runs for `linux/amd64` and `windows/amd64` (`govulncheck.yml`). `linux/arm64` is a target in ADR-0003, but no workflow builds it and nothing checks it.
+   - **The module proxy.** A release build should run with `GOPROXY=off`, so that it uses only modules already verified against `go.sum` (D3's review). Nothing sets this today.
+   - **GitHub Actions** are pinned by tag (`actions/checkout@v4`, `actions/setup-go@v5`, `actions/setup-python@v5`, `actions/upload-artifact@v4`), not by commit SHA. Runners are named `ubuntu-latest` and `windows-latest` in `ci.yml`, `govulncheck.yml` and several dispatch workflows, so the runner image is not pinned either.
+8. **The project's own licence.** The repository has no `LICENSE` file. It is the owner's decision, and it decides what the notices file says about OTSEC itself.
 
 ## 6. How the inventory is kept true
 
@@ -236,8 +251,22 @@ diff recorded.txt generated.txt   # empty when they agree
 ```
 
 - The `h1:` field comes from `go.sum`, so a module bump, a changed hash, or a module that starts or stops being linked on any target shows as a diff.
-- Two more lines belong in the same check: `go version` must report the version in §1.1, and that version must equal `go.mod`'s `go` line.
-- A licence change inside a bumped module does not show in that diff. The check for it recomputes the SHA-256 of every file named in §2 and compares it with the table.
+- **A `replace` directive fails the check.** For a replaced module, `go list` prints the original path and version with an empty `h1:` field. I checked this with Go 1.27.3 in a scratch module that replaced a module with a local folder. So the §1 command also prints `=> <path> <version>` from `.Replace`, and any line containing `=>` fails. The recorded block has none.
+- **The release binaries themselves.** The block is identical with `-tags otsec_testclock` (checked: all six target and binary lists are the same), and the diff never reads a binary. So the check also runs `go version -m` on each release binary, and fails unless:
+  - the output has no `-tags` line (a tagged build prints `build -tags=otsec_testclock`, checked);
+  - `CGO_ENABLED=0`;
+  - `-trimpath=true`;
+  - `vcs.modified=false`;
+  - its `dep` lines equal the block's lines for that target and binary.
+- **The toolchain:** `go version` must report the version in §1.1, and that version must equal `go.mod`'s `go` line.
+- **Licences:** a licence change inside a bumped module does not show in the diff. The check recomputes the SHA-256 of every file named in §2 and compares it with the table.
+- **Not covered by the check** (D3's review):
+  - a build with a `go.work` workspace in effect, so the check must run with `GOWORK=off`;
+  - a newly linked package from a module that is already listed;
+  - `go:embed` assets;
+  - third-party source copied into the repository instead of required as a module;
+  - the hash of the Go toolchain archive itself.
+- **What would gate it.** An edit to this file alone is Markdown-only, so it skips `ci.yml` and `govulncheck.yml` (CLAUDE.md, "Testing and merging"). A CI test of the check would catch a `go.sum` change that leaves this file stale. It would not run on a PR that edits only the block.
 - D6 may turn this into a test. This record does not write it.
 
 Every toolchain or dependency bump updates this file in the same PR, and D7 reads the new component's licence (D7's role file).
