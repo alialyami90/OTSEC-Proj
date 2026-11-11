@@ -168,6 +168,34 @@ def test_a_packet_socket_send_is_seen_with_and_without_qdisc_bypass():
     assert got == [rig_netns.marker_frame("plain"), rig_netns.marker_frame("bypass")]
 
 
+def test_the_bypass_sender_really_skips_the_queueing_layer():
+    """The control for the bypass sender. With a queue on mon0 that drops
+    everything, an ordinary packet-socket send must not arrive and a
+    PACKET_QDISC_BYPASS send must. Otherwise the sender below would be
+    testing the egress rule against the ordinary path twice."""
+    told, sent = {}, {}
+    with rig_netns.Rig() as rig:
+        cap = rig_netns.Capture(rig.rig_ns, TAP).start()
+        rig.up()
+        time.sleep(0.5)
+        rig.qdisc_drop_all()
+        for tag, bypass in (("plain", False), ("bypass", True)):
+            s = rig_netns.packet_socket(rig.sensor_ns, MON, bypass=bypass)
+            try:
+                s.send(rig_netns.marker_frame(tag))
+                told[tag] = "accepted"
+            except OSError as e:
+                told[tag] = errno.errorcode.get(e.errno, str(e.errno))
+            s.close()
+        cap.stop()
+    got = [f[3] for f in cap.arrived()]
+    sent = {t: rig_netns.marker_frame(t) in got for t in ("plain", "bypass")}
+    print(f"MEASURED queue that drops everything on mon0: packet socket: send {told['plain']}, frame arrived "
+          f"{sent['plain']}; with PACKET_QDISC_BYPASS: send {told['bypass']}, frame arrived {sent['bypass']}")
+    assert not sent["plain"], "the queue did not drop an ordinary send, so it is no control"
+    assert sent["bypass"], "the bypass sender did not skip the queueing layer"
+
+
 def test_an_nftables_egress_rule_measured_against_each_send_path():
     """A netdev egress chain that drops everything on mon0, then three ways
     to send: the host's own stack, a packet socket, and a packet socket with

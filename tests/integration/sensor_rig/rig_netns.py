@@ -179,6 +179,12 @@ class Rig:
         for ns in (self.rig_ns, self.sensor_ns):
             subprocess.run(["ip", "netns", "del", ns], capture_output=True)
 
+    def qdisc_drop_all(self):
+        """A queue on mon0 that holds nothing, so the queueing layer drops
+        every frame handed to it. It is the control for the bypass sender:
+        a send that still leaves has skipped that layer."""
+        sh("tc", "-n", self.sensor_ns, "qdisc", "replace", "dev", MON, "root", "pfifo", "limit", "0")
+
     def nft_egress_drop(self):
         """A netdev egress chain on mon0 that drops everything, as a host
         rule against sending would be written. Needs the nft binary."""
