@@ -1456,3 +1456,5 @@ The item 4 exit gate is set in the sensor brief. It holds every criterion the St
 - **Risk.** A status copied from an exit report, or from `docs/requirements.md`, would make the two files circular. Work from the tests and the status tables.
 - **Branch:** `agent/verification-matrix-status`.
 - **Reviewers:** D1. `records-auditor` checks the PR first.
+- **Extended on 2026-11-11 (D4-82).** D6 also corrects two lines of the same file to what is true: the opening "Status" paragraph, and the P3 row of the Principles table. No criterion changes.
+- **Ruling on 2026-11-11 (D4-82).** A row is `e2e` only when its run used the ground truth that its criterion names.
