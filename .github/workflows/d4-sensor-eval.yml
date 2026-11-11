@@ -7,12 +7,14 @@
 # ADR-0007's Windows 10/11 LTSC floor. They are printed to the job log and
 # uploaded as an artifact; raw capture files of the runner's traffic are not.
 #
-# P4-4-A6 (E-D4-01 part 2): the `suricata` job installs Suricata's official
+# P4-4-S1 (E-D4-01 part 2): the `suricata` job installs Suricata's official
 # Windows build, pinned below by URL and SHA-256 and checked for its
 # Authenticode signer before it runs. OISF publishes no checksum for its
 # Windows installers (suricata.io/download, read 2026-11-11), so the SHA-256
-# is the one D4 computed on 2026-11-11 from the same URL; the signer check is
-# the vendor's own assurance. Npcap is never installed.
+# is a first-use pin, not a vendor-published one: the hash of D4's first
+# download from that URL on 2026-11-11, verified before anything runs. The
+# signer check is the vendor's own assurance. Npcap is never installed. No
+# binary or installer is uploaded: the artifact holds two JSON result files.
 name: d4-sensor-eval
 on:
   workflow_dispatch:

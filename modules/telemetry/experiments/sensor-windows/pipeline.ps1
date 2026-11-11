@@ -1,4 +1,4 @@
-# E-D4-01 part 2 (ADR-0009, P4-4-A6): the (a') pipeline end to end on the
+# E-D4-01 part 2 (ADR-0009, P4-4-S1): the (a') pipeline end to end on the
 # runner. pktmon captures while the runner downloads one public capture and
 # replays two recorded sessions' payloads over loopback (replay.py, 127.0.0.1
 # only); `pktmon etl2pcap` converts; Suricata reads the pcapng. Packets are

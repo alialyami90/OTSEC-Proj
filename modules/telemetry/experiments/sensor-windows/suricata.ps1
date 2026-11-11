@@ -1,4 +1,4 @@
-# E-D4-01 part 2 (ADR-0009, P4-4-A6): Suricata's official Windows build, with
+# E-D4-01 part 2 (ADR-0009, P4-4-S1): Suricata's official Windows build, with
 # no capture driver installed. It checks the installer's pinned SHA-256 and
 # its Authenticode signer before running it, installs it, records whether the
 # binary starts with no Npcap (and if not, exactly why), and if it starts,
