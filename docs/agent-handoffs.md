@@ -1551,9 +1551,9 @@ Common rules, beside those of every Phase 4 brief:
 ### P4-4-S2 (D4): E-D4-03, the engine on Linux over GT-PCAP
 
 - **Objective.** ADR-0009 names Zeek as the provisional engine. Produce the run that lets D1 approve it or turn the choice: Zeek on Linux, with and without the ICSNPP-DNP3 and ICSNPP-Modbus packages, over the labelled captures.
-- **Inputs.** E-A4-01 and E-D4-02 (`modules/telemetry/experiments/`), GT-PCAP and its labels (`tests/fixtures/network/gt-pcap/`, `tests/integration/gt_pcap/`), D6's plan, D2's review of #618 (what each SEL family puts on the wire), D7's `docs/release.md` §4.
+- **Inputs.** E-A4-01 and E-D4-02 (`modules/telemetry/experiments/`), GT-PCAP and its labels (`tests/fixtures/network/gt-pcap/`, `tests/integration/gt_pcap/`), D6's plan, D2's review of #618 (what each SEL family puts on the wire), D7's `docs/release.md` §4 (written under option (a); its readings of Zeek's and ICSNPP's licences still apply).
 - **Deliverables:**
-  1. **A dispatch-only workflow and experiment folder** under `modules/telemetry/experiments/`, offline, on a Linux runner. It runs a pinned Zeek, once stock and once with the two ICSNPP packages, over: GT-PCAP's 19 DNP3 cases, which hold group 120; the two cases that D6 adds first under P4-4-R1, DNP3 on a moved outstation port and DNP3 over UDP, which GT-PCAP does not hold yet; the 9 PRP pairs; and the public captures. Suricata runs over the same set, with and without `stream.midstream=true`, as the comparison.
+  1. **A dispatch-only workflow and experiment folder** under `modules/telemetry/experiments/`, offline, on a Linux runner. It runs a pinned Zeek, once stock and once with the two ICSNPP packages, over: GT-PCAP's 19 DNP3 captures (17 labelled cases, and the training and held-out series), of which three hold group 120 objects (`dnp3-sa`, `dnp3-sa-failed-master` and `dnp3-sa-failed-outstation`); the two cases that D6 adds first under P4-4-R1, DNP3 on a moved outstation port and DNP3 over UDP, which GT-PCAP does not hold yet; the 9 PRP pairs; and the public captures. Suricata runs over the same set, with and without `stream.midstream=true`, as the comparison.
   2. **A table per engine and configuration,** against GT-PCAP's labels, which come from tshark and not from an engine: per case, whether the protocol, the function and the service are recorded; whether DNP3 group 120 is visible per session; whether DNP3 and Modbus are found on a moved port; DNP3 over UDP; what the engine logs of SNMPv3's header fields and of Telnet, FTP and HTTP. A row that did not run is `unknown`.
   3. **Pins:** the engine images or packages and each ICSNPP package by version and hash, with the upstream signature checked where one is published, and a first-use pin called a first-use pin. `zkg` may fetch in the experiment; say in the note that a sensor may not fetch at run time (AP-31), so the packages must be carried.
   4. **A findings note** `docs/phase4/D4-engine-linux-eval.md`, and ADR-0009's evidence updated with the run. D4 states its recommendation; the ADR's engine line changes only on D1's approval in review.
@@ -1634,15 +1634,15 @@ Common rules, beside those of every Phase 4 brief:
   4. **The checker** that compares a product's records with the labels: the pass conditions for V-M6, written from `docs/verification.md` and not from an engine's output.
   5. **Cases with no plan yet, planned here and built where the rig allows:** `CAP_NET_RAW` dropped after the socket opens; a link cut and resumed; a revoked sensor credential refused and alarmed; no inbound port on the node; the spoofing flood; AP-33's key search over the sensor's disk and the link's bytes.
   6. **H-rows, written and not run,** for what only a lab machine can show: a real NIC on a SPAN or TAP port, VLAN tags under NIC offload, PRP live on both LANs, HSR, and the 24 h run (H-06).
-- **May change:** `tests/`, `docs/verification.md` (plans and H-rows), `docs/phase4/D6-*.md`, `.github/workflows/a6-*.yml` and, authorized here, new `integration-long` entries in `ci.yml` for the rigs' own self-tests.
+- **May change:** `tests/`, `docs/verification.md` (plans and H-rows), `docs/phase4/D6-*.md`, `.github/workflows/a6-*.yml` and, authorized here, new `integration-long` entries in `ci.yml` for the rigs' own self-tests. `tests/fixtures/network/` is D4's path: D1 authorizes the two new GT-PCAP cases and their labels there, and D4 accepts each label file. A PR that touches GT-PCAP also needs `a6-gt-pcap` green.
 - **Acceptance.** Each rig has a self-test that fails when the rig is broken: the negative control shows frames, the replayer's timing is checked against its own clock, and the checker fails on a planted wrong record. Evidence class `CI-Linux`.
 - **Exclusions.** No product code and no sensor. No real NIC of a runner as a monitoring interface. No lowering of any criterion.
 - **Branch:** `agent/verification-sensor-rig`. **Reviewers:** D4, D5, D3 and D1.
 
 ### Order
 
-1. **Now, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3), P4-4-L3 (D5) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them.
-2. **Then** P4-4-L2 (D4), with L1's note and S2's result.
+1. **Now, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them.
+2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4), the second also with S2's result.
 3. **D1 approves** the engine (from S2) and the link's contracts (from L1, L2 and L3), and brings the owner a recommendation on the sensor's host: its hardware, its operating system, and whether the project ships an image or the site installs the engine (D7's review of #618 gives what each costs in licence duties).
 4. **The third part:** the implementation briefs for the sensor, the node's dialer and enrolment, each against the approved contracts, with D6's contract tests.
 

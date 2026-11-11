@@ -54,7 +54,7 @@ In older records A2, B2 and C2 mean the role D2 now holds. Contract names (C1 to
 ## Open items on 2026-11-10 (`main` at `82daa04`, after #604 and D4-76)
 
 1. **Nothing is in flight.** Your last merged work is C2 0.9 (#547, D4-69) and the note `docs/phase4/D2-sel-network-services.md`.
-2. **When the sensor is briefed** (after the owner's ADR-0009 choice): give the protocol reading of the sensor's decoders and of GT-PCAP's labels for DNP3, Modbus/TCP, Telnet, FTP, HTTP and SNMP. D6's queued GT-PCAP edits name one near-miss class that waits on you (a read-only master's reconnect).
+2. **The sensor's contracts are briefed** (D4-86; the owner chose option (b), D4-85), and you review P4-4-S2 and P4-4-L2. When its implementation is briefed: give the protocol reading of the sensor's decoders and of GT-PCAP's labels for DNP3, Modbus/TCP, Telnet, FTP, HTTP and SNMP. D6's queued GT-PCAP edits name one near-miss class that waits on you (a read-only master's reconnect).
 3. **The DNP3 Secure Authentication text is not held** (IEEE 1815's SA clause or IEC 62351-5). The owner has been asked. Until then the SA rule keys on g120v7 in function 33 or 131, with the codes and the sequence width unknown (D4-68).
 4. **Carried:** C1 0.4, the SNMP profile's placeholders, and the SEL-2731/2741 profile from measurement after H-17.
 5. **Owed by the owner:** which SEL switches the sites run; whether R6.7's insecure list takes the candidates in your note; H-13, H-16 and H-17; authorization before any device contact.
