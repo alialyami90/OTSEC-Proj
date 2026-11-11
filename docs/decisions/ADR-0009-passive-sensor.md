@@ -1,6 +1,6 @@
 # ADR-0009: The passive sensor: which engine, and where it runs
 
-- Status: **accepted, 2026-11-11 (D4-85): the owner chose option (b)**, a separate Linux sensor at each site that feeds the node, on D1's recommendation and P4-4-S1's evidence. This supersedes D4-78's choice of option (a). **The engine is not yet approved:** Zeek is the provisional engine, and D1 approves it after E-D4-03 (brief P4-4-S2), as "Decision" says. HR-20 closes with this decision, and reopens if (a) or (c) is ever reopened. History: proposed from 2026-11-07. The owner chose (a) on 2026-11-10 (D4-78), with the engine and the Npcap licence left open (D4-83).
+- Status: **accepted, 2026-11-11 (D4-85): the owner chose option (b)**, a separate Linux sensor at each site that feeds the node, on D1's recommendation and P4-4-S1's evidence. This supersedes D4-78's choice of option (a). **The engine is Zeek 9.0.1 with the project's script, approved on E-D4-03 (run 43092601088), D1 on #637,** as "Decision" says. One turning condition is met (Modbus/TCP on a moved port) and does not turn the choice; it is a recorded high risk, not closed. HR-20 closes with this decision, and reopens if (a) or (c) is ever reopened. History: proposed from 2026-11-07. The owner chose (a) on 2026-11-10 (D4-78), with the engine and the Npcap licence left open (D4-83).
 - Date: 2026-11-07; decided 2026-11-11
 - Deciders: D1, with D4 (author), D5 (the process and the node's side) and D3 (the boundary). D2 reviews protocol interpretation, D6 testability. The owner decides the two questions in "What decides it".
 - Related: R6.1 to R6.7, V-M6, C-09, C-11, H-06; ADR-0002 item 2 (b), ADR-0007; `docs/phase0/A4-telemetry-feasibility.md` §3 and §4 (E-A4-01); threat model TB6, AP-30 to AP-36, SC-19, HR-20 (#523); D4-66, D4-67, D4-78; brief P4-4-A4 in `docs/agent-handoffs.md`, and brief P4-4-S1 (D4-83, #614)
@@ -152,19 +152,19 @@ The two engines gave identical rows, so each row stands for both.
 
 What ran, every artifact pinned and checked before it ran:
 - Zeek 9.0.1, `zeek/zeek@sha256:71c1d6b6…dfdc92`, in three configurations: stock; with ICSNPP-DNP3 `b31dbade` and ICSNPP-Modbus `6dd3dab1`; and with the project's own script on Zeek's documented DNP3 events.
-- Suricata 8.0.8 as the comparison, `jasonish/suricata@sha256:a8277a84…be1f`: an image OISF does not publish, accepted for this comparison only.
+- Suricata 8.0.8 as the comparison, `jasonish/suricata@sha256:a8277a84…be1f`: an image OISF does not publish, accepted for this comparison only and never in a sensor.
 
 Against the three conditions in "What would turn the choice", each row being D6's:
 
 | Configuration | DNP3 group 120 (11) | DNP3 on a moved port (4) | Modbus on a moved port (3) | DNP3 over UDP (4) |
 | --- | --- | --- | --- | --- |
-| Zeek, stock | fails: 0 pass, 1 unknown | meets | fails; its control on port 502 passes | meets |
+| Zeek, stock | fails: 0 pass, 10 fail, 1 unknown | meets | fails; its control on port 502 passes | meets |
 | Zeek with the project's script | meets: 11 of 11 | meets | fails; control passes | meets |
-| Zeek with ICSNPP | fails: 0 pass, 1 unknown | meets | fails; control passes | meets |
+| Zeek with ICSNPP | fails: 0 pass, 10 fail, 1 unknown | meets | fails; control passes | meets |
 | Suricata | meets | fails: 0 of 4 | fails; control fails too | fails: 0 of 4 |
 | Suricata, midstream | meets | fails: 0 of 4 | fails; control passes | fails: 0 of 4 |
 
-**No configuration meets all three.** Every configuration fails Modbus/TCP on a moved port (the derived capture: port 502 moved to 15020, no handshake). Zeek names nothing there and passes the same capture on 502.
+**No configuration meets all three,** reading the moved-port condition per protocol, DNP3 and Modbus each, as V-M6 does (it lists unauthenticated Modbus/TCP). Every configuration fails Modbus/TCP on a moved port (the derived capture: port 502 moved to 15020, no handshake). Zeek names nothing there and passes the same capture on 502.
 
 **Stock Zeek's and ICSNPP's group 120 failures are by construction of their logs.** `dnp3.log` holds no object, and ICSNPP logs object headers only for READ and RESPONSE. On the same parser, the project's script shows every group 120 message. Its log is the project's and not the engine's own (D6's rule 8; D1 on #625).
 
@@ -173,18 +173,17 @@ Against the three conditions in "What would turn the choice", each row being D6'
 - **The PRP pairs.** Every configuration counts both LAN copies, as in E-D4-02.
 - **Not shown on any capture:** FTP and SNMPv3. Telnet, HTTP, IEC 104, MMS and GOOSE are reported with no pass condition.
 
-**D4's recommendation, for D1's decision, not a decision.**
-- Zeek 9.0.1 with the project's script as the engine.
-- ICSNPP is not carried, on this evidence.
-- Suricata stays the comparison.
-- The Modbus moved-port gap is closed first by a per-site list of Modbus server ports from the asset table, in the sensor's site configuration. An unlisted port is a stated visibility limit. A Modbus content signature in the project's script would come only as an addition, with its false-positive rate measured. Neither is built, and each test is named in the note's section 5.6.
+**What the run decided:** D1's ruling on #637 is under "The engine under (b)" below. D4's recommendation and the reviews behind the ruling are in the note's section 5.6.
 
 **What the run does not show:**
 - live capture on a SPAN or TAP port, or the sensor host;
 - a real relay's traffic; the group 120 bodies are filler;
 - an outstation that starts a UDP flow;
 - a stream that never ends, back-pressure, a stalled writer or a malformed record on the pipe;
-- the engine under the sensor's own account.
+- the engine under the sensor's own account;
+- DNP3 over UDP on a moved port: the UDP case is on the registered port 20000;
+- any rate, drop or latency (R6.4 is the timed-replay rig's);
+- what the captures do not represent (D2's table in `docs/phase4/D6-engine-run-pass-conditions.md` §7).
 
 **This is evidence for the engine choice, not V-M6 evidence.**
 
@@ -215,14 +214,26 @@ The options split on two questions only the owner can answer, and on two experim
 - **(c′) rested on `pktmon`**, whose fitness on a SPAN or TAP port, under a less-privileged account and with layer-2 frames intact is `unknown`. It would also have brought forward decoder work for DNP3 and Modbus that stock engines already do.
 - **Under (b), hostile input is parsed off the machine that holds the node's store, its keys and the collector's route** (AP-30). A decoder exploit holds the sensor, not the node. It can still lie to the node (AP-34, AP-36).
 
-### The engine under (b): provisional
+### The engine under (b)
 
-**Zeek is the provisional engine, with the ICSNPP-DNP3 and ICSNPP-Modbus packages as candidates. D1 approves it after an offline Linux run, E-D4-03, under brief P4-4-S2,** which D1 issues next and which is not built here (D1's ruling on #618). E-D4-03 runs Zeek with and without the two ICSNPP packages over three sets of captures:
+**The engine: Zeek 9.0.1 with the project's script, approved on E-D4-03 (run 43092601088), D1 on #637.** Before E-D4-03, Zeek was the provisional engine, with the ICSNPP-DNP3 and ICSNPP-Modbus packages as candidates, to be approved after an offline Linux run under brief P4-4-S2 (D1's ruling on #618). E-D4-03 ran Zeek, stock, with the two ICSNPP packages and with the project's script, over three sets of captures:
 - GT-PCAP's DNP3 cases, including group 120, DNP3 on a moved outstation port and DNP3 over UDP (its ports by inference, settled by H-23; D2), which GT-PCAP holds since #623, and the derived Modbus/TCP case on a moved port (D6 and D2 on #618);
 - GT-PCAP's PRP pairs;
 - the public captures.
 
 **What would turn the choice.** If Zeek, with or without ICSNPP, cannot show DNP3 group 120 per session, V-M6's "DNP3 without SA" row fails on Zeek. The same holds if it cannot find DNP3 or Modbus on a moved port, or cannot read DNP3 over UDP where the sites use it. D1 decides on E-D4-03's result and records it here. E-D4-03 has run (2026-11-11, run 43092601088): no configuration meets all three, and every one fails Modbus on a moved port ("E-D4-03 results" under Evidence).
+
+**D1's ruling on #637.**
+- **The engine is Zeek 9.0.1 with the project's script.** It is the only configuration that passes every DNP3 group 120 row (11 of 11), every DNP3 moved-port row (4 of 4) and every DNP3-over-UDP row (4 of 4). The script is the project's own code, which the sensor ships and the project must test and keep (D6's rule 8).
+- **One turning condition is met, and the choice does not turn.** No configuration identifies Modbus/TCP on a moved port, Zeek included. That condition does not turn the choice, because no engine tested meets it, and Suricata fails more: DNP3 on a moved port and DNP3 over UDP as well. **The gap is not closed.**
+- **The gap is a recorded high risk.** D3 writes it in the threat model. Two things are owed before item 4's gate:
+  - a tested signal for a flow the engine names nothing for (`undecoded`), with `unknown-pair`, so that an unidentified server on a moved port is at least visible, with D6's legs and controls. On such a server neither the insecure flag nor `unauthorized-write` can fire, and `unknown-pair` only after acknowledgement (D6);
+  - a Modbus/TCP content signature in the project's script, as a measured experiment: its detection on `modbus-moved-port`, and its false-positive rate on a corpus with more non-Modbus binary traffic. It is adopted only on that measurement.
+- **A per-site Modbus port list does not close the gap.** Under D6's pinned conditions, a service found because the engine was told the port fails (`fail (told the port)`), as C13 §11 fails a `service` with `basis: port` on a moved port. The list also misses a server the asset table does not know. It may be offered later as an aid for known servers. Zeek's own Modbus port set would carry it; ICSNPP-Modbus's `additional_tcp_ports` would bring ICSNPP back (D7).
+- **ICSNPP-DNP3 is dropped.** The project's script passes every Objects row (44 of 44) and every group 120 row, and ICSNPP passes 26 of 44 and none.
+- **ICSNPP-Modbus is under evaluation.** On the public `modbus-digitalbond-part2` only the ICSNPP configuration names Modbus, and no pass condition reads that. Its licence duties stay in D7's record until it is decided.
+- **Owed in GT-PCAP:** DNP3 over UDP on a moved port. Zeek's UDP pass came on the registered port 20000 (D2).
+- **Suricata is the comparison only,** and its image is never used in a sensor.
 
 D4's reasons for Zeek:
 
@@ -237,20 +248,20 @@ D4's reasons for Zeek:
    - The engine is a separate program, so it does not put the node's binaries under its licence. But the project's own sensor code (the PRP discard stage, the redaction and the link to the node) shares the sensor host with the engine. So a separate process settles only part of the GPLv2 question for Suricata, and D7 settles the rest if Suricata is ever chosen (D7 on #618).
 4. **Who installs and patches it.** Zeek publishes Linux binaries (through the openSUSE Build Service) and container images (`desk`, zeek.org, 2026-11-11; E-A4-01 and E-D4-02 ran `zeek/zeek`). Ubuntu's archive carries Suricata (E-D4-02 installed it with `apt`). Whether the project ships the sensor's Linux image with the engine in it, or the owner's organization installs both, is open (below). Either way, AP-31 (1) and `docs/release.md` §4 require the engine and its packages at a pinned version, never fetched at run time. That includes ICSNPP, which `zkg` would otherwise download. AP-31 is proposed, and was first written for the node (D7 on #618). As it now reads (D3, P4-4-L1, #624), it covers the sensor host: the engine, each engine package and the project's sensor programs pinned, carried by the platform's signed release, listed in the SBOM, and never fetched at install time or at run time, with the engine's own fetchers, `zkg` among them, absent or off. If the site installs the engine itself, this rests on the site's procedure (HR-21).
 
-**Suricata stays a possible later addition** for signature rules, as A4 §3 proposed, and the fallback if E-D4-03 turns the choice. It is not part of this decision.
+**Suricata stays a possible later addition** for signature rules, as A4 §3 proposed. E-D4-03 did not turn the choice. It is not part of this decision.
 
-**ICSNPP is not shown.** No experiment in this repository installs ICSNPP: there is no `zkg` or `icsnpp` under `modules/telemetry/experiments/`. What ICSNPP-DNP3 and ICSNPP-Modbus decode, and whether they work with the Zeek version the project pins, are `unknown` until E-D4-03 (D6 and D2 on #618).
+**ICSNPP, as E-D4-03 shows it.** ICSNPP-DNP3 `b31dbade` and ICSNPP-Modbus `6dd3dab1` ran with Zeek 9.0.1, each file checked before it was loaded (`modules/telemetry/experiments/engine-linux/`). ICSNPP-DNP3 is dropped, and ICSNPP-Modbus is under evaluation (D1's ruling above).
 
 **What the engine choice does not claim** (D2 on #618):
 - Zeek's built-in analyzers are shown for DNP3/TCP and Modbus/TCP only (E-A4-01).
-- Telnet, FTP, HTTP, SNMP, NTP and DNP3 over UDP are not shown on any capture.
+- FTP, SNMP and NTP are not shown on any capture. Telnet and HTTP are on one public capture each, with no pass condition reading them (E-D4-03). DNP3 over UDP is shown on one GT-PCAP arrangement on the registered port 20000, and not on a moved port.
 - SEL ASCII and the SEL Fast protocols inside Telnet, IEC 61850 MMS, GOOSE and SV, IEC 60870-5-104 and PTP need the project's own decoder under every option.
 
 **Still `unknown` for the engine under (b):**
-- ICSNPP itself, as above.
-- Whether Zeek and ICSNPP expose DNP3 group 120 per session (protocol point 3) and SNMPv3's header fields (point 4).
-- Whether Zeek finds DNP3 and Modbus by content on a non-standard port (point 2).
-- DNP3 over UDP.
+- ICSNPP-Modbus, under evaluation (above).
+- SNMPv3's header fields (point 4): E-D4-03 had no SNMPv3 capture either engine reads. Group 120 per message is shown with the project's script (E-D4-03).
+- Modbus/TCP on a non-standard port: not found by content (E-D4-03); a recorded high risk (above). DNP3 is found (point 2).
+- DNP3 over UDP on a moved port, and a UDP flow that the outstation starts.
 - What Zeek decodes of any protocol the sites turn out to use beyond the two shown.
 - Whether Zeek can run with `CAP_NET_RAW` only and drop it after its socket opens (AP-31 (4)).
 - Zeek's own send paths. It links libpcap, which can send (AP-31 (3)), and Zeek has a NetControl framework for acting on the network (from Zeek's design; its documentation was not read for this ADR). Which send paths a sensor build can reach is `unknown`, and C-11's zero-frames test is the check (AP-32).
