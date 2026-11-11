@@ -18,7 +18,10 @@ A row passes only when all of these hold:
 A row whose logs are missing reads "not run". The script exits 1 if any
 row is "not run" or fails, so a missing engine never reads as a pass.
 
-Usage: python -I compare.py OUT_DIR LABEL_DIR  (as run.sh lays them out)
+Usage: python -I compare.py OUT_DIR LABEL_DIR [CONFIG ...]  (as run.sh lays
+them out; the configurations default to zeek and suricata. A configuration
+whose name starts with "zeek" is read as Zeek, any other as Suricata. E-D4-03
+passes its five, from ../engine-linux/run.sh.)
 """
 import json
 import os
@@ -84,14 +87,15 @@ def labels(path):
     return out
 
 
-def main(out, label_dir):
+def main(out, label_dir, configs=("zeek", "suricata")):
     stems = sorted({d[: -len("-prp-ab")] for d in os.listdir(out) if d.endswith("-prp-ab")})
     print("| capture | engine | labelled flows | flows -a | flows -ab | packets -a | packets -ab | once | packets equal | services equal | labels met | pass |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     bad = 0
     for s in stems:
         want = labels(os.path.join(label_dir, s + "-prp-ab.tsv"))
-        for name, read in (("zeek", zeek), ("suricata", suricata)):
+        for name in configs:
+            read = zeek if name.startswith("zeek") else suricata
             a = read(os.path.join(out, s + "-prp-a", name))
             ab = read(os.path.join(out, s + "-prp-ab", name))
             if a is None or ab is None or want is None:
@@ -114,4 +118,4 @@ def main(out, label_dir):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1], sys.argv[2]))
+    sys.exit(main(sys.argv[1], sys.argv[2], tuple(sys.argv[3:]) or ("zeek", "suricata")))

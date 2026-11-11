@@ -1,0 +1,65 @@
+# D4's E-D4-03 for ADR-0009 (brief P4-4-S2, D4-86): the provisional engine,
+# Zeek, on Linux, stock, with a probe script and with the ICSNPP-DNP3 and
+# ICSNPP-Modbus packages, beside Suricata with and without midstream, over
+# GT-PCAP and the public captures. It can only be started by hand
+# (workflow_dispatch) and is not a project CI pipeline. Offline files only:
+# each engine runs in a container pinned by digest with --network none, and
+# nothing captures a network or contacts a device. Every fetched thing is
+# pinned and checked before it runs (modules/telemetry/experiments/
+# engine-linux/pins.env, icsnpp.sha256, extra-captures.tsv, MANIFEST.tsv).
+# Only the tables and versions are uploaded: no capture, no engine log, no
+# binary. Evidence class: simulated (Linux), CI-Linux.
+#
+# The `dnp3-public` job installs no package: Docker and Python are on the
+# hosted image. Only the `prp` job uses apt, for tshark 4.2.2, the labeller
+# that prp_check.py pins; Ubuntu's archive signs it (apt checks the
+# signature), and prp_check.py refuses any other version.
+name: d4-engine-linux-eval
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dnp3-public:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Fetch the public captures (pinned SHA-256s)
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; run.sh checks each again and drops it, and its rows read not run"
+      - name: GT-PCAP cases (DNP3, and the derived Modbus moved port with its control), rebuilt and checked, under every configuration
+        run: sh modules/telemetry/experiments/engine-linux/run.sh dnp3 "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - name: Public and extra captures under every configuration
+        run: sh modules/telemetry/experiments/engine-linux/run.sh public "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: d4-engine-linux-eval-dnp3-public
+          path: |
+            ${{ runner.temp }}/e-d4-03/dnp3.md
+            ${{ runner.temp }}/e-d4-03/public.md
+            ${{ runner.temp }}/e-d4-03/versions.txt
+          if-no-files-found: warn
+  prp:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install tshark (the labeller prp_check.py pins)
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Fetch the public captures (pinned SHA-256s)
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; the PRP step checks the nine it needs"
+      - name: PRP pairs under every configuration, checked by E-D4-02's compare.py
+        run: sh modules/telemetry/experiments/engine-linux/run.sh prp "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: d4-engine-linux-eval-prp
+          path: |
+            ${{ runner.temp }}/e-d4-03/prp.md
+            ${{ runner.temp }}/e-d4-03/versions.txt
+          if-no-files-found: warn
