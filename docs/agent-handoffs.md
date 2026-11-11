@@ -1517,3 +1517,16 @@ Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HAND
 - **Inputs.** D4-83's account of the first local run, and `HANDOFF.md`'s section on the project folder.
 - **Acceptance.** On the owner's PC, not elevated, the affected packages pass, or skip the elevation-only tests with their message, and no folder is left in the temp directory. Each fixed test fails again when its fix is reverted or its rule is broken. All nineteen `ci` jobs and `govulncheck` are green, and on CI the elevation tests still run.
 - **Exclusions.** No weakening of what any test asserts. No elevated run.
+
+### P4-D4-F26 (D4): the forwarder's rsyslog tests run in CI and cannot skip there (issued 2026-11-11, D4-84)
+
+- **Objective.** The three tests of `modules/telemetry/forward/rsyslog_test.go` run on every pull request in the Linux `go` job, against the `rsyslogd` that Ubuntu's packages install, and fail if rsyslog is missing. Then find out whether the forwarder passes them (F-026).
+- **Inputs.** D6's diagnosis on #619 (`4776b0da` and `1a9439f3`), and how `tests/integration/slice` starts a stock rsyslogd.
+- **Deliverables:**
+  1. The set-up fixed, so the installed `rsyslogd` starts under the runner's AppArmor profile, or a copy of it does, with the test saying which and checking the copy against the installed binary.
+  2. In the Linux leg of the `go` job: `rsyslog` and `rsyslog-relp` installed with their versions printed, and `OTSEC_RSYSLOG_REQUIRED=1` for the `go test` step. `fail-fast: false` on the matrix.
+  3. The result. If the forwarder fails a test, that is a product finding: D4 stops, loosens nothing, and reports to D1.
+- **May change:** `modules/telemetry/forward/rsyslog_test.go`, and, authorized by D1 here for those lines only, `.github/workflows/ci.yml`.
+- **Acceptance.** Every check green on the PR's head, with the Linux `go` log showing each of the three tests' `--- PASS`. With rsyslog absent and the variable set, the tests fail.
+- **Exclusions.** No change under `tests/`. No weakening of what the tests assert.
+- **Branch:** `agent/telemetry-rsyslog-tests-run`. **Reviewers:** D6 and D5.

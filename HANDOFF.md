@@ -28,7 +28,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## Open PRs and branches
 
-- **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance and the owner's word (D4-82). In flight on 2026-11-11 (D4-83): D4 on P4-4-S1, D7 on P4-D7-1, D6 on P4-D6-H5, and D5 and D6 on P4-PC-1. D6's P4-D6-M1 is done and waits in #613. Each role's open items are in its file in `.claude/agents/`.
+- **Open PRs:** list them with `gh pr list`. #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80), merged on 2026-11-10 as `cdbf61e8`. A PR that D1 wrote merges on D6's acceptance and the owner's word (D4-82). On 2026-11-11 at 15:10Z (D4-84): #615 (D7), #616 (D5) and #617 (D6) are merged. Open: #612, #613 and #614, reviewed, waiting for the owner's words; #618 (D4, the sensor's evidence), passed by D3, waiting for the owner's confirmation and choice; #619 (D6, the closing legs), four legs green, waiting for #620; #620 (D4, the forwarder's rsyslog tests), blocked by the hosted runners' failure to reach Ubuntu's package archive. Each role's open items are in its file in `.claude/agents/`.
 - **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), with the script `reference/carried/delete-merged-branches-2026-11-06.ps1`, in which each delete is leased to a recorded SHA. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner approved the first two groups on 2026-11-11, and both scripts ran that day: 207 branches deleted, 49 left (D4-83). The third group stays.
 
 ## Waiting on the owner
@@ -46,6 +46,10 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 11. **ADR-0007** (Windows site node) is still `proposed`.
 12. **D7 and D8** (D4-79): D7's first brief is in flight (D4-83). Still owed: the word to start D8's first brief, and who holds the release key and where it is kept (TB9).
 13. **The words to merge a PR that D1 wrote** (D4-82). On 2026-11-11 these are #612 and #613, which merge together, and then #614.
+14. **The sensor: the choice among (a), (b) and (c′)** with D4's findings and Npcap's prices in front of them, and whether the platform serves their own sites only or is delivered to others (D4-84).
+15. **Whether scratch mutant branches may be pushed** (D4-84). Until then D6's mutants for the closing legs are owed.
+16. **A `LICENSE` and a `SECURITY.md`** for the public repository (D4-84).
+17. **Optional, on the PC:** removing the fourteen `Allow` firewall rules that the approved prompts left for temporary test programs. It needs an elevated shell (D4-84).
 
 ## Test policy
 
@@ -55,6 +59,8 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 Limits on the PC:
 
+- **Run no package in full that holds a listener on an address other than loopback** (`tests/security`, `tests/integration/syslogreceive`). Each run raises a Windows Firewall prompt for the owner, and one test listens on the PC's own LAN address. Run tests by name with `-run`; GitHub Actions runs the full set (D4-84).
+- A run that is not elevated skips 162 of `platform/node`'s tests. State the skip count with any result from the PC (D4-84).
 - Install nothing beyond what the owner approved: a portable Go inside the project folder, and a Python venv inside it with `pytest` and `asyncssh==2.24.1`. No installer, no admin rights requested, no system settings, no permanent PATH change, no pip install outside the venv.
 - A run that creates Windows services happens only in the owner's own elevated session, with the owner present, or on the GitHub-hosted runner.
 - Every endpoint is the simulator on loopback. No device, and no site network.
