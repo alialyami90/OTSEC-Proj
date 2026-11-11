@@ -7,8 +7,10 @@ object headers are tshark's fields. What this file adds is C13's rules for
 turning those fields into rows (docs/phase4/D4-c13-netobs.md section 4), so a
 reviewer can check each row against tshark's own output:
 
-- `flow`: one per TCP conversation; packets and bytes are tshark's frame
-  count and the sum of frame.len (C13 section 4.3, `bytes`).
+- `flow`: one per TCP connection or UDP conversation; packets and bytes
+  are tshark's frame count and the sum of frame.len (C13 section 4.3,
+  `bytes`). A UDP flow has no direction (`none`, C13 section 4.1): its
+  `src` is the first datagram's sender.
 - `service`: one per (server, l4, port, protocol).
 - `function`: one per (flow, code, sorted objects, sa), at its first
   occurrence in the flow (C13 section 4.2), for requests only. DNP3 0, 129,
@@ -28,6 +30,13 @@ reviewer can check each row against tshark's own output:
 - `case`: the generator's case rows (dnp3_cases.py), each checked here
   against tshark: its first frame must be a request, and the sa this file
   derives for it must equal the sa the case states.
+
+A capture named under `decode` in dnp3-cases.json is not DNP3 on TCP 20000.
+The labeller is told its transport, and the outstation's port as the asset
+table's settings give it (plan section 2B), and reads that port as DNP3
+with tshark's -d option. A UDP capture is read with the udp.* fields in
+place of the tcp.* ones. Each label's header names the fields and the
+options used for it.
 
 Usage: python gtlabel.py DIR   (reads DIR/dnp3-cases.json and DIR/*.pcap,
 writes DIR/<name>.tsv; exits 1 on any disagreement or a different tshark)
@@ -52,25 +61,46 @@ COLUMNS = ["kind", "src", "dst", "sport", "dport", "l4", "protocol", "version", 
            "rules", "context", "note"]
 
 
-def tshark_rows(path):
-    out = subprocess.run(["tshark", "-r", path, "-T", "fields", "-E", "separator=\t", "-E", "occurrence=a",
-                          "-E", "aggregator=,", *sum((["-e", f] for f in FIELDS), [])],
+TCP_20000 = {"l4": "tcp", "port": 20000}  # every capture not named under `decode`
+
+
+def fields_for(l4):
+    """FIELDS for a TCP capture; for UDP, the udp.* ports and no TCP flags."""
+    if l4 == "tcp":
+        return FIELDS
+    return [f.replace("tcp.", "udp.") for f in FIELDS if not f.startswith("tcp.flags.")]
+
+
+def options_for(decode):
+    """Tshark's options for a capture: none for DNP3 on port 20000, else the
+    outstation's port read as DNP3."""
+    if decode["port"] == 20000:
+        return []
+    return ["-d", f"{decode['l4']}.port=={decode['port']},dnp3"]
+
+
+def tshark_rows(path, decode=TCP_20000):
+    fields = fields_for(decode["l4"])
+    out = subprocess.run(["tshark", *options_for(decode), "-r", path, "-T", "fields", "-E", "separator=\t",
+                          "-E", "occurrence=a", "-E", "aggregator=,", *sum((["-e", f] for f in fields), [])],
                          check=True, capture_output=True, text=True).stdout
-    return [dict(zip(FIELDS, ln.split("\t"))) for ln in out.splitlines()]
+    return [dict(zip(fields, ln.split("\t"))) for ln in out.splitlines()]
 
 
-def wire_problems(path):
-    """Tshark's own verdict on every frame: IPv4 and TCP checksums good, no
-    DNP3 link CRC flagged, nothing malformed."""
-    fields = ["frame.number", "ip.checksum.status", "tcp.checksum.status", "dnp3.hdr.CRC.incorrect", "_ws.malformed"]
-    out = subprocess.run(["tshark", "-o", "ip.check_checksum:TRUE", "-o", "tcp.check_checksum:TRUE", "-r", path,
+def wire_problems(path, decode=TCP_20000):
+    """Tshark's own verdict on every frame: IPv4 and TCP or UDP checksums
+    good, no DNP3 link CRC flagged, nothing malformed."""
+    l4 = decode["l4"]
+    fields = ["frame.number", "ip.checksum.status", l4 + ".checksum.status", "dnp3.hdr.CRC.incorrect", "_ws.malformed"]
+    out = subprocess.run(["tshark", "-o", "ip.check_checksum:TRUE", "-o", l4 + ".check_checksum:TRUE",
+                          *options_for(decode), "-r", path,
                           "-T", "fields", "-E", "separator=\t", "-E", "occurrence=a", "-E", "aggregator=,",
                           *sum((["-e", f] for f in fields), [])], check=True, capture_output=True, text=True).stdout
     bad = []
     for ln in out.splitlines():
-        n, ipc, tcpc, crc, mal = (ln.split("\t") + [""] * 5)[:5]
-        if ipc != "1" or tcpc != "1" or crc or mal:
-            bad.append(f"frame {n}: ip checksum {ipc!r}, tcp checksum {tcpc!r}, crc flag {crc!r}, malformed {mal!r}")
+        n, ipc, l4c, crc, mal = (ln.split("\t") + [""] * 5)[:5]
+        if ipc != "1" or l4c != "1" or crc or mal:
+            bad.append(f"frame {n}: ip checksum {ipc!r}, {l4} checksum {l4c!r}, crc flag {crc!r}, malformed {mal!r}")
     return bad
 
 
@@ -96,12 +126,13 @@ class Exchange:
         return "none" if answered else ""
 
 
-def label(path, net, timeout_ns):
+def label(path, net, timeout_ns, decode=TCP_20000):
+    l4 = decode["l4"]
     frames = pcapfile.read(path)
-    rows = tshark_rows(path)
+    rows = tshark_rows(path, decode)
     if len(rows) != len(frames):
         raise SystemExit(f"{path}: tshark read {len(rows)} frames, the file has {len(frames)}")
-    assets = {net["outstation"]["ip"]: net["outstation"]["asset"]}
+    assets = {o["ip"]: o["asset"] for o in [net["outstation"], *net.get("outstations", {}).values()]}
     assets.update({m["ip"]: m["asset"] for m in net["masters"].values() if m["asset"]})
     flows = collections.OrderedDict()
     pending, done, reused = {}, [], 0
@@ -114,14 +145,14 @@ def label(path, net, timeout_ns):
         ns = frames[n - 1].ns
         for key in [k for k, x in pending.items() if ns - x.t0 > timeout_ns]:
             complete(key, False)
-        if not r["tcp.srcport"]:
+        if not r[l4 + ".srcport"]:
             continue
-        a, b = (r["ip.src"], r["tcp.srcport"]), (r["ip.dst"], r["tcp.dstport"])
-        fk = ("tcp",) + tuple(sorted([a, b]))
+        a, b = (r["ip.src"], r[l4 + ".srcport"]), (r["ip.dst"], r[l4 + ".dstport"])
+        fk = (l4,) + tuple(sorted([a, b]))
         f = flows.setdefault(fk, {"client": None, "first": a + b, "nums": [], "bytes": 0, "dnp3": False})
         f["nums"].append(n)
         f["bytes"] += int(r["frame.len"])
-        if r["tcp.flags.syn"] in ("1", "True") and r["tcp.flags.ack"] in ("0", "False"):
+        if l4 == "tcp" and r["tcp.flags.syn"] in ("1", "True") and r["tcp.flags.ack"] in ("0", "False"):
             f["client"] = a + b
         if not r["dnp3.al.func"]:
             continue
@@ -169,18 +200,20 @@ def label(path, net, timeout_ns):
     def sha(nums):
         return ",".join(hashlib.sha256(frames[m - 1].data).hexdigest() for m in nums)
 
+    def direction(f):
+        return "none" if l4 == "udp" else "client-server" if f["client"] else "midstream"
+
     out, functions, seen = [], {}, set()
     for fk, f in flows.items():
         src, sp, dst, dp = f["client"] or f["first"]
-        proto = "dnp3" if f["dnp3"] else "tcp"
-        common = [src, dst, sp, dp, "tcp", proto, "", "client-server" if f["client"] else "midstream",
-                  assets.get(dst, "asset-unresolved")]
+        proto = "dnp3" if f["dnp3"] else l4
+        common = [src, dst, sp, dp, l4, proto, "", direction(f), assets.get(dst, "asset-unresolved")]
         out.append(["flow", *common, ",".join(map(str, f["nums"])), sha(f["nums"]), str(len(f["nums"])),
                     str(f["bytes"]), "", "", "", "", "", "", ""])
-        skey = (dst, "tcp", dp, proto)
+        skey = (dst, l4, dp, proto)
         if skey not in seen:
             seen.add(skey)
-            out.append(["service", "", dst, "", dp, "tcp", proto, "", "", assets.get(dst, "asset-unresolved"),
+            out.append(["service", "", dst, "", dp, l4, proto, "", "", assets.get(dst, "asset-unresolved"),
                         str(f["nums"][0]), sha(f["nums"][:1]), "", "", "", "", "", "", "", "", ""])
     flow_common = {fk: [(f["client"] or f["first"])[i] for i in (0, 2, 1, 3)] for fk, f in flows.items()}
     for x, answered in sorted(done, key=lambda d: d[0].req):
@@ -191,7 +224,8 @@ def label(path, net, timeout_ns):
             continue
         seen.add(k)
         src, dst, sp, dp = flow_common[x.flow]
-        out.append(["function", src, dst, sp, dp, "tcp", "dnp3", "", "client-server", assets.get(dst, "asset-unresolved"),
+        out.append(["function", src, dst, sp, dp, l4, "dnp3", "", direction(flows[x.flow]),
+                    assets.get(dst, "asset-unresolved"),
                     ",".join(map(str, x.frames)), sha(x.frames), "", "", str(x.code), ",".join(x.objects), sa,
                     x.err, "", "", ""])
     out.append(["counter", "", "", "", "", "", "dnp3", "", "", "", "", "", "", "", "", "", "", "", "", "",
@@ -199,11 +233,19 @@ def label(path, net, timeout_ns):
     return out, functions, reused
 
 
-def header(name, version, net):
+def header(name, version, net, decode=TCP_20000):
+    told = []
+    if decode != TCP_20000:
+        told = [f"# the labeller is told this capture's transport ({decode['l4']}) and the outstation's port "
+                f"({decode['port']}) from the asset table's settings, never from the product (plan section 2B)."
+                + (" A UDP flow has direction none, and its src is the first datagram's sender (C13 section 4.1)."
+                   if decode["l4"] == "udp" else "")]
     return [
         f"# GT-PCAP labels for {name}.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.",
-        f"# labeller: {version}; options: (none); gtlabel.py applies C13 section 4's rules to tshark's fields.",
-        "# fields: " + ", ".join(FIELDS) + ". objects are dnp3.al.obj as g<group>v<variation>, sorted.",
+        f"# labeller: {version}; options: {' '.join(options_for(decode)) or '(none)'}; gtlabel.py applies C13 "
+        "section 4's rules to tshark's fields.",
+        "# fields: " + ", ".join(fields_for(decode["l4"])) + ". objects are dnp3.al.obj as g<group>v<variation>, sorted.",
+        *told,
         "# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header"
         " in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.",
         f"# sa_reply_timeout_ms: {net['sa_reply_timeout_ms']} (C13 default). sa empty means unknown.",
@@ -227,8 +269,9 @@ def main(d):
     learned = {}
     for name in sorted(list(meta["series"]) + list(meta["cases"])):
         path = os.path.join(d, name + ".pcap")
-        bad += [f"{name}: {p}" for p in wire_problems(path)]
-        rows, functions, reused = label(path, net, timeout)
+        decode = meta.get("decode", {}).get(name, TCP_20000)
+        bad += [f"{name}: {p}" for p in wire_problems(path, decode)]
+        rows, functions, reused = label(path, net, timeout, decode)
         if name in meta["series"]:
             learned[name] = {(r[1], r[2], r[4], r[14], r[15]) for r in rows if r[0] == "function"}
         frames = pcapfile.read(path)
@@ -238,14 +281,14 @@ def main(d):
                 bad.append(f"{name}: case frame {first} is not a request tshark reads as a DNP3 function")
             elif functions[first] != c["sa"]:
                 bad.append(f"{name}: case frame {first} has sa {functions[first]!r} from tshark, the case says {c['sa']!r}")
-            rows.append(["case", "", "", "", "", "tcp", "dnp3", "", "", "", ",".join(map(str, c["frames"])),
+            rows.append(["case", "", "", "", "", decode["l4"], "dnp3", "", "", "", ",".join(map(str, c["frames"])),
                          ",".join(hashlib.sha256(frames[m - 1].data).hexdigest() for m in c["frames"]),
                          "", "", "", "", c["sa"], c.get("sa_error_from", ""), ",".join(c["rules"]),
                          c["context"], c["note"]])
         if name.startswith("dnp3-") and name in meta["series"] and reused:
             print(f"gtlabel: {name}: dnp3_seq_reused {reused} on a benign series (pass value as measured)")
         with open(os.path.join(d, name + ".tsv"), "w", encoding="utf-8") as f:
-            f.write("\n".join(header(name, version, net) + ["\t".join(r) for r in rows]) + "\n")
+            f.write("\n".join(header(name, version, net, decode) + ["\t".join(r) for r in rows]) + "\n")
         print(f"gtlabel: {name}: {len(rows)} rows, dnp3_seq_reused {reused}")
     # Plan section 3: the training series covers every pair and every
     # function the held-out series uses.
