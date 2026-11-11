@@ -1600,7 +1600,7 @@ Common rules, beside those of every Phase 4 brief:
 - **May change:** `docs/phase4/D4-c13-netobs.md` and a proposal file `docs/phase4/D4-c13-0.2-proposal.md`. The code in `contracts/netobs` changes only after D1 approves the proposal, under the third part's brief.
 - **Acceptance.** Every change bumps the minor and keeps a 0.1 reader. Each clause says which of D3's rules it meets. D6 can write a contract test for each clause from the text alone.
 - **Exclusions.** No change to what an observation, a citation or a coverage statement means. No change to how any criterion in `docs/verification.md` is measured. No code.
-- **Order.** After P4-4-S2, and with P4-4-L1's note in hand.
+- **Order.** After P4-4-S2, and with P4-4-L1's note in hand. D1 started it before S2's result (D4-87): see "Order" below.
 - **Branch:** `agent/telemetry-c13-link`. **Reviewers:** D3, D5, D6 and D2.
 
 ### P4-4-L3 (D5): the node's side of the link
@@ -1639,10 +1639,25 @@ Common rules, beside those of every Phase 4 brief:
 - **Exclusions.** No product code and no sensor. No real NIC of a runner as a monitoring interface. No lowering of any criterion.
 - **Branch:** `agent/verification-sensor-rig`. **Reviewers:** D4, D5, D3 and D1.
 
+### P4-4-L4 (D3): the note and the threat model amended for C13 0.2, and the two contract additions (issued 2026-11-11, D4-87)
+
+- **Objective.** Bring D3's note and the threat model in line with the channel and the node's side as reviewed, and write out the C7 and C8 additions, so that D1 can approve the link's contracts as one set.
+- **Inputs.** `docs/phase4/D3-sensor-link.md` and `docs/threat-model.md` on `main`; C13 0.2 as #627 has it at the head D1 names; the node's side as #628 has it; D1's rulings on both PRs; D3's own reviews of both; the fresh D6's notes on #624 (D4-87); D7's note on #625 about AP-31.
+- **Deliverables,** in one change:
+  1. **The seven notes owed from #624:** SL-3 reworded; the assumption that a TAP is receive-only by construction corrected, in the note and in three threat-model rows; SL-R7 named in SL-T12; controls for SL-T15's build check and crash leg and for SL-T2's link check; SL-T12's digest leg on the test-only build; and the missing legs of SL-T9 (g), SL-T5 and SL-T20.
+  2. **The amendments C13 0.2 needs:** SL-13 (`newest_seq` and `drops_channel` in place of the oldest held `seq`), SL-15 ("taken" for "committed", with the count of a refused record durable first), SL-19's list (`tick`), TB6, AP-34 (5) and AP-35 (the residuals: a clock moved inside a short break, and a step made and undone between two ticks), and AP-30 (the restart-delay lever on the sensor's image).
+  3. **The couplings found on `main`** (F1 to F10 in #628's §1.0) recorded in the threat model (AP-19, AP-34 (5), SL-20), marked `desk`, not reproduced and unreachable until a dialer exists, with D1's ruling that they gate it.
+  4. **C7 0.11 and C8 0.13, written out as proposals:** `node.sensor_enrol` and `node.sensor_revoke`, with the reasons `renew` (the same pin), `rekey` and `replace` (a different pin), each `denied` otherwise; the relayed `collector.request` record names the sensor target; `sensor.revoked` may be written late, as owed; and a link-key kind in the node key register that `LoadCertificate` refuses. Each with the test that would show it.
+  5. **AP-31 and the note's citation of E-D4-03 narrowed:** the run reads files, not a pipe (D7). The pipe case is D4's follow-up.
+- **May change:** `docs/threat-model.md`, `docs/phase4/D3-*.md`. No file under `contracts/`.
+- **Acceptance.** Every rule that C13 0.2 or the node's design cites still exists under its number. Nothing is written as built. D5 confirms the node can do what the additions ask, D4 that the channel carries them, and D6 that each has a test.
+- **Exclusions.** No code. No change to a contract's text or version. No decision on O-1 to O-12.
+- **Branch:** `agent/security-sensor-link-2`. **Reviewers:** D5, D4 and D6, after `records-auditor`.
+
 ### Order
 
-1. **Now, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them.
-2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4). Both started on 2026-11-11 (D4-87). L2 was to wait for S2's result. D1 started it first, because the channel does not depend on which engine is chosen and the engine run was waiting on the hosted runners. L2 marks each clause that the engine's result could change.
+1. **First, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them. L1 is done (#624), and the two cases are merged (#623).
+2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4). Both started on 2026-11-11 (D4-87). L2 was to wait for S2's result. D1 started it first, because the channel does not depend on which engine is chosen and the engine run was waiting on the hosted runners. L2 marks each clause that the engine's result could change. **Then P4-4-L4 (D3),** against the reviewed channel and node's side.
 3. **D1 approves** the engine (from S2) and the link's contracts (from L1, L2 and L3), and brings the owner a recommendation on the sensor's host: its hardware, its operating system, and whether the project ships an image or the site installs the engine (D7's review of #618 gives what each costs in licence duties).
 4. **The third part:** the implementation briefs for the sensor, the node's dialer and enrolment, each against the approved contracts, with D6's contract tests.
 
