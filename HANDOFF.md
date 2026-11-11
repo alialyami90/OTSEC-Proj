@@ -29,7 +29,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 ## Open PRs and branches
 
 - **Open PRs:** list them with `gh pr list`. On 2026-11-10 the only one was #609, which adds `reference/` and `tools/` to `.gitignore` (D4-80). It changes no code, and it merges when `ci` and `govulncheck` are green on its head. No role has work in flight. Each role's open items are in its file in `.claude/agents/`.
-- **Branches.** The remote has 248 branches. The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`.
+- **Branches.** The remote had 248 branches when this file was written, and 253 on 2026-11-10 at about 21:45Z (D4-81). The owner approved deleting 150 merged ones (D4-62), and the script for it, `reference/carried/delete-merged-branches-2026-11-06.ps1`, has not been run. Each delete in it is leased to a recorded SHA. Re-check the list before running it, because branches merged after 2026-11-06 are not on it. Four unmerged mutant branches are kept on purpose: `claude/b6-mut-acl-1`, `claude/b6-mut-acl-2`, `claude/b6-mut-unknown-restart` and `claude/b6-diag-expired-links`. D1 sorted the 102 branches that are not on the script into three groups, in `reference/carried/branch-cleanup-2026-11-10.md` (D4-81): 49 meet the owner's rule, 6 hold a tree that equals a commit on `main`, and 47 are kept. The owner has not approved that list.
 
 ## Waiting on the owner
 
@@ -42,7 +42,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 7. **From D4-65:** should the reserve fail on volumes that can't hold real space (compressed or copy-on-write)? Should the store get a Windows folder flush? Should the rare starts over 6 s be briefed?
 8. **Authorization for any device contact:** a lab relay or switch before any H-test or Q3, and any SNMPv3 contact.
 9. **Test runs on the owner's PC** are paused (D4-12). Working in the CLI on the PC makes local `go vet`, `gofmt` and `go test` the natural first check. Recommended: lift the pause for ordinary local runs under the limits below, and keep service-creating runs for the owner's elevated session.
-10. **Running the branch-cleanup script** (above).
+10. **Running the branch-cleanup script, and approving the 2026-11-10 branch list** (above, D4-81).
 11. **ADR-0007** (Windows site node) is still `proposed`.
 12. **D7 and D8** (D4-79): the word to start each one's first brief, and who holds the release key and where it is kept (TB9).
 
