@@ -53,7 +53,7 @@ In older records A5, B5 and C5 mean the role D5 now holds. Contract names (C1 to
 
 ## Open items on 2026-11-10 (`main` at `82daa04`, after #604 and D4-76)
 
-1. **Nothing is in flight.** The node's intake, hold, detector consumer, alert drop counts (B3, #597), health read after a restore (#600) and the once-per-fill alarm (#602) are merged (D4-71 to D4-76).
+1. **Your half of brief P4-PC-1 is done** (#616, D4-84). Nothing is in flight. Noted for later: `integration` took 17 min 48 s of its 20 minutes, and a check that every pruned sequence number is at or below the forwarder's confirmed record would tighten the store-full leg. The node's intake, hold, detector consumer, alert drop counts (B3, #597), health read after a restore (#600) and the once-per-fill alarm (#602) are merged (D4-71 to D4-76).
 2. **When the sensor is briefed** (after the owner's ADR-0009 choice): the sensor's process and the node's side of the link. Under (b) the node opens a mutual-TLS link and gains no inbound port, and supervises nothing. Under (a) or (c) the sensor is its own SCM service (`NT SERVICE\otsec-sensor`), never a child of the node (`docs/phase4/D5-sensor-node.md`).
 3. **Accepted limits to keep stated** (`D5-sensor-node.md` §9, `D5-c5-0.9.md`): after a restart an unparsable `collection.run` is counted again and an ordering refusal can alarm again; alert drop counts survive a clean stop, and a crash can lose the last minute; one full alarm per fill.
 4. **Carried to the owner (D4-65):** the rare starts over 6 s, which now sit in `store-open` and `record-start`; whether the reserve should fail on compressed or copy-on-write volumes; a Windows folder flush.

@@ -1,6 +1,6 @@
 # ADR-0009: The passive sensor: which engine, and where it runs
 
-- Status: proposed (draft for review; no option chosen yet)
+- Status: proposed. The owner chose option (a) on 2026-11-10 (D4-78). The engine, and the owner's answer on the Npcap OEM licence, are open (D4-83)
 - Date: 2026-11-07
 - Deciders: D1, with D4 (author), D5 (the process and the node's side) and D3 (the boundary). D2 reviews protocol interpretation, D6 testability. The owner decides the two questions in "What decides it".
 - Related: R6.1 to R6.7, V-M6, C-09, C-11, H-06; ADR-0002 item 2 (b), ADR-0007; `docs/phase0/A4-telemetry-feasibility.md` §3 and §4 (E-A4-01); threat model TB6, AP-30 to AP-36, SC-19, HR-20 (#523); D4-66, D4-67; brief P4-4-A4 in `docs/agent-handoffs.md`

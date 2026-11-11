@@ -1458,3 +1458,77 @@ The item 4 exit gate is set in the sensor brief. It holds every criterion the St
 - **Reviewers:** D1. `records-auditor` checks the PR first.
 - **Extended on 2026-11-11 (D4-82).** D6 also corrects two lines of the same file to what is true: the opening "Status" paragraph, and the P3 row of the Principles table. No criterion changes.
 - **Ruling on 2026-11-11 (D4-82).** A row is `e2e` only when its run used the ground truth that its criterion names. Where a criterion's HW value is `P` or `Y`, the ground truth for this purpose is the criterion's form against a simulator, a documented example or a synthetic series, as the matrix's legend says: the device itself stays owed at any status.
+
+## After the owner's go-ahead of 2026-11-11 (D4-83)
+
+Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HANDOFF.md`, its own agent file and the files its brief names before it starts. Where a brief lets a role change a path that it does not own, D1 authorizes that change by the brief, for what the brief names and no more. Common rules: the repository is public; stage by explicit path; never force-push; no contact with any device or network; nothing is installed on the owner's PC; a failing job is re-run at most once and a failure is a finding, not a flake.
+
+### P4-4-S1 (D4): the engine and the capture path under option (a), from evidence
+
+- **Objective.** Fill the `unknown` cells of ADR-0009 that a GitHub-hosted Windows runner and primary documents can fill, so that D1 and D4 can choose the engine and the owner can answer the Npcap question with the real terms in front of them. It builds no sensor.
+- **Deliverables:**
+  1. **E-D4-01, second part,** in `modules/telemetry/experiments/sensor-windows/` and the dispatch-only `.github/workflows/d4-sensor-eval.yml`, on `windows-2025`: Suricata's official Windows build decoding the public captures and GT-PCAP offline, pinned by URL and SHA-256 from the vendor's page, and whether it starts with no Npcap installed; whether an official Zeek binary for Windows exists, from primary sources; the (a′) pipeline, `pktmon` to pcapng to the engine, with packets counted at each stage. A row that did not run is `unknown`.
+  2. **Npcap's terms and prices** from the vendor's own pages, each with its URL and the date read. An unreachable page stays `unknown`.
+  3. **ADR-0009's evidence updated,** each new cell with its evidence class and run URL, and D4's provisional view rewritten for option (a). The Status line and the decision are D1's.
+  4. **A findings note,** `docs/phase4/D4-sensor-engine-eval.md`, naming what still needs a lab machine.
+- **Inputs.** `docs/decisions/ADR-0009-passive-sensor.md`, D4-66 to D4-68 and D4-78, and the experiment's own folder and workflow.
+- **May change:** `modules/telemetry/experiments/sensor-windows/`, `docs/phase4/D4-*.md`, and, authorized by D1 here, `.github/workflows/d4-sensor-eval.yml` and `docs/decisions/ADR-0009-passive-sensor.md` (evidence and D4's view only).
+- **Acceptance.** Every new claim has a run URL or a cited source with its date. The workflow stays dispatch-only, pins every download by SHA-256 and checks the hash before it runs anything it downloaded.
+- **Exclusions.** No sensor and no product code. No Npcap install anywhere, the runner included. No capture of a real network: `pktmon` captures only the runner's own traffic, and the workflow reports counts, not the capture. No binary and no installer is committed or uploaded as an artifact. Where the vendor publishes no hash for a download, the SHA-256 of the first download is recorded with its URL and date and pinned from then on, and the record says that it is a first-use pin. No change to `ci.yml`.
+- **Branch:** `agent/telemetry-sensor-engine-eval`. **Reviewers:** D6 (testability), D3 (the boundary and the downloads), D7 (the licence rows).
+
+### P4-D7-1 (D7): `docs/release.md`, the first inventory
+
+- **Objective.** State what `cmd/otsec` and `cmd/otsec-collector` contain today and under which licences, from primary sources, so that every later toolchain or dependency change has a record to update, and the licence duties of option (a) are known before anything is shipped.
+- **Deliverables, all in `docs/release.md`:**
+  1. The modules linked into each binary, with version and `go.sum` hash, and the Go toolchain and standard library, derived by commands the file states.
+  2. Each component's licence, read from the component's own files, with the file's SHA-256.
+  3. What each licence asks of a distributor, and whether the repository does it today. An unmet duty is listed, not fixed.
+  4. The third-party programs of option (a), not shipped today (Suricata, Zeek and the ICSNPP packages, Npcap): what shipping each would require, from its licence text.
+  5. A list of what does not exist yet: signing and the key's holder, the SBOM's format, the update package's contract, the anti-rollback floor, and the record of which versions upgrade and roll back together. No design.
+  6. The one check that shows the file and `go.sum` disagree, described for D6 to turn into a test later.
+- **Inputs.** `go.mod`, `go.sum`, the module cache, the Go distribution's own files, the threat model's TB9, AC-9, AP-10, SC-13 and AP-30, and ADR-0009's licence rows.
+- **May change:** `docs/release.md`, `docs/phase4/D7-*.md`.
+- **Acceptance.** Every licence statement names the file it was read from and that file's SHA-256. The inventory can be regenerated by the stated commands, and D7 ran them. The file is labelled `desk`.
+- **Exclusions.** No change to `go.mod`, `go.sum`, a workflow, `deploy/` or code. No key is made. No SBOM file is generated into the repository. Nothing is called compliant or release-ready.
+- **Branch:** `agent/release-inventory`. **Reviewers:** D3 and D6.
+
+### P4-D6-H5 (D6): the closing legs for R4.1, R4.6, R4.7, R8.6 and R8.8
+
+- **Objective.** Run each of the five criteria on the real binaries against the ground truth it names (D4-82's ruling), and find out whether the product passes.
+- **Deliverables:**
+  1. The node forwards to a stock rsyslog over RELP with mutual TLS and the durable acknowledgement, and rsyslog's own output is reconciled against the simulator's rows (R4.6).
+  2. V-S6's interruption run, with its kills, against that rsyslog (R4.7, R8.6).
+  3. V-S9 on its named ground truths: rsyslog as the upstream, and a direct read of the store showing that nothing unforwarded was evicted (R8.8). If no read-only way to read the store exists, D6 reports it and adds no product code.
+  4. A framing fault and a malformed message sent to the real binaries, each stored raw and flagged, with no message lost (R4.1).
+  5. One mutant for each new test, never committed.
+  6. New `integration-long` matrix entries in `ci.yml`, with the packages they install and their versions printed.
+- **May change:** `tests/integration/`, `tests/security/`, `docs/phase4/D6-closing-legs.md`, and, authorized by D1 here, `ci.yml` for those entries. Not `docs/verification.md`: the status cells follow in a later PR, after the legs pass on `main`.
+- **Inputs.** The matrix's legend and the five rows' cells in #613, V-S6's and V-S9's criteria with their ground truths, and D4-82.
+- **Acceptance.** Each leg is green on the PR's head, or red for a reason reported as a finding. A product failure is a result: the test is not loosened, and no product code changes. **A failing leg is never removed, skipped or marked as an expected failure.** If the product fails, the PR stays open with the leg red, D6 writes the finding in `docs/phase4/D6-closing-legs.md` and reports it to D1, and the owner of the code fixes the product in its own PR. The oracles are rsyslog's own output and the store's contents, never the product's code or D6's own receiver.
+- **Exclusions.** No product code. No lowering of any criterion. Loopback only. No new CI job outside `integration-long`'s matrix.
+- **Branch:** `agent/verification-closing-legs`. **Reviewers:** D4, D5 and D1.
+
+### P4-PC-1 (D5 and D6): the six tests that pass only on a CI runner
+
+- **Objective.** `go test ./...` passes on a Windows machine that is not elevated, not on UTC, and holds `reference/`, `tools/` and `.claude/worktrees/` inside the checkout, with nothing left behind, and each test still fails when it should (D4-83's first local run).
+- **D5's half** (`agent/platform-pc-run-fixes`): the test that formats a C7 time from a local time, after checking that no product path does the same; the `nodeconfigtest` helper, so that a test which needs elevation and skips leaves no folder its cleanup cannot remove. The tests already skip when not elevated, and already fail instead when `GITHUB_ACTIONS` is `true` or `OTSEC_REQUIRE_ELEVATED` is set; both conditions stay. **May change:** tests and test helpers under `platform/` and `cmd/otsec/`. **Reviewers:** D6 and D3.
+- **D6's half** (`agent/verification-pc-run-fixes`): every test that walks the repository tree, with one stated rule for what a walker skips and a test of that rule. The rule is anchored at the repository root, and an unreadable folder anywhere else still fails the test. **May change:** `tests/` (not `tests/integration/slice/`), and, authorized by D1 here, the walk's skip rule in `contracts/advisory/testkeys_test.go`, a C11 test that D3 drafted. **Reviewers:** D3, D5 and D1.
+- **Inputs.** D4-83's account of the first local run, and `HANDOFF.md`'s section on the project folder.
+- **Acceptance.** On the owner's PC, not elevated, the affected packages pass, or skip the elevation-only tests with their message, and no folder is left in the temp directory. Each fixed test fails again when its fix is reverted or its rule is broken. All nineteen `ci` jobs and `govulncheck` are green, and on CI the elevation tests still run.
+- **Exclusions.** No weakening of what any test asserts. No elevated run.
+
+### P4-D4-F26 (D4): the forwarder's rsyslog tests run in CI and cannot skip there (issued 2026-11-11, D4-84)
+
+- **Objective.** The three tests of `modules/telemetry/forward/rsyslog_test.go` run on every pull request in the Linux `go` job, against the `rsyslogd` that Ubuntu's packages install, and fail if rsyslog is missing. Then find out whether the forwarder passes them (F-026).
+- **Inputs.** D6's diagnosis on #619 (`4776b0da` and `1a9439f3`), and how `tests/integration/slice` starts a stock rsyslogd.
+- **Deliverables:**
+  1. The set-up fixed, so the installed `rsyslogd` starts under the runner's AppArmor profile, or a copy of it does, with the test saying which and checking the copy against the installed binary.
+  2. In the Linux leg of the `go` job: `rsyslog` and `rsyslog-relp` installed with their versions printed, and `OTSEC_RSYSLOG_REQUIRED=1` for the `go test` step. `fail-fast: false` on the matrix.
+  3. The result. If the forwarder fails a test, that is a product finding: D4 stops, loosens nothing, and reports to D1.
+- **May change:** `modules/telemetry/forward/rsyslog_test.go`, and, authorized by D1 here for those lines only, `.github/workflows/ci.yml`.
+- **Acceptance.** Every check green on the PR's head, with the Linux `go` log showing each of the three tests' `--- PASS`. With rsyslog absent and the variable set, the tests fail.
+- **Exclusions.** No change under `tests/`. No weakening of what the tests assert. A failing test is never skipped, removed or marked as an expected failure.
+- **Risk.** A copy of the binary runs outside the vendor's AppArmor profile, and the Linux `go` job's rsyslog is a newer build than the one the closing legs use. Both are stated with the result.
+- **Branch:** `agent/telemetry-rsyslog-tests-run`. **Reviewers:** D6 and D5.
+- This brief was given to D4 at about 13:30Z on 2026-11-11 and written here afterwards, in D4-84's PR.
