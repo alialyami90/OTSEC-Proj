@@ -212,7 +212,12 @@ jobs:
   # network namespace of their own, with the binaries built before it;
   # vm1, V-M1 over GT-MIB's agents, about 9 min, proposed by D6 under
   # D4-59 for D1's authorization: its step tees the output and then runs
-  # M3's key search over it).
+  # M3's key search over it;
+  # rsyslog, rsyslog_interruptions, rsyslog_store_full and framing, the
+  # closing legs, about 3, 9, 8 and 1 min, added by D6 under P4-D6-H5
+  # with D1's authorization: the node forwards to the rsyslogd installed
+  # below, and tests/integration/slice/conftest.py keeps the four out of
+  # the integration job's run of the directory).
   integration-long:
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.file == 'test_slice_gtinj_ser_e2e.py' && 50 || 20 }}
@@ -235,6 +240,10 @@ jobs:
           - test_slice_vm8_sets_e2e.py
           - test_slice_vm8_paired_e2e.py
           - test_slice_vm1_e2e.py
+          - test_slice_rsyslog_e2e.py
+          - test_slice_rsyslog_interruptions_e2e.py
+          - test_slice_rsyslog_store_full_e2e.py
+          - test_slice_framing_e2e.py
     env:
       OTSEC_SLICE_REQUIRED: "1"
     steps:

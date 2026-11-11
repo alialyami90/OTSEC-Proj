@@ -54,7 +54,6 @@ and delays; when the interruptions land relative to runs still varies.
 Evidence class: simulated.
 """
 
-import base64
 import calendar
 import json
 import os
@@ -102,34 +101,16 @@ def _rows(added):
     return [l for l in profile_sel751.grown_ser(added).split(b"\r\n") if profile_sel751.SER_ROW.match(l)]
 
 
-def _relp_lines(s):
-    if not os.path.exists(s.relp_log):
-        return 0
-    with open(s.relp_log, "rb") as f:
-        return sum(1 for _ in f)
-
-
-def _syslog_by_line(s):
-    """[(line number, message bytes)] for every syslog frame the receiver
-    acknowledged, in order. Read live while the receiver runs: a last line
-    without its newline is still being written (harness.read_log)."""
-    out = []
-    with open(s.relp_log, "rb") as f:
-        data = f.read()
-    if s.running("receiver"):
-        data = data[:data.rfind(b"\n") + 1]
-    for i, line in enumerate(data.decode("utf-8").split("\n")):
-        if not line.strip():
-            continue
-        r = json.loads(line)
-        if r.get("event") == "syslog":
-            out.append((i, base64.b64decode(r["b64"])))
-    return out
-
-
 def _eid(msg):
     m = SER_SEQ.search(msg)
     return (m[1].decode(), int(m[2])) if m else None
+
+
+def _unsettled(s):
+    """What the receiver still lacks, for the message of a run that did not
+    settle."""
+    problems, stats = reconcile.reconcile_grown(s.received(), _rows(_added(s)))
+    return f"not settled: {stats}; first problems: {problems[:5]}\n"
 
 
 class Interrupter:
@@ -177,21 +158,24 @@ class Interrupter:
         st = self.s.collector_asset()
         return not st.get("level_open") and not st.get("unconfirmed_auth_utc")
 
-    def one(self):
-        kind = self.rng.choice(["receiver", "node", "simulator", "collector"])
+    def one(self, kind=None, burst=None):
+        """One interruption. kind and burst are the scheduler's own seeded
+        choices unless the caller sets them."""
+        kind = kind or self.rng.choice(["receiver", "node", "simulator", "collector"])
         down = {"receiver": (0.5, 15), "node": (0.5, 10), "simulator": (1, 90), "collector": (0.5, 5)}
         wait = self.rng.uniform(*down[kind])
         # Half the receiver and node kills land mid-burst: after a session
         # closes, as soon as the receiver has acknowledged the first new
         # message, while the rest of the burst may be sent and unconfirmed.
-        burst = kind in ("receiver", "node") and self.rng.random() < 0.5
+        if burst is None:
+            burst = kind in ("receiver", "node") and self.rng.random() < 0.5
         if burst:
             closed = self.s.sessions_closed()
             if not harness.wait_for(lambda: self.s.sessions_closed() > closed, 70.0, step=0.2):
                 burst = False
             else:
-                n = len(_syslog_by_line(self.s))
-                if not harness.wait_for(lambda: len(_syslog_by_line(self.s)) > n, 10.0, step=0.01):
+                n = len(self.s.received_by_line())
+                if not harness.wait_for(lambda: len(self.s.received_by_line()) > n, 10.0, step=0.01):
                     burst = False
         if kind in ("simulator", "collector"):
             if not harness.wait_for(lambda: self._idle(kind == "collector"), 70.0, step=0.2):
@@ -199,7 +183,7 @@ class Interrupter:
                 return
         s = self.s
         if kind in ("receiver", "node"):
-            self.breaks.append(_relp_lines(s))
+            self.breaks.append(s.receiver_lines())
         t = time.time()
         if kind == "receiver":
             s.kill("receiver")
@@ -216,12 +200,16 @@ class Interrupter:
         self.log.append((t, kind, f"{'mid-burst, ' if burst else ''}down {wait:.1f}s"))
 
 
-@pytest.fixture(scope="module")
-def run(tmp_path_factory):
+def interrupted(tmp_path_factory, make=Slice, first=()):
+    """The run, as a generator a module's fixture yields from. make is the
+    slice's class: Slice forwards to A6's RELP receiver, and
+    rsyslogrun.RsyslogSlice to a stock rsyslog (GT-RX). first sets the
+    first interruptions, each a (kind, burst) for Interrupter.one; they
+    count toward COUNT, and the rest are the scheduler's choices."""
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
     need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     d = str(tmp_path_factory.mktemp("slice-interruptions"))
-    s = Slice(d)
+    s = make(d)
     s.build()
     s.seed = SEED
     print(f"V-S6 seed {SEED}, {COUNT} interruptions (OTSEC_SLICE_SEED to repeat)", flush=True)
@@ -234,9 +222,9 @@ def run(tmp_path_factory):
         it = Interrupter(s, rng)
         # The first run, so there is something in flight to interrupt.
         assert harness.wait_for(lambda: s.sessions_closed() >= 1, 100.0, step=1.0), diag()
-        for _ in range(COUNT):
+        for i in range(COUNT):
             time.sleep(rng.uniform(5, 40))
-            it.one()
+            it.one(*(first[i] if i < len(first) else ()))
         s.interruptions = it.log
         s.breaks = it.breaks
         # Wind-down: two clean runs, then every stream confirmed.
@@ -254,10 +242,15 @@ def run(tmp_path_factory):
                 s.added, s.final_health = added, health
                 return True
             return False
-        assert harness.wait_for(settled, 90.0, step=1.0), diag()
+        assert harness.wait_for(settled, 90.0, step=1.0), _unsettled(s) + diag()
         yield s
     finally:
         s.stop()
+
+
+@pytest.fixture(scope="module")
+def run(tmp_path_factory):
+    yield from interrupted(tmp_path_factory)
 
 
 def test_interruptions_happened(run):
@@ -276,7 +269,7 @@ def test_every_row_arrives_under_one_event_id(run):
 def test_every_confirmed_event_is_in_gt_rx(run):
     streams = _confirmed(run.final_health)
     got = {}
-    for _, msg in _syslog_by_line(run):
+    for _, msg in run.received_by_line():
         e = _eid(msg)
         assert e is not None, msg[:200]
         got.setdefault(e[0], set()).add(e[1])
@@ -292,7 +285,7 @@ def test_the_unconfirmed_window(run):
     """After each break, count the events received again: the window the
     forwarder had sent and not yet seen confirmed. Nothing is received twice
     except right after a break."""
-    msgs = _syslog_by_line(run)
+    msgs = run.received_by_line()
     marks = sorted(set(run.breaks))
     seen = set()
     resent = {m: 0 for m in marks}

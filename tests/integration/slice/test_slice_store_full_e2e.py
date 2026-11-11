@@ -84,15 +84,31 @@ def _check(logs):
     return checked
 
 
-@pytest.fixture(scope="module")
-def run(tmp_path_factory):
+def _diag(s):
+    return f"health:\n{s.health()}\nnode:\n{s.text('node')[-3000:]}"
+
+
+def _unsettled(s):
+    """What the receiver still lacks, for the message of a run that did not
+    settle."""
+    problems, stats = reconcile.reconcile_grown(s.received(), _rows(_added(s)))
+    return f"not settled: {stats}; first problems: {problems[:5]}\n"
+
+
+def fill(tmp_path_factory, make=Slice, while_killed=None):
+    """Steps 1 to 3, as a generator a module's fixture yields from: the
+    slice with its evidence class full, its node killed and started again.
+    make is the slice's class: Slice forwards to A6's RELP receiver, and
+    rsyslogrun.RsyslogSlice to a stock rsyslog (GT-RX). while_killed(s) is
+    called between the kill and the restart, when no process has the store
+    open."""
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
     need(os.name != "nt" or SERVICE, "the Windows leg of the end-to-end run is the PC run (D1-26)")
     d = str(tmp_path_factory.mktemp("slice-store-full"))
-    s = Slice(d)
+    s = make(d)
     s.build()
     s.grow_state = os.path.join(d, "grow")
-    diag = lambda: f"health:\n{s.health()}\nnode:\n{s.text('node')[-3000:]}"
+    diag = lambda: _diag(s)
     try:
         s.start(sim_extra=("--profile-ser", "grow", "--profile-ser-state", s.grow_state, "--profile-ser-grow", str(GROW)),
                 setup_extra=("-quota", f"adapter-evidence={QUARANTINE_ROOM + FILL}"))
@@ -107,30 +123,47 @@ def run(tmp_path_factory):
         s.sessions_after_full = s.sessions_closed()
         # 3: kill the node while full, and start it again.
         s.kill("node")
+        if while_killed:
+            while_killed(s)
         s.respawn("node")
         assert harness.wait_for(lambda: "collecting: true" in s.health() or "database evidence" in s.health(), 30.0), diag()
         time.sleep(70)
         s.restart_health = s.health()
         s.sessions_after_restart = s.sessions_closed()
-        # 4: the receiver comes back; nothing else is done.
-        s.start_receiver()
-        t = time.time()
-        resumed = lambda: s.sessions_closed() > s.sessions_after_restart
-        assert harness.wait_for(resumed, 240.0, step=1.0), "runs did not resume\n" + diag()
-        s.resumed_after = time.time() - t
-
-        def settled():
-            added = _added(s)
-            _, stats = reconcile.reconcile_grown(s.received(), _rows(added))
-            health = s.health()
-            if stats["matched"] >= 8 + added and _all_confirmed(health) and _added(s) == added:
-                s.added, s.final_health = added, health
-                return True
-            return False
-        assert harness.wait_for(settled, 180.0, step=1.0), diag()
         yield s
     finally:
         s.stop()
+
+
+def recover(s):
+    """Steps 4 and 5 on the slice fill left: the receiver comes back, and
+    nothing else is done."""
+    s.start_receiver()
+    t = time.time()
+    resumed = lambda: s.sessions_closed() > s.sessions_after_restart
+    assert harness.wait_for(resumed, 240.0, step=1.0), "runs did not resume\n" + _diag(s)
+    s.resumed_after = time.time() - t
+
+    def settled():
+        added = _added(s)
+        _, stats = reconcile.reconcile_grown(s.received(), _rows(added))
+        health = s.health()
+        if stats["matched"] >= 8 + added and _all_confirmed(health) and _added(s) == added:
+            s.added, s.final_health = added, health
+            return True
+        return False
+    assert harness.wait_for(settled, 180.0, step=1.0), _unsettled(s) + _diag(s)
+    return s
+
+
+@pytest.fixture(scope="module")
+def full(tmp_path_factory):
+    yield from fill(tmp_path_factory)
+
+
+@pytest.fixture(scope="module")
+def run(full):
+    return recover(full)
 
 
 def test_the_warning_comes_before_runs_stop(run):
