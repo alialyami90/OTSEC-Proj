@@ -68,7 +68,7 @@ func scanImports(t *testing.T, root string) map[string][]goImport {
 			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 				return filepath.SkipDir
 			}
-			if _, err := os.Stat(filepath.Join(p, "go.mod")); err == nil {
+			if fi, err := os.Stat(filepath.Join(p, "go.mod")); err == nil && !fi.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
@@ -247,6 +247,9 @@ func TestD21ImportRulesCatch(t *testing.T) {
 	// own client; cmd/otsec importing collectorclient; platform/node
 	// importing a telemetry module; modernc.org/sqlite and golang.org/x/sys;
 	// a nested Go module and a testdata directory, which are not scanned.
+	// modules/telemetry/forward holds a directory named go.mod. That is not
+	// a module's go.mod file, so the package is scanned and its violation is
+	// in want (brief P4-PC-1).
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("violations found:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

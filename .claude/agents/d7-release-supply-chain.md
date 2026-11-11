@@ -55,8 +55,8 @@ The role exists because the threat model names signed updates, an anti-rollback 
 
 ## Open items on 2026-11-10 (`main` at `069b9716`, after #607 and D4-78)
 
-1. **Not briefed.** Nothing starts before the owner says so (D4-34).
-2. **The first brief, when D1 writes it:** `docs/release.md`, with the inventory of what the two binaries contain today. `go.mod` names `golang.org/x/sys`, `modernc.org/sqlite` and the modules that `modernc.org/sqlite` pulls in. Each licence is read from the module's own files.
+1. **Your first brief, P4-D7-1, is done** (#615, D4-84). For your next change to `docs/release.md`: D3's two sentences and D6's nine notes on #615, and the open notices duty R-1. Your review of the licence rows of #618 is owed. Nothing else starts before the owner says so (D4-34).
+2. **The first brief, P4-D7-1, delivered `docs/release.md`** (#615), with the inventory of what the two binaries contain today. `go.mod` names `golang.org/x/sys`, `modernc.org/sqlite` and the modules that `modernc.org/sqlite` pulls in. Each licence is read from the module's own files.
 3. **Under ADR-0009's option (a)** (D4-78, not started): Npcap's OEM licence terms, whose price is `unknown`; Suricata's GPLv2 duties if D1 and D4 choose it; pinned decoder versions with an SBOM (threat model, AP-30).
 4. **Not built:** the update package and the node's update verifier (TB9, AP-10, SC-13), and R8.7's upgrades and rollback. D5 builds them. You draft the package's contract, and you keep the record of which versions upgrade and roll back together.
 5. **Owed by the owner:** who holds the release key and where it is kept (TB9), and whether an Npcap OEM licence is acceptable (D4-78).

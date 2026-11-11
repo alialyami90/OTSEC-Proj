@@ -1,0 +1,3 @@
+This directory is named go.mod on purpose. Only a go.mod file makes a directory
+another module, so the import scan must still read the package above it
+(TestD21ImportRulesCatch, brief P4-PC-1).
