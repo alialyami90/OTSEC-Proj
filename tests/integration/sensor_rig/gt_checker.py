@@ -35,6 +35,23 @@ label rows on `main` to be compared with.
 """
 
 
+def writers(net):
+    """The asset table's authorized writers as (client address, server
+    address, class). `net` is `net` in dnp3-cases.json, which names hosts in
+    three places: `masters`, `outstation` and, once a second relay exists,
+    `outstations`. A name found in none of them is an error, never a writer
+    quietly left out: a test that judged `unauthorized-write` without it
+    would expect an alert that the node rightly never raises (D4 on #623)."""
+    hosts = {**net["masters"], net["outstation"]["name"]: net["outstation"], **net.get("outstations", {})}
+    out = []
+    for client, server, cls in net["authorized_writers"]:
+        for name in (client, server):
+            if name not in hosts:
+                raise KeyError(f"authorized_writers names {name}, which no table of the capture set holds")
+        out.append((hosts[client]["ip"], hosts[server]["ip"], cls))
+    return out
+
+
 def _key(l4, a, ap, b, bp):
     return (l4,) + tuple(sorted([(a, str(ap)), (b, str(bp))]))
 

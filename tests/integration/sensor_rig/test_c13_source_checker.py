@@ -17,6 +17,8 @@ import c13_source
 import c13_stream
 import gt_checker
 
+import dnp3_cases  # c13_stream puts GT-PCAP's folder on the path
+
 
 def records(name):
     return c13_source.Source(*c13_stream.load(name)).records()
@@ -173,6 +175,21 @@ def test_a_service_found_by_port_alone_fails_only_where_the_port_was_moved():
     assert gt_checker.check(rows, recs)["problems"] == []
     bad = gt_checker.check(rows, recs, moved_port=True)["problems"]
     assert len(bad) == 1 and "not by content, on a moved port" in bad[0]
+
+
+def test_every_authorized_writer_resolves_or_the_checker_stops():
+    net = dnp3_cases.NET
+    got = gt_checker.writers(net)
+    assert ("192.0.2.10", "192.0.2.20", "control") in got and len(got) == len(net["authorized_writers"])
+    # A second relay, named only under `outstations`, resolves too.
+    more = {**net, "outstations": {**net.get("outstations", {}), "O9": {"ip": "192.0.2.29"}},
+            "authorized_writers": net["authorized_writers"] + [["M1", "O9", "control"]]}
+    assert ("192.0.2.10", "192.0.2.29", "control") in gt_checker.writers(more)
+    # A name in no table stops the check; it is never dropped.
+    with pytest.raises(KeyError):
+        gt_checker.writers({**net, "authorized_writers": [["M1", "O7", "control"]]})
+    with pytest.raises(KeyError):
+        gt_checker.writers({**net, "authorized_writers": [["M8", "O1", "write"]]})
 
 
 def test_a_service_recorded_against_the_wrong_asset_fails():

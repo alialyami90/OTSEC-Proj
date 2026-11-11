@@ -41,7 +41,7 @@ Run [43060988168](https://github.com/alialyami90/OTSEC-Proj/actions/runs/4306098
 
 **Two faults of the rig's own were found by its first runs** and fixed before the result above. A packet socket bound while its interface is down reports `ENETDOWN` once, and the capture thread died on it, so the capture held nothing. The C-11 run's cross-check, that the capture saw the replay, caught it (job 130653824135). And a send that the egress rule drops is refused with `ENOBUFS`, which the test first took for a crash (job 130660537965).
 
-**The source and the decoder** (`desk`: owner's PC, Go 1.27.3 on `windows/amd64`, the two tests run by name at the PR's last code commit; `CI-Linux`: the acceptance test in `go (ubuntu-latest)` of run 43060988168): the committed stream is 27 records over four captures, 8 heartbeats, 8 flow, 4 service and 7 function records, with every `sa` outcome. `netobs.DecodeChannel` accepted all 27 at the first attempt, and refused each of the four broken ones: a key twice at the top level, a key twice inside the citation, the node's object on a channel record, and frame bytes that no longer hash to their citation.
+**The source and the decoder** (`CI-Linux`: both tests in `go (ubuntu-latest)` of run [43062016304](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43062016304) at `5301843f`; `desk`: the same two run by name on the owner's PC, Go 1.27.3 on `windows/amd64`): the committed stream is 27 records over four captures, 8 heartbeats, 8 flow, 4 service and 7 function records, with every `sa` outcome. `netobs.DecodeChannel` accepted all 27 at the first attempt, and refused each of the four broken ones: a key twice at the top level, a key twice inside the citation, the node's object on a channel record, and frame bytes that no longer hash to their citation.
 
 ### Limits
 
@@ -51,6 +51,7 @@ Run [43060988168](https://github.com/alialyami90/OTSEC-Proj/actions/runs/4306098
 - **The replay in the C-11 self-test is the 17 DNP3 cases with gaps cut to 2 ms,** not the whole GT-PCAP set at its recorded pace: the two R6.2 series are an hour each. The gate's run replays the whole set, and says what pace it used.
 - **Latency is measured on one host's clock.** Under option (b) the alert's time is the node's and the sensor is another machine. In CI both are on the runner. On two machines the measure needs both clocks compared first, which C13 0.2's skew fields are for (P4-4-L2).
 - **The checker covers `flow`, `service` and `function` rows.** It does not judge `dnp3_no_sa`, alerts against `case` rows, redactions, or `insecure`, `encrypted`, `identity` and `undecoded` records: no labelled capture on `main` holds rows for those yet.
+- **The authorized writers.** `gt_checker.writers()` resolves every name in `authorized_writers` through `masters`, `outstation` and `outstations`, and stops on a name that none of them holds (D4 on #623: `dnp3-cases.json` names outstations in two places once #623 merges). Nothing judges `unauthorized-write` with it yet.
 - **The source reads labels, so it cannot be wrong where the labels are wrong.** It is a way to run the node's side before a sensor exists, and a known-good input for the checker's self-test. It is not a second opinion on the labels.
 
 ## 3. How the gate's tests will use the rigs
