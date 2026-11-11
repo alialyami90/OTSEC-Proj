@@ -697,6 +697,22 @@ class Slice:
         finally:
             os.chmod(d, 0o550)
 
+    def store_copy(self, db, name):
+        """A copy, in the run's directory, of one of the node's databases
+        and its write-ahead log as they are on disk now, for a test to open
+        with sqlite3: the committed state the next start of the node would
+        recover. The node must not be running, so the two files are not
+        changing. Nothing opens the node's own files. Returns the copy's
+        path."""
+        assert not self.running("node"), "the node is running"
+        dst = os.path.join(self.d, name)
+        os.mkdir(dst)
+        for fn in (db + ".db", db + ".db-wal"):
+            src = os.path.join(self.layout["store_dir"], fn)
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
+        return os.path.join(dst, db + ".db")
+
     def text(self, name):
         with open(self.logs[name], "rb") as f:
             return f.read().decode("utf-8", "replace")
@@ -720,6 +736,34 @@ class Slice:
             return []
         return [base64.b64decode(r["b64"]) for r in harness.read_log(self.relp_log, live=self.running("receiver"))
                 if r.get("event") == "syslog"]
+
+    def received_by_line(self):
+        """[(line number, message bytes)] for every syslog frame the receiver
+        acknowledged, in the order its log holds them. Read live while the
+        receiver runs: a last line without its newline is still being
+        written (harness.read_log)."""
+        if not os.path.exists(self.relp_log):
+            return []
+        with open(self.relp_log, "rb") as f:
+            data = f.read()
+        if self.running("receiver"):
+            data = data[:data.rfind(b"\n") + 1]
+        out = []
+        for i, line in enumerate(data.decode("utf-8").split("\n")):
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if r.get("event") == "syslog":
+                out.append((i, base64.b64decode(r["b64"])))
+        return out
+
+    def receiver_lines(self):
+        """How many lines the receiver's log holds now: where a break falls
+        among the line numbers of received_by_line."""
+        if not os.path.exists(self.relp_log):
+            return 0
+        with open(self.relp_log, "rb") as f:
+            return sum(1 for _ in f)
 
     def runs_reported(self):
         """The node's collection.run health reports the receiver got, as

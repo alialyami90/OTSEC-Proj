@@ -2,6 +2,7 @@ package forward
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -24,9 +25,19 @@ import (
 // sync="on". They need rsyslogd with imrelp on PATH and skip without it,
 // unless OTSEC_RSYSLOG_REQUIRED=1. The integration job's end-to-end run is
 // A6's (tests/integration/slice); this is the forwarder's own evidence.
+//
+// They run a copy of the installed rsyslogd, not the installed path itself.
+// Ubuntu's AppArmor profile for /usr/sbin/rsyslogd is attached by path and
+// does not let it read a configuration in the test's temporary directory,
+// so the installed binary never listens (D6, F-026). Every path that profile
+// allows needs root to set up. The copy is byte for byte the vendor's binary
+// (checked by SHA-256 below) and loads the same modules, imrelp included,
+// from its compiled-in module directory; only the AppArmor confinement
+// differs, so these tests do not exercise rsyslog under its profile.
 
 type rsyslog struct {
 	t    *testing.T
+	bin  string
 	dir  string
 	conf string
 	out  string
@@ -51,6 +62,35 @@ func needRsyslog(t *testing.T) string {
 	return ""
 }
 
+// unconfinedCopy copies the installed rsyslogd into dir, checks that the
+// copy has the installed binary's SHA-256, and logs its version line.
+func unconfinedCopy(t *testing.T, installed, dir string) string {
+	t.Helper()
+	src, err := filepath.EvalSymlinks(installed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "rsyslogd")
+	if err := os.WriteFile(dst, b, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sha256.Sum256(c) != sha256.Sum256(b) {
+		t.Fatalf("the copy of %s differs from it", src)
+	}
+	v, _ := exec.Command(dst, "-v").CombinedOutput()
+	first, _, _ := strings.Cut(string(v), "\n")
+	t.Logf("rsyslogd: a copy of %s (sha256 %x): %s", src, sha256.Sum256(b), strings.TrimSpace(first))
+	return dst
+}
+
 func writePEM(t *testing.T, path, typ string, der []byte) {
 	t.Helper()
 	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: typ, Bytes: der}), 0o600); err != nil {
@@ -60,8 +100,9 @@ func writePEM(t *testing.T, path, typ string, der []byte) {
 
 func startRsyslog(t *testing.T, p *pki, permitted string) *rsyslog {
 	t.Helper()
-	bin := needRsyslog(t)
+	installed := needRsyslog(t)
 	dir := t.TempDir()
+	bin := unconfinedCopy(t, installed, dir)
 	writePEM(t, filepath.Join(dir, "ca.pem"), "CERTIFICATE", p.caCert.Raw)
 	writePEM(t, filepath.Join(dir, "server.pem"), "CERTIFICATE", p.server.Certificate[0])
 	k, err := x509.MarshalPKCS8PrivateKey(p.server.PrivateKey)
@@ -75,7 +116,7 @@ func startRsyslog(t *testing.T, p *pki, permitted string) *rsyslog {
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	ln.Close()
-	r := &rsyslog{t: t, dir: dir, conf: filepath.Join(dir, "rsyslog.conf"), out: filepath.Join(dir, "out.log"), port: port}
+	r := &rsyslog{t: t, bin: bin, dir: dir, conf: filepath.Join(dir, "rsyslog.conf"), out: filepath.Join(dir, "out.log"), port: port}
 	conf := fmt.Sprintf(`global(workDirectory=%[1]q)
 module(load="imrelp")
 template(name="raw" type="string" string="%%rawmsg%%\n")
@@ -89,7 +130,7 @@ input(type="imrelp" port="%[3]d" address="127.0.0.1" ruleset="relp" tls="on"
 	if err := os.WriteFile(r.conf, []byte(conf), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r.start(bin)
+	r.start()
 	t.Cleanup(func() {
 		r.kill()
 		if b, _ := os.ReadFile(filepath.Join(dir, "rsyslogd.log")); t.Failed() && len(b) > 0 {
@@ -99,9 +140,9 @@ input(type="imrelp" port="%[3]d" address="127.0.0.1" ruleset="relp" tls="on"
 	return r
 }
 
-func (r *rsyslog) start(bin string) {
+func (r *rsyslog) start() {
 	r.t.Helper()
-	r.cmd = exec.Command(bin, "-n", "-f", r.conf, "-i", filepath.Join(r.dir, "pid"))
+	r.cmd = exec.Command(r.bin, "-n", "-f", r.conf, "-i", filepath.Join(r.dir, "pid"))
 	logf, err := os.OpenFile(filepath.Join(r.dir, "rsyslogd.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		r.t.Fatal(err)
@@ -202,7 +243,6 @@ func TestRsyslogExactlyOnce(t *testing.T) {
 func TestRsyslogKilledMidStream(t *testing.T) {
 	p := newPKI(t)
 	r := startRsyslog(t, p, string(node))
-	bin := needRsyslog(t)
 	g := rsyslogRig(t, r, p, &p.client)
 	g.fill(3000)
 	var confirmed store.Seq
@@ -212,7 +252,7 @@ func TestRsyslogKilledMidStream(t *testing.T) {
 			killed = true
 			r.kill()
 			confirmed = g.m.cursor(serStream)
-			r.start(bin)
+			r.start()
 		}
 		return g.m.cursor(serStream) == 3000
 	}, nil)

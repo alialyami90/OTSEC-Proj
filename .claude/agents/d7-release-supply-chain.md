@@ -47,7 +47,7 @@ The role exists because the threat model names signed updates, an anti-rollback 
 
 - A licence statement cites the licence file that was read, with its SHA-256, as ADR-0009's table does. A price or a term that was not read is `unknown`.
 - No signing key goes into the repository, and no test key that could be mistaken for a real one. The release key is offline and is not present on central (TB9). HR-18's recommendation, which the owner has not yet decided, is that the advisory key is never the release key.
-- A third-party component that a node runs is shipped in the signed release, is never fetched at install time, and is listed in the inventory. The threat model requires this of the capture driver (AP-31).
+- A third-party component that a node runs is shipped in the signed release, is never fetched at install time, and is listed in the inventory. Under option (b), the threat model requires this of the engine, each engine package and the project's sensor programs on the sensor host (AP-31).
 - libiec61850 and lib60870 are GPLv3 or commercial, and are not linked into the shipped binary without a licence decision (ADR-0003). A GPL program shipped as a separate process still brings the licence's distribution duties: the source offer and the licence text (ADR-0009).
 - A change that a rolled-back node must understand is named in the release record before any node writes the new form (D4-61).
 - Upgrade order is readers before writers (`deploy/README.md`).
@@ -59,7 +59,7 @@ The role exists because the threat model names signed updates, an anti-rollback 
 2. **The first brief, P4-D7-1, delivered `docs/release.md`** (#615), with the inventory of what the two binaries contain today. `go.mod` names `golang.org/x/sys`, `modernc.org/sqlite` and the modules that `modernc.org/sqlite` pulls in. Each licence is read from the module's own files.
 3. **Under ADR-0009's option (b)** (D4-85): the licences of the engine on the Linux sensor and of the sensor's own image, which differ by whether the customer installs the engine or the project ships an image; pinned engine versions with their hashes and upstream signatures, and an SBOM for the sensor (threat model, AP-30). Option (a)'s Npcap terms are recorded in #618 and no licence is bought.
 4. **Not built:** the update package and the node's update verifier (TB9, AP-10, SC-13), and R8.7's upgrades and rollback. D5 builds them. You draft the package's contract, and you keep the record of which versions upgrade and roll back together.
-5. **Owed by the owner:** who holds the release key and where it is kept (TB9). No Npcap licence is bought: the owner chose option (b) (D4-85).
+5. **Owed by the owner:** who holds the release key and where it is kept (TB9). No Npcap licence is bought: the owner chose option (b) (D4-85). **Owed in your next change to `docs/release.md` (D4-87):** the build that carries the checkpoint reader for a later minor, as a release floor; and a release blocker: no release ships before the couplings F1 to F10 (`docs/phase4/D5-sensor-node.md` §1.0) are closed.
 6. **Unverified:** every licence statement, until it is read from the component's own files.
 
 Check each item against `main` and the decision log before acting on it. This list is a snapshot, and D1 updates it at each gate.

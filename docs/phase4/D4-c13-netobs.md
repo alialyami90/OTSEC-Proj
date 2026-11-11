@@ -11,6 +11,8 @@ The design note beside it is [D4-network-baseline.md](D4-network-baseline.md). I
 
 **Revised 2026-11-07, after D4-68, with D1's agreement** (§14). Coding C13 found four gaps, and D1 agreed the fixes before the code merges. The identifier stays `otsec.netobs/0.1`, because nothing has been written under it yet.
 
+**C13 0.2 is proposed, not approved** (D4, 2026-11-11, brief P4-4-L2, revised after its reviews on #627): [D4-c13-0.2-proposal.md](D4-c13-0.2-proposal.md). Under option (b) (D4-85) it revises the channel for a link between two machines: mutual TLS on a connection the node opens, a hello in each direction, acknowledgement and resume, the sensor's buffer, clock fields, PRP's `prp_window_ms` and counters, and per-interface counts for a blind sensor. It also replaces §6's "at most once a minute" health event with the node's capped events, and moves both network checkpoints to `otsec.netcheckpoint/0.2` behind a bridge build. It gives this note's local pipe (below and §12), `drops_driver` in `pktmon` terms (§6) and the Windows binding read in `interface_check` (§6) their Linux `AF_PACKET` meaning. Until D1 approves it, this note is C13 0.1 as approved, and the code in `contracts/netobs` follows it.
+
 Everything here is `desk`. No sensor exists, no record has been produced, and no device was contacted. The Go package `contracts/netobs` follows approval, as C11 did (#437, then #446), so that review settles the text before code pins it.
 
 **Written before ADR-0009 names an option, at D1's direction.** The brief's order puts C13 after the ADR (Order step 2). D1 asked for it now, because every option hands the node the same records. Nothing below depends on the option except the channel's transport:
