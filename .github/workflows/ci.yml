@@ -72,7 +72,33 @@ jobs:
       # #230, #252, D4-22 and D4-44). A green platform/node over 12m is
       # still a finding (D4-22, D4-44). On Windows -v gives each test's time
       # to the budget step below, and tee keeps the log for it.
-      - if: runner.os == 'Linux'
+      # The forwarder's own rsyslog tests (modules/telemetry/forward/
+      # rsyslog_test.go) skip unless rsyslogd with imrelp is installed, and
+      # the runner comes without imrelp. So it is installed here, and
+      # OTSEC_RSYSLOG_REQUIRED=1 makes a missing rsyslogd or imrelp fail
+      # those tests instead of skipping them (D6, P4-D6-H5, authorized by
+      # D1). Linux only: rsyslog does not run on Windows, and the variable
+      # is not set there.
+      - name: TEMPORARY, removed in the next commit - the forwarder's rsyslog tests on the runner as it comes
+        if: runner.os == 'Linux'
+        run: |
+          command -v rsyslogd || echo "no rsyslogd on PATH"
+          ls /usr/lib/x86_64-linux-gnu/rsyslog/imrelp.so || echo "no imrelp.so"
+          go test -count=1 -v -run Rsyslog ./modules/telemetry/forward/
+      - name: rsyslog with imrelp, for the forwarder's rsyslog tests
+        if: runner.os == 'Linux' && !cancelled()
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp
+          rsyslogd -v
+          dpkg-query -W rsyslog rsyslog-relp librelp0
+      - name: TEMPORARY, removed in the next commit - the forwarder's rsyslog tests with imrelp installed, one line each
+        if: runner.os == 'Linux' && !cancelled()
+        env:
+          OTSEC_RSYSLOG_REQUIRED: "1"
+        run: go test -count=1 -v -run Rsyslog ./modules/telemetry/forward/
+      - if: runner.os == 'Linux' && !cancelled()
+        env:
+          OTSEC_RSYSLOG_REQUIRED: "1"
         run: go test ./...
       - if: runner.os == 'Windows'
         shell: bash
