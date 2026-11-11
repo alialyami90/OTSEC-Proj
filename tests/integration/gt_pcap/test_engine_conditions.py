@@ -32,7 +32,7 @@ def test_every_capture_has_its_protocol_service_and_function_rows():
     by = collections.defaultdict(collections.Counter)
     for r in rows():
         by[r["capture"]][r["condition"]] += 1
-    assert len(by) == 21  # 19 labelled cases and the two R6.2 series
+    assert len(by) == 22  # 19 labelled DNP3 cases, the two R6.2 series, and the derived Modbus capture
     for name, n in by.items():
         assert n["protocol"] >= 1 and n["service"] >= 1 and n["function"] >= 1, name
 
@@ -58,10 +58,20 @@ def test_the_moved_port_and_udp_rows():
     assert {(r["l4"], r["dport"]) for r in udp} == {("udp", "20000")}
     for case in (moved, udp):
         assert sorted(r["code"] for r in case if r["condition"] == "function") == ["1", "5"]
-    # Every other capture is DNP3 on TCP 20000, so these two are the only
-    # rows that tell a port-only or TCP-only decoder apart.
-    rest = {(r["l4"], r["dport"]) for n, rs in got.items() if n not in ("dnp3-moved-port", "dnp3-udp") for r in rs}
+    # Every other DNP3 capture is on TCP 20000, so these two are the only
+    # DNP3 rows that tell a port-only or TCP-only decoder apart.
+    rest = {(r["l4"], r["dport"]) for n, rs in got.items() if n not in ("dnp3-moved-port", "dnp3-udp") for r in rs
+            if r["protocol"] == "dnp3"}
     assert rest == {("tcp", "20000")}
+
+
+def test_the_derived_modbus_capture_has_its_rows_off_port_502():
+    got = [r for r in rows() if r["capture"] == "modbus-moved-port"]
+    assert [r["condition"] for r in got] == ["protocol", "service", "function"]
+    assert {(r["protocol"], r["l4"], r["dport"]) for r in got} == {("modbus", "tcp", "15020")}
+    assert got[2]["code"] == "3"
+    # It is the only Modbus capture, and no DNP3 row is on its port.
+    assert {r["capture"] for r in rows() if r["protocol"] == "modbus"} == {"modbus-moved-port"}
 
 
 def test_an_unknown_sa_value_is_refused():

@@ -1,104 +1,107 @@
-capture	condition	l4	src	sport	dst	dport	code	objects	sa	show	frames
-dnp3-authorized-operate	protocol	tcp	192.0.2.10	41007	192.0.2.20	20000					
-dnp3-authorized-operate	service	tcp			192.0.2.20	20000					1
-dnp3-authorized-operate	function	tcp	192.0.2.10	41007	192.0.2.20	20000	5	g12v1	none		4,6
-dnp3-authorized-time-sync	protocol	tcp	192.0.2.10	41008	192.0.2.20	20000					
-dnp3-authorized-time-sync	service	tcp			192.0.2.20	20000					1
-dnp3-authorized-time-sync	function	tcp	192.0.2.10	41008	192.0.2.20	20000	2	g50v1	none		4,6
-dnp3-heldout	protocol	tcp	192.0.2.10	64815	192.0.2.20	20000					
-dnp3-heldout	service	tcp			192.0.2.20	20000					1
-dnp3-heldout	protocol	tcp	192.0.2.11	64681	192.0.2.20	20000					
-dnp3-heldout	protocol	tcp	192.0.2.12	50078	192.0.2.20	20000					
-dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	2	g80v1	none		4,6
-dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		8,10
-dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	22	?	none		12,14
-dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		16,18
-dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	2	g80v1	none		26,28
-dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		30,32
-dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	22	?	none		34,36
-dnp3-heldout	function	tcp	192.0.2.11	64681	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		38,40
-dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		42,44
-dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	2	g50v1	none		294,296
-dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	5	g12v1	none		694,696
-dnp3-known-master-new-port	protocol	tcp	192.0.2.11	52999	192.0.2.20	20000					
-dnp3-known-master-new-port	service	tcp			192.0.2.20	20000					1
-dnp3-known-master-new-port	function	tcp	192.0.2.11	52999	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6
-dnp3-moved-port	protocol	tcp	192.0.2.10	41016	192.0.2.21	20001					
-dnp3-moved-port	service	tcp			192.0.2.21	20001					1
-dnp3-moved-port	function	tcp	192.0.2.10	41016	192.0.2.21	20001	1	g60v1,g60v2,g60v3,g60v4	none		4,6
-dnp3-moved-port	function	tcp	192.0.2.10	41016	192.0.2.21	20001	5	g12v1	none		8,10
-dnp3-new-master	protocol	tcp	192.0.2.13	41014	192.0.2.20	20000					
-dnp3-new-master	service	tcp			192.0.2.20	20000					1
-dnp3-new-master	function	tcp	192.0.2.13	41014	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6
-dnp3-reader-disable-unsolicited	protocol	tcp	192.0.2.11	41010	192.0.2.20	20000					
-dnp3-reader-disable-unsolicited	service	tcp			192.0.2.20	20000					1
-dnp3-reader-disable-unsolicited	function	tcp	192.0.2.11	41010	192.0.2.20	20000	21	g60v2	none		4,6
-dnp3-reader-time-sync	protocol	tcp	192.0.2.11	41009	192.0.2.20	20000					
-dnp3-reader-time-sync	service	tcp			192.0.2.20	20000					1
-dnp3-reader-time-sync	function	tcp	192.0.2.11	41009	192.0.2.20	20000	2	g50v1	none		4,6
-dnp3-reconnect-learned	protocol	tcp	192.0.2.12	41011	192.0.2.20	20000					
-dnp3-reconnect-learned	service	tcp			192.0.2.20	20000					1
-dnp3-reconnect-learned	function	tcp	192.0.2.12	41011	192.0.2.20	20000	2	g80v1	none		4,6
-dnp3-reconnect-learned	function	tcp	192.0.2.12	41011	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		8,10
-dnp3-reconnect-learned	function	tcp	192.0.2.12	41011	192.0.2.20	20000	22	?	none		12,14
-dnp3-reconnect-unlearned	protocol	tcp	192.0.2.11	41012	192.0.2.20	20000					
-dnp3-reconnect-unlearned	service	tcp			192.0.2.20	20000					1
-dnp3-reconnect-unlearned	function	tcp	192.0.2.11	41012	192.0.2.20	20000	2	g80v1	none		4,6
-dnp3-reconnect-unlearned	function	tcp	192.0.2.11	41012	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		8,10
-dnp3-reconnect-unlearned	function	tcp	192.0.2.11	41012	192.0.2.20	20000	22	?	none		12,14
-dnp3-response-new-group	protocol	tcp	192.0.2.10	41013	192.0.2.20	20000					
-dnp3-response-new-group	service	tcp			192.0.2.20	20000					1
-dnp3-response-new-group	function	tcp	192.0.2.10	41013	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6
-dnp3-reused-seq	protocol	tcp	192.0.2.10	41015	192.0.2.20	20000					
-dnp3-reused-seq	service	tcp			192.0.2.20	20000					1
-dnp3-reused-seq	function	tcp	192.0.2.10	41015	192.0.2.20	20000	5	g12v1			4
-dnp3-reused-seq	function	tcp	192.0.2.10	41015	192.0.2.20	20000	5	g12v1	none		6,8
-dnp3-sa	protocol	tcp	192.0.2.10	41001	192.0.2.20	20000					
-dnp3-sa	service	tcp			192.0.2.20	20000					1
-dnp3-sa	function	tcp	192.0.2.10	41001	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6
-dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none	no group 120 object between the request and its response	4,6
-dnp3-sa	function	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g12v1	challenged		8,10,12,14
-dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g12v1	challenged	131:g120v1 from 192.0.2.20	8,10,12,14
-dnp3-sa	function	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g120v3,g120v9,g12v1	aggressive		16,18
-dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g120v3,g120v9,g12v1	aggressive	5:g120v3 from 192.0.2.10	16,18
-dnp3-sa-failed-before-ack	protocol	tcp	192.0.2.10	41003	192.0.2.20	20000					
-dnp3-sa-failed-before-ack	service	tcp			192.0.2.20	20000					1
-dnp3-sa-failed-before-ack	function	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed		4,6,8,10
-dnp3-sa-failed-before-ack	g120	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10
-dnp3-sa-failed-master	protocol	tcp	192.0.2.10	41005	192.0.2.20	20000					
-dnp3-sa-failed-master	service	tcp			192.0.2.20	20000					1
-dnp3-sa-failed-master	function	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed		4,6,8
-dnp3-sa-failed-master	g120	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed	33:g120v7 from 192.0.2.10	4,6,8
-dnp3-sa-failed-outstation	protocol	tcp	192.0.2.10	41002	192.0.2.20	20000					
-dnp3-sa-failed-outstation	service	tcp			192.0.2.20	20000					1
-dnp3-sa-failed-outstation	function	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed		4,6,8,10
-dnp3-sa-failed-outstation	g120	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10
-dnp3-sa-failed-unauthorized	protocol	tcp	192.0.2.11	41004	192.0.2.20	20000					
-dnp3-sa-failed-unauthorized	service	tcp			192.0.2.20	20000					1
-dnp3-sa-failed-unauthorized	function	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed		4,6,8,10
-dnp3-sa-failed-unauthorized	g120	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10
-dnp3-train	protocol	tcp	192.0.2.10	51353	192.0.2.20	20000					
-dnp3-train	service	tcp			192.0.2.20	20000					1
-dnp3-train	protocol	tcp	192.0.2.12	61665	192.0.2.20	20000					
-dnp3-train	protocol	tcp	192.0.2.11	63036	192.0.2.20	20000					
-dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	2	g80v1	none		7,9
-dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		11,13
-dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	22	?	none		15,17
-dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	2	g80v1	none		19,21
-dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		23,25
-dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	22	?	none		27,29
-dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		31,33
-dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		38,40
-dnp3-train	function	tcp	192.0.2.11	63036	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		42,44
-dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	2	g50v1	none		302,304
-dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	5	g12v1	none		698,700
-dnp3-udp	protocol	udp	192.0.2.14	20000	192.0.2.20	20000					
-dnp3-udp	service	udp			192.0.2.20	20000					1
-dnp3-udp	function	udp	192.0.2.14	20000	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		1,2
-dnp3-udp	function	udp	192.0.2.14	20000	192.0.2.20	20000	5	g12v1	none		3,4
-dnp3-unauthorized-operate	protocol	tcp	192.0.2.11	41006	192.0.2.20	20000					
-dnp3-unauthorized-operate	service	tcp			192.0.2.20	20000					1
-dnp3-unauthorized-operate	function	tcp	192.0.2.11	41006	192.0.2.20	20000	5	g12v1	none		4,6
-dnp3-unauthorized-operate-no-response	protocol	tcp	192.0.2.11	41006	192.0.2.20	20000					
-dnp3-unauthorized-operate-no-response	service	tcp			192.0.2.20	20000					1
-dnp3-unauthorized-operate-no-response	function	tcp	192.0.2.11	41006	192.0.2.20	20000	5	g12v1			4
+capture	condition	l4	src	sport	dst	dport	code	objects	sa	show	frames	protocol	direction
+dnp3-authorized-operate	protocol	tcp	192.0.2.10	41007	192.0.2.20	20000						dnp3	client-server
+dnp3-authorized-operate	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-authorized-operate	function	tcp	192.0.2.10	41007	192.0.2.20	20000	5	g12v1	none		4,6	dnp3	client-server
+dnp3-authorized-time-sync	protocol	tcp	192.0.2.10	41008	192.0.2.20	20000						dnp3	client-server
+dnp3-authorized-time-sync	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-authorized-time-sync	function	tcp	192.0.2.10	41008	192.0.2.20	20000	2	g50v1	none		4,6	dnp3	client-server
+dnp3-heldout	protocol	tcp	192.0.2.10	64815	192.0.2.20	20000						dnp3	client-server
+dnp3-heldout	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-heldout	protocol	tcp	192.0.2.11	64681	192.0.2.20	20000						dnp3	client-server
+dnp3-heldout	protocol	tcp	192.0.2.12	50078	192.0.2.20	20000						dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	2	g80v1	none		4,6	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		8,10	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	22	?	none		12,14	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		16,18	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	2	g80v1	none		26,28	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		30,32	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	22	?	none		34,36	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.11	64681	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		38,40	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.12	50078	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		42,44	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	2	g50v1	none		294,296	dnp3	client-server
+dnp3-heldout	function	tcp	192.0.2.10	64815	192.0.2.20	20000	5	g12v1	none		694,696	dnp3	client-server
+dnp3-known-master-new-port	protocol	tcp	192.0.2.11	52999	192.0.2.20	20000						dnp3	client-server
+dnp3-known-master-new-port	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-known-master-new-port	function	tcp	192.0.2.11	52999	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6	dnp3	client-server
+dnp3-moved-port	protocol	tcp	192.0.2.10	41016	192.0.2.21	20001						dnp3	client-server
+dnp3-moved-port	service	tcp			192.0.2.21	20001					1	dnp3	
+dnp3-moved-port	function	tcp	192.0.2.10	41016	192.0.2.21	20001	1	g60v1,g60v2,g60v3,g60v4	none		4,6	dnp3	client-server
+dnp3-moved-port	function	tcp	192.0.2.10	41016	192.0.2.21	20001	5	g12v1	none		8,10	dnp3	client-server
+dnp3-new-master	protocol	tcp	192.0.2.13	41014	192.0.2.20	20000						dnp3	client-server
+dnp3-new-master	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-new-master	function	tcp	192.0.2.13	41014	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6	dnp3	client-server
+dnp3-reader-disable-unsolicited	protocol	tcp	192.0.2.11	41010	192.0.2.20	20000						dnp3	client-server
+dnp3-reader-disable-unsolicited	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-reader-disable-unsolicited	function	tcp	192.0.2.11	41010	192.0.2.20	20000	21	g60v2	none		4,6	dnp3	client-server
+dnp3-reader-time-sync	protocol	tcp	192.0.2.11	41009	192.0.2.20	20000						dnp3	client-server
+dnp3-reader-time-sync	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-reader-time-sync	function	tcp	192.0.2.11	41009	192.0.2.20	20000	2	g50v1	none		4,6	dnp3	client-server
+dnp3-reconnect-learned	protocol	tcp	192.0.2.12	41011	192.0.2.20	20000						dnp3	client-server
+dnp3-reconnect-learned	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-reconnect-learned	function	tcp	192.0.2.12	41011	192.0.2.20	20000	2	g80v1	none		4,6	dnp3	client-server
+dnp3-reconnect-learned	function	tcp	192.0.2.12	41011	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		8,10	dnp3	client-server
+dnp3-reconnect-learned	function	tcp	192.0.2.12	41011	192.0.2.20	20000	22	?	none		12,14	dnp3	client-server
+dnp3-reconnect-unlearned	protocol	tcp	192.0.2.11	41012	192.0.2.20	20000						dnp3	client-server
+dnp3-reconnect-unlearned	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-reconnect-unlearned	function	tcp	192.0.2.11	41012	192.0.2.20	20000	2	g80v1	none		4,6	dnp3	client-server
+dnp3-reconnect-unlearned	function	tcp	192.0.2.11	41012	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		8,10	dnp3	client-server
+dnp3-reconnect-unlearned	function	tcp	192.0.2.11	41012	192.0.2.20	20000	22	?	none		12,14	dnp3	client-server
+dnp3-response-new-group	protocol	tcp	192.0.2.10	41013	192.0.2.20	20000						dnp3	client-server
+dnp3-response-new-group	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-response-new-group	function	tcp	192.0.2.10	41013	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6	dnp3	client-server
+dnp3-reused-seq	protocol	tcp	192.0.2.10	41015	192.0.2.20	20000						dnp3	client-server
+dnp3-reused-seq	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-reused-seq	function	tcp	192.0.2.10	41015	192.0.2.20	20000	5	g12v1			4	dnp3	client-server
+dnp3-reused-seq	function	tcp	192.0.2.10	41015	192.0.2.20	20000	5	g12v1	none		6,8	dnp3	client-server
+dnp3-sa	protocol	tcp	192.0.2.10	41001	192.0.2.20	20000						dnp3	client-server
+dnp3-sa	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-sa	function	tcp	192.0.2.10	41001	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		4,6	dnp3	client-server
+dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none	no group 120 object between the request and its response	4,6	dnp3	client-server
+dnp3-sa	function	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g12v1	challenged		8,10,12,14	dnp3	client-server
+dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g12v1	challenged	131:g120v1 from 192.0.2.20	8,10,12,14	dnp3	client-server
+dnp3-sa	function	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g120v3,g120v9,g12v1	aggressive		16,18	dnp3	client-server
+dnp3-sa	g120	tcp	192.0.2.10	41001	192.0.2.20	20000	5	g120v3,g120v9,g12v1	aggressive	5:g120v3 from 192.0.2.10	16,18	dnp3	client-server
+dnp3-sa-failed-before-ack	protocol	tcp	192.0.2.10	41003	192.0.2.20	20000						dnp3	client-server
+dnp3-sa-failed-before-ack	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-sa-failed-before-ack	function	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed		4,6,8,10	dnp3	client-server
+dnp3-sa-failed-before-ack	g120	tcp	192.0.2.10	41003	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10	dnp3	client-server
+dnp3-sa-failed-master	protocol	tcp	192.0.2.10	41005	192.0.2.20	20000						dnp3	client-server
+dnp3-sa-failed-master	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-sa-failed-master	function	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed		4,6,8	dnp3	client-server
+dnp3-sa-failed-master	g120	tcp	192.0.2.10	41005	192.0.2.20	20000	5	g12v1	failed	33:g120v7 from 192.0.2.10	4,6,8	dnp3	client-server
+dnp3-sa-failed-outstation	protocol	tcp	192.0.2.10	41002	192.0.2.20	20000						dnp3	client-server
+dnp3-sa-failed-outstation	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-sa-failed-outstation	function	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed		4,6,8,10	dnp3	client-server
+dnp3-sa-failed-outstation	g120	tcp	192.0.2.10	41002	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10	dnp3	client-server
+dnp3-sa-failed-unauthorized	protocol	tcp	192.0.2.11	41004	192.0.2.20	20000						dnp3	client-server
+dnp3-sa-failed-unauthorized	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-sa-failed-unauthorized	function	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed		4,6,8,10	dnp3	client-server
+dnp3-sa-failed-unauthorized	g120	tcp	192.0.2.11	41004	192.0.2.20	20000	5	g12v1	failed	131:g120v7 from 192.0.2.20	4,6,8,10	dnp3	client-server
+dnp3-train	protocol	tcp	192.0.2.10	51353	192.0.2.20	20000						dnp3	client-server
+dnp3-train	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-train	protocol	tcp	192.0.2.12	61665	192.0.2.20	20000						dnp3	client-server
+dnp3-train	protocol	tcp	192.0.2.11	63036	192.0.2.20	20000						dnp3	client-server
+dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	2	g80v1	none		7,9	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		11,13	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	22	?	none		15,17	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	2	g80v1	none		19,21	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	20	g60v2,g60v3,g60v4	none		23,25	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	22	?	none		27,29	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		31,33	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.12	61665	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		38,40	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.11	63036	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		42,44	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	2	g50v1	none		302,304	dnp3	client-server
+dnp3-train	function	tcp	192.0.2.10	51353	192.0.2.20	20000	5	g12v1	none		698,700	dnp3	client-server
+dnp3-udp	protocol	udp	192.0.2.14	20000	192.0.2.20	20000						dnp3	none
+dnp3-udp	service	udp			192.0.2.20	20000					1	dnp3	
+dnp3-udp	function	udp	192.0.2.14	20000	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		1,2	dnp3	none
+dnp3-udp	function	udp	192.0.2.14	20000	192.0.2.20	20000	5	g12v1	none		3,4	dnp3	none
+dnp3-unauthorized-operate	protocol	tcp	192.0.2.11	41006	192.0.2.20	20000						dnp3	client-server
+dnp3-unauthorized-operate	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-unauthorized-operate	function	tcp	192.0.2.11	41006	192.0.2.20	20000	5	g12v1	none		4,6	dnp3	client-server
+dnp3-unauthorized-operate-no-response	protocol	tcp	192.0.2.11	41006	192.0.2.20	20000						dnp3	client-server
+dnp3-unauthorized-operate-no-response	service	tcp			192.0.2.20	20000					1	dnp3	
+dnp3-unauthorized-operate-no-response	function	tcp	192.0.2.11	41006	192.0.2.20	20000	5	g12v1			4	dnp3	client-server
+modbus-moved-port	protocol	tcp	192.168.110.131	2074	192.168.110.138	15020						modbus	midstream
+modbus-moved-port	service	tcp			192.168.110.138	15020					1	modbus	
+modbus-moved-port	function	tcp	192.168.110.131	2074	192.168.110.138	15020	3				1	modbus	midstream

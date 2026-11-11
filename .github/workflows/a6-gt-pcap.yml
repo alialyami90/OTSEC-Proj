@@ -83,3 +83,37 @@ jobs:
           name: gt-pcap-dnp3
           path: ${{ runner.temp }}/dnp3/
           if-no-files-found: warn
+  # Modbus/TCP on a moved port (D1 on #623; plan sections 2B and 2C).
+  # GT-PCAP has no Modbus/TCP writer, so the case is derived from the public
+  # capture modbus.pcap: movedport.py rewrites its server port and nothing
+  # else, the hash pins the result, and the pinned tshark's reading of it,
+  # with that port decoded as Modbus/TCP, must give the committed label
+  # exactly. modbus_label.py also checks the derived capture against its
+  # source. Only the label is uploaded, never the capture.
+  modbus-moved-port:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tshark
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Fetch the public captures (pinned SHA-256s)
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps"
+      - name: Derive the capture, and check it against the committed hash
+        run: |
+          python3 tests/integration/gt_pcap/movedport.py "$RUNNER_TEMP/caps/modbus.pcap" "$RUNNER_TEMP/modbus"
+          cd "$RUNNER_TEMP/modbus" && sha256sum -c "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/modbus/modbus-moved-port.sha256"
+      - name: Label it with tshark, and check it against its source
+        run: python3 tests/integration/gt_pcap/modbus_label.py "$RUNNER_TEMP/caps/modbus.pcap" "$RUNNER_TEMP/modbus/modbus-moved-port.pcap" 15020 "$RUNNER_TEMP/modbus/modbus-moved-port.tsv"
+      - name: The label equals the committed one
+        run: diff -u tests/fixtures/network/gt-pcap/modbus/modbus-moved-port.tsv "$RUNNER_TEMP/modbus/modbus-moved-port.tsv"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gt-pcap-modbus-moved-port
+          path: ${{ runner.temp }}/modbus/modbus-moved-port.tsv
+          if-no-files-found: warn

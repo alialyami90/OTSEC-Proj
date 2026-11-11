@@ -16,6 +16,18 @@ GT-PCAP is the labelled capture set for V-M6 and R6.1 to R6.5. The plan is `docs
 
 `.github/workflows/a6-gt-pcap.yml` rebuilds them, checks the hashes, has tshark's PRP dissector read every trailer, and writes flow labels as a job artifact. The labels are committed here only after D4 and D2 review them (plan section 1).
 
+## Modbus/TCP on a moved port, derived (plan sections 2B and 2C; D1 on #623)
+
+| Output | Input | Transform | Terms |
+| --- | --- | --- | --- |
+| `modbus-moved-port.pcap`, pinned by `modbus/modbus-moved-port.sha256` | The public capture `modbus.pcap` in `../public-ot-captures/MANIFEST.tsv`, fetched at its pinned SHA-256 (`9e055a2d15a8e447be131002137341ae5f8f8b91b64576cd2fdbd854e141373e`) | `tests/integration/gt_pcap/movedport.py`, added by D6 on 2026-11-11: every TCP segment to or from port 502 is to or from port 15020 instead. Only the two port octets and the TCP checksum change, and the checksum is adjusted by the same difference (RFC 1624), so a checksum's verdict is the source's. Frame order, times, addresses, sequence numbers and payload are the source's. The output is written as a nanosecond classic pcap. | Not vendored, as its input states no redistribution terms. `movedport.py` rebuilds it byte for byte. |
+| `modbus/modbus-moved-port.tsv` | `tests/integration/gt_pcap/modbus_label.py` over the output, with the pinned tshark 4.2.2 and `-d tcp.port==15020,mbtcp` | Labels: one `flow`, one `service`, one `function` (function 3, unit 1) and one `insecure` row (`reason=modbus-tcp`). The labeller first checks the output against its source: the same frames, the same TCP checksum verdict on each, nothing malformed. | `desk` until D4 and D2 review it. The label holds addresses, ports, counts and frame hashes, and no capture bytes. Every result on it is `simulated`. |
+
+- **Why derived.** GT-PCAP has no Modbus/TCP writer, and ADR-0009 names Modbus on a moved port as something that would turn the engine choice. A relay's Modbus/TCP port is a setting (`MODNUM1`, 1 to 65534, 502 by default; S22), so a server off 502 is a documented configuration. Port 15020 is none of a relay's fixed ports.
+- **What the source holds** (`desk`, D6's reading with a stand-in parser): 102 frames, one TCP conversation between 192.168.110.131:2074 and 192.168.110.138:502, with no handshake, so the flow is `midstream`. Its addresses are the public capture's own. It has no asset table, so every row is `asset-unresolved`.
+- **The label was drafted without tshark,** as the two new DNP3 labels were, and no committed Modbus label exists to check the stand-in against. It counts as a label only once the `modbus-moved-port` job of `a6-gt-pcap.yml` is green on it.
+- **Limits.** One conversation, one function code, one unit, no handshake. The synthesized Modbus pair of the plan's section 2B is still owed.
+
 ## DNP3 sources (plan sections 2B, 2C, 3 and 4)
 
 | Output | Origin | Nature | Terms |

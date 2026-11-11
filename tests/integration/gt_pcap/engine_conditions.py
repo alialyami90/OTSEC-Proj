@@ -1,4 +1,4 @@
-"""What an engine's output must show on each GT-PCAP DNP3 capture (D6, P4-4-R1).
+"""What an engine's output must show on each GT-PCAP capture it runs over (D6, P4-4-R1).
 
 Brief P4-4-S2 runs candidate engines over GT-PCAP offline, and its table is
 judged by pass conditions that D6 commits first. This file derives them from
@@ -9,14 +9,19 @@ into a condition are in docs/phase4/D6-engine-run-pass-conditions.md.
 One row per thing an engine must show:
 
 - `protocol`: one per `flow` label row. A record of the engine's, tied to
-  the flow by its transport and both (address, port) ends, names DNP3.
-- `service`: one per `service` label row. DNP3 is attributed to that server
-  end (address, transport, port).
+  the flow by its transport and both (address, port) ends, names the row's
+  protocol (the `protocol` column: dnp3 or modbus).
+- `service`: one per `service` label row. That protocol is attributed to
+  the server end (address, transport, port).
 - `function`: one per `function` label row. A record tied to the flow shows
   the request's function code. `objects` are reported beside it.
 - `g120`: one per `function` label row of the five dnp3-sa captures. `show`
   lists each message that decides the row's `sa`, as <function code>:<object>
   from <sender>, or says that the exchange holds no group 120 object.
+
+The captures are the DNP3 ones named in LABEL_DIR/dnp3-cases.json, and the
+derived Modbus/TCP capture on a moved port, whose label is beside that
+folder (EXTRA).
 
 Usage: python engine_conditions.py LABEL_DIR OUT.tsv
 """
@@ -26,7 +31,10 @@ import json
 import os
 import sys
 
-COLUMNS = ["capture", "condition", "l4", "src", "sport", "dst", "dport", "code", "objects", "sa", "show", "frames"]
+COLUMNS = ["capture", "condition", "l4", "src", "sport", "dst", "dport", "code", "objects", "sa", "show", "frames",
+           "protocol", "direction"]
+# The derived Modbus/TCP capture on a moved port: its label, from LABEL_DIR.
+EXTRA = {"modbus-moved-port": os.path.join("..", "modbus", "modbus-moved-port.tsv")}
 SA_CAPTURES = ("dnp3-sa", "dnp3-sa-failed-outstation", "dnp3-sa-failed-before-ack",
                "dnp3-sa-failed-unauthorized", "dnp3-sa-failed-master")
 
@@ -57,16 +65,17 @@ def conditions(label_dir):
     with open(os.path.join(label_dir, "dnp3-cases.json"), encoding="utf-8") as f:
         meta = json.load(f)
     out = []
-    for name in sorted(list(meta["series"]) + list(meta["cases"])):
-        for r in read_labels(os.path.join(label_dir, name + ".tsv")):
-            if r["protocol"] != "dnp3" or r["kind"] not in ("flow", "service", "function"):
+    paths = {name: name + ".tsv" for name in list(meta["series"]) + list(meta["cases"])}
+    for name, path in sorted({**paths, **EXTRA}.items()):
+        for r in read_labels(os.path.join(label_dir, path)):
+            if r["protocol"] not in ("dnp3", "modbus") or r["kind"] not in ("flow", "service", "function"):
                 continue
             base = [name, {"flow": "protocol"}.get(r["kind"], r["kind"]), r["l4"], r["src"], r["sport"], r["dst"],
                     r["dport"], r["code"], r["objects"], r["sa"]]
             # A flow row lists every frame; the condition needs none of them.
-            out.append(base + ["", "" if r["kind"] == "flow" else r["frames"]])
+            out.append(base + ["", "" if r["kind"] == "flow" else r["frames"], r["protocol"], r["direction"]])
             if r["kind"] == "function" and name in SA_CAPTURES:
-                out.append([name, "g120", *base[2:], g120_show(r), r["frames"]])
+                out.append([name, "g120", *base[2:], g120_show(r), r["frames"], r["protocol"], r["direction"]])
     return out
 
 
