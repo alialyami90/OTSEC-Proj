@@ -38,7 +38,7 @@ In older records A1, B1 and C1 mean the role D1 now holds. Contract names (C1 to
 - **Never fabricate evidence.** Label every result with its evidence class (`desk`, `simulated`, `CI-Linux`, `CI-Windows`) and where it came from (commit SHA or run URL). Nothing is `hardware-verified`, and no SEL family may be called supported.
 - **The repository is public.** Test credentials only. No secret, vendor-default password, real device data or internal hostname goes into any file. Advisory sets and signing keys are test ones until the owner decides HR-18.
 - **Change only the paths you own** (above). A shared contract changes only through D1, with a written proposal and review by every affected owner.
-- **Only D1 merges.** A PR merges when its reviewers accept it and every job in `ci.yml` and `govulncheck.yml` is green on its head. You never approve or merge your own work.
+- **Only D1 merges.** A PR merges when its reviewers accept it and every job in `ci.yml` and `govulncheck.yml` is green on its head. You never approve or merge your own work: a PR that you wrote merges on D6's acceptance and the owner's word (D4-82).
 - **Tests:** GitHub Actions is the gate. The owner's PC is the second Windows run and the fallback, under the limits in `HANDOFF.md`. The PC is never a self-hosted runner. Re-run a failing job at most once, never push an empty commit, and never call a timeout or a property failure a flake.
 - **Git:** stage files by explicit path, never `git add -A`. Never force-push. After a squash merge, restart your branch from `main`. Use `$(go env GOROOT)/bin/gofmt`, not another `gofmt` on the PATH.
 - **When you finish, report what happened:** what was done, the evidence, the contracts touched, the limits and risks, and the files changed. Do not report plans as results.
@@ -52,7 +52,7 @@ In older records A1, B1 and C1 mean the role D1 now holds. Contract names (C1 to
 - A reviewer's verdict names a head. A later "merge main, no content change" commit keeps it; check with `git diff --stat <reviewed> <head>`.
 - When a PR's CI is older than `main`, verify the merged result before merging: `git merge-tree --write-tree origin/main <pr>`, extract with `git archive`, then `go vet` and the affected tests.
 - Never `git checkout` in the main checkout to inspect a PR. Use `git worktree add` or `git merge-tree`.
-- Record each decision in `docs/phase4/B1-decisions.md` with its date, source, evidence and follow-up owner. The next entry is **D4-82**. Mark a replaced decision "superseded", never delete it.
+- Record each decision in `docs/phase4/B1-decisions.md` with its date, source, evidence and follow-up owner. The next entry is **D4-83**. Mark a replaced decision "superseded", never delete it.
 - Phase 4 goes item by item (D4-33, D4-34): nothing on the next item starts before the owner's answer. Put each choice to the owner as one decision with a recommendation.
 - A markdown-only PR skips CI and merges on review (D3-13). A PR touching GT-PCAP also needs `a6-gt-pcap` green (D4-68).
 - Once `docs/release.md` exists, a toolchain or dependency bump updates D7's inventory in the same PR (D4-79).
@@ -69,6 +69,7 @@ In older records A1, B1 and C1 mean the role D1 now holds. Contract names (C1 to
 8. **Carried contract work:** C1 0.4 (the SNMP profile's placeholders; the SEL-2731/2741 profile from measurement after H-17). Items 5 and 6 of Phase 4 are not briefed.
 9. **D7 and D8 are not briefed** (D4-79). D7's first brief is `docs/release.md` with the inventory of what the two binaries contain today. D8's first surface goes through the impeccable skill's new-work flow, once a foundational workflow needs a person to see or decide something. Write each when the owner says to start.
 10. **Keep `docs/requirements.md`'s Status and Basis columns current** at each gate, by the rules in its legend (D4-81).
-11. **Waiting on the owner: the branch list** (D4-81). `reference/carried/branch-cleanup-2026-11-10.md` has 49 branches that meet the owner's rule, and 6 whose tree equals a commit on `main`. Delete nothing before the owner approves, and re-check each SHA first.
+11. **Waiting on the owner: the branch list** (D4-81). `reference/carried/branch-cleanup-2026-11-10.md` has 49 branches that meet the owner's rule, and 6 whose tree equals a commit on `main`. D1 recommends approving both, and `reference/carried/delete-merged-branches-2026-11-11.ps1` is written for them (D4-82). Delete nothing before the owner approves, and re-check each SHA first.
+12. **In flight: D6's brief P4-D6-M1** (D4-82), the verification matrix's Status column. When D6 reports rows that disagree with `docs/requirements.md`, correct that file in a PR that D6 reviews.
 
 Check each item against `main` and the decision log before acting on it. This list is a snapshot, and D1 updates it at each gate.

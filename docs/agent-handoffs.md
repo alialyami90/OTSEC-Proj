@@ -1433,3 +1433,26 @@ Nothing captures traffic on a real network. Nothing scans, probes or transmits o
 4. The sensor brief follows the owner's choice on ADR-0009. V-M6, R6.4's latency and C-11 run only on the real sensor.
 
 The item 4 exit gate is set in the sensor brief. It holds every criterion the Stage A brief listed, and a brief may not lower them.
+
+## After #611: the verification matrix's status (issued 2026-11-11, D4-82)
+
+### P4-D6-M1 (D6): the Status column of the verification matrix
+
+- **Objective.** The matrix in `docs/verification.md` says `defined` on all 57 rows, and it has no row for R1.6 or R1.7. `docs/requirements.md` now states a status for each requirement (D4-81), which D1 read from D6's status tables. Give each matrix row D6's own status, so that the two files agree and the requirement statuses rest on D6's record.
+- **Inputs.** D6's status tables in `docs/verification.md` ("Phase 2 slice status", "Phase 3 status", and the two Phase 4 gate tables), its findings log, the tests themselves, the six exit reports, and the legend of `docs/requirements.md`.
+- **Deliverables:**
+  1. **A short legend for the matrix's Status column.** Each value says what ran and at which evidence class. No value reads as hardware evidence.
+  2. **A status for each of the 57 rows,** naming the table row, finding or test it rests on.
+  3. **Rows for R1.6 and R1.7,** each with a criterion. R1.7 is a standing rule: say how it is checked (the unsupported-claim check), and do not name a test that does not exist.
+  4. **The line that reconciles V-M8's "9 of 9"** with the item 3 exit's "12 of 12" (D6 on #611).
+  5. **In the report to D1:** every row where D6's status and the status in `docs/requirements.md` disagree under D4-81's legend, with the reason. D6 does not edit `docs/requirements.md`.
+- **May change:** `docs/verification.md` only.
+- **Acceptance:**
+  - Every status names its source, and none claims more than the source records.
+  - No criterion, threshold, HW value or Slice value changes.
+  - `records-auditor` finds no reference that fails.
+  - For each `verified` row of `docs/requirements.md`, either a matrix row supports it or D6 has named it as a disagreement.
+- **Exclusions.** No test is run, and none is written. No criterion is reworded or lowered. No status for an item 4 row goes above what its tables hold: V-M6 has not run.
+- **Risk.** A status copied from an exit report, or from `docs/requirements.md`, would make the two files circular. Work from the tests and the status tables.
+- **Branch:** `agent/verification-matrix-status`.
+- **Reviewers:** D1. `records-auditor` checks the PR first.
