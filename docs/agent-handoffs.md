@@ -1457,4 +1457,4 @@ The item 4 exit gate is set in the sensor brief. It holds every criterion the St
 - **Branch:** `agent/verification-matrix-status`.
 - **Reviewers:** D1. `records-auditor` checks the PR first.
 - **Extended on 2026-11-11 (D4-82).** D6 also corrects two lines of the same file to what is true: the opening "Status" paragraph, and the P3 row of the Principles table. No criterion changes.
-- **Ruling on 2026-11-11 (D4-82).** A row is `e2e` only when its run used the ground truth that its criterion names.
+- **Ruling on 2026-11-11 (D4-82).** A row is `e2e` only when its run used the ground truth that its criterion names. Where a criterion's HW value is `P` or `Y`, the ground truth for this purpose is the criterion's form against a simulator, a documented example or a synthetic series, as the matrix's legend says: the device itself stays owed at any status.
