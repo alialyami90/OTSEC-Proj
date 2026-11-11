@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,13 +29,39 @@ import (
 // Evidence class: desk (a source rule), any OS.
 func TestUintptrConversionsInCallArgs(t *testing.T) {
 	root := filepath.Join("..", "..")
+	checked, files, err := checkUintptrConversions(root, t.Errorf)
+	if err != nil {
+		t.Fatalf("%v\nif that path is not this module's, the folder that holds it needs a go.mod of its own (HANDOFF.md)", err)
+	}
+	if files < 100 {
+		t.Fatalf("read %d Go files from %s; is the root right?", files, root)
+	}
+	if checked == 0 {
+		t.Fatal("no uintptr(unsafe.Pointer(...)) found; the rule checked nothing")
+	}
+	t.Logf("%d conversions in %d files checked", checked, files)
+}
+
+// checkUintptrConversions reads the Go files of the module at root and
+// reports each breach of the rule through errorf. It returns the number of
+// conversions and of files it read.
+//
+// The walk's rule (brief P4-PC-1): a directory below root that holds a
+// go.mod file is another module, as the go command has it, and is not
+// entered. The go command builds none of it into this module, so the rule
+// hides no code of the module. On the owner's PC that is a worktree's copy
+// of the repository under .claude/, and the two local folders that Git
+// ignores; in the repository it is platform/experiments/phase0. Nothing is
+// skipped by its name alone, and a directory that is entered and cannot be
+// read is an error, never a silent skip.
+func checkUintptrConversions(root string, errorf func(format string, args ...any)) (checked, nfiles int, err error) {
 	fset := token.NewFileSet()
 	type parsed struct {
 		dir string
 		f   *ast.File
 	}
 	var files []parsed
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -45,6 +72,11 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 			}
 			if rel, _ := filepath.Rel(root, path); filepath.ToSlash(rel) == "platform/experiments" {
 				return filepath.SkipDir
+			}
+			if path != root {
+				if fi, err := os.Stat(filepath.Join(path, "go.mod")); err == nil && !fi.IsDir() {
+					return filepath.SkipDir
+				}
 			}
 			return nil
 		}
@@ -59,10 +91,7 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) < 100 {
-		t.Fatalf("read %d Go files from %s; is the root right?", len(files), root)
+		return 0, 0, err
 	}
 
 	directive := func(fn *ast.FuncDecl) bool {
@@ -91,7 +120,7 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 			case fn.Recv == nil && directive(fn):
 				escapes[p.dir+"."+fn.Name.Name] = true
 			case fn.Recv != nil && fn.Name.Name == "Call" && !directive(fn):
-				t.Errorf("%s: method Call without go:uintptrescapes; the rule allows every method named Call", fset.Position(fn.Pos()))
+				errorf("%s: method Call without go:uintptrescapes; the rule allows every method named Call", fset.Position(fn.Pos()))
 			}
 		}
 	}
@@ -174,7 +203,6 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 		return names
 	}
 
-	checked := 0
 	for _, p := range files {
 		ptrs := pointerNames(p.f)
 		var stack []ast.Node
@@ -206,12 +234,9 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 					}
 				}
 			}
-			t.Errorf("%s: a pointer converted to uintptr outside the argument list of a go:uintptrescapes call; convert it in the call expression", fset.Position(e.Pos()))
+			errorf("%s: a pointer converted to uintptr outside the argument list of a go:uintptrescapes call; convert it in the call expression", fset.Position(e.Pos()))
 			return true
 		})
 	}
-	if checked == 0 {
-		t.Fatal("no uintptr(unsafe.Pointer(...)) found; the rule checked nothing")
-	}
-	t.Logf("%d conversions in %d files checked", checked, len(files))
+	return checked, len(files), nil
 }

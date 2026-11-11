@@ -1433,3 +1433,232 @@ Nothing captures traffic on a real network. Nothing scans, probes or transmits o
 4. The sensor brief follows the owner's choice on ADR-0009. V-M6, R6.4's latency and C-11 run only on the real sensor.
 
 The item 4 exit gate is set in the sensor brief. It holds every criterion the Stage A brief listed, and a brief may not lower them.
+
+## After #611: the verification matrix's status (issued 2026-11-11, D4-82)
+
+### P4-D6-M1 (D6): the Status column of the verification matrix
+
+- **Objective.** The matrix in `docs/verification.md` says `defined` on all 57 rows, and it has no row for R1.6 or R1.7. `docs/requirements.md` now states a status for each requirement (D4-81), which D1 read from D6's status tables. Give each matrix row D6's own status, so that the two files agree and the requirement statuses rest on D6's record.
+- **Inputs.** D6's status tables in `docs/verification.md` ("Phase 2 slice status", "Phase 3 status", and the two Phase 4 gate tables), its findings log, the tests themselves, the six exit reports, and the legend of `docs/requirements.md`.
+- **Deliverables:**
+  1. **A short legend for the matrix's Status column.** Each value says what ran and at which evidence class. No value reads as hardware evidence.
+  2. **A status for each of the 57 rows,** naming the table row, finding or test it rests on.
+  3. **Rows for R1.6 and R1.7,** each with a criterion. R1.7 is a standing rule: say how it is checked (the unsupported-claim check), and do not name a test that does not exist.
+  4. **The line that reconciles V-M8's "9 of 9"** with the item 3 exit's "12 of 12" (D6 on #611).
+  5. **In the report to D1:** every row where D6's status and the status in `docs/requirements.md` disagree under D4-81's legend, with the reason. D6 does not edit `docs/requirements.md`.
+- **May change:** `docs/verification.md` only.
+- **Acceptance:**
+  - Every status names its source, and none claims more than the source records.
+  - No criterion, threshold, HW value or Slice value changes.
+  - `records-auditor` finds no reference that fails.
+  - For each `verified` row of `docs/requirements.md`, either a matrix row supports it or D6 has named it as a disagreement.
+- **Exclusions.** No test is run, and none is written. No criterion is reworded or lowered. No status for an item 4 row goes above what its tables hold: V-M6 has not run.
+- **Risk.** A status copied from an exit report, or from `docs/requirements.md`, would make the two files circular. Work from the tests and the status tables.
+- **Branch:** `agent/verification-matrix-status`.
+- **Reviewers:** D1. `records-auditor` checks the PR first.
+- **Extended on 2026-11-11 (D4-82).** D6 also corrects two lines of the same file to what is true: the opening "Status" paragraph, and the P3 row of the Principles table. No criterion changes.
+- **Ruling on 2026-11-11 (D4-82).** A row is `e2e` only when its run used the ground truth that its criterion names. Where a criterion's HW value is `P` or `Y`, the ground truth for this purpose is the criterion's form against a simulator, a documented example or a synthetic series, as the matrix's legend says: the device itself stays owed at any status.
+
+## After the owner's go-ahead of 2026-11-11 (D4-83)
+
+Each brief below is worked in its own worktree. Each role reads CLAUDE.md, `HANDOFF.md`, its own agent file and the files its brief names before it starts. Where a brief lets a role change a path that it does not own, D1 authorizes that change by the brief, for what the brief names and no more. Common rules: the repository is public; stage by explicit path; never force-push; no contact with any device or network; nothing is installed on the owner's PC; a failing job is re-run at most once and a failure is a finding, not a flake.
+
+### P4-4-S1 (D4): the engine and the capture path under option (a), from evidence
+
+- **Objective.** Fill the `unknown` cells of ADR-0009 that a GitHub-hosted Windows runner and primary documents can fill, so that D1 and D4 can choose the engine and the owner can answer the Npcap question with the real terms in front of them. It builds no sensor.
+- **Deliverables:**
+  1. **E-D4-01, second part,** in `modules/telemetry/experiments/sensor-windows/` and the dispatch-only `.github/workflows/d4-sensor-eval.yml`, on `windows-2025`: Suricata's official Windows build decoding the public captures and GT-PCAP offline, pinned by URL and SHA-256 from the vendor's page, and whether it starts with no Npcap installed; whether an official Zeek binary for Windows exists, from primary sources; the (a′) pipeline, `pktmon` to pcapng to the engine, with packets counted at each stage. A row that did not run is `unknown`.
+  2. **Npcap's terms and prices** from the vendor's own pages, each with its URL and the date read. An unreachable page stays `unknown`.
+  3. **ADR-0009's evidence updated,** each new cell with its evidence class and run URL, and D4's provisional view rewritten for option (a). The Status line and the decision are D1's.
+  4. **A findings note,** `docs/phase4/D4-sensor-engine-eval.md`, naming what still needs a lab machine.
+- **Inputs.** `docs/decisions/ADR-0009-passive-sensor.md`, D4-66 to D4-68 and D4-78, and the experiment's own folder and workflow.
+- **May change:** `modules/telemetry/experiments/sensor-windows/`, `docs/phase4/D4-*.md`, and, authorized by D1 here, `.github/workflows/d4-sensor-eval.yml` and `docs/decisions/ADR-0009-passive-sensor.md` (evidence and D4's view only).
+- **Acceptance.** Every new claim has a run URL or a cited source with its date. The workflow stays dispatch-only, pins every download by SHA-256 and checks the hash before it runs anything it downloaded.
+- **Exclusions.** No sensor and no product code. No Npcap install anywhere, the runner included. No capture of a real network: `pktmon` captures only the runner's own traffic, and the workflow reports counts, not the capture. No binary and no installer is committed or uploaded as an artifact. Where the vendor publishes no hash for a download, the SHA-256 of the first download is recorded with its URL and date and pinned from then on, and the record says that it is a first-use pin. No change to `ci.yml`.
+- **Branch:** `agent/telemetry-sensor-engine-eval`. **Reviewers:** D6 (testability), D3 (the boundary and the downloads), D7 (the licence rows).
+- After this brief's evidence the owner chose option (b), and D4-78's choice of option (a) is superseded (D4-85). The same branch then carries ADR-0009's decision.
+
+### P4-D7-1 (D7): `docs/release.md`, the first inventory
+
+- **Objective.** State what `cmd/otsec` and `cmd/otsec-collector` contain today and under which licences, from primary sources, so that every later toolchain or dependency change has a record to update, and the licence duties of option (a) are known before anything is shipped.
+- **Deliverables, all in `docs/release.md`:**
+  1. The modules linked into each binary, with version and `go.sum` hash, and the Go toolchain and standard library, derived by commands the file states.
+  2. Each component's licence, read from the component's own files, with the file's SHA-256.
+  3. What each licence asks of a distributor, and whether the repository does it today. An unmet duty is listed, not fixed.
+  4. The third-party programs of option (a), not shipped today (Suricata, Zeek and the ICSNPP packages, Npcap): what shipping each would require, from its licence text.
+  5. A list of what does not exist yet: signing and the key's holder, the SBOM's format, the update package's contract, the anti-rollback floor, and the record of which versions upgrade and roll back together. No design.
+  6. The one check that shows the file and `go.sum` disagree, described for D6 to turn into a test later.
+- **Inputs.** `go.mod`, `go.sum`, the module cache, the Go distribution's own files, the threat model's TB9, AC-9, AP-10, SC-13 and AP-30, and ADR-0009's licence rows.
+- **May change:** `docs/release.md`, `docs/phase4/D7-*.md`.
+- **Acceptance.** Every licence statement names the file it was read from and that file's SHA-256. The inventory can be regenerated by the stated commands, and D7 ran them. The file is labelled `desk`.
+- **Exclusions.** No change to `go.mod`, `go.sum`, a workflow, `deploy/` or code. No key is made. No SBOM file is generated into the repository. Nothing is called compliant or release-ready.
+- **Branch:** `agent/release-inventory`. **Reviewers:** D3 and D6.
+
+### P4-D6-H5 (D6): the closing legs for R4.1, R4.6, R4.7, R8.6 and R8.8
+
+- **Objective.** Run each of the five criteria on the real binaries against the ground truth it names (D4-82's ruling), and find out whether the product passes.
+- **Deliverables:**
+  1. The node forwards to a stock rsyslog over RELP with mutual TLS and the durable acknowledgement, and rsyslog's own output is reconciled against the simulator's rows (R4.6).
+  2. V-S6's interruption run, with its kills, against that rsyslog (R4.7, R8.6).
+  3. V-S9 on its named ground truths: rsyslog as the upstream, and a direct read of the store showing that nothing unforwarded was evicted (R8.8). If no read-only way to read the store exists, D6 reports it and adds no product code.
+  4. A framing fault and a malformed message sent to the real binaries, each stored raw and flagged, with no message lost (R4.1).
+  5. One mutant for each new test, never committed.
+  6. New `integration-long` matrix entries in `ci.yml`, with the packages they install and their versions printed.
+- **May change:** `tests/integration/`, `tests/security/`, `docs/phase4/D6-closing-legs.md`, and, authorized by D1 here, `ci.yml` for those entries. Not `docs/verification.md`: the status cells follow in a later PR, after the legs pass on `main`.
+- **Inputs.** The matrix's legend and the five rows' cells in #613, V-S6's and V-S9's criteria with their ground truths, and D4-82.
+- **Acceptance.** Each leg is green on the PR's head, or red for a reason reported as a finding. A product failure is a result: the test is not loosened, and no product code changes. **A failing leg is never removed, skipped or marked as an expected failure.** If the product fails, the PR stays open with the leg red, D6 writes the finding in `docs/phase4/D6-closing-legs.md` and reports it to D1, and the owner of the code fixes the product in its own PR. The oracles are rsyslog's own output and the store's contents, never the product's code or D6's own receiver.
+- **Exclusions.** No product code. No lowering of any criterion. Loopback only. No new CI job outside `integration-long`'s matrix.
+- **Branch:** `agent/verification-closing-legs`. **Reviewers:** D4, D5 and D1.
+
+### P4-PC-1 (D5 and D6): the six tests that pass only on a CI runner
+
+- **Objective.** `go test ./...` passes on a Windows machine that is not elevated, not on UTC, and holds `reference/`, `tools/` and `.claude/worktrees/` inside the checkout, with nothing left behind, and each test still fails when it should (D4-83's first local run).
+- **D5's half** (`agent/platform-pc-run-fixes`): the test that formats a C7 time from a local time, after checking that no product path does the same; the `nodeconfigtest` helper, so that a test which needs elevation and skips leaves no folder its cleanup cannot remove. The tests already skip when not elevated, and already fail instead when `GITHUB_ACTIONS` is `true` or `OTSEC_REQUIRE_ELEVATED` is set; both conditions stay. **May change:** tests and test helpers under `platform/` and `cmd/otsec/`. **Reviewers:** D6 and D3.
+- **D6's half** (`agent/verification-pc-run-fixes`): every test that walks the repository tree, with one stated rule for what a walker skips and a test of that rule. The rule is anchored at the repository root, and an unreadable folder anywhere else still fails the test. **May change:** `tests/` (not `tests/integration/slice/`), and, authorized by D1 here, the walk's skip rule in `contracts/advisory/testkeys_test.go`, a C11 test that D3 drafted. **Reviewers:** D3, D5 and D1.
+- **Inputs.** D4-83's account of the first local run, and `HANDOFF.md`'s section on the project folder.
+- **Acceptance.** On the owner's PC, not elevated, the affected packages pass, or skip the elevation-only tests with their message, and no folder is left in the temp directory. Each fixed test fails again when its fix is reverted or its rule is broken. All nineteen `ci` jobs and `govulncheck` are green, and on CI the elevation tests still run.
+- **Exclusions.** No weakening of what any test asserts. No elevated run.
+
+### P4-D4-F26 (D4): the forwarder's rsyslog tests run in CI and cannot skip there (issued 2026-11-11, D4-84)
+
+- **Objective.** The three tests of `modules/telemetry/forward/rsyslog_test.go` run on every pull request in the Linux `go` job, against the `rsyslogd` that Ubuntu's packages install, and fail if rsyslog is missing. Then find out whether the forwarder passes them (F-026).
+- **Inputs.** D6's diagnosis on #619 (`4776b0da` and `1a9439f3`), and how `tests/integration/slice` starts a stock rsyslogd.
+- **Deliverables:**
+  1. The set-up fixed, so the installed `rsyslogd` starts under the runner's AppArmor profile, or a copy of it does, with the test saying which and checking the copy against the installed binary.
+  2. In the Linux leg of the `go` job: `rsyslog` and `rsyslog-relp` installed with their versions printed, and `OTSEC_RSYSLOG_REQUIRED=1` for the `go test` step. `fail-fast: false` on the matrix.
+  3. The result. If the forwarder fails a test, that is a product finding: D4 stops, loosens nothing, and reports to D1.
+- **May change:** `modules/telemetry/forward/rsyslog_test.go`, and, authorized by D1 here for those lines only, `.github/workflows/ci.yml`.
+- **Acceptance.** Every check green on the PR's head, with the Linux `go` log showing each of the three tests' `--- PASS`. With rsyslog absent and the variable set, the tests fail.
+- **Exclusions.** No change under `tests/`. No weakening of what the tests assert. A failing test is never skipped, removed or marked as an expected failure.
+- **Risk.** A copy of the binary runs outside the vendor's AppArmor profile, and the Linux `go` job's rsyslog is a newer build than the one the closing legs use. Both are stated with the result.
+- **Branch:** `agent/telemetry-rsyslog-tests-run`. **Reviewers:** D6 and D5.
+- This brief was given to D4 at about 13:30Z on 2026-11-11 and written here afterwards, in D4-84's PR.
+
+## Phase 4 item 4, second part: the sensor under option (b) (issued 2026-11-11, D4-86)
+
+The owner chose option (b) on 2026-11-11 (D4-85): a separate Linux machine at each site runs the engine and feeds the node. ADR-0009 records the decision and what it commits the project to. This part covers the evidence for the engine, the contracts for the link between sensor and node, and the test rig (CLAUDE.md §5.1, stages A and B). **No sensor code, no dialer and no enrolment code merges until D1 approves the link's contracts.** The implementation briefs follow that approval, as the third part.
+
+Common rules, beside those of every Phase 4 brief:
+
+- Nothing captures traffic on a real network. Every capture is a public one, a GT-PCAP one, or one recorded from the project's own simulators. Every interface is a virtual one in a network namespace on a CI runner.
+- The sensor never transmits on its monitoring interface (C-11), and nothing scans or probes (P1).
+- No contact with any device, and no lab machine. What needs a lab machine becomes an H-row that D6 writes and nobody runs without the owner's authorization.
+- On the owner's PC: no test package in full that holds a listener off loopback, tests by name only, and nothing installed (`HANDOFF.md`). These briefs need no local run: their test path is GitHub Actions.
+- Each role reads CLAUDE.md, `HANDOFF.md`, its own agent file, ADR-0009 and D4-82 to D4-86 before it starts. Where a brief lets a role change a path it does not own, D1 authorizes that change by the brief, for what the brief names and no more.
+
+**What already exists** (read on `main` on 2026-11-11, `desk`): the node's intake `ServeSensor` reads any byte stream with C13's framing and assumes that its caller authenticated the peer; `sensor-unreachable`; the hold for the node's own sessions; the two network store classes; the detector, which runs on the node. **What does not exist:** a sensor program, an engine on a sensor host, enrolment or a credential for a sensor, a TLS dialer or listener for C13, sensor fields in the node's configuration, more than one sensor for a node, an update path for the sensor, and every test rig in D6's GT-PCAP plan §5 and §6.
+
+### P4-4-S2 (D4): E-D4-03, the engine on Linux over GT-PCAP
+
+- **Objective.** ADR-0009 names Zeek as the provisional engine. Produce the run that lets D1 approve it or turn the choice: Zeek on Linux, with and without the ICSNPP-DNP3 and ICSNPP-Modbus packages, over the labelled captures.
+- **Inputs.** E-A4-01 and E-D4-02 (`modules/telemetry/experiments/`), GT-PCAP and its labels (`tests/fixtures/network/gt-pcap/`, `tests/integration/gt_pcap/`), D6's plan, D2's review of #618 (what each SEL family puts on the wire), D7's `docs/release.md` §4 (written under option (a); its readings of Zeek's and ICSNPP's licences still apply).
+- **Deliverables:**
+  1. **A dispatch-only workflow and experiment folder** under `modules/telemetry/experiments/`, offline, on a Linux runner. It runs a pinned Zeek, once stock and once with the two ICSNPP packages, over: GT-PCAP's 19 DNP3 captures (17 labelled cases, and the training and held-out series), of which the five `dnp3-sa` cases hold group 120 objects (`dnp3-sa`, `dnp3-sa-failed-outstation`, `dnp3-sa-failed-before-ack`, `dnp3-sa-failed-unauthorized` and `dnp3-sa-failed-master`); the two cases that D6 adds first under P4-4-R1, DNP3 on a moved outstation port and DNP3 over UDP, which GT-PCAP does not hold yet; the 9 PRP pairs; and the public captures. Suricata runs over the same set, with and without `stream.midstream=true`, as the comparison.
+  2. **A table per engine and configuration,** against GT-PCAP's labels, which come from tshark and not from an engine: per case, whether the protocol, the function and the service are recorded; whether DNP3 group 120 is visible per session; whether DNP3 and Modbus are found on a moved port; DNP3 over UDP; what the engine logs of SNMPv3's header fields and of Telnet, FTP and HTTP. A row that did not run is `unknown`.
+  3. **Pins:** the engine images or packages and each ICSNPP package by version and hash, with the upstream signature checked where one is published, and a first-use pin called a first-use pin. `zkg` may fetch in the experiment; say in the note that a sensor may not fetch at run time (AP-31), so the packages must be carried.
+  4. **A findings note** `docs/phase4/D4-engine-linux-eval.md`, and ADR-0009's evidence updated with the run. D4 states its recommendation; the ADR's engine line changes only on D1's approval in review.
+- **May change:** `modules/telemetry/experiments/`, a new dispatch-only workflow under `.github/workflows/` (authorized here), `docs/decisions/ADR-0009-passive-sensor.md` (evidence and D4's view), `docs/phase4/D4-*.md`.
+- **Acceptance.** Every claim has a run URL and its evidence class (`CI-Linux`). The workflow is dispatch-only, has `permissions: contents: read`, uploads no binary and no capture, and checks every pin before it runs what it fetched. The table's pass conditions are D6's, from the labels, and D6 commits them before the counted run, with the two new cases. **The result is evidence for the engine choice. It is not V-M6 evidence:** V-M6 runs on the real sensor.
+- **Exclusions.** No sensor and no product code. No change to `ci.yml`. No capture of a real network.
+- **Risk.** Offline decoding of files is not live capture on a SPAN or TAP port, and a hosted runner is not the sensor host. Both stay `unknown` and are named.
+- **Branch:** `agent/telemetry-engine-linux-eval`. **Reviewers:** D6 (the pass conditions), D2 (the protocol reading), D7 (the pins and licences).
+
+### P4-4-L1 (D3): the trust design of the link, and the sensor host in the threat model
+
+- **Objective.** Fix, before any code, how a sensor on another machine is trusted by the node and what it may hold, and bring the threat model in line with option (b).
+- **Inputs.** ADR-0009, TB6, AP-30 to AP-36, SC-11, SC-14, SC-19, HR-19, HR-20, D5's note `docs/phase4/D5-sensor-node.md` (§1(b), §2), C13's note, C7 and C8 as they stand, and D3's and D5's reviews of #618.
+- **Deliverables:**
+  1. **A design note** `docs/phase4/D3-sensor-link.md` that fixes:
+     - **the credential:** one key per sensor, made on the sensor and never exported, and what the node holds;
+     - **enrolment with no trust on first use:** both ends pinned out of band by an admin-signed, audited request, with the C7 kind and the C8 actions it needs;
+     - **binding:** the node's configuration names the sensor's address, key and `sensor_id`, and a record under any other `sensor_id` is refused with an alarm; one compromised sensor cannot speak as another;
+     - **revocation:** it closes the link at once; records already stored are kept and marked, later ones are refused, and the network baseline is acknowledged again;
+     - **replay and resume:** what C13's channel must carry so that a replayed, re-ordered or cloned stream is refused, and so that sequence and resume survive a re-image of the sensor;
+     - **direction:** the node opens the link and gains no inbound port; the link carries the sensor's C13 records and the node's acknowledgements, and no command and no configuration to the sensor;
+     - **secrets on the sensor:** the sensor holds no platform credential, and no unredacted secret is at rest or sent: the ring, the engine's own logs, temporary files, swap and core dumps. A slot that cannot be placed fails closed and is counted (D4-67, D4-68 ruling 13);
+     - **the management side of the sensor host:** who may log in and how, physical custody, and the update path with AP-10's three refusals, each stated as a requirement on the host and marked as not built. AP-31 is proposed and was written for the node: say whether it covers the sensor host, including its rule that nothing is fetched at run time (D7 on #618).
+  2. **The threat model updated** (`docs/threat-model.md`): TB6 and AP-30 to AP-34 read for a sensor on another host; HR-20 closed by D4-85, to reopen if option (a) or (c) does; a new **HR-21** for the sensor host (its image and patching, management access, custody, TAP or SPAN); and AP-32 (1) stated plainly: against a compromised sensor host, only a TAP, or the switch refusing ingress on the mirror port, keeps it from sending.
+  3. **Proposals, not code,** for the C7 and C8 additions, for D1's approval with D4, D5 and D6.
+- **May change:** `docs/threat-model.md`, `docs/phase4/D3-*.md`. No file under `contracts/` in this brief.
+- **Acceptance.** Each rule names the attack path it answers and the test that would show it (for D6's rig). Nothing is written as built. D5 confirms that the node can do what the note asks of it, and D4 that the sensor can.
+- **Exclusions.** No code. No change to a contract's text or version. No decision on the sensor host's hardware or operating system, which D1 brings to the owner.
+- **Branch:** `agent/security-sensor-link`. **Reviewers:** D5, D4 and D6.
+
+### P4-4-L2 (D4): C13 0.2, the channel over a network link
+
+- **Objective.** Revise C13's channel for a link between two machines, as ADR-0009 says, without changing what an observation is.
+- **Inputs.** `docs/phase4/D4-c13-netobs.md` and `contracts/netobs/`, D3's note from P4-4-L1 (its rules are the requirements), D5's review of #618 and its note, and the lesson of C-04 and E-01 on acknowledged delivery.
+- **Deliverables:** a written proposal for `otsec.netobs/0.2`, with its reader for 0.1, that covers:
+  1. the transport under (b): C13's framing inside mutual TLS on a connection that the node opens;
+  2. acknowledgement of the committed sequence number, resume after a break, and a bound on how late a record may arrive, with what the node does past it;
+  3. what binds a stream to one sensor and one run, so that replay and a cloned sensor are refused (from P4-4-L1);
+  4. the sensor's buffer while the link is down: how much, for how long, and what is counted when it overflows (D5's note leaves this to D4);
+  5. time: the sensor host's clock in each record and heartbeat, so that the node can check the skew. The proposal may add clock fields. It does not define R6.4's latency: that measure is D6's, the alert's time minus the triggering frame's send time (GT-PCAP plan §5);
+  6. the wording left over from an on-node sensor: the local pipe, `drops_driver` in `pktmon` terms, and the Windows binding read in `interface_check`, each replaced by its Linux `AF_PACKET` meaning;
+  7. the PRP stage's missing pieces: `prp_window_ms` in the coverage settings and the bounds table, and a counter for a "duplicate" that is not byte-identical apart from the LAN ID (D4-69);
+  8. a signal for a sensor that heartbeats but is blind (flat packet counters, D4-74), so the node can raise `sensor-blind`.
+- **May change:** `docs/phase4/D4-c13-netobs.md` and a proposal file `docs/phase4/D4-c13-0.2-proposal.md`. The code in `contracts/netobs` changes only after D1 approves the proposal, under the third part's brief.
+- **Acceptance.** Every change bumps the minor and keeps a 0.1 reader. Each clause says which of D3's rules it meets. D6 can write a contract test for each clause from the text alone.
+- **Exclusions.** No change to what an observation, a citation or a coverage statement means. No change to how any criterion in `docs/verification.md` is measured. No code.
+- **Order.** After P4-4-S2, and with P4-4-L1's note in hand.
+- **Branch:** `agent/telemetry-c13-link`. **Reviewers:** D3, D5, D6 and D2.
+
+### P4-4-L3 (D5): the node's side of the link
+
+- **Objective.** Say what the node must become to dial a sensor on another machine, and mark what was written for a sensor on the node as history.
+- **Inputs.** `docs/phase4/D5-sensor-node.md`, `platform/node` and `platform/sensorlink` on `main`, D5's review of #618, D3's note from P4-4-L1.
+- **Deliverables:** `docs/phase4/D5-sensor-node.md` revised for option (b), as a design for D1's approval:
+  1. the mutual-TLS dialer with backoff, and the node's outbound firewall rule to the sensor's one address;
+  2. the `network_sensor` configuration: address, trust anchor, credential and permitted peer, and whether a node has one sensor or several (a PRP network may need one for each LAN), with what each choice costs in the intake, the store classes and the baseline;
+  3. enrolment and revocation records, and an expiry alarm for the sensor's certificate;
+  4. the clock-skew check on each heartbeat, with its bound and its alarm;
+  5. records that arrive late after an outage: how the hold for the node's own sessions waits for the sensor's backlog, so that `own-session-unseen` does not fire falsely;
+  6. retiring and replacing a sensor, so that its streams keep a consumer and are pruned;
+  7. `sensor-blind`, beside `sensor-unreachable`;
+  8. the rule that a sensor failure, or a flood from it, must never affect SER or Syslog collection, with the test that would show it. The separate store classes exist; no flood over a network link has run (D3 on #618);
+  9. the sections written for a pipe and a service SID, marked as history.
+- **May change:** `docs/phase4/D5-*.md`.
+- **Acceptance.** Each item names the code on `main` that it changes and the test that would show it. Nothing is written as built.
+- **Exclusions.** No code. No change to C5's classes or quotas in this brief: a need for one is reported to D1.
+- **Branch:** `agent/platform-sensor-link`. **Reviewers:** D3, D4 and D6.
+
+### P4-4-R1 (D6): the rig for the sensor's tests
+
+- **Objective.** Build, before the sensor exists, the rigs that V-M6, R6.4 and C-11 need, so that the sensor is tested by something that was written first.
+- **Inputs.** `docs/phase4/D6-gt-pcap-plan.md` §2, §5 and §6, `docs/verification.md` (V-M6, C-09, C-11, H-06, R6.1 to R6.7), GT-PCAP, D6's review of #618, and the rules in P4-4-L1 as they land.
+- **Deliverables:**
+  0. **First, because P4-4-S2 waits for them: two GT-PCAP cases with their labels,** DNP3 on an outstation port other than TCP 20000, and DNP3 over UDP (the plan's §2B). Today the outstation listens only on TCP 20000, and `dnp3-known-master-new-port` moves the master's source port (D2 and D6 on #618).
+  1. **The veth rig:** a pair of virtual interfaces across two network namespaces on a Linux runner, with a timed replayer on one end, for R6.4's latency.
+  2. **The C-11 rig:** zero frames from the monitoring interface over the whole GT-PCAP replay and the sensor's start and stop, with its negative control, a deliberately misconfigured interface that must show frames. It includes a sender that uses `PACKET_QDISC_BYPASS`, so that an nftables egress rule is tested against a path that may skip it.
+  3. **The test-only C13 source,** which turns GT-PCAP's labels into C13 records over a real byte stream. It is never linked into either binary.
+  4. **The checker** that compares a product's records with the labels: the pass conditions for V-M6, written from `docs/verification.md` and not from an engine's output.
+  5. **Cases with no plan yet, planned here and built where the rig allows:** `CAP_NET_RAW` dropped after the socket opens; a link cut and resumed; a revoked sensor credential refused and alarmed; no inbound port on the node; the spoofing flood; AP-33's key search over the sensor's disk and the link's bytes.
+  6. **H-rows, written and not run,** for what only a lab machine can show: a real NIC on a SPAN or TAP port, VLAN tags under NIC offload, PRP live on both LANs, HSR, and the 24 h run (H-06).
+- **May change:** `tests/`, `docs/verification.md` (plans and H-rows), `docs/phase4/D6-*.md`, `.github/workflows/a6-*.yml` and, authorized here, new `integration-long` entries in `ci.yml` for the rigs' own self-tests. `tests/fixtures/network/` is D4's path: D1 authorizes the two new GT-PCAP cases and their labels there, and D4 accepts each label file. A PR that touches GT-PCAP also needs `a6-gt-pcap` green.
+- **Acceptance.** Each rig has a self-test that fails when the rig is broken: the negative control shows frames, the replayer's timing is checked against its own clock, and the checker fails on a planted wrong record. Evidence class `CI-Linux`.
+- **Exclusions.** No product code and no sensor. No real NIC of a runner as a monitoring interface. No lowering of any criterion.
+- **Branch:** `agent/verification-sensor-rig`. **Reviewers:** D4, D5, D3 and D1.
+
+### Order
+
+1. **Now, in parallel:** P4-4-S2 (D4), P4-4-L1 (D3) and P4-4-R1 (D6). P4-4-R1's two new GT-PCAP cases come first, and P4-4-S2's counted run waits for them.
+2. **Then, with L1's note:** P4-4-L3 (D5) and P4-4-L2 (D4), the second also with S2's result.
+3. **D1 approves** the engine (from S2) and the link's contracts (from L1, L2 and L3), and brings the owner a recommendation on the sensor's host: its hardware, its operating system, and whether the project ships an image or the site installs the engine (D7's review of #618 gives what each costs in licence duties).
+4. **The third part:** the implementation briefs for the sensor, the node's dialer and enrolment, each against the approved contracts, with D6's contract tests.
+
+### Phase 4 item 4 exit gate (D1 decides)
+
+It holds every criterion that the Stage A brief listed under "What item 4 must show at its gate", unchanged, and these, which option (b) adds:
+
+- V-M6 over GT-PCAP runs on **the real sensor and the real node, over the real link**, `simulated`, on the rig of P4-4-R1.
+- C-11 as the Stage A bullet states it, on the sensor's monitoring interface: the full GT-PCAP replay and the sensor's start and stop, the interface up throughout, a virtual interface in a network namespace of its own, with its negative control. The 24 h run stays with H-06 on hardware.
+- R6.4's latency from the timed replay, reported with the clock it was measured against.
+- The link refuses a sensor without the enrolled credential and a revoked one, and the node has no inbound port.
+- A sensor that is cut, blind or flooding never stops SER or Syslog collection.
+- AP-33's key search finds no test secret on the sensor's disk, in the link's bytes, in the node's store, or in anything forwarded.
+- On the real link: a record under another `sensor_id` is refused and alarmed, and a replayed stream is refused.
+- A sensor that heartbeats but is blind raises its alarm, and a sensor clock outside the bound raises the skew alarm.
+- The sensor holds no capability after its capture socket is open (`CAP_NET_RAW` dropped), shown by a test.
+- C13 0.2 and the C7 and C8 additions are merged, with their reviewers' records and D6's contract tests.
+- No safety or security objection is open, and the report says what remains `simulated` and which H-rows wait for a lab machine.
+- The engine and its packages are pinned, and D7's inventory covers the sensor.

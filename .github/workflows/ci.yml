@@ -79,21 +79,43 @@ jobs:
       # rsyslog_test.go) skip unless rsyslogd with imrelp is installed, and
       # the runner comes without imrelp. So it is installed here, and
       # OTSEC_RSYSLOG_REQUIRED=1 makes a missing rsyslogd or imrelp fail
-      # those tests instead of skipping them (D6, P4-D6-H5, authorized by
-      # D1). Linux only: rsyslog does not run on Windows, and the variable
-      # is not set there. On the hosted runner the three tests now fail,
-      # because AppArmor keeps the installed rsyslogd from the test's
-      # configuration (docs/phase4/D6-closing-legs.md, section 3).
+      # those tests instead of skipping them (D4, P4-D4-F26, and D6,
+      # P4-D6-H5, authorized by D1). Linux only: rsyslog does not run on
+      # Windows, and the variable is not set there. The tests run a copy of
+      # the installed rsyslogd, because its AppArmor profile does not let
+      # the installed path read the test's configuration (F-026). The binary
+      # the tests copy is the first rsyslogd on PATH. Its SHA-256 is printed
+      # here so it can be matched to the hash each test logs. `dpkg --verify`
+      # then checks the two packages' installed files against dpkg's
+      # recorded checksums. A changed file fails the step, except a changed
+      # configuration file (dpkg marks it "c"), such as the image's own
+      # /etc/rsyslog.conf, because the tests read none of the packages'
+      # configuration files: they write their own (D6 on #620).
       - name: rsyslog with imrelp, for the forwarder's rsyslog tests
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends rsyslog rsyslog-relp
           rsyslogd -v
           dpkg-query -W rsyslog rsyslog-relp librelp0
+          sha256sum "$(readlink -f "$(command -v rsyslogd)")"
+          v=$(dpkg --verify rsyslog rsyslog-relp || true)
+          echo "dpkg --verify rsyslog rsyslog-relp: ${v:-no changed files}"
+          if printf '%s\n' "$v" | grep -Ev '^[^ ]+ c /' | grep -q .; then
+            echo "::error::a packaged rsyslog file differs from dpkg's record"; exit 1
+          fi
       - if: runner.os == 'Linux'
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
         run: go test ./...
+      # The forwarder's three rsyslog tests again, with -v, so that the log
+      # shows each one's --- PASS or --- FAIL rather than only the package's
+      # result (D4, P4-D4-F26). OTSEC_RSYSLOG_REQUIRED=1 makes a missing
+      # rsyslogd or imrelp a failure, never a skip.
+      - name: forwarder against rsyslog (-v)
+        if: runner.os == 'Linux' && !cancelled()
+        env:
+          OTSEC_RSYSLOG_REQUIRED: "1"
+        run: go test -count=1 -run 'TestRsyslog' -v ./modules/telemetry/forward
       - if: runner.os == 'Windows'
         shell: bash
         run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
