@@ -20,6 +20,7 @@ Linux and root only. Stdlib only. Used by no product code.
 """
 
 import contextlib
+import errno
 import hashlib
 import os
 import shutil
@@ -96,7 +97,7 @@ class Capture:
     def __init__(self, ns, ifname):
         self.sock = packet_socket(ns, ifname)
         self.sock.settimeout(0.05)
-        self.frames, self._stop = [], threading.Event()
+        self.frames, self._stop, self.error = [], threading.Event(), None
         self._thread = threading.Thread(target=self._loop, daemon=True)
 
     def _loop(self):
@@ -105,6 +106,13 @@ class Capture:
                 data, addr = self.sock.recvfrom(65535)
             except socket.timeout:
                 continue
+            except OSError as e:
+                # A socket bound while its interface was down reports that
+                # once, and receives from the moment the interface is up.
+                if e.errno == errno.ENETDOWN:
+                    continue
+                self.error = e  # raised by stop(): a dead capture must not read as zero frames
+                return
             self.frames.append((time.monotonic_ns(), time.time_ns(), addr[2], data))
 
     def start(self):
@@ -116,6 +124,8 @@ class Capture:
         self._stop.set()
         self._thread.join()
         self.sock.close()
+        if self.error:
+            raise self.error
         return self
 
     def arrived(self):
@@ -172,7 +182,8 @@ class Rig:
     def nft_egress_drop(self):
         """A netdev egress chain on mon0 that drops everything, as a host
         rule against sending would be written. Needs the nft binary."""
-        rules = f'table netdev c11 {{ chain out {{ type filter hook egress device "{MON}" priority 0; policy drop; }} }}\n'
+        rules = (f'table netdev c11 {{\n  chain out {{\n    type filter hook egress device "{MON}" priority 0; '
+                 'policy drop;\n  }\n}\n')
         p = subprocess.run(["ip", "netns", "exec", self.sensor_ns, "nft", "-f", "-"], input=rules,
                            capture_output=True, text=True)
         if p.returncode:
