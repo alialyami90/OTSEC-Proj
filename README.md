@@ -11,7 +11,7 @@ The full project brief, engineering principles, team structure, and operating pr
 | Phases 0 to 3: evidence, contracts C1 to C8, the simulated SEL-751 SER-to-Syslog slice, and its hardening | Accepted by the owner. Reports: [docs/phase-0-exit.md](docs/phase-0-exit.md) to [docs/phase-3-exit.md](docs/phase-3-exit.md) |
 | Phase 4, items 1 and 2: configuration monitoring and the event-behaviour baseline | Accepted. Report: [docs/phase-4a-exit.md](docs/phase-4a-exit.md) |
 | Phase 4, item 3: vulnerability applicability with the asset module | Accepted. Report: [docs/phase-4-item3-exit.md](docs/phase-4-item3-exit.md) |
-| Phase 4, item 4: network IDS | In progress. The node side is merged. The owner chose option (a) for the sensor. The evidence gathered for it is in review, and the choice among the options is back with the owner; [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed` |
+| Phase 4, item 4: network IDS | In progress. The node side is merged. The owner chose option (b) for the sensor, a separate Linux machine at each site (D4-85). Its decision record is being written, and the sensor is not built; [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is still `proposed` |
 | Phase 4, items 5 and 6: secure engineering access and the central role | Not started |
 
 There are two Go binaries. `cmd/otsec` is the site node. `cmd/otsec-collector` is the privileged collector, which alone holds device credentials and opens device sessions.
@@ -39,6 +39,7 @@ Eight roles, D1 to D8, each a subagent in [.claude/agents/](.claude/agents/), wi
 | `modules/applicability/` | Vulnerability applicability (R9): matching identities against the advisory set, producing C12 findings; a pure function that opens no connection (D4-52) | D4 |
 | `platform/`, `deploy/` | Runtime, persistence, buffering, deployment | D5 |
 | `ui/` | The minimal UI | D8 |
+| `LICENSE.md`, `SECURITY.md` | The licence notice (all rights reserved, no licence granted) and the policy for reporting a vulnerability | D1 (D7 reviews the licence notice, D3 the security policy) |
 | `PRODUCT.md`, `DESIGN.md` | The product facts the UI rests on, and the design record. Both are written through the impeccable skill. `DESIGN.md` does not exist yet | D8 (D1 reviews `PRODUCT.md`) |
 | `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
