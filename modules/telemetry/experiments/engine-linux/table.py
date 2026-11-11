@@ -113,6 +113,20 @@ class Logs:
         self.notes = 0
         self.flow_notes = collections.defaultdict(list)  # (l4, ends) -> ["file:line text"]
 
+    def in_content_order(self):
+        """Puts flows and messages in an order taken from their own content,
+        never from their line in a log, whose order the engine does not fix
+        (D6 and D1 on #630). Every place the judge takes the first record
+        that satisfies a row (a Service row's flow, rule 6's wrong server, a
+        Protocol row's records, a group 120 message, rule 9's matching) then
+        takes the same record from the file run and from the pipe run.
+        Flows: start time, transport, ends, then the engine's own id (Zeek's
+        uid, Suricata's flow_id). Messages: time, protocol, transport, ends,
+        a request before a response at the same time, sender, code, objects."""
+        self.flows.sort(key=lambda f: (f["first"][0], f["l4"], f["orig"], f["resp"], f["first"][1]))
+        self.msgs.sort(key=lambda m: (m["ts"], m["proto"], m["l4"], m["ends"], not m["request"], str(m["sender"]),
+                                      str(m["fc"]), tuple(m["objs"])))
+
     def msg(self, cite, ts, proto, l4, e, sender, request, fc, objs=()):
         self.msgs.append({"cite": cite, "ts": ts, "proto": proto, "l4": l4, "ends": e, "sender": sender,
                           "request": request, "fc": fc, "objs": list(objs)})
@@ -124,7 +138,7 @@ def zeek(d, cfg, t):
     for i, r in lines(os.path.join(d, "conn.log")):
         o, p = (r["id.orig_h"], str(r["id.orig_p"])), (r["id.resp_h"], str(r["id.resp_p"]))
         conn[r["uid"]] = (r["proto"], o, p)
-        s.flows.append({"cite": f"conn.log:{i}", "l4": r["proto"], "orig": o, "resp": p,
+        s.flows.append({"cite": f"conn.log:{i}", "l4": r["proto"], "orig": o, "resp": p, "first": (r["ts"], r["uid"]),
                         "names": {x for x in (r.get("service") or "").split(",") if x}})
     # dnp3.log's requests. Its replies are not read: a reply is not a
     # function (D6's note), and dnp3.log stamps it with the request's time.
@@ -223,7 +237,7 @@ def zeek(d, cfg, t):
             if r.get("uid") in conn:
                 l4, o, p = conn[r["uid"]]
                 s.flow_notes[(l4, ends(*o, *p))].append(f"{f}:{i} {r.get(field) or r.get('name') or '?'}")
-    s.msgs.sort(key=lambda m: m["ts"])
+    s.in_content_order()
     return s
 
 
@@ -251,6 +265,7 @@ def suricata(d):
         o, p = (r.get("src_ip"), str(r.get("src_port"))), (r.get("dest_ip"), str(r.get("dest_port")))
         if ev == "flow":
             s.flows.append({"cite": f"eve.json:{i}", "l4": l4, "orig": o, "resp": p,
+                            "first": (str(r.get("flow", {}).get("start", "")), str(r.get("flow_id"))),
                             "names": {r["app_proto"]} if r.get("app_proto") else set()})
         elif ev == "anomaly":
             s.notes += 1
@@ -265,6 +280,7 @@ def suricata(d):
         elif ev == "modbus" and isinstance(r["modbus"].get("request"), dict):
             s.msg(f"eve.json:{i}", r.get("timestamp", ""), "modbus", l4, ends(*o, *p), sender(r, True), True,
                   r["modbus"]["request"].get("function_raw"))
+    s.in_content_order()
     return s
 
 
