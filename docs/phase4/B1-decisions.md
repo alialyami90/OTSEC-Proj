@@ -1440,7 +1440,7 @@ The owner's words are from the CLI session, at about 21:10Z and 21:20Z. Evidence
   - A red-team role: D3 designs the boundaries and D6 tests them independently, so the two are already separate.
   - A lab role: H-tests need the owner's authorization and the owner's hands, and D6 writes them.
 - **Model and effort**, set in each agent file's frontmatter (`model` and `effort`):
-  - D1, D3 and D6: `fable`, `high`.
+  - D1, D3 and D6: `fable`, `high`. (Superseded by D4-89: the owner moved all three to `opus`, and D6 to `xhigh`.)
   - D2, D4, D5, D7 and D8: `opus`, `high`.
   - `records-auditor`: `sonnet`, `high`. `ci-triage`: `haiku`, `medium`.
   - **The reason.** The most capable model goes where an error costs most and a test catches it least: the architecture and the gates (D1), the trust boundaries (D3), and the independent verification (D6). The implementing roles work against approved contracts, with tests and reviewers behind them. D2's, D4's, D5's, D7's and D8's work is reviewed by D6, an agent on a different model from its author. D1 and D3 share `fable` with D6, so that does not hold for them; D3's second reviewer, D2, is on `opus`. By list price on 2026-11-03, `opus` costs half of `fable`, `sonnet` a quarter, and `haiku` about one eightieth.
@@ -1706,3 +1706,37 @@ No new words from the owner. Evidence class: `desk`, except where a CI run is na
   - **`docs/requirements.md`, R4.1, R4.3 and R4.4:** the Basis cells now say what D6's matrix cells say (D6's notes on #612). No Status changes.
   - **Two role files** still described the link as it was before D3's note: D3's ("a revocable credential like a node's") and D7's ("the capture driver", for AP-31).
 - **For the owner, when D1 brings them:** choices O-1 to O-12 of D3's note (a TAP or a mirror port, where the sensor's key is kept, who builds and patches the sensor's image, one host or two on a PRP network, and the rest), as one recommendation on the sensor's host, after E-D4-03. What D4-86 lists as owed by the owner is unchanged.
+
+## D4-89: only the defined agents run, one instance of each, and three agents change model (owner and D1, 2026-11-12)
+
+The owner's words in the CLI on 2026-11-12: "update the project so that it cannot run more than one instance of a subagent, or create more subagents. you can run as many as long they are unique agents as defined in agents folder. then commit those files u mentioned and anything else". The files they mean are the three agent files they had changed in their working tree. Evidence class: `desk`, on the owner's PC (Windows 11, Python 3.13.6). D4-88 is the entry in #636, which is open, so this entry takes the next number.
+
+- **The rule** (CLAUDE.md, "Subagents", among the owner's rules).
+  - Only the agents defined in `.claude/agents/` run as subagents: the eight roles and the two helpers. No built-in agent, no fork, no plugin's agent.
+  - At most one instance of each agent runs at a time. Different agents run at the same time, as many as the work needs.
+- **How D1 read "create more subagents".** It has two readings: starting an agent that has no file in the folder, and adding an agent file. D1 applied both. The first is enforced by the hook below. The second is a sentence in CLAUDE.md (no agent is added without the owner's word) and no tool enforces it. If the owner meant only one of the two, D1 removes the other.
+- **What enforces it.** `.claude/settings.json` (new, the project's first settings file) wires `.claude/hooks/agent_guard.py` to five events.
+  - **Before each `Agent` call** it refuses an agent type that has no file in `.claude/agents/` (it reads the `name` line of each file, so the list is not kept twice), and it refuses an agent that already holds a lock. Otherwise it takes the lock. A call with no agent type is refused too, because it starts the built-in general-purpose agent.
+  - **When an agent starts,** its id goes into its lock. **When it stops,** the lock is released if it holds that id. **When `TaskStop` stops it,** the lock is released by the task's id, because the stop event does not fire for a stopped agent (found in the live run below). **When the session is resumed,** its locks are cleared, because no agent outlives the process that ran it.
+  - A lock is one file for each agent in the system's temporary folder, under the session's id. Two CLI sessions each have their own locks.
+  - The hook fails closed: the `Agent` hook has `onFailure: block`, so no subagent starts when the script cannot run. It needs `python` on the PATH.
+  - **The `Workflow` tool is denied** in the same file. This is D1's addition. A workflow starts agents from a script, D1 did not test whether the hook sees them, and the owner's rule would not hold if it did not.
+- **Evidence.**
+  - `python -m pytest -q .claude/hooks/test_agent_guard.py`: 13 passed, with pytest 9.2.0 in `tools/venv`. pytest skips folders whose name starts with a dot, so CI's `pytest` job does not collect this file. It runs by name.
+  - Live, in the session that made the change, with `ci-triage` (the cheapest agent) and a one-word task: one launch ran, and its lock was gone after it finished. Of two launches in one message, one ran and one was refused. `Explore` was refused, with the ten defined names in the message. An agent stopped with `TaskStop` kept its lock, which is how the fifth event was found; with it wired, the lock was released. With the script moved aside, the launch was blocked, and the script was put back.
+- **Limits.**
+  - An agent the owner stops from the interface fires neither event, so its lock stays until the session is resumed or the file is deleted. The refusal names the file, and says to check first that no such agent is running.
+  - A message sent with `SendMessage` to an agent that has finished resumes it. No hook can refuse that. The resumed agent takes the lock when the lock is free, so a new launch of the same agent is refused while it runs. When another instance already holds the lock, both run. D1 does not resume a finished agent while another instance of it is running.
+  - The count is for one session. Two sessions started in the checkout can each run one instance of an agent.
+  - The hook guards a session against a mistake. It is not a security boundary: whoever can edit `.claude/settings.json` can remove it.
+- **What changes for the team.**
+  - Two tasks for one role run one after the other. D6 cannot review two PRs at the same time, and D6 cannot review one PR while it works on a brief.
+  - No session can fall back to a general-purpose subagent briefed from a role's file, as the first CLI session did (D4-77). When the agent files do not load, no subagent starts: start `claude` inside the checkout.
+  - `Explore`, `Plan` and Claude Code's own guide agent do not run in this project. D1 reads and searches in its own context, or gives the reading to a role.
+- **Three agents change model**, in the owner's working tree, committed at their word. This supersedes the first line of D4-79's "Model and effort" for these three, and that line is marked.
+  - D1 and D3: `fable` to `opus`, effort `high` as before.
+  - D6: `fable` to `opus`, and effort `high` to `xhigh`.
+  - Every role is now on `opus`. The helpers are unchanged (`records-auditor` on `sonnet`, `ci-triage` on `haiku`).
+  - The owner gave no reason, and D1 did not ask for one. One consequence, for the record: D4-79 noted that D6 reviews the implementing roles from a different model than their author's. That no longer holds, for any role.
+- **The Python venv exists on the PC.** D1 created `tools/venv` on 2026-11-12 to run the hook's tests, as `HANDOFF.md`'s step 3 describes: `pytest` 9.2.0 and `asyncssh` 2.24.1 with what they depend on, and nothing else. `HANDOFF.md` had said it did not exist.
+- **Review.** D1 wrote this PR, so it merges on D6's acceptance (D4-85). It adds a settings file and a script, so both workflows run on it.

@@ -74,6 +74,15 @@ Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strate
 - No contact with any real device or operational network without the owner's explicit authorization. Every endpoint so far is a simulator on loopback.
 - The repository is public. Use test credentials only. No secret, vendor-default password, real device data, internal hostname or personal detail goes into any file.
 
+### Subagents: only the defined agents, and one instance of each
+
+The owner's rule of 2026-11-12, recorded in D4-89.
+
+- **Only the agents defined in `.claude/agents/` run as subagents:** the eight roles and the two helpers. No built-in agent (`general-purpose`, `Explore`, `Plan`), no fork, no plugin's agent, and no workflow.
+- **At most one instance of each agent runs at a time.** Different agents may run at the same time, as many as the work needs. Two tasks for the same role run one after the other.
+- **No agent is added to `.claude/agents/` without the owner's word.**
+- `.claude/settings.json` enforces the first two. It wires `.claude/hooks/agent_guard.py` to every `Agent` call, and it denies the `Workflow` tool. The hook needs `python` on the PATH. When it cannot run, no subagent starts.
+
 ### UI and UX design work: use the impeccable skill, and only there
 
 The `impeccable` skill is used for UI and UX design work only: designing, building, reviewing or refining screens, layouts, interaction flows, UX copy and visual surfaces under `ui/` (owned by D8). Everything else in this repository is engineering work governed by the brief below, and is never routed through impeccable.
