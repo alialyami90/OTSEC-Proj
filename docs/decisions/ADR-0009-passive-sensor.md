@@ -288,7 +288,6 @@ D4's reasons for Zeek:
 
 ### Not decided here
 
-- The engine, which D1 approves after E-D4-03 (above).
 - The sensor's implementation brief, which D1 writes.
 - The link's contract: C13's channel on the network, with its enrollment, credential, peer binding, replay protection, acknowledgement of the committed sequence number, resume after a break, and a bound on late records.
 - The sensor host's hardware and its Linux distribution and version.
