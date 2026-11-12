@@ -74,6 +74,7 @@ The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared 
 - **Start `claude` inside `OTSEC-Proj`.** The agent files are found from the working directory up to the repository root, so a session started in the folder above the checkout loads none of them. Check with `/agents`.
 - **The main session acts as D1** and calls D2 to D8 as subagents with a bounded brief (CLAUDE.md section 5.2). `records-auditor` and `ci-triage` are helper agents that own no path. The first checks a documentation PR before its review, and is read-only by instruction: its Bash tool is not restricted. The second reads a failed CI run from files D1 saves for it, and has no tool that can change anything.
 - **Independent review means a separate subagent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent.
+- **Only the agents in `.claude/agents/` run, and one instance of each role at a time** (the owner's rule, D4-89; CLAUDE.md, "Subagents"). `.claude/settings.json` wires `.claude/hooks/agent_guard.py`, which refuses any other agent type and a second instance of a role that is running, and it denies the `Workflow` tool. Two tasks for one role run one after the other. The helpers `ci-triage` and `records-auditor` are the exception: each may run several instances at once. The hook's tests run by name, with the venv's Python on the PC: `tools\venv\Scripts\python.exe -m pytest -q .claude/hooks/test_agent_guard.py`.
 - **Branches.** One branch and one PR per task, and one `git worktree` per role working at the same time. Stage by explicit path.
 - **Working files** go in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.
 - **GitHub.** A CLI session uses the owner's own credentials and can force-push and delete branches. Never force-push a shared branch, and delete only branches on a list the owner approved.
@@ -103,7 +104,7 @@ OTSEC-Proj/          the only checkout of this repository; start `claude` here
   - CI is not affected, because neither folder is in the repository.
 - `tools/go` ran on the PC on 2026-11-11 (Go 1.27.3, `windows/amd64`). Go is not on the PATH: call `tools\go\bin\go.exe`, or set `PATH` for the session only, with `GOCACHE`, `GOPATH` and `APPDATA` pointing into `tools/` and `GOTOOLCHAIN=local`.
 - Claude Code keeps each subagent's worktree in `.claude/worktrees/` inside the checkout. `.git/info/exclude` on the PC lists it. Each worktree has the repository's own `go.mod`, so `go list ./...` skips it, and a test that walks the tree does not (P4-PC-1).
-- The Python venv does not exist yet. Create it as `tools/venv` (step 3 below).
+- The Python venv is `tools/venv`, created on 2026-11-12 with `pytest` 9.2.0 and `asyncssh` 2.24.1 (D4-89). Call `tools\venv\Scripts\python.exe -m pytest`; the system Python has no `pytest`.
 - Eleven test files still carry paths into a shared folder that no longer exists (the eight SEL-751 register goldens, two files under `tests/integration/gt_mib/`, and `contracts/adapter/testdata/snmp/README.md`). The goldens are pinned by checksum, so the owner left them. The paths are citations only, and nothing opens them.
 
 ## First session in the CLI
