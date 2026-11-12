@@ -82,7 +82,8 @@ The owner's rule of 2026-11-12, recorded in D4-89.
 - **At most one instance of each role (D1 to D8) runs at a time.** Different roles may run at the same time, as many as the work needs. Two tasks for the same role run one after the other.
 - **The two helpers are the exception.** `ci-triage` and `records-auditor` may each run several instances at the same time, for the tasks they are given.
 - **No agent is added to `.claude/agents/` without the owner's word.**
-- `.claude/settings.json` enforces the first three. It wires `.claude/hooks/agent_guard.py` to every `Agent` call, and it denies the `Workflow` tool. The hook needs `python` on the PATH. When it cannot run, no subagent starts.
+- `.claude/settings.json` enforces the first three for launches made with the `Agent` tool in one session, within the limits D4-89 lists. It wires `.claude/hooks/agent_guard.py` to every `Agent` call, and it denies the `Workflow` tool. The hook needs `python` on the PATH and Claude Code 2.1.295 or later. When the script cannot run before a launch, no subagent starts.
+- What the hook does not see is still under the rule: a second `claude` session, a skill that forks a subagent, and a finished role resumed with `SendMessage` while another instance of it runs.
 
 ### UI and UX design work: use the impeccable skill, and only there
 

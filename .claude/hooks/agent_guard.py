@@ -20,7 +20,7 @@ empty from the launch until the agent starts, and holds the agent's id after.
 
 Not covered: an agent the user stops from the interface fires neither
 SubagentStop nor TaskStop, so its lock stays until the session is resumed or
-the file is deleted. The refusal names the file.
+the file is deleted. The refusal names the file. D4-89 lists the other limits.
 """
 
 import json
@@ -45,7 +45,8 @@ PENDING_SECONDS = 60
 def agent_names():
     names = set()
     for path in AGENTS.glob("*.md"):
-        match = re.search(r"^name:\s*(\S+)\s*$", path.read_text(encoding="utf-8"), re.M)
+        front = re.match(r"---\n(.*?)\n---", path.read_text(encoding="utf-8"), re.S)
+        match = front and re.search(r"^name:\s*(\S+)\s*$", front.group(1), re.M)
         if match:
             names.add(match.group(1))
     return names
@@ -119,7 +120,7 @@ def agent_stopped(event):
 
 
 def task_stopped(event):
-    stopped = event["tool_input"].get("task_id")
+    stopped = event["tool_input"].get("task_id") or event["tool_input"].get("shell_id")
     for lock in session_dir(event).glob("*"):
         if stopped and lock.read_text() == stopped:
             lock.unlink()
