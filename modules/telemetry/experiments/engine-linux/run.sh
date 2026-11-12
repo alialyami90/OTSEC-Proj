@@ -20,12 +20,20 @@
 #                             case, D4-87)
 #   run.sh public WORK CACHE  MANIFEST.tsv's captures (already fetched into
 #                             CACHE by fetch_captures.sh) and the captures in
-#                             extra-captures.tsv
+#                             extra-captures.tsv; then P4-4-E2's corpus for
+#                             the Modbus signature (tests/fixtures/network/
+#                             modbus-sig-corpus/corpus.tsv), whose table is
+#                             appended to public.md
 #   run.sh prp WORK CACHE     GT-PCAP's PRP pairs, labelled by tshark 4.2.2
 #                             through D6's prp_check.py (tshark on PATH)
 # Needs: docker, python3, curl, sha256sum. No apt package except tshark for
 # the prp mode. Writes WORK/<mode>.md and WORK/versions.txt. The tables hold
-# no pass condition of their own: the conditions are D6's (brief P4-4-S2).
+# no pass condition of their own: the conditions are D6's (briefs P4-4-S2
+# and P4-4-E2).
+#
+# P4-4-E2 (D4-90) adds a sixth configuration, `zeek-modbus-sig`: Zeek with
+# the project's script and the Modbus/TCP content signature
+# (modbus-sig.zeek), an experiment that is not adopted.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
@@ -96,7 +104,21 @@ header() {
   else
     kind="rehearsal: not the counted result"
   fi
-  printf '%s\n' "- Run: $kind" "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch ($pinned)" ""
+  # P4-4-E2's measurement counts only against D6's own conditions for it,
+  # pinned in pins.env once they merge; until then every run is a rehearsal.
+  if [ -z "$SIG_CONDITIONS" ] || [ -z "$SIG_CONDITIONS_SHA256" ]; then
+    sig="rehearsal: not the counted result (D6's P4-4-E2 conditions are not pinned in pins.env)"
+  elif [ ! -f "$root/$SIG_CONDITIONS" ]; then
+    sig="rehearsal: not the counted result ($SIG_CONDITIONS is absent)"
+  elif [ "$(sha256sum < "$root/$SIG_CONDITIONS" | cut -c1-64)" != "$SIG_CONDITIONS_SHA256" ]; then
+    sig="rehearsal: not the counted result ($SIG_CONDITIONS differs from the pin $SIG_CONDITIONS_SHA256)"
+  elif [ "$ref" != refs/heads/main ]; then
+    sig="rehearsal: not the counted result (not refs/heads/main)"
+  else
+    sig="counted, against $SIG_CONDITIONS at its pin"
+  fi
+  printf '%s\n' "- Run, for E-D4-03's conditions: $kind" "- Run, for P4-4-E2 (the Modbus signature, \`zeek-modbus-sig\`): $sig" \
+    "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch ($pinned)" ""
 }
 
 # 2. Every configuration over one directory of captures.
@@ -122,6 +144,7 @@ engines() {
   zeek_run zeek zeek
   zeek_run zeek zeek-probe /exp/probe.zeek
   zeek_run zeek zeek-icsnpp /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
+  zeek_run zeek zeek-modbus-sig /exp/probe.zeek /exp/modbus-sig.zeek
   suricata_run suricata suricata
   suricata_run suricata suricata-midstream --set stream.midstream=true
 }
@@ -200,7 +223,41 @@ case $mode in
       echo "$sha  $work/public/$n" | sha256sum -c --status || { echo "MISMATCH or missing: $n"; rm -f "$work/public/$n"; }
     done
     engines "$work/public" "$work/out-public"
-    { header; python3 -I "$here/table.py" public "$work/out-public"; } > "$work/public.md"
+    # P4-4-E2: the Modbus signature's corpus. Each capture is checked against
+    # its SHA-256; a held-out Modbus capture is moved off port 502 by D6's
+    # movedport.py, the result checked against its own pin, and the source
+    # kept beside it as its control on 502. Whatever fails a check is left
+    # out, and its rows read "not run". Flows are counted by flows.py, never
+    # by an engine.
+    corpus=$root/tests/fixtures/network/modbus-sig-corpus/corpus.tsv
+    rm -rf "$work/corpus-src" "$work/corpus" "$work/corpus-control"
+    mkdir -p "$work/corpus-src" "$work/corpus" "$work/corpus-control"
+    grep -v '^#' "$corpus" | tail -n +2 | while IFS="$(printf '\t')" read -r n sha url src lic proto mb moved; do
+      curl -fsSL --retry 5 --retry-delay 20 -o "$work/corpus-src/$n" "$url" || echo "not fetched: $n"
+      if ! echo "$sha  $work/corpus-src/$n" | sha256sum -c --status; then
+        echo "MISMATCH or missing, dropped: $n"
+        continue
+      fi
+      if [ -z "$moved" ]; then
+        cp "$work/corpus-src/$n" "$work/corpus/"
+      elif python3 "$root/tests/integration/gt_pcap/movedport.py" "$work/corpus-src/$n" "$work/corpus" > /dev/null \
+        && echo "$moved  $work/corpus/${n%.*}-moved-port.pcap" | sha256sum -c --status; then
+        cp "$work/corpus-src/$n" "$work/corpus-control/"
+      else
+        echo "the moved capture of $n did not check out; it and its control are left out"
+        rm -f "$work/corpus/${n%.*}-moved-port.pcap"
+      fi
+    done
+    python3 -I "$here/flows.py" "$work/corpus"/* "$work/corpus-control"/* > "$work/corpus-flows.tsv"
+    for s in corpus corpus-control; do
+      pcaps=$work/$s
+      out=$work/out-$s
+      mkdir -p "$out"
+      zeek_run zeek zeek-probe /exp/probe.zeek
+      zeek_run zeek zeek-modbus-sig /exp/probe.zeek /exp/modbus-sig.zeek
+    done
+    { header; python3 -I "$here/table.py" public "$work/out-public"
+      python3 -I "$here/table.py" corpus "$work/out-corpus" "$work/out-corpus-control" "$work/corpus-flows.tsv" "$corpus"; } > "$work/public.md"
     ;;
   prp)
     cache=$3
@@ -212,14 +269,36 @@ case $mode in
     python3 "$root/tests/integration/gt_pcap/prp_check.py" "$work/prp" "$work/labels"
     echo "tshark:    $(tshark -v | head -1)" >> "$work/versions.txt"
     engines "$work/prp" "$work/out-prp"
-    # E-D4-02's own checker, per configuration. It exits 1 on any failed
-    # row, and every row fails while no stage discards PRP duplicates
-    # (E-D4-02), so its exit code is recorded, not obeyed.
+    # E-D4-02's own checker, per configuration. It exits 1 on any row that
+    # failed or did not run, and every row fails while no stage discards PRP
+    # duplicates (E-D4-02), so exit 1 with every row run is the measurement,
+    # and the job stays green. The job says so in its summary, beside the
+    # table (D4-88). It fails instead when a row did not run or the checker
+    # did not finish, because those are faults of the run, not the result.
     rc=0
     header > "$work/prp.md"
     python3 -I "$root/modules/telemetry/experiments/prp-engines/compare.py" "$work/out-prp" "$work/labels" \
-      zeek zeek-probe zeek-icsnpp suricata suricata-midstream >> "$work/prp.md" || rc=$?
+      zeek zeek-probe zeek-icsnpp zeek-modbus-sig suricata suricata-midstream >> "$work/prp.md" || rc=$?
     echo "compare.py exit code: $rc" >> "$work/prp.md"
+    notrun=$(grep -c '| not run |$' "$work/prp.md" || true)
+    case $rc in
+      0) state="**The PRP comparison passed on every row.** That is not the result E-D4-02 and E-D4-03 found (every configuration counted both LAN copies), and nothing in this harness discards PRP duplicates, so read \`prp.md\` before relying on it." ;;
+      1) state="**The PRP comparison failed** (\`compare.py\` exit code 1): each row whose \`pass\` column reads \`no\` is in the table above. That is the expected result while no stage discards PRP duplicates before the engine: every configuration counts both LAN copies (E-D4-02; D4-69). **This job is green because \`run.sh\` records the comparison's exit code and does not obey it:** the comparison measures the engines alone, without the duplicate-discard stage that the sensor must add, so a failed row is the measurement, not a fault of the run. The job fails instead if a row did not run or the checker did not finish." ;;
+      *) state="**The PRP comparison did not finish** (\`compare.py\` exit code $rc). The job fails." ;;
+    esac
+    if [ "$rc" = 1 ] && [ "$notrun" != 0 ]; then
+      state="**The PRP comparison did not run on every row:** $notrun row(s) read \`not run\` (an engine did not run on a capture). The job fails, because that is a fault of the run, not the measurement."
+    fi
+    printf '\n%s\n' "$state" >> "$work/prp.md"
+    if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+      printf '## PRP pairs (E-D4-02, E-D4-03)\n\n%s\n' "$state" >> "$GITHUB_STEP_SUMMARY"
+    fi
+    case $rc in
+      1) [ "$notrun" = 0 ] || { cat "$work/prp.md" >&2; exit 1; }
+         echo "::warning title=PRP comparison failed (expected; job green by design)::Every configuration counts both LAN copies; no stage discards PRP duplicates before the engine (E-D4-02). See the job summary and prp.md." ;;
+      0) ;;
+      *) cat "$work/prp.md" >&2; exit 1 ;;
+    esac
     ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
