@@ -866,12 +866,16 @@ def corpus(out, out_ctl, flows_path, manifest):
                         tot[cfg][f"{kind} flows"] += 1
                         tot[cfg][f"{kind} named"] += bool(r.get("named"))
                         continue
-                    tot[cfg][f"neg {way}"] += 1
+                    # A held-out capture's other flows are the same in its
+                    # moved run and its control: the totals count them once,
+                    # from the moved run.
+                    count = kind != "control"
+                    tot[cfg][f"neg {way}"] += count
                     if any(r.get(k) for k in ("named", "logged", "violation")):
                         fp[way] += 1
-                        tot[cfg][f"fp {way}"] += 1
+                        tot[cfg][f"fp {way}"] += count
                         for k in ("named", "logged", "violation"):
-                            tot[cfg][f"fp {k}"] += bool(r.get(k))
+                            tot[cfg][f"fp {k}"] += count and bool(r.get(k))
                         cites += [x for k in ("named", "logged", "violation") for x in r.get(k, [])][:2]
                 lost = [e for e in recs if e not in {x[0] for x in flows_here}]
                 tot[cfg]["records off the flows"] += len(lost)
