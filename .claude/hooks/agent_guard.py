@@ -1,11 +1,13 @@
-"""Claude Code hook: only the agents in .claude/agents run, one instance of each.
+"""Claude Code hook: only the agents in .claude/agents run, one instance of each role.
 
-The owner's rule (CLAUDE.md, "Subagents"; D4-89). .claude/settings.json wires
-this script to five events, and each sends its JSON on stdin:
+The owner's rule (CLAUDE.md, "Subagents"; D4-89). The two helper agents are the
+exception: any number of instances of each may run, and they take no lock.
+.claude/settings.json wires this script to five events, and each sends its JSON
+on stdin:
 
   PreToolUse on Agent      refuse an agent type that has no file in
-                           .claude/agents, and one that is already running;
-                           otherwise take its lock
+                           .claude/agents, and a role that is already running;
+                           otherwise take the role's lock
   SubagentStart            write the agent's id into its lock
   SubagentStop             release the lock that agent holds
   PostToolUse on TaskStop  release the lock of the agent that was stopped:
@@ -31,6 +33,9 @@ import time
 from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent / "agents"
+
+# The helper agents. Any number of instances of each may run.
+MANY_INSTANCES = {"ci-triage", "records-auditor"}
 
 # A lock with no agent id this old is a launch that never started, for example
 # one the user declined at the permission prompt.
@@ -73,6 +78,8 @@ def before_launch(event):
             f"Only these run in this project (the owner's rule, D4-89): {', '.join(sorted(names))}."
         )
         return
+    if name in MANY_INSTANCES:
+        return
     lock = session_dir(event) / name
     lock.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -83,7 +90,7 @@ def before_launch(event):
     if lock.read_text() or time.time() - lock.stat().st_mtime < PENDING_SECONDS:
         deny(
             f"An instance of {name} is already running in this session, and only one "
-            "instance of each agent runs at a time (the owner's rule, D4-89). Wait for it "
+            "instance of each role runs at a time (the owner's rule, D4-89). Wait for it "
             "to finish, or send it the work with SendMessage. If the user stopped it from "
             f"the interface, its lock is stale: check with ListAgents that no {name} is "
             f"running, then delete {lock}."
@@ -94,7 +101,7 @@ def before_launch(event):
 
 def agent_started(event):
     name = event.get("agent_type") or ""
-    if name not in agent_names():
+    if name not in agent_names() - MANY_INSTANCES:
         return
     lock = session_dir(event) / name
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -104,7 +111,7 @@ def agent_started(event):
 
 def agent_stopped(event):
     name = event.get("agent_type") or ""
-    if name not in agent_names():
+    if name not in agent_names() - MANY_INSTANCES:
         return
     lock = session_dir(event) / name
     if lock.exists() and lock.read_text() == event["agent_id"]:

@@ -53,13 +53,23 @@ def test_an_agent_with_no_file_is_refused(run, agent):
     assert not launch(run, agent)
 
 
-def test_one_instance_of_each_agent_and_any_number_of_agents(run):
+def test_one_instance_of_each_role_and_any_number_of_roles(run):
     assert launch(run, "d6-verification-safety")
     assert not launch(run, "d6-verification-safety")  # launched, not yet started
     run("SubagentStart", agent_type="d6-verification-safety", agent_id="a1")
     assert not launch(run, "d6-verification-safety")  # running
     assert launch(run, "d3-security-access")
-    assert launch(run, "ci-triage")
+    assert launch(run, "d5-platform")
+
+
+@pytest.mark.parametrize("helper", ["ci-triage", "records-auditor"])
+def test_a_helper_runs_any_number_of_instances(run, helper):
+    for agent_id in ("a1", "a2", "a3"):
+        assert launch(run, helper)
+        run("SubagentStart", agent_type=helper, agent_id=agent_id)
+    assert not run.locks.exists() or not list(run.locks.iterdir())
+    run("SubagentStop", agent_type=helper, agent_id="a2")
+    assert launch(run, helper)
 
 
 def test_the_agent_runs_again_after_it_stops(run):
@@ -107,7 +117,7 @@ def test_another_session_has_its_own_locks(run):
 
 
 def test_resuming_the_session_clears_its_locks(run):
-    assert launch(run, "records-auditor")
-    run("SubagentStart", agent_type="records-auditor", agent_id="a1")
+    assert launch(run, "d1-principal-architect")
+    run("SubagentStart", agent_type="d1-principal-architect", agent_id="a1")
     run("SessionStart", source="resume")
-    assert launch(run, "records-auditor")
+    assert launch(run, "d1-principal-architect")

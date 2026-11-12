@@ -32,7 +32,7 @@ Where things are recorded:
 - `platform/` holds the store, the node runtime and the Windows service support.
 - `tests/` holds the verification tests.
 - `docs/` holds the documents listed above.
-- `.claude/agents/` holds the eight roles as subagents, and two helper agents that own no path.
+- `.claude/agents/` holds the eight roles as subagents, and two helper agents that own no path. `.claude/settings.json` and `.claude/hooks/` hold the hook that limits which subagents run.
 
 The ownership table is in `README.md`. The manuals, datasheets and RFC texts that records cite are in `reference/`. On the owner's PC it sits inside the checkout, beside `tools/`. Git ignores both folders, and neither is ever committed.
 
@@ -74,14 +74,15 @@ Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strate
 - No contact with any real device or operational network without the owner's explicit authorization. Every endpoint so far is a simulator on loopback.
 - The repository is public. Use test credentials only. No secret, vendor-default password, real device data, internal hostname or personal detail goes into any file.
 
-### Subagents: only the defined agents, and one instance of each
+### Subagents: only the defined agents, and one instance of each role
 
 The owner's rule of 2026-11-12, recorded in D4-89.
 
 - **Only the agents defined in `.claude/agents/` run as subagents:** the eight roles and the two helpers. No built-in agent (`general-purpose`, `Explore`, `Plan`), no fork, no plugin's agent, and no workflow.
-- **At most one instance of each agent runs at a time.** Different agents may run at the same time, as many as the work needs. Two tasks for the same role run one after the other.
+- **At most one instance of each role (D1 to D8) runs at a time.** Different roles may run at the same time, as many as the work needs. Two tasks for the same role run one after the other.
+- **The two helpers are the exception.** `ci-triage` and `records-auditor` may each run several instances at the same time, for the tasks they are given.
 - **No agent is added to `.claude/agents/` without the owner's word.**
-- `.claude/settings.json` enforces the first two. It wires `.claude/hooks/agent_guard.py` to every `Agent` call, and it denies the `Workflow` tool. The hook needs `python` on the PATH. When it cannot run, no subagent starts.
+- `.claude/settings.json` enforces the first three. It wires `.claude/hooks/agent_guard.py` to every `Agent` call, and it denies the `Workflow` tool. The hook needs `python` on the PATH. When it cannot run, no subagent starts.
 
 ### UI and UX design work: use the impeccable skill, and only there
 
