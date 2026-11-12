@@ -45,7 +45,7 @@ PENDING_SECONDS = 60
 def agent_names():
     names = set()
     for path in AGENTS.glob("*.md"):
-        front = re.match(r"---\n(.*?)\n---", path.read_text(encoding="utf-8"), re.S)
+        front = re.match(r"---\n(.*?)\n---", path.read_text(encoding="utf-8-sig"), re.S)
         match = front and re.search(r"^name:\s*(\S+)\s*$", front.group(1), re.M)
         if match:
             names.add(match.group(1))

@@ -131,6 +131,7 @@ def test_only_the_frontmatter_names_an_agent(tmp_path):
     shutil.copy(GUARD, hooks)
     (agents / "one.md").write_text("---\nname: real-role\n---\n\nname: general-purpose\n")
     (agents / "two.md").write_text("no frontmatter\nname: Explore\n")
+    (agents / "three.md").write_bytes(b"\xef\xbb\xbf---\r\nname: role-with-a-bom\r\n---\r\n")
     env = dict(os.environ, TMPDIR=str(tmp_path), TEMP=str(tmp_path), TMP=str(tmp_path))
 
     def allowed(agent):
@@ -146,6 +147,7 @@ def test_only_the_frontmatter_names_an_agent(tmp_path):
         return not done.stdout
 
     assert allowed("real-role")
+    assert allowed("role-with-a-bom")
     assert not allowed("general-purpose")
     assert not allowed("Explore")
 
