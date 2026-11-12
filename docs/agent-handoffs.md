@@ -1681,6 +1681,8 @@ It holds every criterion that the Stage A brief listed under "What item 4 must s
 - C13 0.2 and the C7 and C8 additions are merged, with their reviewers' records and D6's contract tests.
 - No safety or security objection is open, and the report says what remains `simulated` and which H-rows wait for a lab machine.
 - The engine and its packages are pinned, and D7's inventory covers the sensor.
+- **A flow the engine names nothing for is visible** (D4-90, from D1's ruling on #637): the `undecoded` signal, with `unknown-pair`, is shown by D6's legs with their controls, so that an unidentified server on a moved port, Modbus included, raises something.
+- **The Modbus/TCP content signature** in the project's script is adopted only on its measurement (brief P4-4-E2): its detection on `modbus-moved-port` and its false-positive rate on the wider corpus. If it is not adopted, the gate report says that Modbus on a moved port is not identified, and the high risk HR-22 stands.
 
 ## After D4-88: the last step before the link's contracts are approved, and the owed evidence (issued 2026-11-11, D4-88)
 
@@ -1702,7 +1704,7 @@ Common rules as in "Phase 4 item 4, second part". Each PR body is written from a
 - **The two readings.**
   - **Reading A, D4-82 as written:** for a `P` or `Y` row, a simulator, a documented example or a synthetic series stands in for device data, whatever the method column says. Under A, R4.1 would rise to `e2e`.
   - **Reading B, D1's ruling on R4.1 (#632):** a method that names real device data binds a `P` or `Y` row too, so only that data can raise it. Under B, R3.3 would fall, because it is `e2e` on synthesized settings and its method says "real files only".
-- **Objective.** Read every row of `docs/verification.md` that #613 and #632 did not re-read, and R3.3 and R4.1 with them, under reading A and under reading B. Report the Status each row would have under each. **D1 rules which reading holds, on that report, before any Status moves.** For R4.1, also say what a replay of the three documented examples under `tests/fixtures/ied/sel/` would show under each reading (the question `docs/verification.md` leaves to D1).
+- **Objective.** Read every row of `docs/verification.md` that #632 did not re-read, and R3.3 and R4.1 with them, under reading A and under reading B, with every row whose HW is `P` or `Y` read in full (D4-90: #613 read all 59 rows, so "#613 and" is dropped). Report the Status each row would have under each. D6 may add a third reading, C: the method's named ground truth binds, and a simulator, a documented example or a synthetic series stands in for device data inside it (D6 on #636; D1 does not object). **D1 rules which reading holds, on that report, before any Status moves.** For R4.1, also say what a replay of the three documented examples under `tests/fixtures/ied/sel/` would show under each reading (the question `docs/verification.md` leaves to D1).
 - **Deliverables.** First, the report: a table of the rows, the ground truth each run used, and the Status under A and under B, posted on a draft PR or as a file under `docs/phase4/`. R4.2 and R4.3 first. Then, after D1's ruling, one PR changing `docs/verification.md` only: the legend's `e2e` line as ruled, each row's cell saying which ground truth it used, and each Status that moves saying why.
 - **Acceptance.** `records-auditor`, then D4 and D2 on the rows they own. D1 updates `docs/requirements.md` from it.
 - **Exclusions.** No test is run or changed; a row that needs a run to move stays where it is and says so. No Status moves before D1's ruling.
@@ -1721,14 +1723,56 @@ Common rules as in "Phase 4 item 4, second part". Each PR body is written from a
 
 - **Objective.** No closing leg has a product mutant. D4-85 decided how mutants live in the repository.
 - **Inputs.** D4-85; the closing legs and their notes on `main`; the matrix cells that name M1 to M4.
-- **Deliverables.** M1 to M4 as committed patch files, with a dispatch-only workflow, on D6's four conditions of D4-85: the unmutated test passes first in the same job; a patch that fails to apply or to build is an error and never a kill; a kill is the named test's own failure; and `ci.yml` never applies a patch. Each patch sits beside the test that must kill it (D4-85). The workflow is an `a6-*.yml` file, and the run that counts is dispatched from `main`. A patch can rot unseen between dispatches (D4-85), so the matrix cells give the date and the commit of the last run. D1 changes the line in D6's role file that says mutant scripts stay out of the commit, because `.claude/agents/` is not D6's path.
-- **Acceptance.** D4 (the mutated code is D4's), D5 (the workflow).
+- **Deliverables.** M1 to M4 as committed patch files, with a dispatch-only workflow, on D6's four conditions of D4-85: the unmutated test passes first in the same job; a patch that fails to apply or to build is an error and never a kill; a kill is the named test's own failure; and `ci.yml` never applies a patch. Each patch sits beside the test that must kill it (D4-85). The workflow is an `a6-*.yml` file, and the run that counts is dispatched from `main`. A patch can rot unseen between dispatches (D4-85), so the matrix cells give the date and the commit of the last run. D6's role file already carries the exception for these patches (D4-88).
+- **Pass condition (D4-90).** Each of M1 to M4 is killed by its named test in the counted run. A mutant that survives gets a test that kills it, or a reason, recorded in the matrix cell, why it is accepted.
+- **Acceptance.** The owner of each mutated path (D4-90): D1 for M1 in `contracts/syslog`, D4 for M2 and M4, and D5 for M3 in `platform/store`; and D5 for the workflow.
 - **Exclusions.** No patch is applied by `ci.yml`, and no mutant is pushed as a branch.
 
 ### P4-D7-2 (D7): the next change to `docs/release.md`
 
 - **Objective.** Bring the release record up to what D4-87 and D4-88 decided, so that the first release has its floors and its blocker written down.
-- **Inputs.** `docs/release.md` on `main`; P4-D7-1's reviews; D4-87; D4-88; #637's licence lines when it merges.
-- **Deliverables.** The seven notes carried from P4-D7-1's reviews (D3's two sentences and D6's five notes, in D1's integration review on #615); §5 item 8 now that `LICENSE.md` exists; ICSNPP's `NOTICE.txt`; AP-31 as it now reads for the sensor host; two rollback floors (the build with the detector checkpoint reader for a later minor, and the build with the C8 0.13 reader); and a release blocker: no release ships before F-027's couplings, F1 to F11, are closed.
+- **Inputs.** `docs/release.md` on `main`; P4-D7-1's reviews; D4-87; D4-88; D4-90; #637's licence lines (merged as `d6c2a7f6`), and D7's own notes on #637 at `53554116` and `ccea278c`.
+- **Deliverables.** The seven notes carried from P4-D7-1's reviews (D3's two sentences and D6's five notes, in D1's integration review on #615); §5 item 8 now that `LICENSE.md` exists; ICSNPP-Modbus's `NOTICE.txt`, which stays a duty only while ICSNPP-Modbus is under evaluation (ICSNPP-DNP3 is dropped, D4-90); AP-31 as it now reads for the sensor host; two rollback floors (the build with the detector checkpoint reader for a later minor, and the build with the C8 0.13 reader); and a release blocker: no release ships before F-027's couplings, F1 to F11, are closed.
 - **Acceptance.** D3 and D6. Markdown only.
 - **Exclusions.** No signing key, no build and no release.
+
+## After D4-90: the link's contracts amended for the cross-reviews, and the engine's owed evidence (issued 2026-11-13, D4-90)
+
+Common rules as in "Phase 4 item 4, second part". Each PR body is written from a file with a name of the role's own, and read back with `gh pr view <n> --json body` after it is created or edited. Each role uses scratch files with names of its own.
+
+### P4-4-L6 (D4, D5 and D3): C13 0.2 and the node's design amended for the cross-reviews
+
+- **Objective.** The cross-reviews that P4-4-L5 asked for, and that ran only after its PRs merged, failed both documents: D5 on C13 0.2 (comment 6835767712 on #634, B1 to B6) and D4 on the node's design (comment 6835796775 on #633, B1 to B5). Close each finding, so that C13 0.2, the node's design, C7 0.11 and C8 0.13 can be approved together.
+- **Owners.** D4: `docs/phase4/D4-c13-0.2-proposal.md`, and a C4 0.4 proposal (D5's B6). D5: `docs/phase4/D5-sensor-node.md`. D3: `docs/phase4/D3-sensor-link.md` and `docs/threat-model.md`, for the rulings below that are D3's and for HR-22.
+- **Inputs.** The two comments above, with their notes; D1's rulings in D4-90; #631's description; D4-87 to D4-90.
+- **D1's rulings (D4-90), which the three apply:**
+  - **D4's B1, which enrolment closes an open link:** any enrolment of the sensor, a `renew` included, as D3's SL-R6 says. CH-37, CH-11 and M-9 change, and the node's design drops "that replaces the pin".
+  - **D4's B4, what a coverage gap records:** one closed set of causes, the same in CH-45, the node's design §1.9 item 5 and C8-7. A link drop that the sensor buffers through, and the node's own start, are not gaps under 0.2: the records arrive later. A gap is time the platform did not watch: `lost` records, every interface `blind`, and any other cause the three name, each with its test.
+  - **D5's B6:** C4 0.4 adds the counters C13 0.2 names, and nothing else; D4 drafts it as a proposal in this brief, and it is approved with the four.
+  - **D5's B5:** both of its parts are D5's to fix, to C13's values.
+- **For D3 to rule, before D4 and D5 write the text:** D5's B2 and D4's B2 together. When the node's run file is lost, unreadable, or behind its cursor, may the node take the spans the sensor states as held, and raise the loss alarm instead of closing? That is trusting the sensor's word after a node-side loss. D3 rules on the PR or on #634, with its reasoning, and the two documents follow it.
+- **For D4 and D5 to agree, with D6's review:** D4's B3 (when a record kept from a tie by the latest skew sample alone is marked `node.skewed`), D5's B1 (the durable baseline for `sensor-transmitted` and `sensor-egress-absent`), D5's B3 (a skipped record and `sent_seq`), D4's B5 (the node's dial condition), and D5's B4 (carry-over across two enrolments with no accepted hello). One rule each, the same in both documents.
+- **D3 adds HR-22** to the threat model: Modbus/TCP on a moved port is not identified by the approved engine (D1 on #637; D4-90). It names what it costs (an unidentified server on a moved port raises neither the insecure flag nor `unauthorized-write`, and `unknown-pair` only after acknowledgement), the owed `undecoded` signal and content signature, and when it closes.
+- **Deliverables.** One PR each from D4 and D5, Markdown only, each finding named in the description with its answer; D3's rulings and HR-22 in a PR of D3's, or on D4's or D5's PR if D3's text is short. The non-blocking notes of both comments are taken where they touch a changed passage.
+- **Acceptance.** `records-auditor` on each PR. **D4 reviews D5's PR and D5 reviews D4's, before either merges,** each on the head that merges. D3 and D6 on each. No rule shared between the documents differs in value, name or meaning.
+- **Exclusions.** No code.
+
+### P4-4-E2 (D4): the Modbus content signature, measured, and the harness's PRP summary
+
+- **Objective.** D1's ruling on #637 adopts a Modbus/TCP content signature in the project's script only on a measurement. Make that measurement, and fix the harness so that a failed comparison is never hidden by a green job.
+- **Inputs.** D1's ruling on #637 (comment 6806312738) and the reviews of `53554116` and `ccea278c`, with D2's findings A to C; `modules/telemetry/experiments/engine-linux/`; GT-PCAP; D4-88's PRP bullet.
+- **Deliverables.**
+  - The signature in the project's script, as an experiment, with its detection on `modbus-moved-port` and its false-positive rate on a corpus with more non-Modbus binary traffic than GT-PCAP holds (D2's note 4 on `c794efb3`). Name the corpus and its source; nothing from a real site. D2's finding C: if the script also sets `DPD::ignore_violations`, measure the two together.
+  - The harness states in the job's summary that the PRP comparison failed and why the job is green, or fails the job.
+  - The non-blocking notes carried from #637 to your next change: D7's N1, N2 and N4, the "fallback" comment in `pins.env`, D2's D to H, D6's eight notes, and ADR-0009's "may come from its port registration" brought in line with D2's finding A as a reading.
+  - The counted run dispatched from `main` after the PR merges, labelled as counted.
+- **Acceptance.** D6 (the measurement against its pass conditions), D2 (the protocol reading), D7 (the pins). D1 adopts the signature, or does not, on the counted run.
+- **Exclusions.** No sensor code. Nothing is called closed before the counted run.
+
+### P4-D6-GT2 (D6): GT-PCAP cases owed by the engine run
+
+- **Objective.** D1's ruling on #637 owes a GT-PCAP case for DNP3 over UDP on a moved port; D4-87 owes two DNP3-over-UDP variants and tag, priority and padding pairs for PRP.
+- **Inputs.** `docs/phase4/D6-gt-pcap-plan.md`; D4-87; D1's ruling on #637; D2's finding A on `53554116` (by source, Zeek's UDP analyzer is enabled by content on any port, so the case is expected to pass).
+- **Deliverables.** The cases with their labels and pass conditions, in GT-PCAP, with D2's protocol review; `a6-gt-pcap` green.
+- **Acceptance.** D2 (protocol), D4 (the labels against the engine's output). The engine run's next counted dispatch reads them.
+- **Exclusions.** No real capture. Derived or synthetic captures only.
