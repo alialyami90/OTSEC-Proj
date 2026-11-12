@@ -11,7 +11,7 @@ The full project brief, engineering principles, team structure, and operating pr
 | Phases 0 to 3: evidence, contracts C1 to C8, the simulated SEL-751 SER-to-Syslog slice, and its hardening | Accepted by the owner. Reports: [docs/phase-0-exit.md](docs/phase-0-exit.md) to [docs/phase-3-exit.md](docs/phase-3-exit.md) |
 | Phase 4, items 1 and 2: configuration monitoring and the event-behaviour baseline | Accepted. Report: [docs/phase-4a-exit.md](docs/phase-4a-exit.md) |
 | Phase 4, item 3: vulnerability applicability with the asset module | Accepted. Report: [docs/phase-4-item3-exit.md](docs/phase-4-item3-exit.md) |
-| Phase 4, item 4: network IDS | In progress. The node side is merged. The owner chose option (b) for the sensor, a separate Linux machine at each site (D4-85). The link's trust design, its channel contract and the node's side are merged as reviewed designs, not yet approved (D4-87), and the sensor is not built; [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b), with the engine still to be approved |
+| Phase 4, item 4: network IDS | In progress. The node side is merged. The owner chose option (b) for the sensor, a separate Linux machine at each site (D4-85). The link's trust design, its channel contract, the node's side and the C7 and C8 additions are merged as reviewed designs, not yet approved (D4-88), and the sensor is not built; [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b), with Zeek 9.0.1 and the project's script as its engine (D1 on #637); Modbus on a moved port is a recorded high risk, not closed |
 | Phase 4, items 5 and 6: secure engineering access and the central role | Not started |
 
 There are two Go binaries. `cmd/otsec` is the site node. `cmd/otsec-collector` is the privileged collector, which alone holds device credentials and opens device sessions.
@@ -44,7 +44,7 @@ Eight roles, D1 to D8, each a subagent in [.claude/agents/](.claude/agents/), wi
 | `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | D6 |
-| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s nineteen jobs and `govulncheck.yml`'s one job are the main test path; Markdown-only PRs skip both) | D1 (`a6-*.yml` workflows: D6; `a5-windows-experiments.yml`: D5, changes authorized by D1) |
+| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s twenty-four jobs and `govulncheck.yml`'s one job are the main test path; Markdown-only PRs skip both) | D1 (`a6-*.yml` workflows: D6; `a5-windows-experiments.yml`: D5, changes authorized by D1) |
 | `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | D1 (`contracts/node` maintained by D4) |
 
 The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisions.md). A role modifies only its owned paths unless explicitly authorized. Shared contracts change only through D1, with a documented proposal and review by the affected owners.
