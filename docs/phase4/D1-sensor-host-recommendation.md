@@ -6,12 +6,13 @@ D4-86 owes the owner one recommendation on the sensor's host under option (b): t
 
 ## What the owner is asked first
 
-Four facts about the sites decide several rows. The first two are already owed (`HANDOFF.md`, "Waiting on the owner", item 2); the third and fourth are new with this file.
+Five facts about the sites decide several rows. The first two are already owed (`HANDOFF.md`, "Waiting on the owner", item 2); the other three are new with this file.
 
 1. **Can each site take a network TAP on the links to be monitored,** or only a switch's mirror (SPAN) port?
 2. **Is the station network PRP,** with two LANs?
 3. **Where would the sensor sit:** in the node's cabinet, in the network cabinet, or in a relay room, and on what power?
 4. **What does the site's management network reach,** and where does the site's time server sit? If the time server is only on the station LAN, reaching it would give the sensor a route toward OT assets (D3 on #640).
+5. **Which of the links to be monitored carry protection or control traffic,** and how long an interruption can each of them tolerate? The owner sets that figure, with D2 (D6 on #640). It decides which links may take a TAP at all (O-1).
 
 Where a row depends on one of them, it says so. A statement marked "D1's judgment" has no source in the records; it is D1's reading, for the owner to weigh.
 
@@ -21,7 +22,7 @@ Where D1 recommends one of D3's options, the others remain open to the owner as 
 
 | | Choice | D1 recommends | Why | What it costs |
 | --- | --- | --- | --- | --- |
-| O-1 | How the sensor attaches | **A TAP of a model shown to be receive-only**, on each monitored link. A mirror port only where a TAP cannot be fitted, and then treated as accepting ingress until an H-row shows otherwise for that switch model. | Against a compromised sensor host, a receive-only TAP is the only measure that holds (D3, O-1; ADR-0009's corrected row). Everything else on the sensor's side is software on a host assumed compromised. "Receive-only" is a property of a TAP model, not of TAPs, so the model is chosen from its maker's documentation and then shown by D6's H-row. | One TAP for each monitored link, and one for each LAN on PRP. The H-row needs a TAP and the owner's authorization to run it. **A TAP sits in the monitored link** (D3 on #640; D3's understanding, no source read): fitting one breaks the link once, so it needs the owner's authorization and a planned outage window, and on PRP the two LANs are done one at a time. A TAP that needs power can drop the link it sits in when it fails or loses power, and a monitored link may carry protection traffic (CLAUDE.md §1.8, P1). So the model is chosen also for how it fails, and that needs an H-row of its own. |
+| O-1 | How the sensor attaches | **A TAP of a model shown to be receive-only**, on each monitored link. A mirror port only where a TAP cannot be fitted, and then treated as accepting ingress until an H-row shows otherwise for that switch model. **Condition, on any link that carries protection or control traffic (question 5): only a TAP model that an H-row shows keeps the link passing frames when the TAP loses power or fails, within the interruption the owner sets; otherwise that link gets a mirror port, or is not monitored** (CLAUDE.md §1.8: the platform's failure must not compromise protection; D6 on #640). | Against a compromised sensor host, a receive-only TAP is the only measure that holds (D3, O-1; ADR-0009's corrected row). Everything else on the sensor's side is software on a host assumed compromised. "Receive-only" is a property of a TAP model, not of TAPs, so the model is chosen from its maker's documentation and then shown by D6's H-row. | One TAP for each monitored link, and one for each LAN on PRP. The H-row needs a TAP and the owner's authorization to run it. **A TAP sits in the monitored link** (D3 on #640; D3's understanding, no source read): fitting one breaks the link once, so it needs the owner's authorization and a planned outage window, and on PRP the two LANs are done one at a time. A TAP that needs power can drop the link it sits in when it fails or loses power, and a monitored link may carry protection traffic (CLAUDE.md §1.8, P1). So the model is chosen also for how it fails, and that needs an H-row of its own: it measures link-down time and frames lost at power loss, at power return and with a failed TAP, against the figure of question 5. |
 | O-2 | Where the sensor's private key rests | **In a TPM.** | A copied disk or image is then not a second sensor (SL-16). Root can use the key and cannot copy it (SL-3, an assumption). | Hardware with a TPM (version 2.0 is D1's judgment of what current hardware carries). |
 | O-3 | Disk encryption | **Encrypted, unlocked by the TPM.** | It restarts unattended after a power loss. A disk taken alone is protected; a whole box taken and started is not. Unlock by a person at each start would make every power loss a coverage gap until someone attends (D3, O-3); at an unstaffed site that may be long (D1's judgment). | Protects the disk, not the box; the box's custody is O-4's question. The disk key must be released to the verified start-up chain only, and every firmware, boot-loader or kernel patch must re-seal it, or the next power loss leaves the site unwatched until someone attends. With O-2 and O-3 both on the TPM, a stolen box is a working sensor, so a missing box is revoked at once (D3 on #640; D3's understanding, no source read). |
 | O-4 | Physical custody | **A locked enclosure, in the node's cabinet if question 3 allows,** rather than the network cabinet; contractors only with an escort; a revoked or retired machine's disk wiped or destroyed. | D3 notes that the network cabinet, closest to the mirror port, is opened by more people. The firmware password, a verified start-up chain and unused ports off are SL-24's requirements whatever the cabinet. | Cabling from the sensor's cabinet to the TAPs. Depends on question 3. |
@@ -32,7 +33,7 @@ Where D1 recommends one of D3's options, the others remain open to the owner as 
 | O-9 | Physical or virtual | **Physical.** | On a virtual machine the hypervisor's administrators are root on the sensor, a snapshot is a copy of its key, and C-11 rests on the virtual switch too. | One machine for each site (two on PRP if O-12 says so). |
 | O-10 | The sensor's time source | **The site's time server, reached on the management interface only, authenticated where the server supports it.** A clock signal is D3's other option. | A time client on the monitoring interface would transmit there (SL-29). The node's skew alarm is the check whatever the source (SL-17). | A source without authentication can be forged from the management network: within the skew bound it moves observations into or out of a session's window unseen (AP-35); beyond it the skew alarm stands and every scheduled session alerts, aggregated, until it is corrected (SL-17) (D3 on #640). Depends on question 4. |
 | O-11 | The capture ring on the sensor | **No ring** (size zero) by default; a site may turn one on. | A ring is a store of site traffic on a host the platform cannot audit (AP-33). The eight packets an observation cites reach the node's store, where reads are audited. | No packets beyond those eight for an investigation. |
-| O-12 | On PRP | **One host with two monitoring ports, each on a receive-only TAP.** If either LAN can only give a mirror port, **two hosts**, one per LAN. D3's third option, one LAN only, needs no discard and leaves traffic on the other LAN unseen. | One host sees both copies, so the PRP discard can run (D4-69; E-D4-03's PRP result, 0 of 45 rows without it). Behind receive-only TAPs it cannot join the two LANs (SL-28). Behind mirror ports that may accept ingress it could, so the LANs get a host each. | Two hosts double the hardware and the patching, and the node then gets each flow twice under two `sensor_id`s, which C13 0.2 must handle. Depends on question 2 above. |
+| O-12 | On PRP | **One host with two monitoring ports, each on a receive-only TAP.** If either LAN can only give a mirror port, **two hosts**, one per LAN. D3's third option, one LAN only, needs no discard and leaves traffic on the other LAN unseen. **Condition: the two LANs' TAPs share no power feed and no other common failure, or are passive,** so that one fault cannot drop both LANs and defeat PRP (D6 on #640). A shared cabinet (O-4) makes a shared feed likely, so the condition is checked at fitting. | One host sees both copies, so the PRP discard can run (D4-69; E-D4-03's PRP result, 0 of 45 rows without it). Behind receive-only TAPs it cannot join the two LANs (SL-28). Behind mirror ports that may accept ingress it could, so the LANs get a host each. | Two hosts double the hardware and the patching, and the node then gets each flow twice under two `sensor_id`s, which C13 0.2 must handle. Depends on question 2 above. |
 
 ## The machine this describes
 
@@ -51,18 +52,21 @@ From the rows above, not from a product. **No model is named, and none has been 
 ## What stays unproven, whatever the owner chooses
 
 - That the chosen TAP model is receive-only (an H-row not yet written, named in AP-32's test column; needs the owner's authorization).
-- How the chosen TAP fails when it loses power or breaks: whether the monitored link stays up (an H-row not yet written).
-- That the management network admits only what O-5 says: a commissioning check that the project writes and the site runs, as for AP-24.
+- How the chosen TAP fails when it loses power or breaks: link-down time and frames lost at power loss, at power return and with a failed TAP (an H-row not yet written). On PRP, that the two LANs' TAPs share no common failure.
+- That the enclosure, firmware password and start-up chain hold (SL-24), that out-of-band management is absent or off (SL-27), and, where a mirror port is used, that it refuses ingress for that switch model: each an H-row.
+- That the management network admits only what O-5 says: a commissioning check that the project writes and the site's staff run, as for AP-24.
 - That a TPM-sealed disk key is released to the verified start-up chain only, and survives a patch's re-seal (O-3; D3's understanding).
-- That the egress rule stops every send path on the chosen kernel and NIC (SL-T21 on the image; H-18 for the NIC).
+- That the egress rule stops every send path on the chosen kernel and NIC: SL-T21 on the image's kernel, which a virtual machine in CI may run (D6's view), and H-18 for the NIC and its driver.
 - That the sensor host refuses a tampered, rolled-back or unsigned package (SL-25, SL-T17): no signed release and no updater exist.
 - Anything about a real site's traffic: nothing has captured a site network (D4-66).
+
+Nobody runs any of these H-rows without the owner's authorization.
 
 ## What the owner is asked to decide
 
 1. Answer questions 1 to 4 above.
 2. Accept, change or refuse each row of the table. O-7 changes what the product is and needs the release key's holder (TB9).
-3. Authorize, when the time comes, buying one TAP and one machine for the lab, so that D6's H-rows can run. Nothing is bought before that word.
+3. Authorize, when the time comes, buying two TAPs of the chosen model and one machine for the lab, so that D6's H-rows can run (the failure H-row and the PRP common-mode check need two). Nothing is bought before that word.
 4. Before any TAP is fitted at a site, authorize the outage window it needs (O-1).
 
 D1 records the owner's answers in the decision log, and D3's note and ADR-0009 follow them.
