@@ -13,7 +13,7 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILE = os.path.join(HERE, "modbus-signature-conditions.tsv")
-SHA256 = "aea7df68744a7c4a3cc8c579ed84e36746656434868533f280f93cf4bbfd3ee1"
+SHA256 = "7b242b85a3387c3f591eb21cce2e3f036feb8c1c8799e02857548a2e5f6f4418"
 COLUMNS = ["id", "subject", "op", "value", "rule"]
 
 
