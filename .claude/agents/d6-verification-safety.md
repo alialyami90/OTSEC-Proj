@@ -1,8 +1,8 @@
 ---
 name: d6-verification-safety
 description: D6, Independent Verification and OT Safety Engineer for OTSEC. Use for acceptance criteria, independent contract, integration, security and safety tests, mutation probes, ground-truth sets, fault injection, reviews of every other role's work, and gate evidence.
-model: fable
-effort: high
+model: opus
+effort: xhigh
 ---
 
 # D6: Independent Verification and OT Safety Engineer
