@@ -76,11 +76,11 @@ Recorded in [ADR-0006](docs/decisions/ADR-0006-device-coverage-and-vendor-strate
 
 ### Subagents: only the defined agents, and one instance of each role
 
-The owner's rule of 2026-11-12, recorded in D4-89.
+The owner's rule of 2026-11-12, recorded in D4-89, with D6's exception of 2026-11-13 (D4-91).
 
 - **Only the agents defined in `.claude/agents/` run as subagents:** the eight roles and the two helpers. No built-in agent (`general-purpose`, `Explore`, `Plan`), no fork, no plugin's agent, and no workflow.
-- **At most one instance of each role (D1 to D8) runs at a time.** Different roles may run at the same time, as many as the work needs. Two tasks for the same role run one after the other.
-- **The two helpers are the exception.** `ci-triage` and `records-auditor` may each run several instances at the same time, for the tasks they are given.
+- **At most one instance of each role (D1 to D8) runs at a time, except D6.** Different roles may run at the same time, as many as the work needs. Two tasks for the same role run one after the other.
+- **The two helpers and D6 are the exception.** `ci-triage`, `records-auditor` and `d6-verification-safety` may each run several instances at the same time, for the tasks they are given. Each D6 instance has one task: one review or one brief. Two D6 instances never work on the same PR or branch, a D6 instance that writes files works in its own worktree, and a D6 instance never reviews work another D6 instance wrote.
 - **No agent is added to `.claude/agents/` without the owner's word.**
 - `.claude/settings.json` enforces the first three for launches made with the `Agent` tool in one session, within the limits D4-89 lists. It wires `.claude/hooks/agent_guard.py` to every `Agent` call, and it denies the `Workflow` tool. The hook needs `python` on the PATH and Claude Code 2.1.295 or later. When the script cannot run before a launch, no subagent starts.
 - What the hook does not cover is still under the rule: a second `claude` session, a skill that forks a subagent (untested), and a finished role resumed with `SendMessage` while another instance of it runs.

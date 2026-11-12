@@ -1817,7 +1817,7 @@ The owner's words in the CLI on 2026-11-12: "update the project so that it canno
   - Not verified: whether a launch made by a subagent carries the session's id and so shares its locks, whether the start step fires for an agent with remote isolation, and whether `/clear` changes the session's id while agents run.
   - The hook guards a session against a mistake. It is not a security boundary: whoever can edit `.claude/settings.json` or delete a lock file can get past it.
 - **What changes for the team.**
-  - Two tasks for one role run one after the other. D6 cannot review two PRs at the same time, and D6 cannot review one PR while it works on a brief.
+  - Two tasks for one role run one after the other. D6 cannot review two PRs at the same time, and D6 cannot review one PR while it works on a brief. (Superseded for D6 by D4-91: the owner allowed several D6 instances at once.)
   - No session can fall back to a general-purpose subagent briefed from a role's file, as the first CLI session did (D4-77). When the agent files do not load, no subagent starts: start `claude` inside the checkout.
   - `Explore`, `Plan` and Claude Code's own guide agent do not run in this project. D1 reads and searches in its own context, or gives the reading to a role.
 - **Three agents change model**, in the owner's working tree, committed at their word. This supersedes the first line of D4-79's "Model and effort" for these three, and that line is marked.
@@ -1856,3 +1856,19 @@ No new words from the owner. Evidence class: `desk`, except where a run is named
 - **Amended briefs:** P4-D6-RR reads every row that #632 did not, with the `P` and `Y` rows in full ("#613 and" dropped, since #613 read all 59 rows), and may carry a third reading, C (D6 on #636). P4-D6-MUT gains its pass condition, and its acceptance names the owner of each mutated path: D1 for M1 in `contracts/syslog`, D4 for M2 and M4, D5 for M3 in `platform/store`. P4-D7-2's inputs name #637 as merged and ICSNPP-Modbus's `NOTICE.txt` as a duty if ICSNPP-Modbus is adopted, kept in the record while it is under evaluation.
 - **Corrections carried from #636's reviews** (D1's integration review there lists them): D1's role file (the engine, the closing legs, the mutants, the owner's list, the next entry), D7's (its review of #618 is done), D6's (the couplings' finding number is F-027), and `HANDOFF.md`'s mutant line. Two stay with their owners: D6 corrects F-027's sentence that F11 is not on `main` and the job count in `docs/phase4/D6-closing-legs.md`; D4 brings ADR-0009's "may come from its port registration" in line with D2's reading, under P4-4-E2.
 - **Next:** P4-4-L6, P4-4-E2 and P4-D6-GT2 start; P4-D6-RR, P4-D6-I100, P4-D6-MUT and P4-D7-2 are briefed and may start. D1 brings the owner one recommendation on the sensor's host (O-1 to O-12 of D3's note). After P4-4-L6, D1 approves the five documents together. The third part starts with D5 closing F1 to F11.
+
+## D4-91: several instances of D6 may run at once (owner and D1, 2026-11-13)
+
+The owner's words in the CLI on 2026-11-13: "can you make a modification and allow multiple insatnces of D6-verification subagent to be allowed so we can speed up reviews". Evidence class: `desk`, on the owner's PC (Windows 11, Python 3.13.6). D1's checkpoint comment on the open PRs of 2026-11-12 named D4-91 as the entry that approves P4-4-L6's documents. That approval takes the next number.
+
+- **The rule** (CLAUDE.md, "Subagents"). D6 joins the two helpers as the exception to D4-89's one-instance rule: several `d6-verification-safety` instances may run at once. Every other role still runs one instance at a time.
+- **D1's conditions, added so that the exception keeps what the brief asks of D6** (CLAUDE.md §5.3 and §5.6):
+  - Each D6 instance has one task: one review or one brief.
+  - Two D6 instances never work on the same PR or branch, and a D6 instance that writes files works in its own worktree.
+  - A D6 instance never reviews work another D6 instance wrote. That would be D6 reviewing its own work.
+  - No tool enforces these three. They are in CLAUDE.md, D1's role file and D6's role file.
+- **What enforces the exception.** `.claude/hooks/agent_guard.py` adds `d6-verification-safety` to the list of agents that take no lock. The hook still refuses every agent with no file in `.claude/agents/`, and a second instance of D2, D3, D4, D5, D7, D8 or a D1 subagent.
+- **Evidence.** `tools\venv\Scripts\python.exe -m pytest -q .claude/hooks/test_agent_guard.py`: 19 passed (was 18). The test of one instance per role now uses D3, the `TaskStop` test uses D5, and the test of the helpers' many instances runs for D6 too.
+- **What changes for the team.** D6 can review several PRs at once, and can review a PR while another D6 instance works on a brief. D4-89's line that it cannot is marked superseded for D6. The limits that D4-89 lists for the hook still hold for the other roles.
+- **A lock left by a D6 launched before this change** stays in the session's lock folder until the session is resumed or the file is deleted. It refuses nothing, because the hook no longer reads it for D6.
+- **Review.** D1 wrote this PR, so it merges on D6's acceptance (D4-85). It changes a script, so both workflows run on it.
