@@ -363,11 +363,16 @@ func (s *Scheduler) abandonHold(ctx context.Context, h *heldRun) {
 // the run's session can be rebuilt from the committed record (D1 on the
 // split of PR B). It returns nil when the hold doesn't watch the run, and
 // when the Result fails: its lock not had within sensorlink.HoldLockWait,
-// a panic in it, or the stream's head after the release unreadable, as it
-// is while the network database is swapped out for a Resume. The run then
-// goes on, its collection.run carries no session, its flows commit untied
-// at the run's deadline and the base rules judge them (section 1.9 items 4
-// and 9; D6's note 1 on #663). After sensor-failed the link is not called.
+// a panic in it before the release's batch is in the store, or the
+// stream's head before the release unreadable, as it is while the network
+// database is swapped out for a Resume. In each the link has committed
+// nothing tied and kept the run held: the run goes on, its collection.run
+// carries no session, its flows commit untied at the run's deadline and
+// the base rules judge them. A panic after the batch is in the store does
+// not fail the Result: the link finishes the release and returns the
+// receipts' after_seq, so the session is handed on and judged (section 1.9
+// items 4 and 9; D6's note 1 on #663; D1's ruling on #676). After
+// sensor-failed the link is not called.
 func (s *Scheduler) resultHold(ctx context.Context, h *heldRun, invocationID string, res sessionResult) map[string]string {
 	if h == nil {
 		return nil

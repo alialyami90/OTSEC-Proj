@@ -766,14 +766,18 @@ func TestNoResultAfterSensorFailed(t *testing.T) {
 	}
 }
 
-// D6's note 1 on #663, the after_seq: a Result while the network database
-// is swapped out for a Resume reads no head after its release, so the
-// run's collection.run carries no session rather than after_seq 0, and the
-// detector meets no ordering fault. Control: the head's error dropped in
+// D6's note 1 on #663, the after_seq, as D1 ruled on #676: a Result while
+// the network database is swapped out for a Resume reads no head before
+// its release, so it begins nothing. The run's collection.run carries no
+// session rather than after_seq 0, session_missing rises, the detector
+// meets no ordering fault, and the run stays held: once the database is
+// back, its deadline commits its flow untied and the base rules judge it
+// (own-session-outside-record). Control: the head's error dropped in
 // sensorlink's release, which hands on after_seq 0.
 func TestResultWhileNetworkSwappedOut(t *testing.T) {
-	c, dir := holdConfig(t)
-	r, st := startSeams(t, c, dir, SensorSeams{})
+	c, _ := holdConfig(t)
+	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
+	r, st := startClocked(t, g, SensorSeams{})
 	defer r.Close()
 	s := newScheduler(t, r, &fakeCollector{})
 	h := s.dispatchHold(bg, c.Schedule[0], s.newID())
@@ -798,5 +802,62 @@ func TestResultWhileNetworkSwappedOut(t *testing.T) {
 	tick(t, r)
 	if d := detectorStatus(t, st); d.OrderingFaults != 0 || countAlarms(st, AlarmDetectorOrdering) != 0 {
 		t.Fatalf("detector %+v", d)
+	}
+	if sn := st.Snapshot("x").Sensor; sn == nil || sn.SessionMissing == 0 || sn.Hold.Runs != 1 || sn.Hold.HeadUnread != 1 {
+		t.Fatalf("status after the Result: %+v", sn)
+	}
+	g.advance(sensorlink.HoldRunLimit + netobs.DefaultTieGraceS*time.Second + time.Second)
+	tick(t, r)
+	tick(t, r)
+	if n := outsideRecord(t, r); n != 1 {
+		t.Fatalf("%d own-session-outside-record alerts on the run's flow after its deadline, want 1", n)
+	}
+}
+
+// D3's N1 on #676 on the node, as D1 ruled: a panic in the intake hold's
+// save after the release's batch committed (the seam panics at the
+// second save of the Result) finishes the release. The Result returns the
+// session with the receipts' after_seq, which collection.run carries, so
+// the session is handed on and its flow judged inside it: no
+// own-session-outside-record alert, and none at the deadline either,
+// since the flow is committed once. result_timeouts stays 0 and
+// sensor-failed is not raised. Control: the rollback in every case in
+// sensorlink's result, under which the Result times out and the deadline
+// commits the flow a second time, untied, which alerts.
+func TestSchedulerPanicAfterBatchHandedOn(t *testing.T) {
+	c, _ := holdConfig(t)
+	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
+	var saves atomic.Int32
+	var boom atomic.Bool
+	r, st := startClocked(t, g, SensorSeams{SaveIntake: func() {
+		if boom.Load() && saves.Add(1) == 2 {
+			panic("node test: a fault in the save after the batch")
+		}
+	}})
+	defer r.Close()
+	s := newScheduler(t, r, &fakeCollector{})
+	h := s.dispatchHold(bg, c.Schedule[0], s.newID())
+	if h == nil {
+		t.Fatal("the hold doesn't watch the run")
+	}
+	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
+		t.Fatal(err)
+	}
+	boom.Store(true)
+	got := s.resultHold(bg, h, okInvocation, ownSession)
+	boom.Store(false)
+	if got == nil || got["after_seq"] != "1" {
+		t.Fatalf("session details after a panic past the batch: %v; want after_seq 1", got)
+	}
+	s.recordedRun(bg, h)
+	g.advance(sensorlink.HoldRunLimit + netobs.DefaultTieGraceS*time.Second + time.Second)
+	tick(t, r)
+	tick(t, r)
+	sn := st.Snapshot("x").Sensor
+	if sn == nil || sn.ResultTimeouts != 0 || countAlarms(st, AlarmSensorFailed) != 0 || r.sensorFailed.Load() {
+		t.Fatalf("status %+v, %d sensor-failed", sn, countAlarms(st, AlarmSensorFailed))
+	}
+	if n, c := outsideRecord(t, r), r.sensor.Load().link.Stats().Committed; n != 0 || c != 1 {
+		t.Fatalf("%d own-session-outside-record alerts and %d commits; want none, and the flow committed tied, once", n, c)
 	}
 }
