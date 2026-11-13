@@ -1931,3 +1931,27 @@ No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs
 - **E-D4-03 against #648's 123 rows:** the same run counts for E-D4-03 and governs the 13 rows #648 added; run 43092601088 still governs the original 110 (D1's ruling on #651). DNP3 over UDP on a moved port passes under every Zeek configuration; the temporary-port case's service row fails under every Zeek configuration (the master named as the server on the replies' flow). **ADR-0009's third turning condition is not met** (D1's ruling on #652): Zeek reads DNP3 over UDP; the failure is a server misattribution, recorded as **HR-23**.
 - **Owed GT-PCAP case:** DNP3 over UDP with an unsolicited response from the outstation, including a master request on the 5-tuple the outstation started (D6's N1 on #652). Brief P4-D6-GT3.
 - **Merged on 2026-11-13:** #640, #642, #643, #646, #647, #648, #649, #650, #651, #652, #641, #644, #645.
+
+## D4-95: HR-24 needs a detector change before item 4's gate (the owner, 2026-11-13)
+
+The owner gave this answer in D1's session on 2026-11-13. D1 had asked whether to "(a) accept it for now, or (b) require a detector change before item 4's gate", and the owner replied "Go with b". Evidence class: `desk`. Nothing is built.
+
+- **The decision.**
+  - HR-24 is not accepted as a risk.
+  - Item 4's gate does not open while HR-24 is open.
+  - HR-24 closes only with a detector change that judges tied Telnet and SNMPv3 sessions, measured on a counted run against pass conditions pinned before the run, with a control (brief P4-4-HR24). These are the collector's only session types today (`modules/ied/` holds `sel751`, `snmpv3` and `telnet`). A flow ties only to a run's own protocol and endpoint (6848404829), so no SSH flow can tie until the collector opens SSH sessions.
+  - **SSH:** the brief that adds an SSH collector session carries the same cases and measurement for SSH. No SSH collector session merges without them.
+  - For HR-24 only, this replaces D4-92's "or on the owner's acceptance" (in its "Open high risks" item) and "or with the owner's acceptance" in HR-24's row and in SL-17. HR-22 and HR-23 keep the owner's acceptance as a way to close (D4-94).
+  - If no rule meets the pinned conditions, the gate stays closed and D1 brings HR-24 back to the owner with the measurement.
+- **Why (D1's recommendation, D4-92).**
+  - A tied flow skips every base rule. The skip is `modules/detection/netdetect/detector.go` l.262 on `main` at `34201bfd`: `if r.base && (d.base == nil || o.Node.PlatformSession != nil)`.
+  - So a session that ties is hidden whole, writes included. The one exception is `node-address-spoofed`, which is not a base rule. It still judges a tied flow's start on the node's own segments from a MAC that is not the node's (`modules/detection/netdetect/own.go` l.177 to l.183). Nothing judges the flow from the node's MAC on those segments, from any MAC across a router, or after the flow's start.
+  - Unauthorized engineering access to a relay is what item 4 exists to catch. No mitigation narrows HR-24 today (D1's corrected ruling 6848404829 on #641).
+- **Not changed.**
+  - HR-22 and HR-23 stay open, each closing on a measured fix or on the owner's acceptance (D4-94).
+  - The approved contracts (D4-92) stand. The change is a detector rule within them. If it needs a contract change, that comes back to D1 first.
+- **Follow-up.**
+  - Brief P4-4-HR24, and a bullet in item 4's exit gate (`docs/agent-handoffs.md`).
+  - After #654 merges, D3's next change cites this entry in HR-24's row and in SL-17 (`docs/phase4/D3-sensor-link.md`, the "No mitigation narrows it today" item).
+  - Item 4's gate report states HR-24's state.
+  - When HR-24 closes, the threat model records what an attacker who knows the rule can still hide.
