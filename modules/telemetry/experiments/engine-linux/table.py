@@ -794,12 +794,15 @@ CORPUS = "tests/fixtures/network/modbus-sig-corpus"
 # judge-seen: every earlier run of S0 over the corpus, by run ID, with the
 # head it ran at and the signature it loaded (modbus-sig.zeek and
 # modbus-sig.sig, SHA-256 prefixes). Runs of d4-engine-linux-eval.yml on #643.
+# A run at the head that adds its line, or later, cannot be in this list.
 SEEN = (
     ("43314221626", "21ffb801", "4a8b75d4/beda1433"),
     ("43315465228", "51540b17", "4a8b75d4/beda1433"),
     ("43344298828", "4011e49e", "7be2c6a2/96f335c0"),
     ("43345170729", "4da1f1c8", "7be2c6a2/96f335c0"),
     ("43346878016", "7bfa398a", "7be2c6a2/96f335c0"),
+    ("43354762583", "ccfc4091", "7be2c6a2/96f335c0"),
+    ("43355514690", "4c4ad119", "7be2c6a2/96f335c0"),
 )
 
 
@@ -1143,7 +1146,8 @@ def sig(s, root, work):
                               + "; ".join(f"{r} at {h} ({sg})" for r, h, sg in SEEN)
                               + f". The signature is unchanged since {SEEN[2][1]} (the hashes above against the last listed); "
                               "the earlier signature ran over the captures the manifest's `seen` column marks. A run of S0 after "
-                              f"{SEEN[-1][0]} that is not this one is not in this list",
+                              f"{SEEN[-1][0]}, at the head that adds it to this list or later, is not in the list: "
+                              "the counted result's comment names it",
                 "review-text": "read by D2 and D6 on the PR, not measured by the run", "corpus-members": "the manifest",
                 "corpus-sources": "the manifest's header (D7 and D6 confirm)", "corpus-terms": "the manifest's header (D7 confirms)",
                 "corpus-pins": "pins.env and the header above", "corpus-not-held": "the manifest's header",
