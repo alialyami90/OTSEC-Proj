@@ -267,7 +267,7 @@ func crashAfterRelease(t *testing.T, r *Runtime, outcome audit.Outcome, dial boo
 	sess := sensorlink.Session{InvocationID: okInvocation, Connected: true, Local: netip.MustParseAddrPort(res.Session.LocalAddr)}
 	sess.StartedAt, _ = time.Parse(time.RFC3339Nano, res.StartedAt)
 	sess.EndedAt, _ = time.Parse(time.RFC3339Nano, res.EndedAt)
-	if _, err := r.sensor.link.Result(bg, id, sess); err != nil {
+	if _, err := r.sensor.Load().link.Result(bg, id, sess); err != nil {
 		t.Fatal(err)
 	}
 	// An observation after the release, so the repair's after_seq, the
@@ -538,7 +538,7 @@ func TestIntakeStartRepairOpenFlow(t *testing.T) {
 	sess := sensorlink.Session{InvocationID: "7a2d3c0f-4e5b-4d2f-8c8b-3a1f9e6d2b41", Connected: true, Local: netip.MustParseAddrPort(res.Session.LocalAddr)}
 	sess.StartedAt, _ = time.Parse(time.RFC3339Nano, res.StartedAt)
 	sess.EndedAt, _ = time.Parse(time.RFC3339Nano, res.EndedAt)
-	if rel, err := r.sensor.link.Result(bg, b, sess); err != nil || !rel.OpenFlow {
+	if rel, err := r.sensor.Load().link.Result(bg, b, sess); err != nil || !rel.OpenFlow {
 		t.Fatalf("run B's result: %+v, %v", rel, err)
 	}
 	r.Close()

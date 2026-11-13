@@ -666,7 +666,7 @@ func (r *Runtime) appendAlerts(ctx context.Context, recs []c5.Record) error {
 // alertDropped counts an alert the store refused, by reason and by its
 // "<rule>.<asset>" key.
 func (r *Runtime) alertDropped(reason, key string) {
-	in := r.sensor
+	in := r.sensor.Load()
 	in.mu.Lock()
 	in.alerts.reason[reason]++
 	in.alerts.asset[key]++

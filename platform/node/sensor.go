@@ -232,17 +232,44 @@ func (r *Runtime) startSensor(ctx context.Context) error {
 		in.alerts, in.alert.since = d, at
 	}
 	in.obs.written, in.alert.written = in.base, dropCounts{maps.Clone(in.alerts.reason), maps.Clone(in.alerts.asset)}
-	r.sensor = in
 	// A release a restart interrupted commits once, and a release whose
 	// collection.run never committed gets one, before the sensor is
-	// served. Start's first tickSensor then gives way the holds whose
-	// deadlines passed while the node was down (D3 on #576, D1 in D4-72).
+	// served. The tick that started the intake then gives way the holds
+	// whose deadlines passed while the node was down (D3 on #576, D1 in
+	// D4-72). The intake is published only once its hold is recovered, so
+	// a failed start leaves nothing half started.
 	if err := link.RecoverHold(ctx); err != nil {
 		return fmt.Errorf("the intake hold's recovery: %w", err)
 	}
+	r.sensor.Store(in)
 	r.repairIntake(ctx)
 	r.pruneIntake(ctx, "")
 	return nil
+}
+
+// AlarmSensorIntakeNotStarted: the sensor's intake did not start, so
+// nothing is taken from the sensor and no run is held for it. The node
+// starts and collects without it, and tries again at each tick (F2,
+// D5-sensor-node.md section 1.9 item 2). It is raised once for each
+// stretch in which the intake is not started.
+const AlarmSensorIntakeNotStarted = "sensor-intake-not-started"
+
+// startIntake starts the intake when the section is set and it has not
+// started, and raises AlarmSensorIntakeNotStarted when it fails. It
+// reports the intake, nil when it is not started.
+func (r *Runtime) startIntake(ctx context.Context) *sensorIntake {
+	if in := r.sensor.Load(); in != nil || r.cfg.NetworkSensor == nil {
+		return in
+	}
+	if err := r.startSensor(ctx); err != nil {
+		if !r.intakeDown {
+			r.opt.Status.Raise("", AlarmSensorIntakeNotStarted, "the sensor's intake did not start, so nothing is taken from the sensor; the node collects without it and tries again at each tick: "+err.Error())
+		}
+		r.intakeDown = true
+		return nil
+	}
+	r.intakeDown = false
+	return r.sensor.Load()
 }
 
 // liveAppender appends to stream through the Log of its database as it is
@@ -281,10 +308,14 @@ func (a liveAppender) LastCommitted(ctx context.Context) (uint64, error) {
 // (sensorlink.Link.Serve). The caller authenticates the stream's peer as
 // the configured sensor (ADR-0009, TB6); the records' sensor_id only
 // refuses a misrouted stream. It returns an error when the configuration has
-// no network_sensor section. Status shows the link connected while it runs.
+// no network_sensor section, or while the intake is not started. Status
+// shows the link connected while it runs.
 func (r *Runtime) ServeSensor(ctx context.Context, rd io.Reader) error {
-	in := r.sensor
+	in := r.sensor.Load()
 	if in == nil {
+		if r.cfg.NetworkSensor != nil {
+			return errors.New("node: the sensor's intake is not started")
+		}
 		return errors.New("node: no network_sensor section")
 	}
 	in.mu.Lock()
@@ -316,7 +347,12 @@ func (in *sensorIntake) counts(st sensorlink.Stats) dropCounts {
 // A write that fails raises store-commit-failed on the health stream's
 // database, as Runtime.health does, and is tried again a minute later.
 func (r *Runtime) tickSensor(ctx context.Context, final bool) {
-	in := r.sensor
+	var in *sensorIntake
+	if final {
+		in = r.sensor.Load()
+	} else {
+		in = r.startIntake(ctx)
+	}
 	if in == nil {
 		return
 	}

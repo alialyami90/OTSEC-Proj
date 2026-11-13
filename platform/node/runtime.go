@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/audit"
@@ -80,9 +81,13 @@ type Runtime struct {
 	// consumer's Record: a test's way to make a record fail.
 	retentionRecord func(context.Context, audit.Retention) error
 	// sensor is the sensor's intake, nil without the network_sensor
-	// section (sensor.go).
-	sensor *sensorIntake
-	intake intakeRecords // the intake hold's records (netintake.go)
+	// section and until the intake starts (sensor.go). A tick may start it
+	// while the scheduler reads it.
+	sensor atomic.Pointer[sensorIntake]
+	// intakeDown: the intake did not start, and its alarm is raised.
+	// Only tickSensor touches it.
+	intakeDown bool
+	intake     intakeRecords // the intake hold's records (netintake.go)
 	// detector is the detector consumer, nil until it starts
 	// (netdetector.go). Only Start, Tick and Close touch it.
 	detector *netDetector
@@ -170,10 +175,9 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	r.advanceHolds(ctx)
 	starts.add("holds", from)
 	r.tickRetention(ctx)
-	if err := r.startSensor(ctx); err != nil {
-		r.Close()
-		return nil, fmt.Errorf("node: the sensor's intake: %w", err)
-	}
+	// The intake's start never fails the node's start (F2): tickSensor
+	// starts it, and while it does not start, raises its alarm and tries
+	// again at each tick.
 	r.tickSensor(ctx, false)
 	from = time.Now()
 	opt.Status.Write(string(cfg.NodeID))

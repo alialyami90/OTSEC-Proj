@@ -240,6 +240,10 @@ func (r *Runtime) loadIntake(ctx context.Context) ([]sensorlink.RunRecord, error
 	if db == nil {
 		return nil, errors.New("the configuration database is not open")
 	}
+	// A start that failed is tried again, so the series is read afresh.
+	r.intake.mu.Lock()
+	r.intake.runs, r.intake.newest = nil, 0
+	r.intake.mu.Unlock()
 	var newest *intakeDoc
 	var after c5.Seq
 	for {
@@ -321,7 +325,7 @@ type heldRun struct{ run sensorlink.HoldRun }
 // fails holds nothing: the run's flows commit untied, its collection.run
 // has no session, and both are counted in status.
 func (s *Scheduler) dispatchHold(ctx context.Context, col Collection, requestID string) *heldRun {
-	in := s.rt.sensor
+	in := s.rt.sensor.Load()
 	if in == nil {
 		return nil
 	}
@@ -342,7 +346,7 @@ func (s *Scheduler) abandonHold(ctx context.Context, h *heldRun) {
 	if h == nil {
 		return
 	}
-	_, _ = s.rt.sensor.link.Abandon(ctx, h.run.RequestID)
+	_, _ = s.rt.sensor.Load().link.Abandon(ctx, h.run.RequestID)
 	s.rt.pruneIntake(ctx, "")
 }
 
@@ -368,13 +372,13 @@ func (s *Scheduler) resultHold(ctx context.Context, h *heldRun, invocationID str
 	// release, which the release's after_seq can't be below, until
 	// recordedRun (D4's finding 4 on #576).
 	var head uint64
-	if db := s.rt.Store(s.rt.sensor.stream); db != nil {
-		if seq, err := db.LastCommitted(ctx, s.rt.sensor.stream); err == nil {
+	if db := s.rt.Store(s.rt.sensor.Load().stream); db != nil {
+		if seq, err := db.LastCommitted(ctx, s.rt.sensor.Load().stream); err == nil {
 			head = uint64(seq)
 		}
 	}
 	s.rt.intake.enter(h.run.RequestID, head, false)
-	rel, err := s.rt.sensor.link.Result(ctx, h.run.RequestID, sess)
+	rel, err := s.rt.sensor.Load().link.Result(ctx, h.run.RequestID, sess)
 	if err != nil {
 		s.rt.intake.missing()
 		return nil
