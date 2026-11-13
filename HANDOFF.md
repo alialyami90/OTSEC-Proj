@@ -35,7 +35,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## Waiting on the owner
 
-0. **The three open high risks of item 4 (D4-92, D4-94):** HR-22 (Modbus/TCP on a moved port not identified), HR-23 (the DNP3 server misattributed on a reply-only flow) and HR-24 (the one-tick tie residual). Each closes on a measured fix or on the owner's acceptance. D1 recommends requiring a detector change for HR-24 before the gate.
+0. **The three open high risks of item 4 (D4-92, D4-94):** HR-22 (Modbus/TCP on a moved port not identified), HR-23 (on a DNP3 flow the relay starts, the wrong end taken as the server, so a master's write can be missed) and HR-24 (the one-tick tie residual: a Telnet, SSH or SNMP session from the node's address hidden whole; see D4-92 and the threat model for its routes). D1 decides when a row closes: on a fix measured on a counted run, or on the owner's acceptance. D1 recommends requiring a detector change for HR-24 before the gate.
 1. **The sensor's host under option (b)** (D4-85): the hardware and the operating system of the Linux machine at each site, and who ships its image. D1's recommendation, choice by choice for O-1 to O-12, is `docs/phase4/D1-sensor-host-recommendation.md`. The choice of option (b) itself is made.
 2. **The sites' networks:** which protocols run on them, whether a site can give a SPAN port or a TAP, and whether the station network is PRP (D4-66).
 3. **R6.7's insecure list:** should it add IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68)?
