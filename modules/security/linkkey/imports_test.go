@@ -28,13 +28,13 @@ var importers = []string{"platform/sensorlink"}
 
 // strays lists each non-test Go file under root, slash-separated from
 // root, that imports the reader from a directory not in importers. Only a
-// go.mod file, or a name that starts with a dot, closes a directory, as in
-// P4-PC-1's walk (tests/security/uintptr_walk_d6_test.go). The go command
-// leaves testdata, tools, _ and the like out of ./... only: it builds a
-// package there when another imports it by path, so the walk reads them
-// (D6's B1 on #672). An import path element cannot start with a dot. The
-// owner's PC's tools and reference folders each hold a go.mod. read is the
-// number of non-test Go files parsed.
+// go.mod file closes a directory, as in P4-PC-1's walk
+// (tests/security/uintptr_walk_d6_test.go). The go command leaves
+// testdata, tools, _ and . directories and the like out of ./... only: it
+// builds a package there when another imports it by path, so the walk
+// reads them (D6's B1 on #672, and on #678 for a leading dot). The owner's
+// PC's tools and reference folders each hold a go.mod, and so does each
+// worktree under .claude. read is the number of non-test Go files parsed.
 func strays(t *testing.T, root string) (out []string, read int) {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -47,9 +47,6 @@ func strays(t *testing.T, root string) (out []string, read int) {
 		if d.IsDir() {
 			if rel == "." {
 				return nil
-			}
-			if strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir
 			}
 			if fi, err := os.Stat(filepath.Join(p, "go.mod")); err == nil && !fi.IsDir() {
 				return filepath.SkipDir
@@ -99,10 +96,10 @@ func TestOnlySensorlinkImports(t *testing.T) {
 
 // TestImportCheckBites: on a tree with one file of each kind, the check
 // finds the product importers outside platform/sensorlink, a package
-// under it included and packages under tools, reference, testdata and _
-// directories, and passes the tests, platform/sensorlink itself, a hidden
-// directory, and a nested module (the root tools folder of the owner's PC
-// among them).
+// under it included and packages under tools, reference, testdata, vendor,
+// _ and . directories, and passes the tests, platform/sensorlink itself,
+// and a nested module (the root tools folder of the owner's PC among
+// them).
 func TestImportCheckBites(t *testing.T) {
 	root := t.TempDir()
 	src := "package x\n\nimport _ " + strconv.Quote(readerPath) + "\n"
@@ -121,7 +118,7 @@ func TestImportCheckBites(t *testing.T) {
 		"platform/sensorlink/dial.go":            false,
 		"platform/node/sensorlink_key_test.go":   false,
 		"tests/security/link_key_d6_test.go":     false,
-		"platform/node/.x/x.go":                  false,
+		"platform/node/.x/x.go":                  true,
 		"platform/experiments/phase0/x/x.go":     false,
 		"tools/gopath/x/x.go":                    false,
 	}
