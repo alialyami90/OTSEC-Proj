@@ -107,7 +107,7 @@ func TestSensorDropCounts(t *testing.T) {
 	serve(flows(2)...)
 	seq++
 	serve(sensorFlow(seq, "11111111-2222-4333-8444-555555555555")) // another sensor's
-	r.Tick(bg)
+	tick(t, r)
 	s := st.Snapshot("x").Sensor
 	if s == nil || s.Dropped[sensorlink.DropUnresolvedBudget] != 2 || s.DroppedByAsset[netobs.AssetUnresolved] != 2 ||
 		s.Refused[sensorlink.RefusedSensorID] != 1 || s.Connected {
@@ -126,19 +126,19 @@ func TestSensorDropCounts(t *testing.T) {
 	// More drops: not written again within the minute, then written.
 	serve(flows(3)...)
 	g.advance(30 * time.Second)
-	r.Tick(bg)
+	tick(t, r)
 	if ev := dropEvents(t, r); len(ev) != 1 {
 		t.Fatalf("written again within the minute: %v", ev)
 	}
 	g.advance(30 * time.Second)
-	r.Tick(bg)
+	tick(t, r)
 	if ev := dropEvents(t, r); len(ev) != 2 || ev[1]["count"] != "5" {
 		t.Fatalf("after the minute: %v", ev)
 	}
-	r.Tick(bg) // unchanged: nothing written
+	tick(t, r) // unchanged: nothing written
 	seq++
 	serve(sensorFlow(seq, "11111111-2222-4333-8444-555555555555"))
-	r.Tick(bg)
+	tick(t, r)
 	if n := alarms(st, AlarmSensorRecordRefused); n != 1 || len(dropEvents(t, r)) != 2 {
 		t.Fatalf("%d refused alarms, %d events", n, len(dropEvents(t, r)))
 	}
@@ -298,7 +298,7 @@ func TestSensorAlertDropOtherKept(t *testing.T) {
 		r.alertDropped(sensorlink.DropRecordCap, string(rule)+"."+netobs.AssetUnresolved)
 		total++
 	}
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	r.Close()
 	r, st := g.start()
 	defer r.Close()
@@ -334,10 +334,10 @@ func TestSensorAlertDropEventRewritten(t *testing.T) {
 		return out
 	}
 	r.alertDropped(sensorlink.DropClassFull, key)
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	g.advance(time.Minute)
 	r.alertDropped(sensorlink.DropClassFull, key)
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if got := alertEvents(); !slices.Equal(got, []string{"1/1", "2/2"}) {
 		t.Fatalf("alert drop events (count/pair) %v", got)
 	}
@@ -366,15 +366,15 @@ func TestSensorDropWriteFails(t *testing.T) {
 		}
 		return n
 	}
-	r.tickSensor(bg, false)
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
+	sensorStep(t, r)
 	g.advance(30 * time.Second)
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if n := failed(); n != 1 || len(dropEvents(t, r)) != 0 {
 		t.Fatalf("%d store-commit-failed alarms, %d events", n, len(dropEvents(t, r)))
 	}
 	g.advance(30 * time.Second)
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if n := failed(); n != 2 {
 		t.Fatalf("%d store-commit-failed alarms after the minute", n)
 	}
@@ -382,7 +382,7 @@ func TestSensorDropWriteFails(t *testing.T) {
 	d.report.Mode = mode
 	r.state.Unlock()
 	g.advance(time.Minute)
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if ev := dropEvents(t, r); failed() != 2 || len(ev) != 1 || ev[0]["count"] != "1" {
 		t.Fatalf("after the store recovered: %d alarms, %v", failed(), ev)
 	}
@@ -398,7 +398,7 @@ func TestSensorRefusedAlarmPerReason(t *testing.T) {
 		sensorFlow(2, "11111111-2222-4333-8444-555555555555"))); err != nil {
 		t.Fatal(err)
 	}
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	s := st.Snapshot("x").Sensor
 	if n := alarms(st, AlarmSensorRecordRefused); n != 2 || s.Refused[sensorlink.RefusedSeq] != 1 || s.Refused[sensorlink.RefusedSensorID] != 1 {
 		t.Fatalf("%d refused alarms, refused %v", n, s.Refused)
@@ -418,7 +418,7 @@ func TestSensorConnected(t *testing.T) {
 	if _, err := pw.Write(b); err != nil { // returns once Serve has read it
 		t.Fatal(err)
 	}
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if s := st.Snapshot("x").Sensor; !s.Connected {
 		t.Fatalf("not connected while serving: %+v", s)
 	}
@@ -426,7 +426,7 @@ func TestSensorConnected(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if s := st.Snapshot("x").Sensor; s.Connected {
 		t.Fatalf("connected after the stream ended: %+v", s)
 	}
@@ -444,7 +444,7 @@ func TestSensorFirstWriteAtMonoZero(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
 		t.Fatal(err)
 	}
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	if ev := dropEvents(t, r); len(ev) != 1 || ev[0]["count"] != "1" {
 		t.Fatalf("events %v", ev)
 	}
@@ -459,7 +459,7 @@ func TestSensorDropRestoreScan(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, sensorFlow(1, sensorID))); err != nil {
 		t.Fatal(err)
 	}
-	r.tickSensor(bg, false)
+	sensorStep(t, r)
 	fill := func(r *Runtime, n int) {
 		t.Helper()
 		for n > 0 {
@@ -504,8 +504,9 @@ func sensorHeartbeat(seq int) *netobs.Heartbeat {
 }
 
 // unreachable is the sensor-unreachable alarms raised and status's flag.
-func unreachable(r *Runtime, st *Status) (int, bool) {
-	r.tickSensor(bg, false)
+func unreachable(t *testing.T, r *Runtime, st *Status) (int, bool) {
+	t.Helper()
+	sensorStep(t, r)
 	return alarms(st, AlarmSensorUnreachable), st.Snapshot("x").Sensor.Unreachable
 }
 
@@ -520,7 +521,7 @@ func TestSensorUnreachable(t *testing.T) {
 	step := func(d time.Duration, wantN int, wantFlag bool) {
 		t.Helper()
 		g.advance(d)
-		if n, f := unreachable(r, st); n != wantN || f != wantFlag {
+		if n, f := unreachable(t, r, st); n != wantN || f != wantFlag {
 			t.Fatalf("at mono %s: %d alarms, unreachable %v; want %d, %v", g.monoNow(), n, f, wantN, wantFlag)
 		}
 	}
@@ -561,7 +562,7 @@ func TestSensorUnreachableReconnects(t *testing.T) {
 		if c.reconnect {
 			reconnect()
 		}
-		if n, f := unreachable(r, st); n != c.n || f != (c.n > 0) {
+		if n, f := unreachable(t, r, st); n != c.n || f != (c.n > 0) {
 			t.Fatalf("at %s after the heartbeat: %d alarms, unreachable %v; want %d", g.monoNow()-time.Minute, n, f, c.n)
 		}
 	}
@@ -577,13 +578,13 @@ func TestSensorUnreachableWallSteps(t *testing.T) {
 	g.mu.Lock()
 	g.wall, g.mono = g.wall.Add(time.Hour), g.mono+10*time.Second
 	g.mu.Unlock()
-	if n, f := unreachable(r, st); n != 0 || f {
+	if n, f := unreachable(t, r, st); n != 0 || f {
 		t.Fatalf("a wall jump raised it: %d, %v", n, f)
 	}
 	g.mu.Lock()
 	g.wall, g.mono = g.wall.Add(-3*time.Hour), g.mono+51*time.Second
 	g.mu.Unlock()
-	if n, f := unreachable(r, st); n != 1 || !f {
+	if n, f := unreachable(t, r, st); n != 1 || !f {
 		t.Fatalf("a backward wall step held it back: %d, %v", n, f)
 	}
 }
@@ -619,11 +620,11 @@ func TestSensorUnreachableFromHeartbeat(t *testing.T) {
 	}
 	accepted(2)
 	g.advance(59 * time.Second)
-	if n, f := unreachable(r, st); n != 0 || f {
+	if n, f := unreachable(t, r, st); n != 0 || f {
 		t.Fatalf("raised 59 s after a heartbeat: %d, %v", n, f)
 	}
 	g.advance(2 * time.Second)
-	if n, f := unreachable(r, st); n != 1 || !f {
+	if n, f := unreachable(t, r, st); n != 1 || !f {
 		t.Fatalf("not raised 61 s after a heartbeat: %d, %v", n, f)
 	}
 	pw.Close()
@@ -640,19 +641,19 @@ func TestSensorUnreachableTickCadence(t *testing.T) {
 	g := newRetentionRig(t)
 	r, st := g.start()
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	g.advance(time.Second)
 	if err := r.ServeSensor(bg, sensorChannel(t, sensorHeartbeat(1))); err != nil {
 		t.Fatal(err)
 	}
 	hb := g.monoNow()
 	g.advance(TickInterval - time.Second)
-	r.Tick(bg)
+	tick(t, r)
 	if n := alarms(st, AlarmSensorUnreachable); n != 0 {
 		t.Fatalf("raised at the first tick after the heartbeat: %d", n)
 	}
 	g.advance(TickInterval)
-	r.Tick(bg)
+	tick(t, r)
 	if n, f := alarms(st, AlarmSensorUnreachable), st.Snapshot("x").Sensor.Unreachable; n != 1 || !f {
 		t.Fatalf("not raised at the second tick: %d, %v", n, f)
 	}

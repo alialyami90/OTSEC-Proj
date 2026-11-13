@@ -160,7 +160,7 @@ func TestDetectorAlertCapture(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""), spoofFlow(2, nil, gone), spoofFlow(3, nil, hashOf(f1)), laterFlow(4, gone))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	got := committedAlerts(t, r)
 	type want struct {
 		rule    netobs.Rule
@@ -200,7 +200,7 @@ func TestDetectorFrameHashMismatch(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	nd := r.detector
 	ref := nd.index.at[hashOf(f1)]
 	if ref == "" {
@@ -234,12 +234,12 @@ func TestDetectorCheckpointCursor(t *testing.T) {
 		if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(i, frameData(byte(i)), ""))); err != nil {
 			t.Fatal(err)
 		}
-		r.Tick(bg)
+		tick(t, r)
 		if seqs := detectorCkpts(t, r); len(seqs) != 1 || detectorCursor(t, r) != c5.Seq(i) {
 			t.Fatalf("after observation %d: checkpoints %v, cursor %d", i, seqs, detectorCursor(t, r))
 		}
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.CheckpointsWritten != 3 || d.Checkpointed != 2 {
 		t.Fatalf("a tick that didn't move wrote a checkpoint: %+v", d)
 	}
@@ -249,7 +249,7 @@ func TestDetectorCheckpointCursor(t *testing.T) {
 		if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(i, frameData(byte(i)), ""))); err != nil {
 			t.Fatal(err)
 		}
-		r.Tick(bg)
+		tick(t, r)
 	}
 	d := detectorStatus(t, st)
 	if seqs := detectorCkpts(t, r); !slices.Equal(seqs, before) || detectorCursor(t, r) != 2 || d.Through != 4 || d.Checkpointed != 2 ||
@@ -270,7 +270,7 @@ func TestDetectorReplayNoDuplicate(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if n := len(committedAlerts(t, r)); n != 2 || detectorCursor(t, r) != 0 {
 		t.Fatalf("%d alerts before the crash, cursor %d", n, detectorCursor(t, r))
 	}
@@ -278,7 +278,7 @@ func TestDetectorReplayNoDuplicate(t *testing.T) {
 
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	if n := len(committedAlerts(t, r)); n != 2 || !d.Restored || d.Through != 1 || d.Mismatches != 0 || d.Alerts != 0 {
 		t.Fatalf("%d alerts after the restart, status %+v", n, d)
@@ -294,11 +294,11 @@ func TestDetectorReplayNoDuplicate(t *testing.T) {
 func TestDetectorTrailingSkip(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, st, _ := start(t, c, dir)
-	r.detector.pruned = true
+	heldManager(r, func() { r.detector.pruned = true })
 	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	// The run started an hour before the observation at 09:15, and its
 	// flows are taken to be pruned. Its collection.run comes at a tick
 	// that reads no observation.
@@ -307,7 +307,7 @@ func TestDetectorTrailingSkip(t *testing.T) {
 		"started_at": "2026-10-24T08:15:00Z", "ended_at": "2026-10-24T08:15:01Z", "connected": "true", "open_flow": "false", "after_seq": "1"}) {
 		t.Fatal("collection.run not stored")
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.NotJudged["before-retained"] != 1 || d.OrderingFaults != 0 || d.Checkpointed != 1 || d.CheckpointsWritten != 3 || d.CheckpointFailures != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -320,7 +320,7 @@ func TestDetectorTrailingSkip(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	for _, a := range committedAlerts(t, r) {
 		if a.alert.Rule == netobs.RuleOwnSessionUnseen {
@@ -350,7 +350,7 @@ func TestDetectorHandoverBarrier(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.Through != 1 {
 		t.Fatalf("the detector passed the barrier: through %d", d.Through)
 	}
@@ -360,7 +360,7 @@ func TestDetectorHandoverBarrier(t *testing.T) {
 		t.Fatal("collection.run not stored")
 	}
 	r.intake.leave("r-1")
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.Through != 2 || d.OrderingFaults != 0 || countAlarms(st, AlarmDetectorOrdering) != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -382,7 +382,7 @@ func TestDetectorBarrierDuringRelease(t *testing.T) {
 		if err := r.ServeSensor(bg, sensorChannel(t, after)); err != nil {
 			t.Error(err)
 		}
-		r.Tick(bg)
+		tick(t, r)
 	}
 	result, transcript := figureOrderFrom(t, ok09Result)
 	var seq uint64
@@ -395,7 +395,7 @@ func TestDetectorBarrierDuringRelease(t *testing.T) {
 		t.Fatalf("run: %+v", rep)
 	}
 	r.afterRelease = nil
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.Through != 2 || d.OrderingFaults != 0 || countAlarms(st, AlarmDetectorOrdering) != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -414,15 +414,15 @@ func TestDetectorAlertRetried(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), laterFlow(2, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
-	r.Tick(bg)
+	tick(t, r)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	if n := len(committedAlerts(t, r)); n != 0 || d.Through != 1 || d.AlertsPending != 2 || d.AlertCommitFailures != 2 ||
 		d.CheckpointsWritten != 1 || detectorCursor(t, r) != 0 || countAlarms(st, AlarmAlertNotStored) != 1 {
 		t.Fatalf("%d alerts, cursor %d, status %+v, %d alarms", n, detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
 	}
 	r.alertAppend = nil
-	r.Tick(bg)
+	tick(t, r)
 	got := committedAlerts(t, r)
 	d = detectorStatus(t, st)
 	if len(got) != 4 || got[0].alert.Rule != netobs.RuleOwnSessionOutsideRecord || got[1].alert.Rule != netobs.RuleNodeAddressSpoofed ||
@@ -440,12 +440,12 @@ func TestDetectorAlertUnsentAtStop(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	r.Close()
 
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	if n := len(committedAlerts(t, r)); n != 2 || !d.Restored || d.Through != 1 || d.Mismatches != 0 || detectorCursor(t, r) != 1 {
 		t.Fatalf("%d alerts after the restart, cursor %d, status %+v", n, detectorCursor(t, r), d)
@@ -463,7 +463,7 @@ func TestDetectorGuardCommitTime(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	r.detector.pruned = true
+	heldManager(r, func() { r.detector.pruned = true })
 	now := time.Now().UTC()
 	at := func(d time.Duration) string { return now.Add(d).Format("2006-01-02T15:04:05.000000Z") }
 	end := ownFlow(1)
@@ -483,7 +483,7 @@ func TestDetectorGuardCommitTime(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	for _, a := range committedAlerts(t, r) {
 		if a.alert.Rule == netobs.RuleOwnSessionUnseen {
 			t.Errorf("the session at 08:15 alerted: %+v", a.alert)
@@ -507,7 +507,7 @@ func TestDetectorAlertDroppedAtQuota(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 				t.Fatal(err)
 			}
-			r.Tick(bg)
+			tick(t, r)
 			d := detectorStatus(t, st)
 			if d.AlertsNotStored != 2 || d.AlertsPending != 0 || d.AlertCommitFailures != 0 || d.Through != 1 || d.Checkpointed != 1 ||
 				detectorCursor(t, r) != 1 || countAlarms(st, AlarmAlertNotStored) != 1 {
@@ -560,7 +560,7 @@ func TestDetectorAlertDropsKept(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	det := alertDropEvent(t, r)
 	want := map[string]string{"stream": string(NetAlertStream(sensorID)), "class": string(c5.ClassNetworkAlert), "count": "2", "reason." + sensorlink.DropClassFull: "2"}
 	for k := range spoofDrops(1) {
@@ -594,8 +594,8 @@ func TestDetectorAlertAlarmRearmed(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 				t.Fatal(err)
 			}
-			r.Tick(bg)
-			r.Tick(bg)
+			tick(t, r)
+			tick(t, r)
 			if n := countAlarms(st, AlarmAlertNotStored); n != 1 {
 				t.Fatalf("%d alarms in the first stretch", n)
 			}
@@ -603,7 +603,7 @@ func TestDetectorAlertAlarmRearmed(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(frameData(1))))); err != nil {
 				t.Fatal(err)
 			}
-			r.Tick(bg)
+			tick(t, r)
 			if n := countAlarms(st, AlarmAlertNotStored); n != 1 || detectorStatus(t, st).Alerts == 0 {
 				t.Fatalf("%d alarms, status %+v", n, detectorStatus(t, st))
 			}
@@ -613,7 +613,7 @@ func TestDetectorAlertAlarmRearmed(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, third)); err != nil {
 				t.Fatal(err)
 			}
-			r.Tick(bg)
+			tick(t, r)
 			if n := countAlarms(st, AlarmAlertNotStored); n != 2 {
 				t.Fatalf("%d alarms after the second stretch, status %+v", n, detectorStatus(t, st))
 			}
@@ -631,7 +631,7 @@ func TestDetectorSessionBeforeClock(t *testing.T) {
 	r, st, _ := start(t, c, dir)
 	from := time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)
 	guardRun(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), from, 0)
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.CheckpointFailures != 0 || d.CheckpointsWritten != 2 || countAlarms(st, AlarmDetectorCheckpoint) != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -641,7 +641,7 @@ func TestDetectorSessionBeforeClock(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(1, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); unseenAlerts(t, r) != 1 || !d.Restored || d.CheckpointFailures != 0 {
 		t.Fatalf("%d unseen, status %+v", unseenAlerts(t, r), d)
 	}
@@ -658,7 +658,7 @@ func TestDetectorAlertAlarmRearmedInFlush(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	answers := []error{errors.New("batch refused"), nil, &c5.Error{Code: c5.CodeQuotaReached}}
 	r.alertAppend = func([]c5.Record) error {
 		err := answers[0]
@@ -668,7 +668,7 @@ func TestDetectorAlertAlarmRearmedInFlush(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); len(answers) != 0 || d.Alerts != 1 || d.AlertsNotStored != 3 || countAlarms(st, AlarmAlertNotStored) != 2 {
 		t.Fatalf("%d answers left, status %+v, %d alarms", len(answers), d, countAlarms(st, AlarmAlertNotStored))
 	}
@@ -724,8 +724,8 @@ func TestDetectorPendingFullAlarm(t *testing.T) {
 		runRecord(t, s, c, testInvocation(i+1), nil)
 	}
 	runRecord(t, s, c, testInvocation(1000), map[string]string{"after_seq": "x"})
-	r.Tick(bg)
-	r.Tick(bg)
+	tick(t, r)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	if d.NotJudged["pending-full"] != 1 || d.NotJudged["tied-evicted"] != 0 || d.NotJudged["session-missing"] != 1 || countAlarms(st, AlarmSessionNotJudged) != 1 {
 		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmSessionNotJudged))
@@ -770,8 +770,8 @@ func TestDetectorTiedEvictedAlarm(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	r.Tick(bg)
-	r.Tick(bg)
+	tick(t, r)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	if d.NotJudged["tied-evicted"] != 1 || d.NotJudged["pending-full"] != 0 || countAlarms(st, AlarmSessionNotJudged) != 1 {
 		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmSessionNotJudged))
@@ -844,7 +844,7 @@ func prunedStart(t *testing.T) (*Runtime, *Status, *Config, event.Event) {
 	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	stream := NetObservationStream(sensorID)
 	got, err := r.Store(stream).Read(bg, stream, 0, 1)
 	if err != nil || len(got) != 1 {
@@ -858,7 +858,7 @@ func prunedStart(t *testing.T) (*Runtime, *Status, *Config, event.Event) {
 	foreignCheckpoint(t, r)
 	r.Close()
 	r, st, _ := start(t, c, dir)
-	r.Tick(bg)
+	tick(t, r)
 	if nd := r.detector; !nd.pruned || nd.restored || !nd.firstObs.IsZero() || firstRetained(t, r) != 0 {
 		t.Fatalf("pruned %v, restored %v, first read at %v", nd.pruned, nd.restored, nd.firstObs)
 	}
@@ -882,7 +882,7 @@ func TestDetectorPrunedFromStream(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1), ownFlow(2))); err != nil {
 				t.Fatal(err)
 			}
-			r.Tick(bg)
+			tick(t, r)
 			pruneObservations(t, r, c, tc.step)
 			if f := firstRetained(t, r); f != tc.first || detectorCursor(t, r) != 2 {
 				t.Fatalf("first retained %d, cursor %d", f, detectorCursor(t, r))
@@ -990,7 +990,7 @@ func TestDetectorGuardEdge(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 				t.Fatal(err)
 			}
-			r.Tick(bg)
+			tick(t, r)
 			d := detectorStatus(t, st)
 			refused := int64(0)
 			if first == "refused" || first == "undecodable" {
@@ -1009,7 +1009,7 @@ func TestDetectorGuardNothingRead(t *testing.T) {
 	r, st, c, _ := prunedStart(t)
 	defer r.Close()
 	guardRun(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), time.Now().Add(time.Hour), 1)
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.NotJudged["before-retained"] != 1 || d.Through != 0 || d.OrderingFaults != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -1026,7 +1026,7 @@ func TestDetectorUnseenNoCapture(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(1, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if n := unseenAlerts(t, r); n != 1 {
 		t.Fatalf("%d own-session-unseen alerts", n)
 	}
@@ -1042,7 +1042,7 @@ func TestDetectorFrameIndexRebuilt(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	r.Close()
 	r, _, _ = start(t, c, dir)
 	defer r.Close()
@@ -1052,7 +1052,7 @@ func TestDetectorFrameIndexRebuilt(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(f1)))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	got := committedAlerts(t, r)
 	if len(got) != 4 {
 		t.Fatalf("%d alerts", len(got))
@@ -1075,11 +1075,11 @@ func TestDetectorRestoreFailure(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	foreign := foreignCheckpoint(t, r)
 	r.Close()
 	r, st, _ := start(t, c, dir)
-	r.Tick(bg)
+	tick(t, r)
 	d, seqs := detectorStatus(t, st), detectorCkpts(t, r)
 	if countAlarms(st, AlarmDetectorNotRestored) != 1 || d.Restored || r.detector.pruned || d.Through != 1 || len(seqs) != 1 || seqs[0] <= foreign {
 		t.Fatalf("status %+v, checkpoints %v (foreign %d), %d alarms", d, seqs, foreign, countAlarms(st, AlarmDetectorNotRestored))
@@ -1104,7 +1104,7 @@ func TestDetectorCrashAfterAlertCheckpoint(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	_, doc, err := r.detectorCheckpoints(bg)
 	if err != nil {
 		t.Fatal(err)
@@ -1117,14 +1117,14 @@ func TestDetectorCrashAfterAlertCheckpoint(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(f1)))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if n := len(committedAlerts(t, r)); n != 4 || detectorCursor(t, r) != 1 {
 		t.Fatalf("%d alerts before the crash, cursor %d", n, detectorCursor(t, r))
 	}
 	r.Close()
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	d := detectorStatus(t, st)
 	if n := len(committedAlerts(t, r)); n != 4 || !d.Restored || d.Through != 2 || d.Mismatches != 0 || d.Alerts != 0 {
 		t.Fatalf("%d alerts after the restart, status %+v", n, d)
@@ -1142,9 +1142,9 @@ func TestDetectorOrderingMismatchAlarms(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), ownFlow(2))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	runRecord(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), map[string]string{"after_seq": "1"})
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.OrderingFaults != 1 || countAlarms(st, AlarmDetectorOrdering) != 1 || d.NotJudged["session-missing"] != 0 {
 		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmDetectorOrdering))
 	}
@@ -1168,7 +1168,7 @@ func TestDetectorOrderingMismatchAlarms(t *testing.T) {
 	r.Close()
 	r, st, _ = start(t, c, dir)
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); !d.Restored || d.Mismatches != 1 || countAlarms(st, AlarmDetectorMismatch) != 1 {
 		t.Fatalf("status %+v, %d alarms", d, countAlarms(st, AlarmDetectorMismatch))
 	}
@@ -1180,6 +1180,9 @@ func TestDetectorEndpointsNotTracked(t *testing.T) {
 	c, dir := schedConfig(t, func(nc *nodeconfigtest.Config) {
 		sensorQuotas(nc)
 		nc.NetworkSensor = sensorSection()
+		// 256 entries every 300 s over 72 outage hours need 1.8 GB of the
+		// platform class beneath the sensor (PlatformFloor).
+		nc.Store.Quotas["platform"] = 2 << 30
 		for i := range netobs.MaxDetectorEndpoints {
 			nc.AddSEL751(fmt.Sprintf("%08x-0000-4000-9000-000000000000", i+1), fmt.Sprintf("127.1.%d.%d", i/250, i%250+1), 2323, 300)
 		}
@@ -1233,7 +1236,7 @@ func healthPosition(t *testing.T, bad bool) {
 		missing = 1
 	}
 	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
-	r.Tick(bg)
+	tick(t, r)
 	run, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
 	if err != nil {
 		t.Fatal(err)
@@ -1242,7 +1245,7 @@ func healthPosition(t *testing.T, bad bool) {
 		t.Fatalf("health position %d (was %d) past the session at %d, not handed over", h, before, run)
 	}
 	r.alertAppend = nil
-	r.Tick(bg)
+	tick(t, r)
 	doc, err := r.detector.d.Checkpoint(0)
 	if err != nil {
 		t.Fatal(err)
@@ -1276,7 +1279,7 @@ func TestDetectorHealthReadRestored(t *testing.T) {
 	s := newScheduler(t, r, &fakeCollector{})
 	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "x"})
 	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
-	r.Tick(bg)
+	tick(t, r)
 	run, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
 	if err != nil {
 		t.Fatal(err)
@@ -1287,7 +1290,7 @@ func TestDetectorHealthReadRestored(t *testing.T) {
 	r.Close()
 	r, st, _ = start(t, c, dir)
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); !d.Restored || d.NotJudged["session-missing"] != 0 {
 		t.Fatalf("after the restart: status %+v", d)
 	}
@@ -1296,7 +1299,7 @@ func TestDetectorHealthReadRestored(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, laterFlow(2, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if n := unseenAlerts(t, r); n != 1 {
 		t.Fatalf("%d own-session-unseen after the restart, status %+v", n, detectorStatus(t, st))
 	}
@@ -1322,19 +1325,19 @@ func TestDetectorHealthReadAfterCrash(t *testing.T) {
 		return seq
 	}
 	runRecord(t, s, c, testInvocation(1), map[string]string{"after_seq": "1", "connected": "false"})
-	r.Tick(bg)
+	tick(t, r)
 	run1 := last()
 	fillCeiling(t, r, c)
 	runRecord(t, s, c, testInvocation(2), map[string]string{"after_seq": "1", "connected": "false"})
 	run2 := last()
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); run2 != run1+1 || r.detector.d.SessionThrough() != uint64(run2) || d.CheckpointFailures == 0 {
 		t.Fatalf("runs at %d and %d, session through %d, status %+v", run1, run2, r.detector.d.SessionThrough(), d)
 	}
 	r.Close()
 	r, st, _ = start(t, c, dir)
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); !d.Restored || r.detector.d.SessionThrough() != uint64(run2) {
 		t.Fatalf("after the restart: session through %d, want %d, status %+v", r.detector.d.SessionThrough(), run2, d)
 	}
@@ -1360,21 +1363,26 @@ func TestDetectorCursorRetried(t *testing.T) {
 			t.Fatal(err)
 		}
 		if i == 1 {
-			r.Tick(bg)
+			tick(t, r)
 		}
 	}
-	nd := r.detector
-	r.observeTo(bg, nd, 2)
-	seq, err := r.storeDetectorCheckpoint(bg, nd)
+	var seq c5.Seq
+	var err error
+	heldManager(r, func() {
+		nd := r.detector
+		r.observeTo(bg, nd, 2, newDrive())
+		if seq, err = r.storeDetectorCheckpoint(bg, nd); err == nil {
+			nd.written, nd.ckpts = nd.d.Through(), append(nd.ckpts, seq)
+		}
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	nd.written, nd.ckpts = nd.d.Through(), append(nd.ckpts, seq)
 	if n := len(detectorCkpts(t, r)); n != 2 || detectorCursor(t, r) != 1 {
 		t.Fatalf("%d checkpoints, cursor %d", n, detectorCursor(t, r))
 	}
 	written := detectorStatus(t, st).CheckpointsWritten
-	r.Tick(bg)
+	tick(t, r)
 	if seqs := detectorCkpts(t, r); len(seqs) != 1 || seqs[0] != seq || detectorCursor(t, r) != 2 || detectorStatus(t, st).CheckpointsWritten != written {
 		t.Fatalf("checkpoints %v, cursor %d", seqs, detectorCursor(t, r))
 	}
@@ -1387,7 +1395,7 @@ func TestDetectorSessionRefused(t *testing.T) {
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
 	runRecord(t, newScheduler(t, r, &fakeCollector{}), c, testInvocation(1), map[string]string{"ended_at": "2026-10-24T09:14:00Z"})
-	r.Tick(bg)
+	tick(t, r)
 	if d := detectorStatus(t, st); d.NotJudged["session-missing"] != 1 || d.OrderingFaults != 0 {
 		t.Fatalf("status %+v", d)
 	}

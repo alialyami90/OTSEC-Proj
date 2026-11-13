@@ -58,7 +58,30 @@ type SensorSeams struct {
 	// Prune, when set, runs before each prune of a sensor database; an
 	// error from it ends that prune.
 	Prune func(ctx context.Context, db c5.DatabaseID) error
+	// Append, when set, runs before each append to the observation stream
+	// through the intake (liveAppender), under the link's lock: a test's
+	// way to slow or hold a network commit.
+	Append func(ctx context.Context)
+	// SaveIntake, when set, runs at the start of each intake hold save,
+	// under the link's lock, inside a scheduler call's release too.
+	SaveIntake func()
+	// Observe, when set, runs before the detector takes each observation:
+	// a test's slow detector.
+	Observe func()
 }
+
+// SensorDriveEvery is how often the manager drives the detector between
+// the steps Tick asks for, and DriveObservations and DriveTime bound one
+// drive. A drive that stops at either is followed by another at once,
+// after the manager has yielded to a stop or a step Tick asked for, so a
+// backlog is worked off as fast as the drives allow (section 1.9 item 3;
+// section 1.10, unmeasured). DriveTime bounds the manager's own work, so it
+// is timed on the process's monotonic clock, never on the node's.
+const (
+	SensorDriveEvery  = time.Second
+	DriveObservations = 1000
+	DriveTime         = 200 * time.Millisecond
+)
 
 // isSensorDB reports whether a database is in the sensor store set.
 func isSensorDB(id c5.DatabaseID) bool { return id == NetworkDB }
@@ -88,6 +111,28 @@ type sensorManager struct {
 	// steps counts the steps ended.
 	first chan struct{}
 	steps atomic.Uint64
+	// more asks for another drive after one that stopped at its bound.
+	// final is the stop's context, set before cancel: the final step runs
+	// under it (section 1.9 item 10).
+	more  chan struct{}
+	final context.Context
+	// stepMu guards begun, settled and stepped, for WaitSensorStep: begun
+	// counts the steps Tick asked for that have begun; settled is begun as
+	// it was when the manager last ended a step with no drive asked for;
+	// stepped is closed and replaced at each step's end.
+	stepMu  sync.Mutex
+	begun   uint64
+	settled uint64
+	stepped chan struct{}
+	// run is held across each step, so this package's tests can hold the
+	// manager between steps while they reach the detector or the intake.
+	run sync.Mutex
+	// notTied: network-session-not-tied is raised for this stretch, and
+	// timeouts is the scheduler calls' timeouts last seen (sensor.go).
+	notTied  bool
+	timeouts uint64
+	// floorShort: sensor-platform-floor is raised (sensorceiling.go).
+	floorShort bool
 	// notOpen: AlarmSensorStoreNotOpen is raised for the database. raised
 	// are the startup alarm codes raised for it in this stretch, so a retry
 	// raises each at most once until the database opens (D6's B4). raisedMu
@@ -118,7 +163,7 @@ const SensorFailedDetailBytes = 2048
 // newSensorManager makes the manager when there is a sensor database. Its
 // goroutine starts with startSensorManager.
 func (r *Runtime) newSensorManager() {
-	m := &sensorManager{first: make(chan struct{}), notOpen: map[c5.DatabaseID]bool{},
+	m := &sensorManager{first: make(chan struct{}), more: make(chan struct{}, 1), stepped: make(chan struct{}), notOpen: map[c5.DatabaseID]bool{},
 		raised: map[c5.DatabaseID]map[c5.AlarmCode]bool{}, modes: map[c5.DatabaseID]*modeCap{}}
 	if len(r.sdbs) == 0 {
 		close(m.first)
@@ -146,17 +191,90 @@ func (r *Runtime) startSensorManager() {
 	m.kick <- struct{}{}
 	go func() {
 		defer close(m.done)
+		drive, stop := nodeClock.NewTicker(SensorDriveEvery)
+		defer stop()
 		for {
+			full := false
+			// A stop and a step Tick asked for go before a drive.
 			select {
 			case <-ctx.Done():
+				r.finalStep()
 				return
 			case <-m.kick:
+				full = true
+			default:
+				select {
+				case <-ctx.Done():
+					r.finalStep()
+					return
+				case <-m.kick:
+					full = true
+				case <-m.more:
+				case <-drive:
+				}
 			}
-			if !r.managerStep(ctx) {
+			if !r.managerStep(ctx, full) {
+				m.endStep(true)
 				return
 			}
 		}
 	}()
+}
+
+// endStep notes a step's end for WaitSensorStep, settled when no drive is
+// asked for after it.
+func (m *sensorManager) endStep(settled bool) {
+	m.stepMu.Lock()
+	defer m.stepMu.Unlock()
+	if settled {
+		m.settled = m.begun
+	}
+	close(m.stepped)
+	m.stepped = make(chan struct{})
+}
+
+// WaitSensorStep asks the sensor manager for a step, as Tick does, and
+// returns once a step that began after the call has ended and the drives
+// it left have caught up, or the manager has stopped, or ctx has ended.
+// Tick never waits for the manager (F3); a test that needs the sensor's
+// work done waits here. It returns at once without the network_sensor
+// section. No product code calls it.
+func (r *Runtime) WaitSensorStep(ctx context.Context) error {
+	m := r.smgr
+	if m == nil || m.kick == nil {
+		return nil
+	}
+	want := m.nextStep()
+	r.kickSensorManager()
+	return r.waitSettled(ctx, want)
+}
+
+// nextStep is the count the next step Tick asks for will begin as.
+func (m *sensorManager) nextStep() uint64 {
+	m.stepMu.Lock()
+	defer m.stepMu.Unlock()
+	return m.begun + 1
+}
+
+// waitSettled waits until the steps Tick asked for up to want have ended
+// and the drives they left have caught up, or the manager has stopped.
+func (r *Runtime) waitSettled(ctx context.Context, want uint64) error {
+	m := r.smgr
+	for {
+		m.stepMu.Lock()
+		done, w := m.settled >= want, m.stepped
+		m.stepMu.Unlock()
+		if done {
+			return nil
+		}
+		select {
+		case <-w:
+		case <-m.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // kickSensorManager asks the manager for a step, and never waits.
@@ -169,31 +287,43 @@ func (r *Runtime) kickSensorManager() {
 	}
 }
 
-// managerStep is one step of the manager's loop: the store set, the
-// intake, the held mode changes and the prune. A panic anywhere in it is
-// recovered: it raises AlarmSensorFailed, naming the sensor, and stops the
-// sensor's work until a restart, and managerStep reports false. The node
-// and every other stream go on (section 1.9 item 9; D6's B1).
-func (r *Runtime) managerStep(ctx context.Context) (ok bool) {
+// managerStep is one step of the manager's loop. A full step, which Tick
+// asks for, is the store set, the intake, the held mode changes, the prune
+// and the sensor's tick (tickSensor: the hold's deadlines, a drive of the
+// detector and its checkpoint, the drop counts, the alarms and the sensor
+// section of status). Any other step is a drive of the detector. A panic
+// anywhere in either is recovered: it raises AlarmSensorFailed, naming the
+// sensor, and stops the sensor's work until a restart, and managerStep
+// reports false. The node and every other stream go on (section 1.9 item
+// 9; D6's B1).
+func (r *Runtime) managerStep(ctx context.Context, full bool) (ok bool) {
 	m := r.smgr
+	more := false
+	m.run.Lock()
+	defer m.run.Unlock()
 	defer func() {
 		if p := recover(); p != nil {
-			r.sensorFailed.Store(true)
-			detail := fmt.Sprintf("%v\n%s", p, debug.Stack())
-			if len(detail) > SensorFailedDetailBytes {
-				detail = detail[:SensorFailedDetailBytes] + "..."
-			}
-			r.opt.Status.Raise("", AlarmSensorFailed, fmt.Sprintf("sensor %s: the sensor's work panicked and is stopped until the node restarts; SER, Syslog and forwarding go on: %s",
-				r.sensorID(), detail))
+			r.failSensor(p)
 			ok = false
 		}
-		if m.steps.Add(1) == 1 {
+		if full && m.steps.Add(1) == 1 {
 			close(m.first)
+		}
+		if ok {
+			m.endStep(!more)
 		}
 	}()
 	if r.sensorFailed.Load() {
 		return false
 	}
+	if !full {
+		more = r.driveSensor(ctx)
+		r.askDrive(more)
+		return true
+	}
+	m.stepMu.Lock()
+	m.begun++
+	m.stepMu.Unlock()
 	starts := newStartTimes()
 	for _, d := range r.sdbs {
 		if ctx.Err() != nil {
@@ -207,7 +337,55 @@ func (r *Runtime) managerStep(ctx context.Context) (ok bool) {
 	r.startIntake(ctx)
 	r.flushModeChanges(ctx)
 	r.pruneSensorStores(ctx)
+	if ctx.Err() != nil {
+		return false
+	}
+	more = r.tickSensor(ctx, false)
+	r.askDrive(more)
 	return true
+}
+
+// askDrive asks for another drive at once when the last one stopped at its
+// bound. It never waits.
+func (r *Runtime) askDrive(more bool) {
+	if !more {
+		return
+	}
+	select {
+	case r.smgr.more <- struct{}{}:
+	default:
+	}
+}
+
+// failSensor raises AlarmSensorFailed for a recovered panic p, naming the
+// sensor, and stops the sensor's work until a restart.
+func (r *Runtime) failSensor(p any) {
+	r.sensorFailed.Store(true)
+	detail := fmt.Sprintf("%v\n%s", p, debug.Stack())
+	if len(detail) > SensorFailedDetailBytes {
+		detail = detail[:SensorFailedDetailBytes] + "..."
+	}
+	r.opt.Status.Raise("", AlarmSensorFailed, fmt.Sprintf("sensor %s: the sensor's work panicked and is stopped until the node restarts; SER, Syslog and forwarding go on: %s",
+		r.sensorID(), detail))
+}
+
+// finalStep is the stop's last step, under the stop's context: the final
+// drop counts and the detector's checkpoint, which tickSensor writes at a
+// clean stop, if SensorStopTimeout allows (section 1.9 items 3 and 10). A
+// panic in it is recovered, as in any step.
+func (r *Runtime) finalStep() {
+	ctx := r.smgr.final
+	if ctx == nil || ctx.Err() != nil || r.sensorFailed.Load() {
+		return
+	}
+	r.smgr.run.Lock()
+	defer r.smgr.run.Unlock()
+	defer func() {
+		if p := recover(); p != nil {
+			r.failSensor(p)
+		}
+	}()
+	r.tickSensor(ctx, true)
 }
 
 // sensorID is the configured sensor's ID, or "" without the section.
@@ -384,7 +562,7 @@ func (r *Runtime) recordMode(ctx context.Context, d *database, mc c5.ModeChange,
 		details["not_recorded"] = strconv.Itoa(m.held)
 	}
 	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
-	r.health(ctx, c5.HealthModeChanged, details)
+	r.sensorHealthEvent(ctx, c5.HealthModeChanged, details) // under the ceiling (F1)
 	m.at, m.ever, m.to, m.held = r.opt.Mono(), true, mc.To, 0
 }
 
@@ -410,10 +588,13 @@ func (r *Runtime) pruneSensorStores(ctx context.Context) {
 // releases their locks; Close does not wait for them.
 func (r *Runtime) closeSensorStores() {
 	if m := r.smgr; m != nil && m.cancel != nil {
+		final, cancel := context.WithTimeout(context.Background(), SensorStopTimeout)
+		defer cancel()
+		m.final = final
 		m.cancel()
 		select {
 		case <-m.done:
-		case <-time.After(SensorStopTimeout):
+		case <-final.Done():
 			r.opt.Status.Raise("", AlarmSensorFailed, fmt.Sprintf("the sensor manager did not stop within %s; its databases are closed when it stops, or at the process's exit", SensorStopTimeout))
 			go func() {
 				<-m.done

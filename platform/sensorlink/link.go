@@ -115,6 +115,17 @@ type Stats struct {
 	HeartbeatMono time.Duration
 	// Hold is the intake hold's counts.
 	Hold HoldStats
+	// DispatchTimeouts and ResultTimeouts count the scheduler calls that
+	// did not have the link's lock within HoldLockWait, or panicked, so
+	// their run went on untied (section 1.9 items 4 and 9); an Abandon is
+	// counted with the results. LockWaitMax is the longest any scheduler
+	// call waited for the lock. SchedPanics counts the panics recovered in
+	// them, and LastSchedPanic is the last one's text, capped.
+	DispatchTimeouts uint64
+	ResultTimeouts   uint64
+	LockWaitMax      time.Duration
+	SchedPanics      uint64
+	LastSchedPanic   string
 }
 
 // Link reads one sensor's channel.
@@ -125,8 +136,9 @@ type Link struct {
 
 	// cmu orders every commit to the stream with the hold's changes, so a
 	// release's batch and its saved state agree with what came before and
-	// after it. It is taken before mu.
-	cmu  sync.Mutex
+	// after it. It is taken before mu. The scheduler's calls go first
+	// (fairlock.go).
+	cmu  fairLock
 	hold *hold
 
 	mu     sync.Mutex

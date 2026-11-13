@@ -468,24 +468,25 @@ func note(f *HeldFlow, st *netobs.Observation) {
 
 // Dispatch starts holding run's endpoint. The run's deadline is now plus
 // HoldRunLimit plus g. The record is saved first; if that fails nothing is
-// held for the run, and its flows commit untied.
+// held for the run, and its flows commit untied. It is a scheduler call: it
+// waits at most HoldLockWait for the link's lock, and a panic in it is
+// recovered; either returns ErrHoldTimeout, and nothing is held.
 func (l *Link) Dispatch(ctx context.Context, run HoldRun) error {
-	l.cmu.Lock()
-	defer l.cmu.Unlock()
-	defer l.syncHold()
-	h := l.hold
-	if !h.on() {
+	return l.schedCall(&l.stats.DispatchTimeouts, func() error {
+		h := l.hold
+		if !h.on() {
+			return nil
+		}
+		run.Endpoint = netip.AddrPortFrom(run.Endpoint.Addr().Unmap().WithZone(""), run.Endpoint.Port())
+		run.Deadline = h.now().Add(HoldRunLimit + h.grace())
+		rec := RunRecord{State: HoldHolding, Run: run}
+		if err := h.save(ctx, rec); err != nil {
+			return fmt.Errorf("sensorlink: the hold for run %s was not saved, so its flows commit untied: %w", run.RequestID, err)
+		}
+		h.n++
+		h.runs[run.RequestID] = &holdRun{rec: *h.last, order: h.n}
 		return nil
-	}
-	run.Endpoint = netip.AddrPortFrom(run.Endpoint.Addr().Unmap().WithZone(""), run.Endpoint.Port())
-	run.Deadline = h.now().Add(HoldRunLimit + h.grace())
-	rec := RunRecord{State: HoldHolding, Run: run}
-	if err := h.save(ctx, rec); err != nil {
-		return fmt.Errorf("sensorlink: the hold for run %s was not saved, so its flows commit untied: %w", run.RequestID, err)
-	}
-	h.n++
-	h.runs[run.RequestID] = &holdRun{rec: *h.last, order: h.n}
-	return nil
+	})
 }
 
 // Released is what a run's result did.
@@ -503,11 +504,20 @@ type Released struct {
 // Result ties the run's held flows by its session and commits them in
 // arrival order, leaving any failed dial still to end waiting (part (c)).
 // A second result for a run, or one for a run the hold doesn't know, does
-// nothing.
-func (l *Link) Result(ctx context.Context, requestID string, s Session) (Released, error) {
-	l.cmu.Lock()
-	defer l.cmu.Unlock()
-	defer l.syncHold()
+// nothing. It is a scheduler call, as Dispatch is: past HoldLockWait, or on
+// a recovered panic, it returns ErrHoldTimeout and the run's flows stay
+// held until its deadline releases them untied. It returns an error, and
+// no after_seq, when the stream's head after the release can't be read, so
+// no session is handed on with an after_seq of 0 (D6's note 1 on #663).
+func (l *Link) Result(ctx context.Context, requestID string, s Session) (out Released, err error) {
+	err = l.schedCall(&l.stats.ResultTimeouts, func() error {
+		out, err = l.result(ctx, requestID, s)
+		return err
+	})
+	return out, err
+}
+
+func (l *Link) result(ctx context.Context, requestID string, s Session) (Released, error) {
 	r := l.hold.runs[requestID]
 	if r == nil || r.rec.State != HoldHolding {
 		head, err := l.head(ctx)
@@ -553,21 +563,28 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (Release
 		}
 		rel = append(rel, h.releaseFlow(f, tie, s.InvocationID, rec.Run.AssetID)...)
 	}
-	out.AfterSeq = l.release(ctx, r, rec, rel, remaining)
+	after, err := l.release(ctx, r, rec, rel, remaining)
+	if err != nil {
+		return Released{}, err
+	}
+	out.AfterSeq = after
 	out.OpenFlow = h.repointed
 	return out, nil
 }
 
-// Abandon releases a run that ended without a result, untied, at once.
-func (l *Link) Abandon(ctx context.Context, requestID string) (uint64, error) {
-	l.cmu.Lock()
-	defer l.cmu.Unlock()
-	defer l.syncHold()
-	r := l.hold.runs[requestID]
-	if r == nil {
-		return l.head(ctx)
-	}
-	return l.release(ctx, r, cloneRec(r.rec), l.hold.untied(r.rec.Flows), nil), nil
+// Abandon releases a run that ended without a result, untied, at once. It
+// is a scheduler call, counted with the results.
+func (l *Link) Abandon(ctx context.Context, requestID string) (head uint64, err error) {
+	err = l.schedCall(&l.stats.ResultTimeouts, func() error {
+		r := l.hold.runs[requestID]
+		if r == nil {
+			head, err = l.head(ctx)
+			return err
+		}
+		head, err = l.release(ctx, r, cloneRec(r.rec), l.hold.untied(r.rec.Flows), nil)
+		return err
+	})
+	return head, err
 }
 
 // TickHold releases, untied, every hold past its deadline: a run with no
@@ -592,7 +609,7 @@ func (l *Link) TickHold(ctx context.Context) {
 			}
 			if !now.Before(rec.Run.Deadline) {
 				h.stats.DeadlineReleases++
-				l.release(ctx, r, rec, h.untied(rec.Flows), nil)
+				_, _ = l.release(ctx, r, rec, h.untied(rec.Flows), nil)
 			}
 		case HoldWaiting:
 			var rel []Release
@@ -609,7 +626,7 @@ func (l *Link) TickHold(ctx context.Context) {
 				rel = append(rel, h.untied([]HeldFlow{f})...)
 			}
 			if len(rel) > 0 {
-				l.release(ctx, r, rec, rel, remaining)
+				_, _ = l.release(ctx, r, rec, rel, remaining)
 			}
 		}
 	}
@@ -679,8 +696,9 @@ func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Releas
 // release commits rel and keeps remaining, in rec's run: first the record
 // saying what it releases (state releasing), then the batch, then the
 // record after it. A release whose record can't be saved commits untied
-// (D4-72). It returns the stream's head after the batch.
-func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Release, remaining []HeldFlow) uint64 {
+// (D4-72). It returns the stream's head after the batch, or the error of a
+// head that can't be read then.
+func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Release, remaining []HeldFlow) (uint64, error) {
 	h := l.hold
 	head, _ := l.head(ctx)
 	rec.Flows, rec.Releasing, rec.Head = remaining, rel, head
@@ -709,7 +727,7 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 		}
 		l.commitBatch(ctx, rel)
 	}
-	after, _ := l.head(ctx)
+	after, headErr := l.head(ctx)
 	rec.Releasing, rec.Head, rec.AfterSeq = nil, 0, after
 	rec.State = HoldReleased
 	if len(remaining) > 0 {
@@ -733,7 +751,7 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	} else {
 		r.rec = rec
 	}
-	return after
+	return after, headErr
 }
 
 // RecoverHold finishes a release a restart interrupted: a run saved as

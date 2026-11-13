@@ -43,7 +43,7 @@ type rig struct {
 	mono time.Duration
 }
 
-func newRig(t *testing.T) *rig {
+func newRig(t *testing.T, change ...func(*nodeconfigtest.Config)) *rig {
 	t.Helper()
 	dir := t.TempDir()
 	storeDir := filepath.Join(dir, "store")
@@ -56,6 +56,9 @@ func newRig(t *testing.T) *rig {
 	nc.Store.Quotas["network-alert"] = 16 << 20
 	nc.NetworkSensor = map[string]any{"sensor_id": sensorID, "evidence_class": "simulated", "outage_hours": 72, "alert_retention_days": 30,
 		"node_addresses": []any{"192.0.2.10"}, "node_macs": []any{"02:00:5e:00:00:0a"}, "node_vlans": []any{10, "untagged"}}
+	for _, f := range change {
+		f(nc)
+	}
 	if err := nc.WriteInstallKey("ik_sensortest"); err != nil {
 		t.Fatal(err)
 	}

@@ -64,7 +64,21 @@ D5 found four ways, D6 five more, D5 a tenth on the second read, and D3 an eleve
   - Tests: `TestForwardSessionsSplit`, `TestSensorStoreNotOpenForwardingGoesOn` (F5's forwarded-SER leg) and `TestSensorSessionUnreachableNamed` (`platform/node`).
   - Controls: one session for every stream, as on `main`; a stream in both sessions; the sensor session not judged; its alarm not named.
 - **D6's C1 and C2 on #663:** `TestSensorUnreachableFromNodeStart` (`sensortest`; control, the origin at the intake's start) and `TestSensorStartupAlarmConcurrent` (`platform/node`; control, no lock around the startup alarms' record).
-- **Not yet closed:** F1, F3 and F4 (deliverable (3)), F8 (owed in full by the dialer-and-enrolment brief), and F11 (deliverable (4)). §1.9 lists the owed tests.
+- **Built in deliverable (3), branch `agent/platform-f27-step3`; not merged, and not closed until D6 records it:**
+  - **F1, the platform-class floor and ceiling** (`sensorceiling.go`; item 5):
+    - `Config.PlatformFloor` gives C and S. Below `C + S` the node starts and collects, the intake is not started, and `sensor-platform-floor` stands once, naming both terms; nothing is refused at load.
+    - Every sensor health event on `main` goes under the ceiling (`Runtime.sensorHealth`): `intake.drop-counted`, the network database's store alarms (Tick's queue), its mode changes (F9's health event), and the forwarder's sensor session's reports and `forward.unreachable` (D6's N3 on #662). Past it an event is not written and is counted in `health_held`; drop counts are written once room returns.
+    - Tests: `TestPlatformFloorTerms`, `TestPlatformFloorShortNodeStarts` and `TestSensorEventsHeldPastCeiling` (`platform/node`), `TestSensorEventsUnderPlatformCeiling` (`sensortest`, control 1).
+    - Not shown by a test: that `NewForwarding` gives the sensor session `sensorHealthSink` (read in the diff only).
+  - **F3, the detector's drive** (item 3): the sensor's tick runs on the manager's goroutine. Tick only kicks it, and `WaitSensorStep` is the tests' wait. Drives run about once a second, bounded by `DriveObservations` and `DriveTime`, with a checkpoint at the steps Tick asks for (at most once a `TickInterval`) and at the stop. `network-detector-lag` is raised past 60 s and its stretch ends below 30 s. Tests: `TestTickReturnsWithSlowDetector` and `TestDetectorLagAlarm`.
+  - **F4, the link's lock** (item 4; `platform/sensorlink/fairlock.go`): the scheduler goes first, and `HoldLockWait` = 2 s. Past it, and on a recovered panic in `Dispatch`, `Result` or `Abandon` (item 9), the run goes on untied, `dispatch_timeouts` or `result_timeouts` rises, `network-session-not-tied` stands, and the base rules judge the flows.
+    - Tests: `TestFairLockSchedulerFirst` (control 2), `TestSchedulerFirstOnLinkLock`, `TestSchedulerCallTimesOut` and `TestSchedulerCallPanicRecovered` (`sensorlink`), and `TestResultTimeoutUntiedJudged` and `TestSchedulerPanicTakenAsTimeoutUntied` (`platform/node`).
+  - **Carried from #663:**
+    - `after_seq`: `TestResultHeadUnknownNoAfterSeq` and `TestResultWhileNetworkSwappedOut`.
+    - The final drop counts move from `Close` to the manager's stop (`TestSensorDropCounts`' clean stop).
+    - No hold after `sensor-failed`: `TestNoHoldAfterSensorFailed`.
+    - `liveAppender` appends nothing in a mode that accepts no events: `TestLiveAppenderDrainOnlyDrops`.
+- **Not yet closed:** F1, F3 and F4 until deliverable (3) merges, F8 (owed in full by the dialer-and-enrolment brief), and F11 (deliverable (4)). §1.9 lists the owed tests.
 
 Also read for this note (`desk`): `Runtime.Collecting` iterates every database, but no product code calls it, so it reaches nothing. And no file under `platform/node`, `platform/sensorlink` or `cmd/otsec` calls `recover`, so a panic in the sensor's work, today inside `Tick`, ends the node (D6; §1.9 item 9).
 
