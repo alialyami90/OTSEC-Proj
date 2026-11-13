@@ -131,6 +131,12 @@ type SensorStatus struct {
 	DispatchTimeouts uint64 `json:"dispatch_timeouts"`
 	ResultTimeouts   uint64 `json:"result_timeouts"`
 	LockWaitMaxMS    int64  `json:"lock_wait_max_ms"`
+	// SchedPanics counts the panics recovered in those calls: one before a
+	// release's receipts is also a timeout above, and one after them is
+	// also an intake checkpoint failure (hold.checkpoint_failures), which
+	// raises intake-checkpoint-failed (section 1.9 item 9; D6's B1 on
+	// #676's 98aa92e8).
+	SchedPanics uint64 `json:"sched_panics"`
 	// HealthHeld counts the ceiling's refusals of the sensor's health
 	// events since start, not the events: an event tried again, as a
 	// forwarder's owed report or a drop count is, is counted at each try
@@ -472,6 +478,7 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 		s.Heartbeat = &SensorHeartbeat{AtUTC: h.AtUTC, Counters: h.Counters, RingOldestUTC: h.RingOldestUTC, InterfaceCheck: h.InterfaceCheck}
 	}
 	s.DispatchTimeouts, s.ResultTimeouts, s.LockWaitMaxMS = st.DispatchTimeouts, st.ResultTimeouts, st.LockWaitMax.Milliseconds()
+	s.SchedPanics = st.SchedPanics
 	s.HealthHeld = r.sensorHeld.Load()
 	r.opt.Status.SetSensor(s)
 	return more

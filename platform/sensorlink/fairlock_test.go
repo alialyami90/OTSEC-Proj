@@ -26,6 +26,8 @@ type gatedStore struct {
 	headFail atomic.Bool
 	// headFailAfter makes the head fail from the first batch on.
 	headFailAfter atomic.Bool
+	// panicBatch makes the next batch panic before it commits anything.
+	panicBatch atomic.Bool
 }
 
 func (s *gatedStore) wait() {
@@ -43,6 +45,9 @@ func (s *gatedStore) Append(ctx context.Context, rec c5.Record) (c5.Receipt, err
 
 func (s *gatedStore) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
 	s.wait()
+	if s.panicBatch.CompareAndSwap(true, false) {
+		panic("sensorlink test: a fault in the batch before it commits")
+	}
 	rcs, err := s.netStore.AppendBatch(ctx, recs)
 	if s.headFailAfter.Load() {
 		s.headFail.Store(true)
@@ -343,10 +348,20 @@ func TestResultHeadUnknownNoAfterSeq(t *testing.T) {
 	if c := g.committed(); len(c) != 0 || g.l.hold.runs["run-1"] == nil || g.l.Stats().Hold.HeadUnread != 1 {
 		t.Fatalf("after a Result with no head: committed %+v, still held %v, %+v", c, g.l.hold.runs["run-1"] != nil, g.l.Stats().Hold)
 	}
-	s.headFail.Store(false)
+	// The deadline with the head still unread begins nothing either, and
+	// is not counted as a release (D6's N2 on #676's 98aa92e8; control:
+	// DeadlineReleases counted before the error is tested).
 	g.wall = g.wall.Add(HoldRunLimit + time.Hour)
 	g.l.TickHold(bg)
+	if st := g.l.Stats().Hold; len(g.committed()) != 0 || st.DeadlineReleases != 0 || st.HeadUnread != 2 {
+		t.Fatalf("a deadline with no head: committed %+v, %+v; want nothing, deadline_releases 0, head_unread 2", g.committed(), st)
+	}
+	s.headFail.Store(false)
+	g.l.TickHold(bg)
 	want(t, g.committed(), tied{seq: 1})
+	if st := g.l.Stats().Hold; st.DeadlineReleases != 1 {
+		t.Fatalf("deadline_releases %d once the head reads, want 1", st.DeadlineReleases)
+	}
 }
 
 // D3's B2 and D6's B1 on #676, as D1 ruled: the after_seq is the largest

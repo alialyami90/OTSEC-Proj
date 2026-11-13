@@ -261,9 +261,13 @@ type hold struct {
 type releasePhase struct {
 	prev   []OpenFlow // the open table before the staged changes
 	staged bool       // the open table holds the staged changes
+	saved  bool       // the releasing record is saved
 	taken  bool       // the batch's receipts are taken: its records are in the store
 	after  uint64     // the receipts' largest seq, or the head before the batch
 	finish func()     // the end state, as when the record after the batch is not saved
+	// resave writes the run's holding record again, with the open table
+	// rolled back, over a releasing record saved before a panic.
+	resave func()
 }
 
 func newHold(cfg HoldConfig) (*hold, error) {
@@ -547,18 +551,11 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	// finishes the release and returns its after_seq.
 	l.hold.phase = nil
 	defer func() {
-		h, p := l.hold, recover()
-		ph := h.phase
-		h.phase = nil
-		switch {
-		case p != nil && ph != nil && ph.taken:
-			ph.finish()
-			l.notePanic(p)
-			out, err, p = Released{AfterSeq: ph.after, OpenFlow: h.repointed}, nil, nil
-		case p != nil && ph != nil && ph.staged:
-			h.open = ph.prev
+		p := recover()
+		if after, done := l.endPhase(p); done {
+			out, err = Released{AfterSeq: after, OpenFlow: l.hold.repointed}, nil
+			return
 		}
-		h.pending, h.pendingTied, h.repoint = nil, 0, nil
 		if p != nil {
 			panic(p)
 		}
@@ -616,10 +613,68 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	return out, nil
 }
 
+// endPhase is a scheduler call's deferred clean-up of its release, given
+// the recovered panic p or nil (D1's ruling on #676). It always clears the
+// hold-wide staged state. On a panic after the batch's receipts it finishes
+// the release, as when the record after the batch is not saved, counts the
+// panic as that checkpoint failure, so intake-checkpoint-failed stands on
+// the node (D6's B1 on #676's 98aa92e8), and reports the receipts'
+// after_seq and true: the caller returns it, and p is spent. On a panic
+// before them it rolls back the open table, and the caller re-panics. If
+// the releasing record was saved, it then saves the run's holding record
+// again, so a restart does not find the run releasing and commit its batch
+// tied to a session never handed on (D3's B2 and D4's note on #676's
+// 98aa92e8). A failed re-save is counted in checkpoint_failures and leaves
+// the releasing record newest, as with no re-save; a panic in it is
+// recovered and counted the same way, and the first panic still reaches
+// the caller.
+func (l *Link) endPhase(p any) (after uint64, done bool) {
+	h := l.hold
+	ph := h.phase
+	h.phase = nil
+	resave := false
+	switch {
+	case p != nil && ph != nil && ph.taken:
+		h.stats.CheckpointFailures++
+		ph.finish()
+		l.notePanic(p)
+		after, done = ph.after, true
+	case p != nil && ph != nil && ph.staged:
+		h.open = ph.prev
+		resave = ph.saved
+	}
+	h.pending, h.pendingTied, h.repoint = nil, 0, nil
+	if resave {
+		func() {
+			defer func() {
+				if recover() != nil {
+					h.stats.CheckpointFailures++
+				}
+			}()
+			ph.resave()
+		}()
+	}
+	return after, done
+}
+
 // Abandon releases a run that ended without a result, untied, at once. It
-// is a scheduler call, counted with the results.
+// is a scheduler call, counted with the results. Its release has result's
+// phased clean-up (endPhase): a panic after the batch's receipts finishes
+// the release and returns their after_seq, so the deadline does not commit
+// the run's records a second time (D6's N3 on #676's 98aa92e8).
 func (l *Link) Abandon(ctx context.Context, requestID string) (head uint64, err error) {
-	err = l.schedCall(&l.stats.ResultTimeouts, func() error {
+	err = l.schedCall(&l.stats.ResultTimeouts, func() (ferr error) {
+		l.hold.phase = nil
+		defer func() {
+			p := recover()
+			if after, done := l.endPhase(p); done {
+				head, ferr = after, nil
+				return
+			}
+			if p != nil {
+				panic(p)
+			}
+		}()
 		r := l.hold.runs[requestID]
 		if r == nil {
 			head, err = l.head(ctx)
@@ -754,7 +809,11 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	h := l.hold
 	head, err := l.head(ctx)
 	if err != nil {
+		// Nothing is applied, so the staged ties the caller built
+		// (releaseFlow) go with it: they never reach the next release (D6's
+		// B2 on #676's 98aa92e8).
 		h.stats.HeadUnread++
+		h.pending, h.pendingTied = nil, 0
 		return 0, err
 	}
 	ph := &releasePhase{prev: slices.Clone(h.open), after: head}
@@ -806,12 +865,15 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	// After the receipts, a recovered panic ends the release as a failed
 	// save of the record after the batch does (result).
 	ph.finish = func() { settle(final()) }
+	ph.resave = func() { _ = h.save(ctx, r.rec) } // counted on failure
 	if len(rel) > 0 {
 		if err := h.save(ctx, rec); err != nil {
 			h.open, applied = ph.prev, false
 			for i := range rel {
 				rel[i].Tie, rel[i].Asset = nil, ""
 			}
+		} else {
+			ph.saved = true
 		}
 		l.commitBatch(ctx, rel, func(last uint64) { ph.after, ph.taken = last, true })
 	}
@@ -924,9 +986,14 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		return false
 	}
 	if heldCount(rec) >= HoldRecordCap {
-		h.stats.RecordCapReleases++
+		// A release not begun (its head unread) leaves the run held and hr
+		// to the caller, which commits it untied or counts its drop (D3's
+		// B1 and D6's B2 on #676's 98aa92e8).
 		rel := append(h.untied(rec.Flows), Release{Record: hr})
-		l.release(ctx, r, rec, rel, nil)
+		if _, err := l.release(ctx, r, rec, rel, nil); err != nil {
+			return false
+		}
+		h.stats.RecordCapReleases++
 		return true
 	}
 	if fi < 0 {
@@ -953,7 +1020,9 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		if s != nil {
 			invocation = s.InvocationID
 		}
-		l.release(ctx, r, rec, h.releaseFlow(done, tie, invocation, rec.Run.AssetID), rec.Flows)
+		if _, err := l.release(ctx, r, rec, h.releaseFlow(done, tie, invocation, rec.Run.AssetID), rec.Flows); err != nil {
+			return false // as at the record cap
+		}
 		return true
 	}
 	if err := h.save(ctx, rec); err != nil {

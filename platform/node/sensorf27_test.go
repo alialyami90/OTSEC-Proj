@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -821,9 +822,13 @@ func TestResultWhileNetworkSwappedOut(t *testing.T) {
 // the session is handed on and its flow judged inside it: no
 // own-session-outside-record alert, and none at the deadline either,
 // since the flow is committed once. result_timeouts stays 0 and
-// sensor-failed is not raised. Control: the rollback in every case in
-// sensorlink's result, under which the Result times out and the deadline
-// commits the flow a second time, untied, which alerts.
+// sensor-failed is not raised. The panic is not silent (D6's B1 on #676's
+// 98aa92e8): sched_panics is 1 in status, and it is counted as the failed
+// save of the record after the batch, so intake-checkpoint-failed is
+// raised. Controls: the rollback in every case in sensorlink's result,
+// under which the Result times out and the deadline commits the flow a
+// second time, untied, which alerts; and the checkpoint count removed from
+// sensorlink's endPhase, under which no alarm names the panic.
 func TestSchedulerPanicAfterBatchHandedOn(t *testing.T) {
 	c, _ := holdConfig(t)
 	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
@@ -859,5 +864,13 @@ func TestSchedulerPanicAfterBatchHandedOn(t *testing.T) {
 	}
 	if n, c := outsideRecord(t, r), r.sensor.Load().link.Stats().Committed; n != 0 || c != 1 {
 		t.Fatalf("%d own-session-outside-record alerts and %d commits; want none, and the flow committed tied, once", n, c)
+	}
+	b, err := json.Marshal(sn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sn.SchedPanics != 1 || sn.Hold.CheckpointFailures != 1 || countAlarms(st, AlarmIntakeCheckpointFailed) != 1 || !strings.Contains(string(b), `"sched_panics":1`) {
+		t.Fatalf("after a panic past the batch: sched_panics %d, checkpoint_failures %d, %d intake-checkpoint-failed; want 1 each, in %s",
+			sn.SchedPanics, sn.Hold.CheckpointFailures, countAlarms(st, AlarmIntakeCheckpointFailed), b)
 	}
 }
