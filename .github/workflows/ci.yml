@@ -103,10 +103,13 @@ jobs:
           if printf '%s\n' "$v" | grep -Ev '^[^ ]+ c /' | grep -q .; then
             echo "::error::a packaged rsyslog file differs from dpkg's record"; exit 1
           fi
+      # -v, so that the log shows each test's --- PASS or --- FAIL, as the
+      # Windows step below does (D4-99, in place of the hand-kept list of
+      # sensor tests that D1 authorized on #663).
       - if: runner.os == 'Linux'
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
-        run: go test ./...
+        run: go test -v ./...
       # The forwarder's three rsyslog tests again, with -v, so that the log
       # shows each one's --- PASS or --- FAIL rather than only the package's
       # result (D4, P4-D4-F26). OTSEC_RSYSLOG_REQUIRED=1 makes a missing
@@ -116,15 +119,6 @@ jobs:
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
         run: go test -count=1 -run 'TestRsyslog' -v ./modules/telemetry/forward
-      # F-027's sensor tests again, with -v, so that both go jobs' logs show
-      # each one's --- PASS or --- FAIL (D1 on #663, brief P4-4-F27).
-      - name: sensor store set tests (-v)
-        if: '!cancelled()'
-        shell: bash
-        run: |
-          go test -count=1 -v ./platform/node/sensortest/...
-          go test -count=1 -v -run '^(TestHoldRecordUnreadableNodeStarts|TestIntakeRetryRecoversAndRepairs|TestIntakeNotPublishedOnFailedRecovery|TestRunWhileSensorResumeHeld|TestRunAfterSensorFailed|TestForwardSessionsSplit|TestSensorStoreNotOpenForwardingGoesOn|TestSensorSessionUnreachableNamed|TestSensorSessionUnreportedShown|TestSensorStartupAlarmConcurrent)$' ./platform/node
-          go test -count=1 -v -run 'TestNewSecondSession|TestSecondSession' ./modules/telemetry/forward
       - if: runner.os == 'Windows'
         shell: bash
         run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
