@@ -1973,7 +1973,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Files or modules each role may modify:
   - D4: a new `docs/phase4/D4-c13-0.3-proposal.md`;
   - D2: a new `docs/phase4/D2-c2-0.10-proposal.md`;
-  - D3: `docs/phase4/D3-sensor-link.md`.
+  - D3: `docs/phase4/D3-sensor-link.md`, and HR-23's row in `docs/threat-model.md` for D4-100 item 1.
   - No contract code changes. The code comes with the brief "The approved contracts in code".
 - Expected interfaces:
   - C13 0.2 to 0.3: the rule token `own-session-mismatch`; `orig_payload` and `resp_payload`; `orig_pkts` and `resp_pkts`; `orig_overlap_octets` and `incomplete`; `orig_rexmit_inconsistent`; and `login.attempts` as password lines sent. Each with what an earlier reader does with it (§7.1 item 1).
@@ -1988,6 +1988,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Uncertainty or safety risks:
   - On an own Telnet flow, `orig_payload` less the approved commands' lengths gives the password's length (D3's N1, §7.1 item 2). The proposal states the readers and the residual.
   - `rexmit_octets` is read by `SIO_TCP_INFO` under D3's read rule, which the hosted Windows measurement checks (D4-98).
+  - `contracts/adapter`'s tests use `otsec.adapter/0.10` as a future version (`adapter_test.go`, `testdata/generate.py`, `results/valid/failed.unknown.json`). D2's proposal says how those fixtures move when 0.10 is coded.
 - Scratch files: `d4-hr24p-*`, `d2-hr24p-*`, `d3-hr24p-*`
 
 ### P4-4-HR23 (D4; D2, D3 and D7 review; D6 for the cases): HR-23's fix

@@ -1930,7 +1930,7 @@ No new words from the owner. Evidence class: `desk`. Nothing is built. This numb
 
 ## D4-94: the Modbus signature is not adopted, and E-D4-03's thirteen new rows (D1, 2026-11-13)
 
-*Partly superseded by D4-98: HR-22 and HR-23 no longer close on the owner's acceptance.*
+*Partly superseded by D4-98: HR-22 and HR-23 no longer close on the owner's acceptance.* *Partly superseded by D4-100: ADR-0009's third turning condition is met on `dnp3-udp-unsolicited`.*
 
 No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs, `desk` for the rest.
 
@@ -2092,18 +2092,16 @@ Evidence class: `desk`. D1's first proposal 1, a restart habit for the main sess
 - **Dropped: the build summaries of D4-97.**
   - The design documents are 13% of tool reads, and agents already read them in slices.
   - Each summary would be a second copy that needs its own reviews and can drift from the original.
-- **Next decision number:** D4-100.
-
 ## D4-100: HR-23's fix and ADR-0009's third turning condition, the next briefs, and #655's follow-ups (D1, 2026-11-13)
 
 No new words from the owner. Evidence class: `desk` for the rulings; the runs cited are `CI-Linux`, `simulated`.
 
-- **1. ADR-0009's third turning condition is met, and the choice does not turn.**
+- **1. ADR-0009's third turning condition is met on the measurement, and the choice does not turn.** Whether the sites use DNP3 over UDP is unknown.
   - The condition is "cannot read DNP3 over UDP where the sites use it". On `dnp3-udp-unsolicited` (#657; the counted run 43419437949 at `650a62be`) every configuration tested fails all five rows: the master's 2-octet confirm stops Zeek's `DNP3_UDP` analyzer, and nothing after it is seen (D4's reading 6852704517 of the rehearsal run 43423267197).
   - It does not turn the choice, for the reason D1 gave for Modbus on #637: no engine tested meets it. Suricata 8.0.8 identifies DNP3 over UDP in none of GT-PCAP's five UDP captures.
   - Whether a site uses DNP3 over UDP, and whether its relays send unsolicited responses, is a site fact that the owner holds (HANDOFF, "Waiting on the owner", item 1).
   - This replaces D1's ruling on #652 that the condition is not met. That ruling predates the case.
-  - HR-23 stays open and high, and it blocks item 4's gate (D4-98). ADR-0009 records this under D1's ruling on #637.
+  - HR-23 stays open and high, and it blocks item 4's gate (D4-98). ADR-0009 records this under D1's ruling on #637, and D4-94 and D4's note 5.2 are marked. D3 amends HR-23's row in `docs/threat-model.md` in its P4-4-HR24P PR.
 - **2. Part (b) of HR-23's fix may be a change outside the approved engine's script.**
   - Part (b) keeps the analyzer on a flow the relay starts. That it cannot be done from the script is `inference`, since no one has read Zeek's source for it. Stage 1 of brief P4-4-HR23 settles it from Zeek 9.0.1's source before anything is built.
   - If a change outside the script is needed, it is admitted as HR-23's fix, on these conditions:
@@ -2129,4 +2127,3 @@ No new words from the owner. Evidence class: `desk` for the rulings; the runs ci
   - **D5's items** are taken into P4-4-DO's D5 PR, which is D5's next change to its note. For N1 (a clean stop within the minute after a `sensor.counters` commit), the double is listed beside case (iv), and no new mechanism is added.
   - **D6's N1 on #656** is taken into P4-D6-F027R.
 - **Next decision number:** D4-101.
-
