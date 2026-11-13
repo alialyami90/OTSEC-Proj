@@ -76,3 +76,43 @@ def test_gt_pcap_members_are_synthesized():
     assert table.synthesized("GT-PCAP (D6), synthesized")
     assert table.synthesized("synthesized (D4)")
     assert not table.synthesized("zeek/zeek v9.0.1")
+
+
+def test_reg_rows_control_every_row_ran():
+    # D6's B3: the control, every row ran and S0 keeps S1's passes.
+    assert table.reg_rows([("pass a", "pass a"), ("fail b", "fail b"), ("fail c", "pass c")]) == ("pass", [])
+
+
+def test_reg_rows_unrun_is_unknown_never_pass():
+    # D6's B3: rows that did not run under S1 or S0 make it unknown.
+    assert table.reg_rows([("pass a", "pass a"), ("unknown (not run)", "unknown (not run)")])[0].startswith("unknown")
+    assert table.reg_rows([("pass a", "pass a"), ("unknown (not run)", "fail b")])[0].startswith("unknown")
+    assert table.reg_rows([("pass a", "pass a"), ("pass b", "unknown (not run)")])[0].startswith("unknown")
+    assert table.reg_rows([])[0].startswith("unknown")
+
+
+def test_reg_rows_lost_pass_fails_over_unknown():
+    assert table.reg_rows([("pass a", "fail a"), ("unknown (not run)", "unknown (not run)")]) == ("fail", [0])
+
+
+def test_held_counts_rule():
+    # D6's N7: only judged flows count, and only public ones count as public.
+    pub, syn = "zeek/zeek v9.0.1", "synthesized (D4)"
+    assert table.held_counts("pass", True, False, "held-502", pub) == (True, True)
+    assert table.held_counts("fail", True, False, "held-502", pub) == (True, True)
+    assert table.held_counts("unknown", True, False, "held-502", pub) == (False, False)
+    assert table.held_counts("listed", True, False, "held-502", pub) == (False, False)
+    assert table.held_counts("pass", True, False, "held-502", syn) == (False, True)
+    assert table.held_counts("pass", True, False, "held-502", "GT-PCAP (D6), synthesized") == (False, True)
+    assert table.held_counts("pass", True, False, "held-502", None) == (False, True)
+    assert table.held_counts("pass", False, False, "held-502", pub) == (False, False)
+    assert table.held_counts("pass", False, False, "held-other", pub) == (True, True)
+    assert table.held_counts("pass", True, True, "held-502", pub) == (False, False)
+
+
+def test_seen_same_compares_the_hashes():
+    # D6's N9: the sentence follows hashes.txt, not fixed text.
+    same = "S0, zeek-modbus-sig: modbus-sig.zeek 7be2c6a2" + "0" * 56 + "\nS0, zeek-modbus-sig: modbus-sig.sig 96f335c0" + "0" * 56
+    assert "first run at 4011e49e" in table.seen_same(same)
+    other = same.replace("96f335c0", "aaaaaaaa")
+    assert "**not**" in table.seen_same(other)

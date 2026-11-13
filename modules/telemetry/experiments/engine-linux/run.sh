@@ -238,7 +238,7 @@ sig() {
     esac
   done
   python3 -I "$here/flows.py" "$s/pcaps"/* > "$s/flows.tsv"
-  python3 -I "$here/corpus_label.py" "$corpus/corpus.tsv" "$s/pcaps" "$s/flows.tsv" "$s/labels.tsv" || rm -f "$s/labels.tsv"
+  python3 -I "$here/corpus_label.py" "$corpus/corpus.tsv" "$s/pcaps" "$s/flows.tsv" "$s/labels.tsv"     || { echo "corpus_label.py failed; the labels are not regenerated in this run"; rm -f "$s/labels.tsv"; }
   pcaps=$s/pcaps
   out=$s/out
   mkdir -p "$out"

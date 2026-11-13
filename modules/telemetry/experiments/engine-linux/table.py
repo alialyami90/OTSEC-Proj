@@ -887,6 +887,41 @@ def judge_held(rows):
     return state, ctl_pass, out
 
 
+def reg_rows(pairs):
+    """reg-rows over (S1 result, S0 result) pairs, one per row of D6's
+    engine-pass-conditions: (verdict, indexes of the rows S1 passes that fail
+    under S0). `fail` when such a row exists; else `unknown` when any row did
+    not run under S1 or S0, or none ran; else `pass` (D6's B3 on #643)."""
+    lost = [i for i, (a, b) in enumerate(pairs) if verdict(a) == "pass" and verdict(b) == "fail"]
+    if lost:
+        return "fail", lost
+    if not pairs or any("unknown" in (verdict(a), verdict(b)) for a, b in pairs):
+        return "unknown (not run)", lost
+    return "pass", lost
+
+
+def held_counts(state, ctl_pass, no_roles, kind, source):
+    """held-count's rule for one held-out flow: (counts, counts_any). A flow
+    counts when it was judged pass or fail (never unknown or listed), its
+    roles are recoverable, and, on 502, its controls passed; `counts` also
+    needs a public capture, by the manifest's source (D1's ruling 6840362704;
+    D6's N7 on #643). source is None for a capture not in the manifest."""
+    ok = state in ("pass", "fail") and not no_roles and (kind == "held-other" or ctl_pass)
+    return ok and source is not None and not synthesized(source), ok
+
+
+def seen_same(hashes):
+    """judge-seen: this run's signature hashes (hashes.txt) against the last
+    run SEEN lists, compared, not stated (D6's N9 on #643)."""
+    got = {m.group(1): m.group(2)[:8] for m in re.finditer(r"zeek-modbus-sig: (modbus-sig\.(?:zeek|sig)) ([0-9a-f]{64})", hashes)}
+    now = f"{got.get('modbus-sig.zeek', '?')}/{got.get('modbus-sig.sig', '?')}"
+    last = SEEN[-1][2]
+    first = next(h for _, h, sg in SEEN if sg == last)
+    if now == last:
+        return f"This run loads {now}, the signature the last listed run loaded, first run at {first}"
+    return f"This run loads {now}, **not** the signature the last listed run loaded ({last}); the listed runs did not run it"
+
+
 def held_tally(hs):
     """held-502 or held-other over its flows: (verdict, detail). Listed flows
     (refused, or every row also failing on 502) are named apart and are in no
@@ -946,7 +981,10 @@ def sig(s, root, work):
 
     # The labels regenerated in this run, against the committed ones.
     regen = os.path.join(s, "labels.tsv")
-    if labels_from == committed and os.path.exists(regen):
+    if labels_from == committed and not os.path.exists(regen):
+        print("**The labels were not regenerated in this run:** `corpus_label.py` failed (the job log says so); "
+              "the committed file decides (D6's N8 on #643).\n")
+    elif labels_from == committed:
         a = [l for l in open(committed, encoding="utf-8") if not l.startswith("#")]
         b = [l for l in open(regen, encoding="utf-8") if not l.startswith("#")]
         same = a == b
@@ -986,12 +1024,13 @@ def sig(s, root, work):
         r, cite = hit[0]
         v[key] = (det_verdict(r, ctl_ok, ctl_unknown, v["ctl-baseline"][0] == "fail"), f"{r} {cite}")
     pairs = list(zip(res[S1], res[S0]))
-    s1_pass = [(a, b) for a, b in pairs if verdict(a[1]) == "pass"]
-    lost = [a[0] for a, b in s1_pass if verdict(b[1]) != "pass"]
-    s0_pass = sum(1 for _, b in pairs if verdict(b[1]) == "pass")
-    v["reg-rows"] = ("pass" if s1_pass and not lost else "fail" if lost else "unknown (not run)",
-                     f"S1 passes {len(s1_pass)} of {len(pairs)}, S0 {s0_pass} of {len(pairs)}; rows S1 passes that S0 does not: "
-                     + ("; ".join(f"{r['capture']} {r['condition']} {r['code']}" for r in lost) or "none"))
+    rv, lost = reg_rows([(a[1], b[1]) for a, b in pairs])
+    n_pass = {i: sum(1 for p in pairs if verdict(p[i][1]) == "pass") for i in (0, 1)}
+    n_unrun = {i: sum(1 for p in pairs if verdict(p[i][1]) == "unknown") for i in (0, 1)}
+    v["reg-rows"] = (rv, f"S1 passes {n_pass[0]} of {len(pairs)}, S0 {n_pass[1]} of {len(pairs)}; not run: {n_unrun[0]} under S1, "
+                     f"{n_unrun[1]} under S0; rows S1 passes that fail under S0: "
+                     + ("; ".join(f"{pairs[i][0][0]['capture']} {pairs[i][0][0]['condition']} {pairs[i][0][0]['code']}" for i in lost)
+                        or "none"))
 
     # 2. Held-out Modbus flows (held-502, held-other, held-count).
     ports = {}
@@ -1012,7 +1051,7 @@ def sig(s, root, work):
             cap, ctlcap, port = (MOVED if lab["capture"] == CONTROL else lab["capture"] + "-moved-port"), lab["capture"], MOVED_PORT
         else:
             cap, ctlcap, port = lab["capture"], None, lab["dport"]
-        held.append({"lab": lab, "cap": cap, "ctl": ctlcap, "port": port, "public": public, "no_roles": no_roles,
+        held.append({"lab": lab, "cap": cap, "ctl": ctlcap, "port": port, "public": public, "source": meta["source"] if meta else None, "no_roles": no_roles,
                      "kind": "held-502" if ctlcap else "held-other"})
     by_cap = collections.defaultdict(list)
     for h in held:
@@ -1066,9 +1105,7 @@ def sig(s, root, work):
             continue
         state, ctl_pass, out_rows = judge_held(h[S0])
         h["state"] = state
-        ok = state in ("pass", "fail") and not h["no_roles"] and (h["kind"] == "held-other" or ctl_pass)
-        h["counts"] = h["public"] and ok
-        h["counts_any"] = ok
+        h["counts"], h["counts_any"] = held_counts(state, ctl_pass, h["no_roles"], h["kind"], h["source"])
         h["result"] = ("listed: every row also fails on port 502; " if state == "listed" else "") + "; ".join(out_rows)
     for key in ("held-502", "held-other"):
         v[key] = held_tally([h for h in held if h["kind"] == key])
@@ -1146,7 +1183,7 @@ def sig(s, root, work):
                 "judge-verdict": "applied", "judge-counted": "the header above",
                 "judge-seen": "earlier runs of S0 over the corpus, run ID at head (modbus-sig.zeek/modbus-sig.sig): "
                               + "; ".join(f"{r} at {h} ({sg})" for r, h, sg in SEEN)
-                              + f". The signature is unchanged since {SEEN[2][1]} (the hashes above against the last listed); "
+                              + f". {seen_same(hashes)}; "
                               "the earlier signature ran over the captures the manifest's `seen` column marks. A run of S0 after "
                               f"{SEEN[-1][0]}, at the head that adds it to this list or later, is not in the list: "
                               "the counted result's comment names it",
