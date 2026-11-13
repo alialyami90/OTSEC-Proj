@@ -1895,6 +1895,8 @@ The owner's words in the CLI on 2026-11-13, asked whether the uncommitted `effor
 
 ## D4-92: C13 0.2, the node's design, C7 0.11, C8 0.13 and C4 0.4 approved together (D1, 2026-11-13)
 
+*Partly superseded by D4-98: HR-22 and HR-23 no longer close on the owner's acceptance.*
+
 No new words from the owner. Evidence class: `desk`. Nothing is built. This number was reserved for this approval on 2026-11-13 (comments on #640 to #645), so D4-93 (the owner's effort change, #650) precedes it in the file.
 
 - **Approved as contracts, at the merged texts:**
@@ -2018,44 +2020,50 @@ The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes an
 
 ## D4-98: the owner's open questions settled on D1's recommendations, and D3's effort (the owner, 2026-11-13)
 
-The owner wrote, in D1's session on 2026-11-13: "For things waiting on me go with your recommended choice for a better and secure product. D3 can be high." Evidence class: `desk`.
+The owner wrote in D1's session on 2026-11-13: "For things waiting on me go with your recommended choice for a better and secure product. D3 can be high." Evidence class: `desk`.
 
-The delegation covers choices D1 can make from the records. It does not reach:
+**What the delegation covers.** It covers only choices for which D1 or a role has a written recommendation. It does not cover:
 - facts only the owner holds;
-- anything CLAUDE.md reserves for the owner's explicit authorization: device or network contact, purchases, a site outage or a switch change, and credentials or keys.
+- the owner's own requirements (for example R1.8);
+- anything CLAUDE.md reserves for the owner's explicit authorization (§10 and the owner's rules): device or network contact, production networks, purchases, a site outage or switch change, a site's security policy, and credentials or keys.
 
-Those stay with the owner, below.
+Those stay with the owner, as listed below.
 
 - **D3's effort is `high`** (`.claude/agents/d3-security-access.md`). This replaces D4-93 for D3 only.
-- **HR-22 and HR-23 are not accepted.** Each closes only on a fix measured on a counted run, as HR-24 does (D4-95). The owner's acceptance is no longer a way to close them. The fixes:
-  - HR-23's parts (a) and (b), in its row of `docs/threat-model.md`;
-  - for HR-22, a new signature brief with new held-out captures (D4-94).
-
-  D1 briefs both in the third part. The `undecoded` signal stays in item 4's gate. This replaces, for HR-22 and HR-23, D4-94's "or on the owner's acceptance" and D4-95's line that they keep it. Until D3 amends the two rows in `docs/threat-model.md`, their words "or the owner's acceptance" are superseded by this entry.
-- **The Windows measurement HR-24 stage 2 needs** (`BytesRetrans` under loss, D1 on #664) runs on a GitHub-hosted Windows runner with a packet-dropping tool, not on the owner's PC. That is the safer place for a test driver. The tool (D4 named WinDivert on #664) needs D7's inventory entry before it is used (D4-79). If a hosted runner cannot do it, it comes back to the owner.
-- **The sensor's host (#640):** every row O-1 to O-12 of `docs/phase4/D1-sensor-host-recommendation.md` is adopted as recommended. Some parts stay open:
-  - O-7: the project ships a signed image, and the release key's holder stays the owner's (TB9).
-  - Questions 1 to 5 there are facts about the sites. Question 5 has a stated default: a link with no answer counts as carrying protection traffic with no tolerance for an interruption. Questions 1 to 4 have none. So the rows that depend on them (O-1, O-4, O-5, O-10 and O-12) are not applied at a site until that site's answer is recorded.
-  - O-7 changes what the product is. The owner may reverse it.
-  - Buying lab equipment, and any outage window or switch change at a site, still need the owner's word when the time comes.
-- **R6.7's insecure list** gains IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68).
-- **Item 3's questions** (D4-65 and HR-17):
-  - A report shows a severity score only as its source published it, labelled with that source. The platform computes none.
-  - No SNMP v1 or v2c path is added, so its approval key is not needed.
-  - Which SEL switches the sites run, and the model naming for set authors, stay with the owner as facts.
+- **HR-22 and HR-23 are not accepted.** Neither closes on the owner's acceptance any more. Each closes only on a fix measured on a counted run, as HR-24 does under D4-95. This replaces "or on the owner's acceptance" in D4-92, D4-94 and D4-95 for these two rows. Until D3 amends the rows in `docs/threat-model.md`, those words there are superseded by this entry.
+  - **HR-23** blocks item 4's gate. Its fix is known: parts (a) and (b) in its row. D1 briefs it in the third part. If the measured fix does not close the row, HR-23 comes back to the owner with the measurement before the gate, on D4-95's path.
+  - **HR-22** does not block the gate. No candidate fix exists after D4-94. The gate keeps its Modbus bullet: the gate report says that Modbus on a moved port is not identified, and HR-22 stands open and high. D1 briefs a new signature, with new held-out captures, in the third part. The `undecoded` signal stays in the gate.
+- **The Windows measurement HR-24 stage 2 needs** (`BytesRetrans` under loss, D1 on #664) runs on a GitHub-hosted Windows runner with a packet-dropping tool, not on the owner's PC.
+  - That is the safer place for a test driver.
+  - The tool (WinDivert, as D3 named it on #664) needs D7's inventory entry before it is used (D4-79).
+  - If a hosted runner cannot do it, it comes back to the owner.
+- **The sensor's host (#640):** the rows O-1 to O-12 of `docs/phase4/D1-sensor-host-recommendation.md` are adopted as the product's recommendation. Limits:
+  - Applying a row at a site needs that site's facts. Question 5 has a stated default: a link with no answer counts as carrying protection traffic with no tolerance for an interruption. Questions 1 to 4 have none, so the rows that depend on them (O-1, O-4, O-5, O-10 and O-12) are not applied at a site until its answer is recorded.
+  - A row that sets a site's security policy (O-5's management access, O-10's time source) also needs the owner's word for that site.
+  - O-7 (the project ships a signed image) changes what the product is. The owner may reverse it, and the release key's holder stays theirs (TB9).
+  - The operating system is chosen by D4 and D7 under O-7, as the recommendation says.
+  - D3's note and ADR-0009 follow these rows.
+- **R6.7's insecure list** is to gain IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports and raw TCP serial tunnels (D4-68's proposal).
+  - C13's `insecure.reason` set is closed, so this needs a C13 change (D4) and V-M6's list (D6) before it is built.
+  - Until then, `docs/requirements.md` records the additions as decided and not contracted.
 - **From D4-65:**
   - the reserve fails (drain-only, as D4-65 states) on a volume that cannot hold real space (compressed or copy-on-write);
   - the store gets a Windows folder flush;
   - the rare starts over 6 s are briefed at low priority.
-- **Still the owner's:**
-  - the sites' networks;
-  - the DNP3 Secure Authentication text, a licensed copy only the owner can provide;
+- **Not settled by this entry, and still the owner's:**
+  - item 3's questions: severity scores in reports (C3 §1.3, R9.2), the v1 and v2c approval key (HR-17, R1.8), which SEL switches the sites run, and model naming;
+  - the sites' facts;
+  - the DNP3 Secure Authentication text;
   - HR-18's advisory publisher and key;
   - the release key's holder (TB9);
+  - purchases and site changes;
   - any device contact;
   - the word to start D8's first brief. D1 recommends it waits until the foundational workflows are proven (CLAUDE.md §4).
 - **Follow-up:**
-  - D3 amends HR-22's and HR-23's rows for "not accepted", HR-17's row for "no v1 or v2c path is added", and D3's note for the #640 rows.
-  - R6.7's line in `docs/requirements.md` is updated in this entry's PR.
-  - D5 takes D4-65's items in a brief.
-  - D1 issues the HR-22 and HR-23 fix briefs.
+  - D3 amends the HR-22 and HR-23 rows and its note.
+  - D4 proposes the C13 change for R6.7.
+  - D6 adds the list to V-M6.
+  - D5 takes D4-65's items.
+  - D7 inventories the packet-dropping tool.
+  - D4 and D7 choose the operating system.
+  - D1 issues the HR-23 fix brief and the HR-22 signature brief. The gate's Modbus bullet is marked with this entry in the same PR.

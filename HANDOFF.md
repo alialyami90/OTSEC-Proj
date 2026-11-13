@@ -59,9 +59,9 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
      - D6 records in F-027 (`docs/verification.md`) the closings of #662 and #663 (F2, F5, F6, F7, F9's cap, F10), corrects its F11 sentence, and updates points 3 and 4 of its gate for D4-96.
   7. **The approved contracts in code** (C13 0.2, C7 0.11, C8 0.13, C4 0.4, with D6's contract tests): the first of the later briefs of the third part, after P4-4-F27. Item 3's C8 sentence folds into it.
   8. **Issued briefs not yet delivered:** P4-D6-RR, P4-D6-I100, P4-D6-MUT and P4-D7-2 (D4-88, D4-90).
-  9. **D4-98's follow-ups:** D1 issues the HR-22 and HR-23 fix briefs; D3 amends both rows for "not accepted" and its note for the #640 rows; D5 takes D4-65's items; D7 inventories the packet-dropping tool before HR-24 stage 2 uses it.
+  9. **D4-98's follow-ups:** the list at the end of D4-98 in `docs/phase4/B1-decisions.md`.
   10. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
-- **The sensor's own brief** also waits for the owner's answers on the sensor's host (#640, "Waiting on the owner" item 1).
+- **The sensor's own brief** can be issued under the adopted #640 rows (D4-98). Applying them at a site waits for that site's facts ("Waiting on the owner" item 1).
 - **F-027's gate stands (D4-96):** no `network_sensor` section outside the tests, no release, and no product wiring of any sensor path.
 - **CI under D4-97:** add `full-ci` after the last review, and merge only on the merge check in CLAUDE.md, "Testing and merging".
 
@@ -77,22 +77,26 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 ## Waiting on the owner
 
 **Settled on D1's recommendations (D4-98, 2026-11-13):**
-- HR-22 and HR-23 are not accepted; each needs a measured fix;
-- D3's effort is `high`;
-- HR-24's Windows measurement runs on a hosted runner;
-- the #640 rows O-1 to O-12 are adopted;
-- R6.7's list is extended;
-- item 3's and D4-65's questions are decided.
+- HR-22 and HR-23 are not accepted. HR-23 must be fixed before item 4's gate; HR-22 stands open at it.
+- D3's effort is `high`.
+- HR-24's Windows measurement runs on a hosted runner.
+- The #640 rows are adopted as the product's recommendation.
+- R6.7's list is decided, and needs a C13 change.
+- D4-65's items are decided.
 
 What D4-98 leaves with the owner:
 
-1. **The sites' facts:** questions 1 to 5 of `docs/phase4/D1-sensor-host-recommendation.md`, the protocols on each site's networks, which SEL switches the sites run, and the model naming for set authors (`SEL-2731M`). Until questions 1 to 4 are answered, the rows that depend on them are not applied at a site (D4-98).
-2. **The DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5), a licensed copy only the owner can provide (D4-68).
-3. **HR-18:** who publishes the advisory set and holds its signing key. No real advisory is entered until then.
-4. **The release key's holder** (TB9), for O-7's signed image.
-5. **Purchases and site changes,** when the time comes: lab TAPs and machines, and a site's outage window or switch change (#640).
-6. **The word to start D8's first brief.** D1 recommends that it waits (D4-98).
-7. **O-7, a product-scope change, was adopted under the delegation (D4-98).** The project ships a signed image. The owner may reverse it.
+1. **The sites' facts:** questions 1 to 5 of `docs/phase4/D1-sensor-host-recommendation.md`, the protocols on each site's networks, which SEL switches the sites run, and the model naming for set authors (`SEL-2731M`). Until questions 1 to 4 are answered, the rows that depend on them are not applied at a site. A row that sets a site's security policy (O-5, O-10) needs the owner's word for that site.
+2. **Item 3's other questions:** severity scores in reports (C3 §1.3, R9.2), and the v1 and v2c approval key (HR-17, R1.8). These are the owner's requirements, so D4-98 does not settle them.
+3. **The DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5), a licensed copy only the owner can provide (D4-68).
+4. **HR-18:** who publishes the advisory set and holds its signing key. No real advisory is entered until then.
+5. **The release key's holder** (TB9), for O-7's signed image. O-7 was adopted under the delegation, and the owner may reverse it.
+6. **Purchases and site changes,** when the time comes: lab TAPs and machines, and a site's outage window or switch change (#640).
+7. **Returns to the owner before item 4's gate:**
+   - HR-24, with stage 3's measurement and its named misses (D1 on #664);
+   - HR-23, if its measured fix does not close the row (D4-98).
+
+   D8's first brief waits for the owner's word, and D1 recommends that it waits (D4-98).
 8. **Authorization for any device contact:** a lab relay or switch before any H-test or Q3, and any SNMPv3 contact.
 9. **Test runs on the owner's PC** are resumed for ordinary local runs (D4-83, 2026-11-11). Runs that create Windows services stay in the owner's elevated session. Nothing is owed here.
 10. **The branch cleanup is done** (D4-83). Nothing is owed here.
