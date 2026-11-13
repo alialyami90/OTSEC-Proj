@@ -107,6 +107,7 @@ func TestD6SensorTextNeverReachesStatus(t *testing.T) {
 		t.Logf("serve: %v", err) // the channel may close on the bad frame; what was taken still counts
 	}
 	r.Tick(ctx)
+	waitStep(t, r)
 
 	snap := st.Snapshot("site-a-node1")
 	b, err := json.Marshal(snap)

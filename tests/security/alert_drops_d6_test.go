@@ -90,13 +90,16 @@ func adStart(t *testing.T, dir string, create bool, alertQuota int64) *adNode {
 	}
 	waitFirstStep(t, n.r)
 	n.r.Tick(context.Background())
+	waitStep(t, n.r)
 	return n
 }
 
 // advance moves the monotonic clock by d and ticks.
-func (n *adNode) advance(d time.Duration) {
+func (n *adNode) advance(t *testing.T, d time.Duration) {
+	t.Helper()
 	n.mono.Add(int64(d))
 	n.r.Tick(context.Background())
+	waitStep(t, n.r)
 }
 
 // adHit is one flow start from the node's address to dst:2323 at the
@@ -120,6 +123,7 @@ func (n *adNode) window(t *testing.T, seq *int, at time.Time, hits ...adHit) {
 	}
 	serveRecs(t, n.r, recs...)
 	n.r.Tick(context.Background())
+	waitStep(t, n.r)
 }
 
 // adSpoof and adOwn are the hits on relay i (0 is the real relay).
@@ -255,7 +259,7 @@ func TestD6AlertClassFullCounts(t *testing.T) {
 	}
 	// The event is written at most once a minute: a minute on, it carries
 	// the counts status shows.
-	n.advance(node.SensorDropReportEvery)
+	n.advance(t, node.SensorDropReportEvery)
 	ev := n.lastAlertDrops(t, "a minute on")
 	wantEv := map[string]string{"stream": string(node.NetAlertStream(unrSensor)), "class": string(c5.ClassNetworkAlert),
 		"since": ev["since"], "count": strconv.FormatUint(total, 10), "reason." + sensorlink.DropClassFull: strconv.FormatUint(total, 10)}
@@ -296,7 +300,7 @@ func TestD6AlertDropsHidingEnrolledDecoys(t *testing.T) {
 	n := adStart(t, dir, true, 64<<10)
 	// The unresolved budget starts empty and fills over outage_hours on
 	// the monotonic clock; a full budget lets the unresolved flows commit.
-	n.advance(72 * time.Hour)
+	n.advance(t, 72*time.Hour)
 	seq := 0
 	unknown := adHit{adUnknown, "02:00:00:00:00:01"}
 	at := n.fill(t, &seq, time.Date(2026, 11, 8, 10, 0, 0, 1000, time.UTC), unknown, unknown)
@@ -321,7 +325,7 @@ func TestD6AlertDropsHidingEnrolledDecoys(t *testing.T) {
 			}
 		}
 	}
-	n.advance(node.SensorDropReportEvery)
+	n.advance(t, node.SensorDropReportEvery)
 	ev := n.lastAlertDrops(t, "8 enrolled pairs")
 	if ev[r] != "1" || ev[o] != "1" || ev[unres] != "" || ev["other"] != strconv.FormatUint(u, 10) || len(ev) != 4+1+8+1 {
 		t.Fatalf("with 8 enrolled pairs: event %v", ev)

@@ -164,7 +164,7 @@ func TestD6AlertCaptureFramesMissing(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "store")
 	f1, f2, f3 := acFrame(1), acFrame(2), acFrame(3)
 	gone := acHash(acFrame(9)) // no first sight ever holds it
-	r, st := bcStart(t, dir, true)
+	r, st := bcStart(t, dir, true, nil)
 	r.Tick(ctx)
 	// Before the restart: a first sight of two frames, one of one, and a
 	// flow citing a held frame between two that are not.
@@ -174,6 +174,7 @@ func TestD6AlertCaptureFramesMissing(t *testing.T) {
 		acFlow(3, "2026-11-08T10:00:02.000001Z", []string{gone, acHash(f2), acHash(acFrame(8))}),
 	)
 	r.Tick(ctx)
+	waitStep(t, r)
 	r.Close()
 
 	// After the restart, the index comes from the store: flows citing the
@@ -182,7 +183,7 @@ func TestD6AlertCaptureFramesMissing(t *testing.T) {
 	// the 10:00 windows, whose summaries cite across all of them, and opens
 	// new ones citing only frames no first sight holds, and one at 11:00
 	// that closes those.
-	r, st = bcStart(t, dir, false)
+	r, st = bcStart(t, dir, false, nil)
 	defer r.Close()
 	r.Tick(ctx)
 	serveRecs(t, r,
@@ -193,6 +194,7 @@ func TestD6AlertCaptureFramesMissing(t *testing.T) {
 		acFlow(8, "2026-11-08T11:00:00.000001Z", []string{acHash(f3), acHash(f2)}),
 	)
 	r.Tick(ctx)
+	waitStep(t, r)
 
 	c := acCheck(t, r)
 	d := bcDetector(t, st, "after the stream")
