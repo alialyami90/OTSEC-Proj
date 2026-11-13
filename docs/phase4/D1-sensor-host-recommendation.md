@@ -2,7 +2,7 @@
 
 D4-86 owes the owner one recommendation on the sensor's host under option (b): the hardware, the operating system, and who builds and patches it. D3's note (`docs/phase4/D3-sensor-link.md` §10) lists twelve choices, O-1 to O-12, with what each costs in risk. This file gives D1's recommendation for each, in one place, for the owner to accept, change or refuse.
 
-**Status: a recommendation.** Nothing here is decided, bought or built. The owner decides every row. Evidence class: `desk`, from D3's note, ADR-0009, and the measurements cited. No hardware, TAP, switch or distribution named or described here has been run by this project.
+**Status: adopted as the product's recommendation (D4-98, under the owner's delegation).** Nothing here is bought or built. Applying a row at a site still needs that site's facts, and a row that sets a site's security policy needs the owner's word (D4-98). Evidence class: `desk`, from D3's note, ADR-0009, and the measurements cited. No hardware, TAP, switch or distribution named or described here has been run by this project.
 
 ## What the owner is asked first
 
