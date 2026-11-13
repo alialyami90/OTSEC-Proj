@@ -1,6 +1,6 @@
 # D4: HR-23's fix, the design (P4-4-HR23, stage 1)
 
-D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's rulings on them, and again for the re-reviews of `9919fd24` and D1's ruling 6866095230. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. This PR is documents only: nothing here is built or run.
+D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's rulings on them, again for the re-reviews of `9919fd24` and D1's ruling 6866095230, and again for D6's re-review of `52c7592c` under D1's ruling 6866534402, which narrows this PR to option (i). Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. This PR is documents only: nothing here is built or run.
 
 - **Evidence class: `desk`.** Every statement below about Zeek's code comes from reading its source, and stage 3's counted run measures it. The earlier results this note cites (section 1 item 5, and section 4.2's Basis column) were measured, `CI-Linux`, `simulated`, and each is named with its run. Every statement about IEEE 1815 is `inference`, because the project holds no text of it (D2 on #675).
 - **What was read.** The release tarball `https://github.com/zeek/zeek/releases/download/v9.0.1/zeek-9.0.1.tar.gz`, fetched over HTTPS on 2026-11-13, SHA-256 `fbee2eb5ee6ebd64ef0db830fbb9fa1d702d58807643c719e8338a59329197f2`. It was unpacked in D4's scratch folder, outside the repository. Its signature file `zeek-9.0.1.tar.gz.asc` has SHA-256 `269e266a0b473b4621448034b98a9f8aafe39f0e53f026ad03bff5312e5bffce`. The tarball matches the pin in `docs/phase4/D4-engine-linux-eval.md` §3 (tag `v9.0.1`): its `DNP3.cc`, `dnp3-protocol.pac`, `dnp3-objects.pac`, `events.bif`, `base/protocols/dnp3/main.zeek` and `dpd.sig` have the SHA-256s that §3 records.
@@ -37,10 +37,14 @@ D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's ruli
   | `src/analyzer/protocol/tcp/TCP_Endpoint.cc` | `6a935b5b13f855d792ea671bd08269d3f851991ae70488047f254cd5554bf2a7` |
   | `src/Reporter.cc` | `9bdb6c0597165da9476988e4768905c8ecf28e53b3f3ee5334e5663646b44dac` |
   | `src/packet_analysis/protocol/tcp/TCP.cc` | `585e70b69fcf9eb85984872ecdb34c4bb60cc684b860238ca873254707e38400` |
+  | `src/packet_analysis/protocol/tcp/TCPSessionAdapter.cc` | `4ee34a68a009a54956c35716e8210fc4ab32aac937b252959cea410260c2419c` |
+  | `src/analyzer/protocol/pia/PIA.cc` | `2d4284ca1ea772e3c3369d933d8e5eb04bcca82e426302dd256dbad856c29cd8` |
+  | `scripts/base/init-bare.zeek` | `05e960679cdc6832276c35f8dc2623bce3fa786555cbf80a4a4f19cd9cc4c675` |
 
 - **Inputs:** HR-23 in `docs/threat-model.md`; D4-98 and D4-100; D4's reading 6852704517 on #657; `docs/phase4/D4-engine-linux-eval.md` §3 and 5.8; D6's E2 note §3 (`docs/phase4/D6-modbus-signature-conditions.md`); the project's script, `modules/telemetry/experiments/engine-linux/probe.zeek`, and its judge, `table.py`; GT-PCAP's `dnp3-udp-temp-port` and `dnp3-udp-unsolicited` labels.
 - **The reviews on #675:** D7 6864785127, D2 6864828995, D3 6864835839 and D6 6864977091. **D1's rulings** are 6864990229, and they replace D1's provisional points 6862064732. **D4's confirmation of ruling 1** is 6865038018.
 - **The re-reviews of `9919fd24`:** D7 6865821469, D2 6865838202, D3 6865838688 and D6 6866085736. **D1's rulings on them** are 6865138996 (ids, paths, HR-25) and 6866095230.
+- **The re-reviews of `52c7592c`:** D7 6866209008, D2 6866220392, D3 6866236602 and D6 6866520537. **D1's rulings** are 6866203475 and 6866534402. The second moves HR-25's resync design to its own brief, P4-4-HR25 (section 5.2).
 - Section 7 maps each finding to the place where it is answered.
 
 ## 1. How Zeek picks the DNP3 parser by direction
@@ -150,6 +154,8 @@ The rule, in the project's script. It is CH-49 (C13 0.2), and it applies to DNP3
 
 D6 writes the cases and the conditions, and pins them before the counted run. Labels come from how each case was built, never from an engine. **A case with a forged DIR takes its labels from the builder's role, not from tshark's `dnp3.ctl.dir`,** since that bit is the one being forged (D2's Q4). This section states what the measurement needs, and the results that section 1 predicts (`desk`; the run settles them).
 
+**Case ids name their transport** (D1 6866534402, point 3; D6's N7 on `52c7592c`). None ends in `-udp` or contains `moved-port`, because `table.py`'s summary columns tag a capture by those strings (`endswith("-udp")`, `"moved-port" in`). The new ids here are `dnp3-udp-relay-write`, `dnp3-udp-relay-restart`, `dnp3-udp-master-short`, `dnp3-udp-dir-spoof`, `dnp3-udp-swap-control`, `dnp3-tcp-master-short` and `dnp3-tcp-dir-spoof`, and each meets the rule. The `dnp3-resync-*` ids go to P4-4-HR25.
+
 ### 4.1 The configurations, the port arrangement and the control cases
 
 **The configurations** (D6's B1, D7's N3, ruling 5):
@@ -180,9 +186,13 @@ D6 writes the cases and the conditions, and pins them before the counted run. La
 **The port arrangement.** **Every new relay-started UDP case puts both ends on ports in `likely_server_ports`** (20000 and 20000, as `dnp3-udp-unsolicited` does), or puts both on ports outside the set. Otherwise Zeek swaps the roles at creation, and the case does not test HR-23 (section 1, item 2).
 - **`dnp3-udp-swap-control`** puts the relay on 20000 and the master on a port outside the set. The control engine is expected to pass every row of it, and that measures section 1 item 2.
 - **The TCP arrangement for `dnp3-tcp-master-short`** (D6's B1 on `9919fd24`). By S22, an SEL relay opens no TCP session (D2's table in `docs/phase4/D6-engine-run-pass-conditions.md` §7). So the case is a sensor joining a long-lived session mid-stream, and the first segment the sensor sees is the outstation's (HR-23 item (3)).
-  - `TCPAnalyzer::WantConnection` never swaps a connection seen from its SYN. It swaps one seen without its SYN only by the port numbers (`TCP.cc`).
-  - So with the outstation on 20000 and the master on a port outside `likely_server_ports`, the roles would be put right, and the case would not reach the changed path.
-  - **The case therefore puts both ports outside the set.**
+  - **When Zeek swaps a TCP connection** (D6's N1 on `52c7592c`):
+    - `TCPAnalyzer::WantConnection` never swaps a connection seen from its SYN. It swaps one seen without its SYN by the port numbers (`TCP.cc`);
+    - a connection first seen at its SYN-ACK is swapped once an ACK or data follows (`TCP_Endpoint::CheckHistory`);
+    - a SYN and SYN-ACK seen the wrong way round swap it too (`TCPSessionAdapter.cc`).
+  - **So the case's capture holds neither a SYN nor a SYN-ACK,** and puts both ports outside `likely_server_ports`. With the outstation on 20000 and the master outside the set, the roles would be put right, and the case would not reach the changed path.
+  - **When the analyzer attaches.** `dpd_dnp3_server` (`dpd.sig`) has `tcp-state responder`, so `DNP3_TCP` attaches at the first matching payload from the responder, here the master. The outstation's frames before that reach the analyzer only by the PIA's replay (`PIA_TCP::ReplayStreamBuffer`, `PIA.cc`), within `dpd_buffer_size` (1024 octets) and `dpd_max_packets` (100, `init-bare.zeek`). **The case keeps the outstation's frames before the master's first frame within both limits.**
+  - **C1 is the control for attachment.** C1's Service row needs the analyzer, so a C1 pass on it shows that the analyzer attached and that the replay reached it.
 
 **`dnp3-udp-master-short`, run under C0 before any build** (D2's B2, D6's §4.1, ruling 3). Option (i)'s fix of the confirm assumes that Zeek's request parser accepts a 2-octet application part. By the grammar it should, since the request header is `&length = 2` and the arms for CONFIRM, COLD_RESTART and RECORD_CURRENT_TIME are `empty`. But the record-level `&length` of `DNP3_Request` and `DNP3_Response` is in generated code that was not read, and no GT-PCAP capture holds a 2-octet master message on a flow the master starts.
 - **The case:** one UDP flow that the master starts. It carries a confirm (code 0), a cold restart (13) and a record current time (24, the LAN time sync's 2-octet request). Each is followed by a request of 4 octets or more.
@@ -215,7 +225,7 @@ A row that C0 passes reads `unknown` for the fix, never `pass`. C1's column hold
 | `dnp3-tcp-dir-spoof` | the service | pass | fail (server conflict) | fail (server conflict) | `desk`, section 3 item 4 |
 | `dnp3-tcp-dir-spoof` | the direct operate's objects, and the other rows | pass | pass | pass, `unknown` | `desk`; a selector keyed by DIR would fail the objects row |
 
-C1p is expected to equal C1 on every row. A row where it does not shows the build, not the patch (section 4.1). The C2 column is for option (i) alone. If D1 adopts HR-25's fix into the same patch, section 5.2 lists what changes.
+C1p is expected to equal C1 on every row. A row where it does not shows the build, not the patch (section 4.1). The C2 column is option (i). HR-25's fix is not part of it (section 5.2). Section 4.7 lists every expectation that (i) changes.
 
 - **How `dnp3-udp-relay-write` is built** (D2's Q4; D6's N4). Starting the flow with a 130 is not a conforming session: its CON bit is set, so the master must confirm it, and the 2-octet confirm stops the analyzer first. So the case is built as a sensor joining mid-session, which is HR-23 item (3):
   - the first datagram the sensor sees is the relay's solicited 129 with CON clear, answering a request the sensor missed;
@@ -263,7 +273,7 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
   - (3c) in the same datagram, with valid chunk CRCs and an application part too short for its parser.
 
   By `DNP3_Base::ProcessData` and `ParseAppLayer`, (3a) and (3b-data) raise only a weird (`dnp3_corrupt_app_chunk_checksum`, `dnp3_header_lacks_magic`) and set `skip`. Neither raises an analyzer violation, so `dpd.zeek` never removes the service that the header's CRC confirmed. (3c) throws in binpac, which raises a violation (section 1, item 6), so C0 removes the service;
-- (4) real UDP protocols whose first two octets are free and can be `05 64` (D6's N2): a DNS query with ID `0x0564`, NetBIOS name service and LLMNR with the same ID, and a RADIUS Accounting-Response (code 5, identifier `0x64`). **The generator checks every header CRC, and changes the free field (the ID) whenever one passes** (D6's N3 on `9919fd24`). In a real payload, octets 8 and 9 sit where the header CRC is (a DNS query's ARCOUNT, for one), so a payload could otherwise match by chance;
+- (4) real UDP protocols whose first two octets are free and can be `05 64` (D6's N2): a DNS query with ID `0x0564`, NetBIOS name service and LLMNR with the same ID, and a RADIUS Accounting-Response (code 5, identifier `0x64`). **The generator checks every header CRC.** When one passes, it changes a field outside the first two octets that keeps the message valid for its protocol, and checks again: the flags of a DNS, NetBIOS or LLMNR query, or the authenticator of a RADIUS response (D6's N2 on `52c7592c`, correcting D6's N3 on `9919fd24`). The ID is not changed, because it is the field that carries `05 64`. In a real payload, octets 8 and 9 sit where the header CRC is (a DNS header's NSCOUNT, for one), so a payload could otherwise match by chance;
 - (5) random UDP payloads forced to start `05 64`. This class also holds NTP, Syslog and SNMP payloads forced to start that way, since none of those protocols can start `05 64` (D6's N2). **The generator computes every header CRC, and draws again whenever one passes** (D6's N3). For a header split across datagrams from one end, it computes the CRC over the octets that `ProcessData` would assemble. The labels then say that each CRC fails, from how the case was built.
 
 **The bounds** (D6's N2):
@@ -278,12 +288,18 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
 **The malformed DNP3 inputs** (D4-100 item 2), run under C2, C1p and C0.
 - **Each input is on its own 5-tuple** (D6's B3, ruling 6). Otherwise C0 stops at the first failure on a flow, (i) carries on, and the later inputs raise errors that C0 never reached.
 - **How each input is judged** (ruling 6; D6's N1 on `9919fd24`; D1 records this reading of D4-100 item 2 in its next decision entry):
-  - **A crash or reporter error** (`reporter->AnalyzerError` in `AddToBuffer` and `ParseAppLayer`) counts against the patch when C1p lacks it. One that C1p or C0 also shows is a finding in Zeek or in the build, and is not netted out. It is handled as section 4.6's disclosure rule says.
+  - **A reporter error** (`reporter->AnalyzerError` in `AddToBuffer` and `ParseAppLayer`) is judged against the pin for its input, as a violation is (D6's N4 on `52c7592c`). Some are expected by design under every configuration: link lengths 1 to 3 raise `AddToBuffer`'s invalid-target-length error (below).
+  - **A crash, or a reporter error that no pin expects, is the finding.** It counts against the patch when C1p lacks it. One that C1p or C0 also shows is a finding in Zeek or in the build. It is not netted out, and section 4.6's disclosure rule handles it.
   - **Sanitizer reports come only from the fuzz run,** where this set is part of the seed corpus. C0, C1p and C2 are not sanitizer builds.
   - **Analyzer violations** are judged against an expected result pinned for each input and each configuration by stage 2, not against the control. Under (i), some inputs fail by design where C0 does not, and that is (i)'s correct behaviour.
 - **The set:**
   - 1 to 3 octets;
-  - a link length field of 0 to 4, which makes `ProcessData`'s target length less than its buffer;
+  - **a link length of 0 to 4 with a valid header CRC, each treated as a failed header** (D6's N3 on `52c7592c`; D2's N1 on `52c7592c`, as it applies to (i)). There is no length to read such a frame by. By `ProcessData` and `AddToBuffer`, the results are the same under C0, C1p and C2:
+    - **0:** the weird `dnp3_negative_or_zero_length_link_layer`, raised before any target is computed, then `skip`. No violation;
+    - **1 to 3:** a target of 8 to 10 octets, below the 11 already buffered. So `AddToBuffer` raises its invalid-target-length `AnalyzerError`, which sets `skip`. That reporter error is expected by design. No violation;
+    - **4:** a target of 11, equal to the buffer. The 11th octet is taken as the transport octet, and `ParseAppLayer` runs with no chunk. With FIR clear: `dnp3_first_application_layer_chunk_missing`, then `skip`. With FIR and FIN: binpac gets only the 8-octet header. Section 5.1's unread generated code decides what happens, so it is `unknown` and the run pins it. With FIR and no FIN: no failure at that frame, and the fragment stays open with no application octet.
+
+    Stage 2 pins each;
   - a length of 5 with trailing bytes. **Expected under every configuration: the trailing bytes are dropped, with no weird and no violation** (D6's B2 on `9919fd24`);
   - a length of 6: a transport octet and no application octet;
   - 1 application octet (a control octet and no function code), from each side (section 2.3);
@@ -354,12 +370,44 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
   - **The job publishes only pass or fail, and its counts.** It uploads no input, trace or crashing input, and prints none.
   - **If a crash is found,** it may be a vulnerability in Zeek itself. D1 brings it to the owner for disclosure before anything about it is made public, a threat-model row included.
   - Any report to Zeek's maintainers waits for the owner's word, because it is contact with an outside party about a security flaw.
+  - **The limit this leaves** (D6's N5 on `52c7592c`). No input leaves the runner and none is kept. So a report against the patch can be counted, but not reproduced, fixed or reported. Whether inputs are kept privately is the owner's decision.
 - **What the run leaves unshown, even on its terms.** It is evidence that nothing was found in that time, not a proof that nothing is there. It does not show:
   - fragments assembled across many datagrams (FIR and FIN sequences), or the 100,000-octet `DNP3::max_application_layer_fragment_size`, which a short input cannot reach;
   - algorithmic and memory exhaustion beyond the limits set;
   - reads of uninitialised memory, since no MSan is run;
   - the optimised binary that ships, which is a different build from the sanitizer one. So the result speaks for the source and the patch, not for the shipped bytes;
   - the script layer above the analyzer.
+
+### 4.7 Every expectation that option (i) changes
+
+This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) changes it, judged as C2 against C1p (`desk`). Option (i) changes only one thing: which binpac parser reads a reassembled fragment, chosen by its code instead of by `is_orig` (section 2.3). `ProcessData`, `ParseAppLayer`, the CRC checks, the 11-octet header stage, `AddToBuffer` and `SetSkip` are unchanged.
+
+**What changes.** A fragment changes its result only when its code's class disagrees with its side: a code of 129 to 131 from the originator, or any other code from the responder.
+- **A request code from the responder:**
+  - 2 or 3 octets: C1p throws in the 4-octet response header, which raises a violation. C2 parses it with the request header.
+  - 4 octets or more: C1p reads the objects as IIN and takes the `default` arm (`Debug_Byte`). C2 parses the object headers and raises `dnp3_object_header` and the object events.
+- **A response code (129 to 131) from the originator:**
+  - 2 or 3 octets: C1p parses it with the request header and takes the `default` arm (`unknown: bytestring &restofdata`), with no violation. C2 throws in the response header, which raises a violation.
+  - 4 octets or more: C1p takes the same `default` arm. C2 parses the IIN and the objects.
+- **The events.** Under C2, `dnp3_application_request_header` can be raised with `is_orig` false, and `dnp3_application_response_header` with `is_orig` true. The probe's `fc` rows keep the code and `is_orig`, and the judge classes a message by its code (`NOT_REQUESTS`, `table.py`), so its reading does not change. `dnp3.log`'s rows change where these combinations occur (`base/protocols/dnp3/main.zeek`). Those are values in its existing fields, not new fields.
+- **What follows from one changed fragment.** Where C1p's violation set `skip`, C2 goes on parsing the flow. So every later row on that flow changes with it.
+
+**Where it shows:**
+- in section 4.2: the C2 column where it differs from C1, on `dnp3-udp-unsolicited`, `dnp3-udp-relay-write`, `dnp3-udp-relay-restart` and `dnp3-tcp-master-short`;
+- in section 4.3's malformed set: the 129 to 131 fragments of 2 or 3 octets from the originator, the master's 2- and 3-octet messages on the responder's side, and the TCP inputs restated by code and side;
+- in class (3c) of the false-positive set: its result changes only where its code's class disagrees with its side. So stage 2 states each (3c) item's code and side, and pins its result for each.
+
+**What (i) does not change, under any configuration.** C2 is expected to equal C1p on:
+- the magic, header CRC and chunk CRC checks, and their weirds and violations;
+- the 11-octet header stage, the link-only silent loss, and a length of 5 with trailing bytes (section 1 item 4; section 5.1);
+- link lengths 0 to 4 (section 4.3), except a length of 4 with FIR and FIN, which is `unknown` under both;
+- a fragment of 0 or 1 application octets, which throws under both;
+- a fragment without FIR, the fragment-size limit, and the reporter errors of `AddToBuffer` and `ParseAppLayer`;
+- classes (1), (2), (3a), (3b-data), (3b-link), (4) and (5) of the false-positive set;
+- `dpd.zeek`'s 10 KiB bound;
+- every flow whose fragments' codes all agree with their sides. That covers every GT-PCAP DNP3 case that the master starts, over TCP and over UDP, and every PRP pair, public capture and E2 corpus row with conforming DNP3.
+
+A difference on any of these is a regression, or a difference in the build when C1p differs from C1 as well (section 4.1).
 
 ## 5. Limits, and HR-25's candidate fix
 
@@ -372,8 +420,8 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
   - the code binpac generates at all, the record-level `&length` included;
   - whether binpac 9.0.1's generated flow can safely be reused after a `binpac::Exception`. Zeek never reuses it today, because `skip` ends the flow (D3's condition 2 on `9919fd24`).
 
-  A Zeek build makes that code. `dnp3-udp-master-short`, the run and section 5.2's cases show its effect.
-- **HR-25: one failed frame stops the analyzer for the whole flow,** under the control and under (i), whatever key picks the parser (D4 6865038018; D1 6865138996, point 1). `DNP3_UDP_Analyzer::DeliverPacket` and `DNP3_TCP_Analyzer::DeliverStream` set `skip` on a bad header or chunk CRC, a lost magic, a lost first chunk, or a fragment too short for its parser (section 1, item 6). `Reporter::AnalyzerError` sets `skip` itself (`Reporter.cc`). So one bad datagram stops the analyzer, and a later write goes unseen. On UDP it takes no role in the session: any host on the segment can send it with the flow's addresses and ports (D3). D3 writes HR-25's row, and section 5.2 proposes a fix.
+  A Zeek build makes that code. `dnp3-udp-master-short` and the run show its effect.
+- **HR-25: one failed frame stops the analyzer for the whole flow,** under the control and under (i), whatever key picks the parser (D4 6865038018; D1 6865138996, point 1). `DNP3_UDP_Analyzer::DeliverPacket` and `DNP3_TCP_Analyzer::DeliverStream` set `skip` on a bad header or chunk CRC, a lost magic, a lost first chunk, or a fragment too short for its parser (section 1, item 6). `Reporter::AnalyzerError` sets `skip` itself (`Reporter.cc`). So one bad datagram stops the analyzer, and a later write goes unseen. On UDP it takes no role in the session: any host on the segment can send it with the flow's addresses and ports (D3). D3 writes HR-25's row. Its candidate fix is briefed as P4-4-HR25 (section 5.2).
 - **A link-only frame silently drops the next delivery from the same end** (D6's B2 on `9919fd24`; `desk`, unmeasured). The header stage waits for 11 octets, and a link-only frame is 10 (section 1, item 4). So the first octet of that end's next delivery completes the check, and `ProcessData` then drops the rest of the delivery.
   - **On UDP,** the next datagram from that end is lost, with no weird and no violation, and the flow stays named. Any sender can hide its next datagram, a write included, behind one link-only frame.
   - **On TCP,** the rest of the segment is lost. A frame split across segments then starts without its magic, which sets `skip`.
@@ -385,91 +433,24 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
 - **The `.asc` check** rests on a key from one channel, and on a SHA-1 digest (opening section).
 - **The 10 KiB bound of `dpd.zeek`** (section 1, item 6).
 
-### 5.2 HR-25's candidate fix: drop the failed frame and resynchronise (design, not built)
+### 5.2 HR-25's candidate fix
 
-D1 asked for it as a candidate in the same patch (6865138996, point 1), with D2's, D3's and D6's conditions (6866095230, point 4). It is a design, written for the reviewers' next pass. Nothing of it is built, and D1 rules on it before D6 pins stage 2 (D6 on `9919fd24`).
-
-**The aim.** A failed frame costs that frame, not the flow. A DNP3 station's link layer discards a bad frame and hunts for the next start octets, with the header CRC gating each candidate (D2, `inference`). A sensor that stops at the first bad frame is less tolerant than the device it watches. So the device acts on frames the sensor never sees, and that is HR-25's evasion. Only a change in the engine can do this.
-
-**1. Before and after confirmation.**
-- **Before `AnalyzerConfirmation` on the connection, nothing changes.** Failures raise violations and set `skip` as today, so a flow that is not DNP3 is still removed (class (3c) under C0; D2's point 1).
-- **After confirmation, a failure becomes a counted weird, never a violation** (D1 6866095230, point 4):
-  - the bad header CRC drops its `AnalyzerViolation("broken_checksum")` call. `CheckCRC` already raises the weird `dnp3_corrupt_header_checksum`;
-  - a `binpac::Exception` is caught in `DeliverPacket` and `DeliverStream`. It is not rethrown, so `Analyzer::NextPacket` and `NextStream` raise no violation, and a weird is raised instead.
-- **How this works with `dpd.zeek`.** After confirmation, the analyzer raises no violation, so `dpd.zeek`'s `analyzer_violation_info` handler never runs for it, and never calls `disable_analyzer`. The `DPD::ignore_violations` redef is not needed, so section 2.1's objection to it stands (D3's condition 4; D6's item 1). The 10 KiB bound then plays no part after confirmation, and a case above that size shows this (point 9).
-- **Its cost:** a flow that was confirmed by one valid header and then carries garbage stays named. That is (3c) under C2, and any confirmed flow an attacker keeps failing. Section 4.3's false-positive set measures it, against C1p. Point 5 makes such a flow visible.
-
-**2. `AnalyzerError` on the resync path** (D6's item 2). `AddToBuffer`'s three checks (negative input length, invalid target length, buffer length exceeded) and `ParseAppLayer`'s overflow check call `reporter->AnalyzerError`, which sets `skip` itself. After confirmation, the patch replaces those calls with the counted weird and the reset of point 3. Before confirmation, they stay.
-
-**3. What is reset on a failure** (D2's point 2; D3's condition 1):
-- for that end: `ClearEndpointState` (which clears `in_hdr`, `encountered_first_chunk`, `buffer_len`, `pkt_length`, `tpflags` and `pkt_cnt`) and `DiscardFlowBuffer`;
-- the partial fragment is dropped, and parsing resumes only at the next fragment with FIR, which is what a DNP3 transport function does after a sequence error;
-- the other end's state is not touched.
-
-**4. Binpac's state after an exception** (D2's point 2; D3's condition 2; D6's item 3). `DiscardFlowBuffer` clears the flow buffer. Whether the generated flow also drops a half-parsed `DNP3_PDU` is in generated code no one has read (section 5.1). A flow that still held a partial unit would misparse the next frame.
-- Stage 2 shows it: a parse after an exception on the same flow is a case (point 9), and a coverage target of the fuzz run (point 8).
-- **The fallback, if reuse cannot be shown safe:** the patch replaces the whole interpreter (`DNP3_Conn`) on a failure, instead of reusing its flow. That also drops the other end's partial fragment, which is then counted too. It is cruder, but needs no claim about the generated code.
-
-**5. Where to resynchronise** (D3's condition 1; D6's item 4):
-- **On UDP, at the next datagram, with no scan.** The rest of the failed datagram is dropped, and the next one starts fresh. Each datagram should hold whole frames (`inference` from the IP mapping, not held). Resetting at the datagram boundary also removes the cross-datagram completion that classes (1) and (3b) had to work around.
-- **On TCP, when the failed frame's header CRC passed,** its length gives its end. The sensor skips by that length, and does not scan inside the frame.
-- **On TCP, only when the header itself failed** (a lost magic, or a bad header CRC), the sensor scans the stream for the next `05 64` whose header CRC passes.
-- **Why scanning is limited.** Scanning inside a failed datagram or a failed frame would let bytes the attacker placed in object data be read as a frame of their own. The sensor would then see a write the device never sees, or miss one it does: a classic way to evade an IDS, or to plant false alerts in it (D3; D6).
-- **What the TCP scan should match** is what the receiving device's link layer does after a bad CRC. That is `unknown` for SEL until an H-row shows it (D3; section 6).
-
-**6. The link-only fix, in the same patch** (D6's item 6). The resync does not cover section 5.1's silent loss, because nothing fails there. So the header stage checks the magic, CRC and length at 10 octets. On a length of 5 it resets that end and goes on with the rest of the delivery. It asks for the transport octet only for a longer frame.
-
-**7. Observability** (P5; D3's condition 3; D6's item 5; D2's point 3).
-- **The analyzer never stops without a trace.** Even with resync, an attacker can make every frame fail. So HR-25's fail-closed rule does not depend on this fix. A DNP3 flow whose analyzer has stopped, or keeps failing, surfaces as a visible state: a cause in D4-90's closed set of gap causes, or a row of its own. It never looks like a quiet named flow, which is what (3a) and (3b-data) look like under C0 today.
-- **The counts are bounded.** The engine writes no log row per failed frame. The engine's output sits in memory-backed storage on the sensor host (`docs/phase4/D3-sensor-link.md`, the process table), so a flood of failures could exhaust it and blind the engine another way.
-  - Each dropped frame raises a weird, under Zeek's weird sampling (`Weird::sampling_threshold`, 25 by default).
-  - The probe log carries one aggregate count per flow, by cause, at the connection's end.
-- **The count reaches the node,** so that a quiet partial blind does not replace a loud full one. If that needs C13 text, it is settled in comments first (D4-99). The mapping of point 1's cost goes the same way.
-- **The no-new-field check** (section 4.3) then has to admit the aggregate count and any new weird name. Which of those are a new record or field, under C13 0.2, is for D1 and D6 to rule with the design.
-
-**8. Its cost** (D1 6865138996, point 1; D2's point 3; D3; D7 6865821469):
-- **The parse surface grows.** Every later frame from a hostile sender is parsed. That is the same surface (i) already accepts for relay-started flows.
-- **It is new hand-written C++** in the part of `DNP3.cc` that manages buffers, which is new memory-safety ground (D3).
-- **The upstream diff is larger,** and it is re-applied at each Zeek security release (R-4). D7: the same patch file, with the same pins, inventory entry and couplings.
-- **The fuzz run changes.** The mutator fixes every CRC, so mutated inputs never take the failure paths. With this fix, the mutator leaves a pinned share of CRCs bad. The coverage condition gains the resync paths, and a parse after an exception on the same flow (D3; D6).
-
-**9. Stage 2's cases, if it is adopted** (D1 gives the ids). Each case is on its own 5-tuple.
-- **A bad datagram, then a write, which must be seen** (D1; D6). There is one case for each failure path, because the paths differ:
-  - a missing magic (a weird);
-  - a bad chunk CRC (a weird);
-  - a fragment without FIR (a weird);
-  - a bad header CRC (a violation today);
-  - a fragment of 1 application octet (a binpac exception);
-  - a link length of 1 to 3 with a valid header CRC (`AddToBuffer`'s invalid target length, an `AnalyzerError`).
-
-  Each is followed by the master's labelled direct operate (code 5, g12v1), over UDP and over TCP. Expected under C0, C1, C1p and (i) alone: the operate is unseen. Expected under the fixed engine: the operate is seen, and the dropped frame is counted.
-- **A burst of bad datagrams, then a write** (D3).
-- **A bad frame in the middle of a multi-frame fragment, then a new FIR fragment** (D2). The new fragment must be seen, and the broken one must not be.
-- **Over TCP, garbage octets between two valid frames,** including a false `05 64` whose CRC fails (D2).
-- **A later bad frame in a flow above 10 KiB,** which separates the resync from dpd's bound (D2).
-- **A failed frame whose data holds an embedded valid `05 64` frame carrying a write** (D3; D6). Over UDP and over TCP, the embedded write is not reported: on UDP there is no scan, and on TCP the failed frame's header CRC passed, so it is skipped by its length.
-- **A link-only frame, then a write from the same end, which must be seen** (D6). This runs over UDP in two datagrams and in one, and over TCP in one segment and in two. Expected under C0 to C2 as they stand: the write is unseen, with no weird on UDP. Expected with point 6: the write is seen.
-- **Negative controls** (D6): the same bad datagram with no write after it, which gives no function row; and the false-positive set rerun, because the analyzer stays on more flows.
-
-**What changes in stage 2 if it is adopted** (D6 on `9919fd24`). It goes into the same patch, so C2 is (i) with the resync, and these expected results change:
-- the malformed set's violations after confirmation become counted weirds;
-- (3a) to (3c) stay named;
-- every row after a failure is parsed.
-
-The note then states the combined rule. Pinning against (i) alone first would mean pinning twice.
+HR-25's candidate fix: see P4-4-HR25. Not part of HR-23's fix (D1 6866534402). The resync design this section held is citable at `52c7592c` (`docs/phase4/D4-hr23-design.md`, section 5.2). P4-4-HR25 takes it as a required input, with the reviews' open findings on it: D2's B1, N1 and N2 (6866220392); D3's B4, B5 and N6 to N9 (6866236602); and D6's B1 (a) to (c) and the resync parts of B2 (6866520537).
 
 ## 6. Risk records and open items, for D1
 
 These are D1's to record. The note does not close them.
 
 - **R-1. The attacker-caused both-ends outcome** (D3's N3, D6's N5; ruling 2). One datagram of the opposite DIR names a false second server on a flow. In production that must fail closed: the flow counts as `undecoded`, or takes a cause of its own in D4-90's closed set, and is never a quiet DNP3 flow. That mapping may need C13 text, so it is settled in comments first (D4-99). `undecoded` is not yet a ready path, because its first-sight key needs a server address (C13 0.1 §4.2, "The key of a first sight"; D6's N5).
-- **R-2, now HR-25. One failed frame blinds the analyzer for the flow** (section 5.1). D1 made it a high risk of its own, HR-25, open, which D3 writes (6865138996, point 1). D1 decides with the owner whether it blocks item 4's gate. Section 5.2 is its candidate fix.
+- **R-2, now HR-25. One failed frame blinds the analyzer for the flow** (section 5.1). D1 made it a high risk of its own, HR-25, open, which D3 writes (6865138996, point 1). D1 decides with the owner whether it blocks item 4's gate. Its candidate fix is P4-4-HR25 (section 5.2). D3's HR-25 row also gains D6's two further triggers: one bad header before confirmation, and a TCP content gap (D1 6866534402).
 - **The link-only silent loss** (section 5.1): D3 adds it to HR-25's row on #677 (D1 6866095230, point 2).
-- **R-6. Two H-rows, written and not run, for D1 to add beside H-23** (D2 on `9919fd24`; D3):
+- **R-6. Two H-rows, written and not run** (D2 on `9919fd24`; D3). D1 numbers them with the stage-2 brief, together with #671's two (6866203475, point 3):
   - send the SEL-751 one read with DIR clear, to show whether it acts on it;
-  - show what an SEL device's link layer does after a bad CRC on TCP, which section 5.2 point 5's scan should match.
+  - show what an SEL device's link layer does after a bad CRC on TCP, which P4-4-HR25's scan would match.
 
-  Each needs the owner's authorization for device contact, like every H-test.
+  Each runs only with the owner's authorization for device contact, like every H-test. Two terms for OT safety (D6's N6 on `52c7592c`):
+  - each row runs on a bench unit that is out of service;
+  - the DIR-clear frame, and every frame sent after a bad CRC, carry only a read (code 1), never a write, operate, restart or time set.
 - **R-3. A second channel for Zeek's signing key** (D7's N5). The binding of key `962F…8019` to the Zeek project rests on one keyserver. Before a sensor ships, a second check is needed: the same primary key's signatures on earlier Zeek releases, or a fingerprint that the Zeek project publishes.
 - **R-4. The patch's couplings** (D7's N6):
   - the first patched build is a rollback floor for the sensor image, since rolling below it reopens HR-23 without a sound;
@@ -522,9 +503,9 @@ These are D1's to record. The note does not close them.
 | D7 M2: the key's second source is other than `keys.openpgp.org` | non-blocking | Section 4.5; section 6, R-3 |
 | D2 N1: code 5 is a direct operate, and a write is code 2 | non-blocking | Sections 4.2 and 4.3 |
 | D2: does an outstation act on a request whose DIR is clear (`unknown`) | answer | Section 5.1; section 6, R-6 |
-| D2: the resync's conditions (violation path, reset, noise, cases) | design | Section 5.2, points 1, 3, 7 and 9 |
+| D2: the resync's conditions (violation path, reset, noise, cases) | design | P4-4-HR25 (section 5.2; the design at `52c7592c`) |
 | D3 N5: which end opens the TCP connection, and its expected results | non-blocking | Sections 4.2 (`dnp3-tcp-dir-spoof`) and 4.3 |
-| D3: the resync's conditions 1 to 5 | design | Section 5.2, points 1, 3, 4, 5, 7, 8 and 9 |
+| D3: the resync's conditions 1 to 5 | design | P4-4-HR25 (section 5.2; the design at `52c7592c`) |
 | D6 B1: the TCP cases do not all reach the changed path; the two TCP ids | blocking | Sections 4.1, 4.2 and 4.3 (D1 6866095230, point 1) |
 | D6 B2: the header is checked only at 11 octets | blocking | Section 1 item 4; section 3 item 6; sections 4.1 and 4.3 (D1 6866095230, point 2) |
 | D6 B2: the link-only silent loss | risk | Section 5.1; section 6; HR-25 by D3 |
@@ -533,5 +514,21 @@ These are D1's to record. The note does not close them.
 | D6 N2: D1's ids, paths and HR-25 written in | non-blocking | Sections 4.1, 4.2, 4.5 and 6 |
 | D6 N3: class (4)'s zero by construction | non-blocking | Section 4.3 |
 | D6 N4: everything is rerun, with no exemption | non-blocking | Section 4.3 |
-| D6: the resync's items 1 to 6 and its cases | design | Section 5.2 |
-| D1 6865138996, point 1: HR-25's candidate fix | design | Section 5.2 |
+| D6: the resync's items 1 to 6 and its cases | design | P4-4-HR25 (section 5.2; the design at `52c7592c`) |
+| D1 6865138996, point 1: HR-25's candidate fix | design | P4-4-HR25 (section 5.2; D1 6866534402) |
+| **Re-reviews of `52c7592c`** | | |
+| D7 6866209008: pass, no findings | answer | — |
+| D2 B1, N1 and N2: the resync's UDP rule, lengths 0 to 4, an embedded frame behind a failed header | design | P4-4-HR25 (section 5.2; D1 6866534402) |
+| D2 N1, as it applies to (i): lengths 0 to 4 as a failed header | non-blocking | Section 4.3 (D1 6866534402, point 2) |
+| D3 B4, B5 and N6 to N9 (6866236602): the resync design | design | P4-4-HR25 (section 5.2) |
+| D6 B1 (a) to (c): blinding routes before confirmation, at a TCP gap, and a link-only frame inside a fragment | design and risk | P4-4-HR25 (section 5.2); (a) and (b) go into HR-25's row by D3 (section 6) |
+| D6 B2: the resync's names, and its changed expectations | design | P4-4-HR25 (section 5.2) |
+| D6 B2, as far as (i) changes them: the complete list of changed expectations | blocking for pinning | Section 4.7 |
+| D6 N1: the TCP SYN-ACK swap and DPD attachment | non-blocking | Section 4.1 |
+| D6 N2: class (4), keeping the ID, NSCOUNT | non-blocking | Section 4.3 |
+| D6 N3: link lengths 0 to 4 | non-blocking | Section 4.3 |
+| D6 N4: reporter errors that are expected by design | non-blocking | Section 4.3 |
+| D6 N5: the disclosure rule's limit | non-blocking | Section 4.6 |
+| D6 N6: OT safety terms for R-6's H-rows | non-blocking | Section 6, R-6 |
+| D6 N7: D1's 6866203475, and ids that name their transport | non-blocking | Section 4 (opening); section 6, R-6; the `dnp3-resync-*` ids and the count's C13 path go to P4-4-HR25 |
+| D1 6866534402, point 3: case ids name their transport | ruling | Section 4 (opening) |
