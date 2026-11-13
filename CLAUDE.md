@@ -61,7 +61,7 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 
 Where one of these differs from the brief below, the rule here wins.
 
-### Working rules (the owner, 2026-11-13, D4-97; for work started after D4-97 merged)
+### Working rules (the owner, 2026-11-13, D4-97 and D4-99; for work started after each merged)
 
 - **A non-blocking review note is fixed in the same PR before it merges, or dropped.** It is not carried to a follow-up brief, unless D1 records it as a risk: a threat-model row or an open item in the decision log. The reviewer's note says which it asks for.
 - **One source for each decision:** the decision log. HANDOFF, this file, the role files and the briefs carry one line and the D-number, never a restatement.

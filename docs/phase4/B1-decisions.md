@@ -2000,7 +2000,7 @@ No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 at 
 
 ## D4-97: working rules for productivity (the owner, 2026-11-13)
 
-*Partly superseded by D4-99: the build summaries are dropped.*
+*Partly superseded by D4-99: the build summaries are dropped, and the resume rule is refined.*
 
 The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes and recommended the first five. The owner replied: "Implement everything except 6." The sixth (several D4 and D5 instances) is not adopted. Evidence class: `desk`.
 
@@ -2087,7 +2087,7 @@ Evidence class: `desk`. D1's first proposal 1, a restart habit for the main sess
   - On #664, D6 joined after D2 and D3 had passed, which cost at least one round.
   - Three of its eight versions each added a new mechanism invented in answer to a finding.
   - D1 withdrew two other rules after re-checking them: "a fix commit holds only what was asked" and "a pass is final for Markdown". The six runs after the passes found three real problems.
-- **4. Batching independent reads and checks into one step,** as a trial. Agents made 1.16 tool calls per step. D1 reruns the measurement after the next session, with the scratch script `d1_usage_probe4.py`.
+- **4. Batching independent reads and checks into one step,** as a trial. Agents made 1.16 tool calls per step. D1 reruns the measurement after the next session, with a script kept in D1's scratch space, not in the repository.
 - **5. The Linux `go` job runs `go test -v ./...`.** The hand-kept `-v` list of sensor tests is removed from both jobs. Windows already printed every test name, and the list had to be edited, and reviewed, on every PR that added a test. The rsyslog `-v` step stays.
 - **Dropped: the build summaries of D4-97.**
   - The design documents are 13% of tool reads, and agents already read them in slices.

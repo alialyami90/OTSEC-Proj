@@ -10,7 +10,7 @@ D1 issues a brief before assigning significant work.
 ### Task <ID>: <short title>
 - Objective and rationale: (the requirement, by its number)
 - Owner, and the reviewers (CLAUDE.md §5.6):
-- Required inputs and dependencies: (files by section, build summaries first)
+- Required inputs and dependencies: (files by section)
 - Files or modules each role may modify: (every path the work needs has a named owner)
 - Expected interfaces: (the approved contract and version)
 - Deliverable: (PRs in order; no intermediate main may weaken a guarantee)
