@@ -1657,6 +1657,8 @@ No new words from the owner. This entry follows their choice of option (b) in D4
 
 ## D4-87: six PRs merged, the runners' fault, the link's two designs merged as documents, a finding about `main` and its gate, and four corrections (D1, 2026-11-11)
 
+*Partly superseded by D4-96 (2026-11-13): the gate's "before any dialer" and its fourth rule.*
+
 No new words from the owner. Evidence class: `desk`, except where a CI run is named. Times are UTC on 2026-11-11.
 
 - **Six PRs merged.**
@@ -1958,24 +1960,32 @@ The owner gave this answer in D1's session on 2026-11-13. D1 had asked whether t
 
 ## D4-96: F-027 closes in two steps, and the gate holds until the owed tests pass (D1, 2026-11-13)
 
-No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 (6851207952).
+No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 at `5b86e298` (6851207952) and its B1 at `35ffd147` (6851393552).
 
 - **The problem.** D4-87 and F-027 put §1.9's tests in the first brief of the third part, "before any dialer". Several of those tests need machinery that is not on `main`:
-  - F8's tests need refused hellos, `sensor.link_refused` and `rekey`;
+  - F8's tests need the `node-sensors` consumer, refused hellos, `sensor.link_refused` and `rekey`;
   - SL-T13's leg (e) needs heartbeats and coverage gaps;
-  - F11's dial tests need the dialer;
+  - F11's dial legs need the dialer;
   - some of F1's events need `sensorrun.json`, `sensor.redial-granted` or coverage gaps;
+  - F4's `hold-timeout` alerts need C13 0.2's `Alert`;
   - the rig legs need a real sensor and link.
 
   The first brief cannot meet that as written.
 - **The ruling.**
-  - Brief P4-4-F27 closes each coupling on `main`'s code, with the tests that can run there, each with its control. That includes in-process legs for F1's ceiling and F4's fairness rule, with controls 1 and 2.
-  - Every other test of §1.9 is owed by the brief that builds its machinery: the C13 0.2 intake, the dialer and enrolment, or the sensor and its rig. Each owing brief names its owed tests.
+  - Brief P4-4-F27 closes each coupling on `main`'s code, with the tests that can run there, each with its control. That includes in-process legs for F1's ceiling and F4's fairness rule, with controls 1 and 2, and F4's interim behaviour on a timeout: the session stays untied and the base rules judge it.
+  - Every other test of §1.9 is owed by the brief that builds its machinery: the contracts in code, the C13 0.2 intake, the dialer and enrolment, or the sensor and its rig. Each owing brief names its owed tests.
   - The owed tests are release blockers.
-  - F-027's gate stays until every owed test has passed: no `network_sensor` section outside the tests, no release, no caller of `ServeSensor` outside the tests, and no caller of `Link.Serve` other than `ServeSensor`.
-  - The dialer and enrolment may be built and tested through tests before F-027 closes. Their product call to `ServeSensor` comes only in the PR that passes the last owed test.
-  - This replaces D4-87's "before any dialer" with "before any product caller of `ServeSensor`". D4-87's gate is otherwise unchanged.
+- **The gate.** F-027's gate stays until every owed test has passed:
+  - no `network_sensor` section outside the tests;
+  - no release;
+  - no product wiring of any path to or from a sensor. That covers a product caller of `ServeSensor`, or of `Link.Serve` other than `ServeSensor`, and the dialer, enrolment (including through the admin relay), the sensor fold, or any new or renamed intake entry point.
+- **Unwired code.** Code for those paths may merge unwired, reached only from tests. Each new entry point is added to the merge check as a `git grep` of its callers outside `_test.go` files. All product wiring comes in the PR that passes the last owed test.
+- **What this replaces.** It replaces D4-87's "before any dialer" and the gate's fourth rule as worded there. D4-87 is otherwise unchanged.
 - **Ownership.**
   - The link-key reader (NK-1 to NK-6) is D3's, as a new package under `modules/security/`.
   - The forwarder's sensor-only session needs D4's change in `modules/telemetry/forward/`. D1 rules on that PR how the session's too-large events are released.
-- **Follow-up.** Brief P4-4-F27, rewritten (`docs/agent-handoffs.md`).
+  - The forwarder change merges before the sensor manager. The manager, F2 and F10 merge as one step (D6's B2 at `35ffd147`).
+- **Follow-up.**
+  - Brief P4-4-F27, rewritten (`docs/agent-handoffs.md`).
+  - D6 updates point 3 of F-027's gate.
+  - D5 aligns the opening of §1.9 in its note.
