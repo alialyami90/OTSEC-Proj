@@ -32,7 +32,7 @@ def test_every_capture_has_its_protocol_service_and_function_rows():
     by = collections.defaultdict(collections.Counter)
     for r in rows():
         by[r["capture"]][r["condition"]] += 1
-    assert len(by) == 25  # 22 labelled DNP3 cases, the two R6.2 series, and the derived Modbus capture
+    assert len(by) == 26  # 23 labelled DNP3 cases, the two R6.2 series, and the derived Modbus capture
     for name, n in by.items():
         assert n["protocol"] >= 1 and n["service"] >= 1 and n["function"] >= 1, name
 
@@ -67,9 +67,9 @@ def test_the_moved_port_and_udp_rows():
     assert {(r["l4"], r["dport"]) for r in udp} == {("udp", "20000")}
     for case in (moved, udp):
         assert sorted(r["code"] for r in case if r["condition"] == "function") == ["1", "5"]
-    # Every other DNP3 capture is on TCP 20000, so these five are the only
+    # Every other DNP3 capture is on TCP 20000, so these six are the only
     # DNP3 rows that tell a port-only or TCP-only decoder apart.
-    udp_cases = ("dnp3-udp", "dnp3-udp-moved-port", "dnp3-udp-temp-port", "dnp3-udp-req-port")
+    udp_cases = ("dnp3-udp", "dnp3-udp-moved-port", "dnp3-udp-temp-port", "dnp3-udp-req-port", "dnp3-udp-unsolicited")
     rest = {(r["l4"], r["dport"]) for n, rs in got.items() if n not in ("dnp3-moved-port",) + udp_cases for r in rs
             if r["protocol"] == "dnp3"}
     assert rest == {("tcp", "20000")}
@@ -94,6 +94,23 @@ def test_the_three_udp_arrangements_of_p4_d6_gt2():
     assert flows == [("192.0.2.14", "41017", "192.0.2.20", "20000"), ("192.0.2.20", "20000", "192.0.2.14", "20000")]
     assert [(r["dst"], r["dport"]) for r in got["dnp3-udp-temp-port"] if r["condition"] == "service"] == [
         ("192.0.2.20", "20000")]
+
+
+def test_the_flow_the_outstation_starts_of_p4_d6_gt3():
+    """dnp3-udp-unsolicited: one flow, whose src is the outstation that sent
+    its first datagram; one service, the outstation's end; and three
+    functions on that flow, each from the master that sent the request,
+    not from the flow's first sender (C13 section 14, item 14)."""
+    got = [r for r in rows() if r["capture"] == "dnp3-udp-unsolicited"]
+    assert [r["condition"] for r in got] == ["protocol", "service", "function", "function", "function"]
+    flow, service, functions = got[0], got[1], got[2:]
+    assert (flow["l4"], flow["src"], flow["sport"], flow["dst"], flow["dport"], flow["direction"]) == (
+        "udp", "192.0.2.20", "20000", "192.0.2.14", "20000", "none")
+    assert (service["dst"], service["dport"], service["frames"]) == ("192.0.2.20", "20000", "1")
+    assert [(r["code"], r["objects"], r["sa"]) for r in functions] == [
+        ("1", "g60v1,g60v2,g60v3,g60v4", "none"), ("5", "g12v1", "none"), ("2", "g34v1", "none")]
+    assert {(r["src"], r["sport"], r["dst"], r["dport"], r["direction"]) for r in functions} == {
+        ("192.0.2.14", "20000", "192.0.2.20", "20000", "none")}
 
 
 def test_the_derived_modbus_capture_has_its_rows_off_port_502():

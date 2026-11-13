@@ -160,6 +160,18 @@ def second_service_by_port(recs):
     recs.insert(-1, again)
 
 
+def swap_ends(ip):
+    ip["src"], ip["dst"], ip["sport"], ip["dport"] = ip["dst"], ip["src"], ip["dport"], ip["sport"]
+
+
+def service_oriented_like_its_flow(recs):
+    swap_ends(find(recs, "service")["ip"])  # names the master as the server (C13 0.2's U-2)
+
+
+def function_oriented_like_its_flow(recs):
+    swap_ends(find(recs, "function", code=2)["ip"])  # the outstation as the write's sender
+
+
 # (the wrong record, what the checker must say, the capture it is planted in)
 PLANTED = [
     (drop_service, "missed service", "dnp3-sa"), (wrong_sa, "recorded with sa none", "dnp3-sa"),
@@ -171,6 +183,9 @@ PLANTED = [
     (syn_only_on_a_flow_with_data, "an end says syn_only", "dnp3-sa"),
     (cites_only_its_response, "does not cite the request first", "dnp3-sa"),
     (second_service_by_port, "not by content, on a moved port", "dnp3-moved-port"),
+    # A flow the outstation starts (P4-D6-GT3): its records are not oriented like the flow.
+    (service_oriented_like_its_flow, "missed service", "dnp3-udp-unsolicited"),
+    (function_oriented_like_its_flow, "the request is recorded as sent by 192.0.2.20:20000", "dnp3-udp-unsolicited"),
 ]
 
 
@@ -187,7 +202,21 @@ def test_the_checker_fails_on_a_planted_wrong_record(plant, says, name):
     plant(recs)
     got = gt_checker.check(rows, recs, moved_port=moved(name))
     assert any(says in p for p in got["problems"]), got["problems"]
-    assert len(PLANTED) == 15
+    assert len(PLANTED) == 17
+
+
+def test_a_service_may_cite_any_flow_with_its_server_at_either_end():
+    """D4's N3 on #648: a sensor may emit a service once per flow (C13 0.1
+    section 4.2), so on dnp3-udp-temp-port one that cites the responses'
+    flow, which the outstation starts, passes; a frame of no flow fails."""
+    rows, frames, sha = c13_stream.load("dnp3-udp-temp-port")
+    recs = c13_source.Source(rows, frames, sha).records()
+    replies = next(r for r in rows if r["kind"] == "flow" and r["src"] == "192.0.2.20")
+    n, h = replies["frames"].split(",")[0], replies["frame_sha256"].split(",")[0]
+    find(recs, "service")["citation"]["frames"][0].update(n=int(n), sha256=h)
+    assert gt_checker.check(rows, recs)["problems"] == []
+    find(recs, "service")["citation"]["frames"][0]["sha256"] = "0" * 64
+    assert any("cites a frame that does not show it" in p for p in gt_checker.check(rows, recs)["problems"])
 
 
 def test_a_flow_with_no_start_is_not_matched():
