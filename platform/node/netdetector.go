@@ -464,17 +464,24 @@ func (r *Runtime) driveOnce(ctx context.Context, nd *netDetector) (more bool) {
 // drive bounds one drive of the detector: at most DriveObservations
 // observations, and DriveTime of the process's monotonic clock, which
 // bounds the manager's own work and is no rule on the node's clock.
+// DriveTime counts from the drive's first observation, so a drive whose
+// work before it (flushAlerts, the head, the health stream's sessions) is
+// slow still takes one, and a backlog is still worked off (D4's B1 on #676).
 type drive struct {
 	left  int
-	until time.Time
+	until time.Time // zero until the first observation
 	spent bool
 }
 
-func newDrive() *drive { return &drive{left: DriveObservations, until: time.Now().Add(DriveTime)} }
+func newDrive() *drive { return &drive{left: DriveObservations} }
 
 // take reports whether the drive may take one more observation.
 func (dv *drive) take() bool {
-	if dv.left <= 0 || !time.Now().Before(dv.until) {
+	now := time.Now()
+	if dv.until.IsZero() {
+		dv.until = now.Add(DriveTime)
+	}
+	if dv.left <= 0 || !now.Before(dv.until) {
 		dv.spent = true
 		return false
 	}

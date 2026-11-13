@@ -196,6 +196,129 @@ func TestDetectorLagAlarm(t *testing.T) {
 	}
 }
 
+// F3's lag stretch (section 1.9 item 3; D6's N1 on #676): once raised, a
+// lag that falls below DetectorLagRaise but stays at or above
+// DetectorLagClear keeps the stretch, so the alarm is not raised again
+// when the lag rises past 60 s once more. Here the stretch is set and the
+// lag held at 45 s. Control: the clear moved to DetectorLagRaise, which
+// ends the stretch at 45 s.
+func TestDetectorLagStretchKept(t *testing.T) {
+	c, _ := holdConfig(t)
+	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
+	r, st := startClocked(t, g, SensorSeams{})
+	defer r.Close()
+	heldManager(r, func() {
+		r.alertAppend = func([]c5.Record) error { return errors.New("node test: the alert class refuses") }
+	})
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), relayFlow(2))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, r)
+	heldManager(r, func() { r.detector.lagging = true })
+	g.advanceWall(45 * time.Second)
+	tick(t, r)
+	if d := detectorStatus(t, st); !d.Lagging || d.LagS < 45 || d.LagS >= 60 {
+		t.Fatalf("at a lag of 45 s in a stretch: %+v", d)
+	}
+}
+
+// F3's bounds on one drive (section 1.9 item 3; D6's N1 on #676): a drive
+// takes at most DriveObservations, and none once DriveTime has passed
+// since its first. Control: a take that never stops, which takes past both.
+func TestDriveBounds(t *testing.T) {
+	dv, n := newDrive(), 0
+	for n <= DriveObservations && dv.take() {
+		n++
+	}
+	if n != DriveObservations || !dv.spent {
+		t.Fatalf("a drive took %d observations, spent %v; want %d", n, dv.spent, DriveObservations)
+	}
+	dv = newDrive()
+	if !dv.take() {
+		t.Fatal("a new drive took no observation")
+	}
+	time.Sleep(DriveTime) // the drive's work
+	if dv.take() {
+		t.Fatalf("a drive took an observation %s after its first", DriveTime)
+	}
+}
+
+// D4's B1 on #676: the drive's clock starts at its first observation, so
+// a drive whose work before it takes longer than DriveTime (here the test
+// sleeps between newDrive and the drive, as a slow flushAlerts or health
+// scan would) still takes one, and Through advances over three drives.
+// Each observation is slow too, so a drive takes one and the backlog
+// lasts the three drives. Control: the clock started at newDrive, under
+// which each drive takes none and Through stays.
+func TestDriveSlowBeforeFirstTake(t *testing.T) {
+	c, dir := holdConfig(t)
+	var slow atomic.Bool
+	r, _ := startSeams(t, c, dir, SensorSeams{Observe: func() {
+		if slow.Load() {
+			time.Sleep(DriveTime + 50*time.Millisecond)
+		}
+	}})
+	defer r.Close()
+	heldManager(r, func() {
+		slow.Store(true)
+		defer slow.Store(false)
+		if err := r.ServeSensor(bg, sensorChannel(t, relayFlow(1), relayFlow(2), relayFlow(3))); err != nil {
+			t.Fatal(err)
+		}
+		nd := r.detector
+		for i := range 3 {
+			before := nd.d.Through()
+			dv := newDrive()
+			time.Sleep(DriveTime + 50*time.Millisecond) // the work before the first take
+			r.driveDetector(bg, nd, dv)
+			if nd.d.Through() <= before {
+				t.Fatalf("drive %d: Through stayed at %d after slow work before the first take", i, before)
+			}
+		}
+	})
+}
+
+// F3's yield (section 1.9 item 3; D6's N1 on #676): a drive that reaches
+// DriveTime stops, and a step Tick asked for during it begins before the
+// detector takes another observation. The first observation is slow
+// (longer than DriveTime) and asks for a step; the second must come after
+// that step began. Control: a take that never stops, under which the
+// second observation comes in the same drive.
+func TestStepBeforeNextDrive(t *testing.T) {
+	c, dir := holdConfig(t)
+	var r *Runtime
+	var calls atomic.Int32
+	var begunAt uint64
+	late := make(chan bool, 1)
+	r, _ = startSeams(t, c, dir, SensorSeams{Observe: func() {
+		m := r.smgr
+		m.stepMu.Lock()
+		begun := m.begun
+		m.stepMu.Unlock()
+		switch calls.Add(1) {
+		case 1:
+			begunAt = begun
+			r.kickSensorManager()
+			time.Sleep(DriveTime + 50*time.Millisecond)
+		case 2:
+			late <- begun > begunAt
+		}
+	}})
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, relayFlow(1), relayFlow(2))); err != nil {
+		t.Fatal(err)
+	}
+	r.kickSensorManager()
+	select {
+	case ok := <-late:
+		if !ok {
+			t.Fatal("the second observation came before the step asked for during the drive")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the detector did not reach a second observation")
+	}
+}
+
 // advanceWall moves the rig's wall clock only.
 func (g *retentionRig) advanceWall(d time.Duration) {
 	g.mu.Lock()
