@@ -307,6 +307,12 @@ type session struct {
 	known   []bool           // the start is a cursor or a window start, so a jump past it is a loss
 	hold    []*held
 	stopped bool // TXNRs used up: drain, close, reopen
+	// A second session's last read of the health stream's cursors: when,
+	// and this target's position there. It is read at most once per Poll
+	// while an event is held, so the session takes the lock of the
+	// database that holds the health stream no more often than that.
+	healthAt      time.Time
+	healthThrough store.Seq
 }
 
 // prepare works out, once per process, where each event stream of a
@@ -732,21 +738,30 @@ func (s *session) release() error {
 // stream. On a second session it is the main session's cursor on the
 // health stream, saved only after the target confirmed the event, so a
 // too-large event is never passed before its report is confirmed, and the
-// main session never waits on this one.
+// main session never waits on this one. That cursor is read at most once
+// per Poll; a cursor only moves forward, so the last value read is a safe
+// lower bound between reads. A failed read ends the session, and the
+// event stays held.
 func (s *session) released(k store.Key) (bool, error) {
 	if j := s.index(k.Stream); j >= 0 {
 		return s.conf[j] >= k.Seq, nil
 	}
-	if s.f.cfg.HealthCursors == nil {
+	if s.f.cfg.HealthCursors == nil || k.Stream != s.f.cfg.HealthStream {
 		return false, nil
 	}
-	cs, err := s.f.cfg.HealthCursors.LoadCursors(s.ctx, k.Stream)
-	if err != nil {
-		return false, fmt.Errorf("forward: load cursors of %s: %w", k.Stream, err)
+	if s.healthThrough < k.Seq && (s.healthAt.IsZero() || time.Since(s.healthAt) >= s.f.cfg.Poll) {
+		s.healthAt = time.Now()
+		cs, err := s.f.cfg.HealthCursors.LoadCursors(s.ctx, k.Stream)
+		if err != nil {
+			return false, fmt.Errorf("forward: load cursors of %s: %w", k.Stream, err)
+		}
+		for _, c := range cs {
+			if c.Consumer == s.f.consumer && c.Stream == k.Stream {
+				s.healthThrough = max(s.healthThrough, c.Through)
+			}
+		}
 	}
-	return slices.ContainsFunc(cs, func(c store.Cursor) bool {
-		return c.Consumer == s.f.consumer && c.Stream == k.Stream && c.Through >= k.Seq
-	}), nil
+	return s.healthThrough >= k.Seq, nil
 }
 
 // inFlight reports whether stream i has a transaction not yet confirmed.

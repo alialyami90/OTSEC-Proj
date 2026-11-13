@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,8 +56,11 @@ func TestNewSecondSession(t *testing.T) {
 // A too-large event of the second session is passed only once the main
 // session's cursor on the health stream reaches its forward.too-large
 // event, and the second session saves its cursor under the target's name.
+// One health event is committed first, so forward.too-large is seq 2 and
+// this target's cursor held at 1 pins the boundary (D6's B1 on #662).
 func TestSecondSessionTooLargeWaitsForHealthCursor(t *testing.T) {
 	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	r.m.commit(t, hlStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": "before"}))
 	big := r.m.commit(t, snStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": strings.Repeat("x", 1200)}))
 	r.m.commit(t, snStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": "small"}))
 	r.cfg = r.second(Stream{ID: snStream, Outbox: r.m, Cursors: r.m})
@@ -84,16 +88,18 @@ func TestSecondSessionTooLargeWaitsForHealthCursor(t *testing.T) {
 		if heldSince.IsZero() {
 			heldSince = time.Now()
 			// Another target's consumer has confirmed forward.too-large;
-			// this target has not.
-			if err := r.m.SaveCursor(context.Background(), store.Cursor{Consumer: "siem-b", Stream: hlStream, Through: 1}); err != nil {
-				t.Fatal(err)
+			// this target has confirmed only the event before it.
+			for _, c := range []store.Cursor{{Consumer: "siem-b", Stream: hlStream, Through: 2}, {Consumer: "siem-a", Stream: hlStream, Through: 1}} {
+				if err := r.m.SaveCursor(context.Background(), c); err != nil {
+					t.Fatal(err)
+				}
 			}
 		}
 		if time.Since(heldSince) < 300*time.Millisecond {
-			return false // several loops of the session, with this target's cursor on the health stream still 0
+			return false // several loops of the session, with this target's cursor one short of forward.too-large
 		}
 		// The main session confirms forward.too-large and saves its cursor.
-		if err := r.m.SaveCursor(context.Background(), store.Cursor{Consumer: "siem-a", Stream: hlStream, Through: 1}); err != nil {
+		if err := r.m.SaveCursor(context.Background(), store.Cursor{Consumer: "siem-a", Stream: hlStream, Through: 2}); err != nil {
 			t.Fatal(err)
 		}
 		saved = true
@@ -149,6 +155,7 @@ func TestSecondSessionReleasedByMainSession(t *testing.T) {
 func TestSecondSessionFailureLeavesMainSession(t *testing.T) {
 	r := newRig(t, nil, nil)
 	r.fill(5)
+	r.m.commit(t, hlStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": "health"}))
 	bad := Stream{ID: snStream, Outbox: unopened{r.m}, Cursors: r.m}
 	sec, err := New(r.second(bad))
 	if err != nil {
@@ -167,6 +174,7 @@ func TestSecondSessionFailureLeavesMainSession(t *testing.T) {
 	// Control: one session over every stream, the unreadable one included.
 	c := newRig(t, nil, nil)
 	c.fill(5)
+	c.m.commit(t, hlStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": "health"}))
 	c.cfg.Streams = append(c.cfg.Streams, Stream{ID: snStream, Outbox: unopened{c.m}, Cursors: c.m})
 	one, err := New(c.cfg)
 	if err != nil {
@@ -175,7 +183,79 @@ func TestSecondSessionFailureLeavesMainSession(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	_ = one.Run(ctx)
-	if got := c.m.cursor(serStream); got == 5 {
-		t.Errorf("control: one session over an unreadable stream still delivered SER (cursor %d)", got)
+	if ser, hl := c.m.cursor(serStream), c.m.cursor(hlStream); ser != 0 || hl != 0 {
+		t.Errorf("control: one session over an unreadable stream still confirmed something (SER cursor %d, health cursor %d)", ser, hl)
+	}
+}
+
+// failingCursors is a health stream whose database is not open: every
+// LoadCursors fails.
+type failingCursors struct{ *memStore }
+
+func (failingCursors) LoadCursors(context.Context, store.StreamID) ([]store.Cursor, error) {
+	return nil, errors.New("health database not open")
+}
+
+// A failed read of the health stream's cursors ends the second session's
+// attempt and keeps its too-large event held: the next event is not sent,
+// LastErr names the failed load, and forward.too-large is raised once over
+// every attempt (D6's B2 on #662).
+func TestSecondSessionHealthCursorReadFails(t *testing.T) {
+	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	r.m.commit(t, snStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": strings.Repeat("x", 1200)}))
+	r.m.commit(t, snStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": "small"}))
+	r.cfg = r.second(Stream{ID: snStream, Outbox: r.m, Cursors: r.m})
+	r.cfg.HealthCursors = failingCursors{r.m}
+	var f *Forwarder
+	r.run(func() bool {
+		if c := r.m.cursor(snStream); c != 0 {
+			return true
+		}
+		return f != nil && r.srv.Conns() >= 3 && f.Status().LastErr != nil
+	}, func(x *Forwarder) { f = x })
+	sent := slices.ContainsFunc(r.srv.Acked(), func(m relptest.Message) bool { return strings.Contains(string(m.Data), "note=small") })
+	if c := r.m.cursor(snStream); c != 0 || sent {
+		t.Errorf("passed on a failed health-cursor read: cursor %d, next event sent %v", c, sent)
+	}
+	if err := f.Status().LastErr; err == nil || !strings.Contains(err.Error(), "load cursors of platform/health") {
+		t.Errorf("LastErr %v, want the failed load", err)
+	}
+	if n := r.healthCount(syslog.HealthTooLarge); n != 1 {
+		t.Errorf("%d forward.too-large events over %d sessions, want 1", n, r.srv.Conns())
+	}
+}
+
+// countingCursors counts the reads of the health stream's cursors.
+type countingCursors struct {
+	*memStore
+	n atomic.Int64
+}
+
+func (c *countingCursors) LoadCursors(ctx context.Context, stream store.StreamID) ([]store.Cursor, error) {
+	c.n.Add(1)
+	return c.memStore.LoadCursors(ctx, stream)
+}
+
+// While an event is held, the second session reads the health stream's
+// cursors at most once per Poll, however fast its other streams drain
+// (D6's B3 on #662, D1's option (a)).
+func TestSecondSessionHealthCursorReadsPerPoll(t *testing.T) {
+	r := newRig(t, nil, func(tg *syslog.Target) { tg.MaxMessageOctets = 1000 })
+	other := store.StreamID("sensor/s1/other")
+	r.m.commit(t, snStream, healthEvent(event.HealthSourceSilent, map[string]string{"note": strings.Repeat("x", 1200)}))
+	for range 400 {
+		r.m.commit(t, other, healthEvent(event.HealthSourceSilent, map[string]string{"note": "drain"}))
+	}
+	hc := &countingCursors{memStore: r.m}
+	r.cfg = r.second(Stream{ID: snStream, Outbox: r.m, Cursors: r.m}, Stream{ID: other, Outbox: r.m, Cursors: r.m})
+	r.cfg.HealthCursors, r.cfg.Poll = hc, 200*time.Millisecond
+	start := time.Now()
+	r.run(func() bool { return r.m.cursor(other) == 400 }, nil)
+	elapsed := time.Since(start)
+	if bound := int64(elapsed/r.cfg.Poll) + 2; hc.n.Load() > bound {
+		t.Errorf("%d reads of the health cursors in %s at Poll %s, want at most %d", hc.n.Load(), elapsed, r.cfg.Poll, bound)
+	}
+	if hc.n.Load() == 0 {
+		t.Error("the health cursors were never read")
 	}
 }
