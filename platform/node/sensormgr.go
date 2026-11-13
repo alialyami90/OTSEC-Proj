@@ -219,6 +219,11 @@ func (r *Runtime) startSensorManager() {
 			}
 			if !r.managerStep(ctx, full) {
 				m.endStep(true)
+				if ctx.Err() != nil {
+					// A stop that lands in a step still has its final
+					// step (section 1.9 items 3 and 10; D6 on #676).
+					r.finalStep()
+				}
 				return
 			}
 		}

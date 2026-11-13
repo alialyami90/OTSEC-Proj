@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -294,6 +295,70 @@ func TestTickReturnsWithStalledRetention(t *testing.T) {
 	}
 	if n := len(healthRuns(t, r)); n != 1 {
 		t.Fatalf("%d collection.run events, want 1", n)
+	}
+}
+
+// A stop that lands in a full step (section 1.9 items 3 and 10; D6's
+// comment 6862658408 on #676): the step is held in its retention call
+// until the stop cancels it, and the stop's final step still writes the
+// drop counts and the detector's checkpoint. The next start is held in its
+// first step, before the sensor's tick, so what it reads is what the stop
+// wrote. Control: the manager's loop returns on a failed step without the
+// final step, as at 9d462ba1.
+func TestStopInStepStillFinal(t *testing.T) {
+	g := newRetentionRig(t)
+	var hold atomic.Bool
+	entered := make(chan struct{}, 1)
+	seam := SensorSeams{Retention: func(ctx context.Context) {
+		if hold.Load() {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+		}
+	}}
+	r, _ := startClocked(t, g, seam)
+	serve := func(recs ...any) {
+		t.Helper()
+		if err := r.ServeSensor(bg, sensorChannel(t, recs...)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	serve(sensorFlow(1, sensorID), sensorFlow(2, sensorID), relayFlow(3))
+	tick(t, r) // the first drop counts and a checkpoint
+	// Within the minute: written only at the stop.
+	serve(sensorFlow(4, sensorID), sensorFlow(5, sensorID), relayFlow(6))
+	want := r.sensor.Load().link.Stats().Dropped[sensorlink.DropUnresolvedBudget]
+	obs := NetObservationStream(sensorID)
+	head, err := r.Store(obs).LastCommitted(bg, obs)
+	if err != nil || head < 2 {
+		t.Fatalf("observation head %d, %v", head, err)
+	}
+	hold.Store(true)
+	r.kickSensorManager()
+	<-entered
+	r.Close()
+
+	// The next start, held in its first step's retention call.
+	st := NewStatus("", nil, g.now)
+	r2, err := Start(bg, g.c, RuntimeOptions{Status: st, Now: g.now, Mono: g.monoNow, SensorSeams: seam,
+		Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	select {
+	case <-entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the next start's first step did not reach the retention call")
+	}
+	ev := dropEvents(t, r2)
+	if len(ev) != 2 || ev[1]["count"] != strconv.FormatUint(want, 10) {
+		t.Errorf("drop counts after a stop in a step, want a second event with %d: %v", want, ev)
+	}
+	if c := detectorCursor(t, r2); c != head {
+		t.Fatalf("the detector's stored cursor is %d after a stop in a step, want the head %d", c, head)
 	}
 }
 

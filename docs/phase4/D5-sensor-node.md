@@ -625,7 +625,8 @@ The link's commits and position saves go to the sensor's database only. What els
 - **The order:** `Runtime.Close` first stops the sensor manager, then closes `Runtime.dbs` as today.
 - **The bound:** the manager gets `SensorStopTimeout` = 10 s. It cancels its context, which every store call it makes takes, so a `Resume` or a prune stops at its next step. It writes the final drop counts and the position within that time if it can, and closes every handle that no caller holds.
 - **Past 10 s,** `Close` goes on without it: a sensor database still in a call is left to the process's exit, which releases its lock, and the node's own databases close as today. So a sensor database stuck in a `Resume` never holds the node's stop, and the local stop of §1.3 stays a restart.
-- **Test:** `TestCloseWithStuckSensorResume` (a sensor `Resume` that never returns: `Close` returns within 10 s and the evidence database is closed cleanly; control: an unbounded wait for the manager).
+- **A stop that lands in a step** still has the final step once that step ends at its next check of the context, inside the same 10 s (D6's comment 6862658408 on #676).
+- **Tests:** `TestCloseWithStuckSensorResume` (a sensor `Resume` that never returns: `Close` returns within 10 s and the evidence database is closed cleanly; control: an unbounded wait for the manager); `TestStopInStepStillFinal` (a full step held in its retention call until the stop: the next start reads the final drop counts and the detector's checkpoint at the observation head; control: the loop's return on a failed step without the final step).
 
 ### 11. The link key (F11)
 
