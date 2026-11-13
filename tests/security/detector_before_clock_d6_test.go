@@ -56,6 +56,7 @@ func bcStart(t *testing.T, dir string, create bool) (*node.Runtime, *node.Status
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitFirstStep(t, r)
 	return r, st
 }
 

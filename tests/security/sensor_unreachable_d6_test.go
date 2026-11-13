@@ -71,7 +71,20 @@ func newUnrNode(t *testing.T) *unrNode {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { n.r.Close() })
+	waitFirstStep(t, n.r)
 	return n
+}
+
+// waitFirstStep waits for the sensor manager's first step, which opens the
+// sensor's database and starts its intake after Start returns (D1's
+// ruling on #663). The tests then read the sensor as before.
+func waitFirstStep(t *testing.T, r *node.Runtime) {
+	t.Helper()
+	select {
+	case <-r.SensorFirstStep():
+	case <-time.After(30 * time.Second):
+		t.Fatal("the sensor manager's first step did not end within 30 s")
+	}
 }
 
 func (n *unrNode) now() time.Time { n.mu.Lock(); defer n.mu.Unlock(); return n.wall }

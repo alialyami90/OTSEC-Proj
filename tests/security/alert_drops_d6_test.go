@@ -88,6 +88,7 @@ func adStart(t *testing.T, dir string, create bool, alertQuota int64) *adNode {
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitFirstStep(t, n.r)
 	n.r.Tick(context.Background())
 	return n
 }
