@@ -1,6 +1,7 @@
 # GT-PCAP labels for dnp3-udp.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.
 # labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: (none); gtlabel.py applies C13 section 4's rules to tshark's fields.
-# fields: frame.number, frame.len, ip.src, ip.dst, udp.srcport, udp.dstport, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# fields: frame.number, frame.len, ip.src, ip.dst, udp.srcport, udp.dstport, dnp3.ctl.dir, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# a DNP3 frame is the master's when dnp3.ctl.dir is set and the outstation's when it is clear, whichever end of the flow sent first; a service row's server is the outstation's end.
 # the labeller is told this capture's transport (udp) and the outstation's port (20000) from the asset table's settings, never from the product (plan section 2B). A UDP flow has direction none, and its src is the first datagram's sender (C13 section 4.1).
 # objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.
 # sa_reply_timeout_ms: 5000 (C13 default). sa empty means unknown.

@@ -291,6 +291,81 @@
     "sa": "none"
    }
   ],
+  "dnp3-udp-moved-port": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     1,
+     2
+    ],
+    "note": "DNP3 over UDP 20001 on O2, both ends on 20001 (DNPNUM and that session's DNPUDPn := 20001), so no end is on the registered port 20000: a service and a pair the baseline never saw, one alert from each rule for the flow",
+    "rules": [
+     "new-service",
+     "unknown-pair"
+    ],
+    "sa": "none"
+   },
+   {
+    "context": "acknowledged",
+    "frames": [
+     3,
+     4
+    ],
+    "note": "the authorized master's operate on the same flow; dnp3_no_sa, and no alert beyond the flow's two",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-udp-req-port": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     1,
+     2
+    ],
+    "note": "DNP3 over UDP on O1 with DNPUDPn := REQ, so O1 answers to M5's temporary port 41018 on one 5-tuple: a service and a pair the baseline never saw, one alert from each rule for the flow",
+    "rules": [
+     "new-service",
+     "unknown-pair"
+    ],
+    "sa": "none"
+   },
+   {
+    "context": "acknowledged",
+    "frames": [
+     3,
+     4
+    ],
+    "note": "the authorized master's operate on the same flow; dnp3_no_sa, and no alert beyond the flow's two",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
+  "dnp3-udp-temp-port": [
+   {
+    "context": "acknowledged",
+    "frames": [
+     1,
+     2
+    ],
+    "note": "DNP3 over UDP on O1 from M5's temporary port 41017 while DNPUDPn stays 20000, so the response comes back on a second 5-tuple, 192.0.2.20:20000 to 192.0.2.14:20000: unknown-pair for each of the two flows, since neither orientation of either pair is in the baseline, and new-service for 192.0.2.20 udp/20000, never for the master's port 20000",
+    "rules": [
+     "new-service",
+     "unknown-pair"
+    ],
+    "sa": "none"
+   },
+   {
+    "context": "acknowledged",
+    "frames": [
+     3,
+     4
+    ],
+    "note": "the authorized master's operate, its response on the second 5-tuple; dnp3_no_sa, and no alert beyond the two flows' own",
+    "rules": [],
+    "sa": "none"
+   }
+  ],
   "dnp3-unauthorized-operate": [
    {
     "context": "acknowledged",
@@ -327,6 +402,18 @@
   "dnp3-udp": {
    "l4": "udp",
    "port": 20000
+  },
+  "dnp3-udp-moved-port": {
+   "l4": "udp",
+   "port": 20001
+  },
+  "dnp3-udp-req-port": {
+   "l4": "udp",
+   "port": 20000
+  },
+  "dnp3-udp-temp-port": {
+   "l4": "udp",
+   "port": 20000
   }
  },
  "net": {
@@ -349,6 +436,11 @@
    [
     "M5",
     "O1",
+    "control"
+   ],
+   [
+    "M5",
+    "O2",
     "control"
    ]
   ],

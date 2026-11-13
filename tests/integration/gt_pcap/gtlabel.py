@@ -11,7 +11,13 @@ reviewer can check each row against tshark's own output:
   are tshark's frame count and the sum of frame.len (C13 section 4.3,
   `bytes`). A UDP flow has no direction (`none`, C13 section 4.1): its
   `src` is the first datagram's sender.
-- `service`: one per (server, l4, port, protocol).
+- `service`: one per (server, l4, port, protocol). For DNP3 the server is
+  the outstation's end of the flow, whichever end sent first.
+- Who sent a DNP3 frame, the master or the outstation, is its link
+  header's DIR bit (dnp3.ctl.dir, set by the master), never which end of
+  the flow sent first. Over UDP the outstation's responses can come back on
+  another 5-tuple (dnp3-udp-temp-port), and the first datagram of that
+  flow is the outstation's.
 - `function`: one per (flow, code, sorted objects, sa), at its first
   occurrence in the flow (C13 section 4.2), for requests only. DNP3 0, 129,
   130 and 131 are never functions, and a 32 or 33 carrying group 120 belongs
@@ -54,7 +60,7 @@ import pcapfile
 TSHARK = "TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3)."
 NOT_FUNCTIONS = {0, 129, 130, 131}
 FIELDS = ["frame.number", "frame.len", "ip.src", "ip.dst", "tcp.srcport", "tcp.dstport",
-          "tcp.flags.syn", "tcp.flags.ack", "dnp3.al.func", "dnp3.al.seq", "dnp3.al.obj",
+          "tcp.flags.syn", "tcp.flags.ack", "dnp3.ctl.dir", "dnp3.al.func", "dnp3.al.seq", "dnp3.al.obj",
           "dnp3.al.fragment.reassembled.length"]
 COLUMNS = ["kind", "src", "dst", "sport", "dport", "l4", "protocol", "version", "direction", "asset",
            "frames", "frame_sha256", "packets", "bytes", "code", "objects", "sa", "sa_error_from",
@@ -149,7 +155,8 @@ def label(path, net, timeout_ns, decode=TCP_20000):
             continue
         a, b = (r["ip.src"], r[l4 + ".srcport"]), (r["ip.dst"], r[l4 + ".dstport"])
         fk = (l4,) + tuple(sorted([a, b]))
-        f = flows.setdefault(fk, {"client": None, "first": a + b, "nums": [], "bytes": 0, "dnp3": False})
+        f = flows.setdefault(fk, {"client": None, "first": a + b, "nums": [], "bytes": 0, "dnp3": False,
+                                  "server": None})
         f["nums"].append(n)
         f["bytes"] += int(r["frame.len"])
         if l4 == "tcp" and r["tcp.flags.syn"] in ("1", "True") and r["tcp.flags.ack"] in ("0", "False"):
@@ -157,32 +164,36 @@ def label(path, net, timeout_ns, decode=TCP_20000):
         if not r["dnp3.al.func"]:
             continue
         f["dnp3"] = True
-        client = (f["client"] or f["first"])[:2]
-        from_client = a == client
+        direction_bit = r["dnp3.ctl.dir"].split(",")[0]
+        if direction_bit not in ("1", "True", "0", "False"):
+            raise SystemExit(f"{path}: frame {n}: tshark gives the link direction as {direction_bit!r}")
+        from_master = direction_bit in ("1", "True")
+        if f["server"] is None:
+            f["server"] = b if from_master else a  # the outstation's end
         code, seq = int(r["dnp3.al.func"].split(",")[0]), int(r["dnp3.al.seq"].split(",")[0])
         objs = sorted({obj_name(v) for v in r["dnp3.al.obj"].split(",") if v})
         al_len = int((r["dnp3.al.fragment.reassembled.length"] or "0").split(",")[0])
-        if not objs and from_client and al_len > 2:
+        if not objs and from_master and al_len > 2:
             # The APDU holds object headers that this tshark doesn't dissect
             # (4.2.2 shows none for function 22): unlabelled, not empty.
             objs = ["?"]
-        master, outst = (a[0], b[0]) if from_client else (b[0], a[0])
+        master, outst = (a[0], b[0]) if from_master else (b[0], a[0])
         key = (master, outst, seq)
         g120 = any(o.startswith("g120v") for o in objs)
-        if from_client and code in (32, 33) and g120:
+        if from_master and code in (32, 33) and g120:
             x = pending.get(key)
             if x:
                 x.frames.append(n)
                 if code == 33 and "g120v7" in objs:
                     x.err = "master"
             continue
-        if from_client and code not in NOT_FUNCTIONS:
+        if from_master and code not in NOT_FUNCTIONS:
             if key in pending:
                 reused += 1
                 complete(key, False)
             pending[key] = Exchange(n, fk, code, objs, ns)
             continue
-        if not from_client and key in pending:
+        if not from_master and key in pending:
             x = pending[key]
             if code == 131 and "g120v1" in objs:
                 x.chal = True
@@ -210,10 +221,11 @@ def label(path, net, timeout_ns, decode=TCP_20000):
         common = [src, dst, sp, dp, l4, proto, "", direction(f), assets.get(dst, "asset-unresolved")]
         out.append(["flow", *common, ",".join(map(str, f["nums"])), sha(f["nums"]), str(len(f["nums"])),
                     str(f["bytes"]), "", "", "", "", "", "", ""])
-        skey = (dst, l4, dp, proto)
+        server, server_port = f["server"] or (dst, dp)
+        skey = (server, l4, server_port, proto)
         if skey not in seen:
             seen.add(skey)
-            out.append(["service", "", dst, "", dp, l4, proto, "", "", assets.get(dst, "asset-unresolved"),
+            out.append(["service", "", server, "", server_port, l4, proto, "", "", assets.get(server, "asset-unresolved"),
                         str(f["nums"][0]), sha(f["nums"][:1]), "", "", "", "", "", "", "", "", ""])
     flow_common = {fk: [(f["client"] or f["first"])[i] for i in (0, 2, 1, 3)] for fk, f in flows.items()}
     for x, answered in sorted(done, key=lambda d: d[0].req):
@@ -245,6 +257,8 @@ def header(name, version, net, decode=TCP_20000):
         f"# labeller: {version}; options: {' '.join(options_for(decode)) or '(none)'}; gtlabel.py applies C13 "
         "section 4's rules to tshark's fields.",
         "# fields: " + ", ".join(fields_for(decode["l4"])) + ". objects are dnp3.al.obj as g<group>v<variation>, sorted.",
+        "# a DNP3 frame is the master's when dnp3.ctl.dir is set and the outstation's when it is clear, whichever end"
+        " of the flow sent first; a service row's server is the outstation's end.",
         *told,
         "# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header"
         " in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.",
