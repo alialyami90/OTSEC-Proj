@@ -46,8 +46,18 @@ type Config struct {
 	Streams []Stream
 	// HealthStream is the stream HealthSink commits to. It must be one of
 	// Streams, so the forward.* events reach this collector and a
-	// too-large event can be released.
+	// too-large event can be released, unless HealthCursors is set.
 	HealthStream store.StreamID
+	// HealthCursors is set only on a target's second session: one that
+	// carries some of the target's streams apart from its main session,
+	// which carries HealthStream and the audit stream (the node gives each
+	// target one for the sensor's streams, D5's note section 1.9 item 1).
+	// HealthStream and every audit stream must then be left out of
+	// Streams. Both sessions use the target's name as their consumer, on
+	// disjoint streams. HealthCursors reads the cursors of HealthStream:
+	// a too-large event of this session is passed once the main session
+	// has confirmed and saved its forward.too-large event.
+	HealthCursors store.CursorStore
 	// Dial opens the connection to the collector: DialTLS for relp-tls,
 	// DialTCP for a lab-only plain relp target.
 	Dial   func(ctx context.Context) (net.Conn, error)
@@ -171,10 +181,16 @@ func New(cfg Config) (*Forwarder, error) {
 			}
 		}
 	}
-	if audits > 1 || (audits == 1) != t.Audit {
+	switch {
+	case cfg.HealthCursors != nil:
+		// A second session: the main session keeps the health and audit
+		// streams, and this one never holds or frees them.
+		if !cfg.HealthStream.Valid() || seen[cfg.HealthStream] || audits > 0 {
+			return nil, fmt.Errorf("%w: a second session of target %s carries neither its health stream %q nor an audit stream", ErrConfig, t.Name, cfg.HealthStream)
+		}
+	case audits > 1 || (audits == 1) != t.Audit:
 		return nil, fmt.Errorf("%w: target audit %v with %d audit streams", ErrConfig, t.Audit, audits)
-	}
-	if !health {
+	case !health:
 		return nil, fmt.Errorf("%w: health stream %q is not one of the target's event streams", ErrConfig, cfg.HealthStream)
 	}
 	if cfg.ResponseTimeout <= 0 {
@@ -692,8 +708,11 @@ func (s *session) release() error {
 		if h == nil || h.release == nil || s.inFlight(i) {
 			continue
 		}
-		j := s.index(h.release.Stream)
-		if j < 0 || s.conf[j] < h.release.Seq {
+		ok, err := s.released(*h.release)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			continue
 		}
 		st := s.f.cfg.Streams[i]
@@ -706,6 +725,28 @@ func (s *session) release() error {
 		s.f.setStream(st.ID, func(x *StreamStatus) { x.Blocked = "" })
 	}
 	return nil
+}
+
+// released reports whether this target has confirmed the forward.too-large
+// event k. On the main session that is its own confirmation of the health
+// stream. On a second session it is the main session's cursor on the
+// health stream, saved only after the target confirmed the event, so a
+// too-large event is never passed before its report is confirmed, and the
+// main session never waits on this one.
+func (s *session) released(k store.Key) (bool, error) {
+	if j := s.index(k.Stream); j >= 0 {
+		return s.conf[j] >= k.Seq, nil
+	}
+	if s.f.cfg.HealthCursors == nil {
+		return false, nil
+	}
+	cs, err := s.f.cfg.HealthCursors.LoadCursors(s.ctx, k.Stream)
+	if err != nil {
+		return false, fmt.Errorf("forward: load cursors of %s: %w", k.Stream, err)
+	}
+	return slices.ContainsFunc(cs, func(c store.Cursor) bool {
+		return c.Consumer == s.f.consumer && c.Stream == k.Stream && c.Through >= k.Seq
+	}), nil
 }
 
 // inFlight reports whether stream i has a transaction not yet confirmed.
