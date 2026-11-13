@@ -2,7 +2,7 @@
 
 D4, 2026-11-13. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. Documents only: nothing is built or run here.
 
-- **Evidence class: `desk`.** Every statement about Zeek below comes from reading its source. None is measured. Stage 3's counted run measures them.
+- **Evidence class: `desk`.** Every statement about Zeek's code below comes from reading its source, and stage 3's counted run measures it. The results this note cites from earlier runs (section 1 item 5, and section 4.2's Basis column) are measured, `CI-Linux`, `simulated`, each named with its run.
 - **What was read.** The release tarball `https://github.com/zeek/zeek/releases/download/v9.0.1/zeek-9.0.1.tar.gz`, fetched over HTTPS on 2026-11-13, SHA-256 `fbee2eb5ee6ebd64ef0db830fbb9fa1d702d58807643c719e8338a59329197f2`. It was unpacked in D4's scratch folder, outside the repository. Its signature file `zeek-9.0.1.tar.gz.asc` (SHA-256 `269e266a0b473b4621448034b98a9f8aafe39f0e53f026ad03bff5312e5bffce`) was fetched and **not checked**, because D4 holds no Zeek signing key. The tarball matches the pin of `docs/phase4/D4-engine-linux-eval.md` §3 (tag `v9.0.1`): its `DNP3.cc`, `dnp3-protocol.pac`, `dnp3-objects.pac`, `events.bif`, `base/protocols/dnp3/main.zeek` and `dpd.sig` have the SHA-256s §3 records.
 - **Files cited**, with their SHA-256 in the tarball. Code is cited by function, never by line.
 
@@ -23,6 +23,11 @@ D4, 2026-11-13. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), unde
   | `scripts/base/protocols/dnp3/main.zeek` | `37f51eab720db2d744ef229c0a10b0fbcd90a131b859f5500f4665a51258d2cd` |
   | `scripts/base/protocols/dnp3/dpd.sig` | `b2067b53fca4dff949c837928e94af647318cc4937d8a37fac3be5d62488a402` |
   | `src/fuzzers/CMakeLists.txt` | `eaefb55fb3c8cb35cad7f2c9aaa368a9c8fbbc75d11d4b6eff2bc00d9113ecb7` |
+  | `src/analyzer/protocol/dnp3/dnp3-objects.pac` | `0ba3df0cab28933f6729d6cab06d9b5c0d88bb9554c9b4a89caeb5b6b24dc493` |
+  | `src/analyzer/protocol/dnp3/events.bif` (DNP3's events) | `c3c3107870fb0347e0aaa7f3e004d35fb369b9e7908e88862889b970e2de7100` |
+  | `src/packet_analysis/protocol/udp/events.bif` (UDP's events) | `d9d7f5a2fec8a32a789add0bcee07957fdabe51f35c464dec0e632fc10ef52c2` |
+  | `src/analyzer/protocol/dns/DNS.cc` | `e7c7de92ce075551d5d15d76f4e86d3319463168e6abbc49cb7c547fcd3e5876` |
+  | `src/analyzer/protocol/tcp/TCP_Endpoint.cc` | `6a935b5b13f855d792ea671bd08269d3f851991ae70488047f254cd5554bf2a7` |
 
 - **Inputs:** HR-23 in `docs/threat-model.md`; D4-98 and D4-100; D4's reading 6852704517 on #657; `docs/phase4/D4-engine-linux-eval.md` §3 and 5.8; D6's E2 note §3 (`docs/phase4/D6-modbus-signature-conditions.md`); the project's script, `modules/telemetry/experiments/engine-linux/probe.zeek`; GT-PCAP's `dnp3-udp-temp-port` and `dnp3-udp-unsolicited` labels.
 
@@ -30,7 +35,7 @@ D4, 2026-11-13. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), unde
 
 1. **Which end is the originator.** A UDP connection's originator is the sender of the first datagram the sensor sees. At creation, Zeek swaps the two roles only when the source port is in `likely_server_ports` and the destination port is not, and the responder is not a broadcast address (`UDPAnalyzer::WantConnection`, `IPBasedAnalyzer::NewConn`). It never swaps them later for DNP3. Only the DNS analyzer and TCP's own code call `FlipRoles` (`DNS.cc`, `TCP_Endpoint.cc`), and no script function swaps them (`zeek.bif`, `analyzer.bif`).
 2. **20000/udp is in `likely_server_ports`.** `base/protocols/dnp3/main.zeek` registers `DNP3_TCP` for `{ 20000/tcp, 20000/udp }` through `Analyzer::register_for_ports`, and that function adds every server port to `likely_server_ports` (`base/frameworks/analyzer/main.zeek`).
-   - **This settles HR-23 item (3)'s `inference` on `likely_server_ports`, as `desk`:** a flow that the relay starts from 20000 to a master's port that is not in the set is swapped at creation, and is parsed the right way round.
+   - **This moves HR-23 item (3)'s `inference` on `likely_server_ports` (also D6's on #666) to `desk`, not yet checked against a run:** a flow that the relay starts from 20000 to a master's port that is not in the set is swapped at creation, and is parsed the right way round. The record that confirms the set's contents is the UDP line that `ports.zeek` printed on run 43373373987 ("likely_server_ports at …: … udp …"). Stage 2 or 3 cites that line, and the control case of section 4.1 measures the swap itself.
    - **HR-23's trigger is therefore a 5-tuple that the relay starts, where both ports or neither port is in `likely_server_ports`.** Both ends on 20000, the arrangement GT-PCAP's two failing cases use, is one such case. Two moved ports are another.
 3. **What attaches `DNP3_UDP`.** The signature `dpd_dnp3_server_udp` (`dpd.sig`) does, on a UDP payload that starts `05 64`, sent by either end.
 4. **Each datagram.** `DNP3_Base::ProcessData(len, data, orig)` keeps a buffer for each end, chosen by `orig`. It then checks the following, in order:
@@ -72,7 +77,7 @@ The rule, in the project's script. It is CH-49 (C13 0.2), for DNP3 over UDP and 
 2. **The frame's sender** is the connection's originator when `is_orig` is true, and its responder otherwise.
 3. **If DIR is clear, the sender is the outstation, so the server is the sender's address, port and transport.** If DIR is set, the sender is a master, so the server is the other end.
 4. **The server is never taken from the flow's responder** (CH-49; the brief's exclusions).
-5. **When one flow's frames name two different servers** (DIR clear from both ends, or set from both), the script names no server for the flow. It logs the conflict, and the judge reads a conflict as `fail`. D2 is asked whether any legitimate DNP3 arrangement does this on one 5-tuple, for example a device that is both master and outstation.
+5. **When one flow's frames name two different servers** (DIR clear from both ends, or set from both), the script names no server for the flow. It logs the conflict, and the judge reads a conflict as `fail`. That is a new judge rule, for D6 to write and pin in stage 2. D2 is asked whether any legitimate DNP3 arrangement does this on one 5-tuple, for example a device that is both master and outstation.
 6. **Where it goes:**
    - `probe.zeek`'s `link` row gains the DIR bit, the one new field. The judge (`table.py`) takes the zeek-probe configuration's service rows from it, not from `conn.log`'s responder. The other configurations keep today's reading, as controls.
    - **No contract changes.** CH-49 already defines the server this way (`inference` that D1 confirms).
@@ -100,6 +105,7 @@ D6 writes the cases and the conditions, and pins them before the counted run. La
 | `dnp3-udp-relay-restart` | the flow and the service | fail (the restart stops the analyzer, and `dpd.zeek` removes the service) | pass | `desk`, section 1, items 5 and 6 |
 | `dnp3-udp-relay-restart` | the restart's code, and every row after it | fail | pass | `desk` |
 
+- So the control is expected to fail `dnp3-udp-relay-write`'s service row and its objects row, and to pass its flow and code rows. D6's §3b names only the service row; the objects row fails too, by section 1 item 5.
 - The write's objects should be labelled (no `?`), so that the objects column can tell the fix from the control.
 - `dnp3-udp-relay-restart` should carry one request of 4 octets or more after the restart, so that the run shows that nothing after the restart is parsed.
 - Stock Zeek and ICSNPP are shown beside the control, not judged for the fix.
@@ -110,11 +116,16 @@ D6 writes the cases and the conditions, and pins them before the counted run. La
 - **The UDP false-positive set, with a floor that D6 sets.** It needs near misses that start `05 64`, in these classes:
   - (1) `05 64` and nothing more, and `05 64` with 1 to 8 more octets;
   - (2) a header whose CRC fails (expected: never named, since confirmation needs the CRC);
-  - (3) a header whose CRC passes, followed by non-DNP3 bytes, or by a second datagram without the magic;
+  - (3) a header whose CRC passes, then non-DNP3 bytes, in three forms:
+    - (3a) in the same datagram, failing the chunk CRC;
+    - (3b) a later datagram without the magic;
+    - (3c) in the same datagram, with valid chunk CRCs and an application part too short for its parser.
+
+    By `DNP3_Base::ProcessData` and `ParseAppLayer`, (3a) and (3b) raise only a weird (`dnp3_corrupt_app_chunk_checksum`, `dnp3_header_lacks_magic`) and set `skip`. Neither raises an analyzer violation, so `dpd.zeek` never removes the service the header's CRC confirmed. (3c) throws in binpac, which raises a violation (section 1 item 6), so the control removes the service;
   - (4) real UDP protocols whose first two octets happen to be `05 64`: a DNS query with ID `0x0564`, and NTP, Syslog and SNMP payloads built that way;
   - (5) random UDP payloads forced to start `05 64`, enough of them that a 1 in 65,536 CRC match is unlikely across the set.
 
-  A class (3) flow is a false positive under every configuration, the control's included. The floor compares the fix with the control, and does not need zero there. For classes (1), (2), (4) and (5), whose CRC fails, the floor is zero named flows (`desk`, from section 1 item 4). Each class also has its rate of `undecoded`, against the control, because part (b) must not turn an unnamed flow into a named one.
+  So (3a) and (3b) flows are expected to stay named DNP3, a false positive, under every configuration, the control's included (`desk`). (3c) is expected to be named under the control only until its violation. Whether a changed engine keeps it named is what the class measures. The floor compares the fix with the control, and does not need zero there. For classes (1), (2), (4) and (5), whose CRC fails, the floor is zero named flows (`desk`, from section 1 item 4). Each class also has its rate of `undecoded`, against the control, because part (b) must not turn an unnamed flow into a named one.
 - **The malformed DNP3-over-UDP datagrams** (D4-100 item 2), under the changed engine and the control, for any option outside the script. Expected: no crash, and no reporter or analyzer error that the control lacks. The set:
   - 1 to 3 octets;
   - a link length field of 0 to 4, which makes `ProcessData`'s target length less than its buffer;
