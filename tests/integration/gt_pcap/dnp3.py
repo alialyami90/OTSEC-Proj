@@ -15,8 +15,10 @@ object headers it reads (dnp3.al.obj), never on the contents.
 
 import struct
 
-# Function codes used here (S23 Table 2.30).
-READ, WRITE, SELECT, OPERATE, DIRECT_OPERATE = 1, 2, 3, 4, 5
+# Function codes used here (S23 Table 2.30). CONFIRM, 0, is the master's
+# Application Confirm of an unsolicited response (S22 p. D.7 names the
+# message; its code is what tshark reads, IEEE 1815 not being held).
+CONFIRM, READ, WRITE, SELECT, OPERATE, DIRECT_OPERATE = 0, 1, 2, 3, 4, 5
 ENABLE_UNSOL, DISABLE_UNSOL, ASSIGN_CLASS = 20, 21, 22
 AUTH_REQ, AUTH_REQ_NO_ACK = 32, 33
 RESPONSE, UNSOL_RESPONSE, AUTH_RESPONSE = 129, 130, 131
@@ -70,6 +72,18 @@ def response(app_seq, fc=RESPONSE, iin=0, objects=b""):
     return bytes([0xC0 | (app_seq & 0x0F), fc]) + struct.pack(">H", iin) + objects
 
 
+def unsolicited(app_seq, iin=0, objects=b""):
+    """An unsolicited response APDU: function 130 with FIR, FIN, CON and UNS
+    set, so the master must confirm it (S22 p. D.7)."""
+    return bytes([0xF0 | (app_seq & 0x0F), UNSOL_RESPONSE]) + struct.pack(">H", iin) + objects
+
+
+def confirm(app_seq):
+    """The master's Application Confirm of an unsolicited response: function
+    0 with FIR, FIN and UNS set, in the response's sequence number."""
+    return bytes([0xD0 | (app_seq & 0x0F), CONFIRM])
+
+
 # Object headers (S23 §2.x; qualifier codes as tshark reads them).
 
 def all_objects(g, v):
@@ -96,6 +110,21 @@ def crob(index, code=0x03, count=1, on_ms=1000, off_ms=0):
 def time_sync(ms):
     """g50v1, qualifier 0x07 count 1: the absolute time, 48-bit milliseconds."""
     return count8(50, 1, struct.pack("<Q", ms)[:6])
+
+
+def binary_event(index, ms, flags=0x81):
+    """g2v2, a binary input change with time, qualifier 0x17 (an 8-bit
+    count of 1, an 8-bit index): flags (0x81, online and state 1), then
+    48-bit milliseconds. In 129 and 130 with qualifiers 17h and 28h (S22
+    Table D.9, p. D.15)."""
+    return bytes([2, 2, 0x17, 1, index, flags]) + struct.pack("<Q", ms)[:6]
+
+
+def deadband16(index, value):
+    """g34v1, a 16-bit analog input reporting deadband, qualifier 0x00 (8-bit
+    start and stop indices). Written with function 2 (S22 Table D.9,
+    p. D.17)."""
+    return start_stop8(34, 1, index, index, struct.pack("<H", value))
 
 
 def iin_clear_restart():

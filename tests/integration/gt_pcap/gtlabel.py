@@ -19,7 +19,11 @@ reviewer can check each row against tshark's own output:
   another 5-tuple (dnp3-udp-temp-port), and the first datagram of that
   flow is the outstation's.
 - `function`: one per (flow, code, sorted objects, sa), at its first
-  occurrence in the flow (C13 section 4.2), for requests only. DNP3 0, 129,
+  occurrence in the flow (C13 section 4.2), for requests only. Its src and
+  sport are the request's sender, the master, and its dst and dport the
+  outstation, whichever end of the flow sent first; its direction is the
+  flow's (C13 section 14, item 14). On a flow the outstation starts
+  (dnp3-udp-unsolicited) they are the flow row's ends swapped. DNP3 0, 129,
   130 and 131 are never functions, and a 32 or 33 carrying group 120 belongs
   to the pending exchange (D2, D1). Its `sa` follows the exchange keyed on
   (master, outstation, application sequence number): a group 120 v1
@@ -116,10 +120,10 @@ def obj_name(v):
 
 
 class Exchange:
-    __slots__ = ("req", "flow", "code", "objects", "frames", "chal", "aggr", "err", "t0")
+    __slots__ = ("req", "flow", "ends", "code", "objects", "frames", "chal", "aggr", "err", "t0")
 
-    def __init__(self, req, flow, code, objects, t0):
-        self.req, self.flow, self.code, self.objects, self.t0 = req, flow, code, objects, t0
+    def __init__(self, req, flow, ends, code, objects, t0):
+        self.req, self.flow, self.ends, self.code, self.objects, self.t0 = req, flow, ends, code, objects, t0
         self.frames, self.chal, self.aggr, self.err = [req], False, "g120v3" in objects, ""
 
     def sa(self, answered):
@@ -191,7 +195,7 @@ def label(path, net, timeout_ns, decode=TCP_20000):
             if key in pending:
                 reused += 1
                 complete(key, False)
-            pending[key] = Exchange(n, fk, code, objs, ns)
+            pending[key] = Exchange(n, fk, (a, b), code, objs, ns)
             continue
         if not from_master and key in pending:
             x = pending[key]
@@ -227,7 +231,6 @@ def label(path, net, timeout_ns, decode=TCP_20000):
             seen.add(skey)
             out.append(["service", "", server, "", server_port, l4, proto, "", "", assets.get(server, "asset-unresolved"),
                         str(f["nums"][0]), sha(f["nums"][:1]), "", "", "", "", "", "", "", "", ""])
-    flow_common = {fk: [(f["client"] or f["first"])[i] for i in (0, 2, 1, 3)] for fk, f in flows.items()}
     for x, answered in sorted(done, key=lambda d: d[0].req):
         sa = x.sa(answered)
         k = (x.flow, x.code, tuple(x.objects), sa)
@@ -235,7 +238,7 @@ def label(path, net, timeout_ns, decode=TCP_20000):
         if k in seen:
             continue
         seen.add(k)
-        src, dst, sp, dp = flow_common[x.flow]
+        (src, sp), (dst, dp) = x.ends  # the request's sender and its receiver
         out.append(["function", src, dst, sp, dp, l4, "dnp3", "", direction(flows[x.flow]),
                     assets.get(dst, "asset-unresolved"),
                     ",".join(map(str, x.frames)), sha(x.frames), "", "", str(x.code), ",".join(x.objects), sa,
@@ -258,7 +261,8 @@ def header(name, version, net, decode=TCP_20000):
         "section 4's rules to tshark's fields.",
         "# fields: " + ", ".join(fields_for(decode["l4"])) + ". objects are dnp3.al.obj as g<group>v<variation>, sorted.",
         "# a DNP3 frame is the master's when dnp3.ctl.dir is set and the outstation's when it is clear, whichever end"
-        " of the flow sent first; a service row's server is the outstation's end.",
+        " of the flow sent first; a service row's server is the outstation's end, and a function row's src is the"
+        " request's sender (C13 section 14, item 14).",
         *told,
         "# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header"
         " in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.",

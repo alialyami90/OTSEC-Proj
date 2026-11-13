@@ -227,6 +227,32 @@ def test_the_req_port_case_answers_to_the_requests_port():
     assert udp_ends("dnp3-udp-req-port") == [(41018, 20000, 1), (20000, 41018, 0)] * 2
 
 
+def test_the_unsolicited_case_is_a_flow_the_outstation_starts():
+    """P4-D6-GT3 (D6's N1 on #652): O1's unsolicited response is the first
+    datagram of one 5-tuple, both ends on 20000; M5 confirms it, then sends
+    its read, operate and write on that same 5-tuple. Read from the bytes:
+    the link header's DIR bit, then the application control octet (FIR 80h,
+    FIN 40h, CON 20h, UNS 10h) and the function code, after the transport
+    octet."""
+    assert udp_ends("dnp3-udp-unsolicited") == [(20000, 20000, 0), (20000, 20000, 1)] + [
+        (20000, 20000, 1), (20000, 20000, 0)] * 3
+    frames = {n: f for n, f, _ in dnp3_cases.cases()}["dnp3-udp-unsolicited"]
+    o1, m5 = synth.ip4(dnp3_cases.NET["outstation"]["ip"]), synth.ip4(dnp3_cases.NET["masters"]["M5"]["ip"])
+    assert (frames[0].data[26:30], frames[0].data[30:34]) == (o1, m5)
+    apdus = [l4_payload(f.data)[3][11:13] for f in frames]
+    assert apdus[0] == bytes([0xF0, dnp3.UNSOL_RESPONSE]) and apdus[1] == bytes([0xD0, dnp3.CONFIRM])
+    assert [a[1] for a in apdus[2:]] == [dnp3.READ, dnp3.RESPONSE, dnp3.DIRECT_OPERATE, dnp3.RESPONSE, dnp3.WRITE,
+                                         dnp3.RESPONSE]
+    assert all(a[0] & 0x30 == 0 for a in apdus[2:])  # no CON, no UNS: solicited
+    # The event (g2v2, qualifier 17h) and the deadband written (g34v1, qualifier 00h).
+    assert l4_payload(frames[0].data)[3][15:18] == bytes([2, 2, 0x17])
+    assert l4_payload(frames[6].data)[3][13:16] == bytes([34, 1, 0x00])
+    # M5 may control O1 and may not write to it, so the write is the
+    # unauthorized one (plan section 4).
+    assert ["M5", "O1", "control"] in dnp3_cases.NET["authorized_writers"]
+    assert ["M5", "O1", "write"] not in dnp3_cases.NET["authorized_writers"]
+
+
 def test_the_baseline_series_never_holds_the_two_new_services():
     """Both captures are new-service samples only if the R6.2 series never
     shows O2, O1 over UDP, or M5. Checked on the two committed series
@@ -249,6 +275,7 @@ def test_the_labeller_is_told_the_port_and_transport_from_the_settings():
     assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-moved-port"]) == ["-d", "tcp.port==20001,dnp3"]
     assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-udp"]) == []
     assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-udp-moved-port"]) == ["-d", "udp.port==20001,dnp3"]
+    assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-udp-unsolicited"]) == []
     udp = gtlabel.fields_for("udp")
     assert "dnp3.ctl.dir" in udp and "dnp3.ctl.dir" in gtlabel.FIELDS  # who sent a frame, from its link header
     assert "udp.srcport" in udp and "udp.dstport" in udp and not [f for f in udp if f.startswith("tcp.")]

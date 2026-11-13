@@ -120,6 +120,14 @@ class Session:
     def reply(self, seq, fc=dnp3.RESPONSE, objects=b"", gap_ns=None):
         return self.back.send(False, self._link(False, dnp3.response(seq, fc, 0, objects)), gap_ns=gap_ns)[0]
 
+    def unsolicited(self, seq, objects=b""):
+        """The outstation's unsolicited response (function 130); returns its frame."""
+        return self.back.send(False, self._link(False, dnp3.unsolicited(seq, objects=objects)))[0]
+
+    def confirm(self, seq):
+        """The master's Application Confirm of that response (function 0)."""
+        return self.conv.send(True, self._link(True, dnp3.confirm(seq)))[0]
+
     def auth(self, seq, fc, objects):
         """A master's function 32 or 33 carrying group 120 objects, in the
         pending exchange's sequence number."""
@@ -370,6 +378,38 @@ def cases():
     add("dnp3-udp-req-port", "M5", 41018, poll_then_operate,
         decode_rows("DNP3 over UDP on O1 with DNPUDPn := REQ, so O1 answers to M5's temporary port 41018 on one "
                     "5-tuple"), l4="udp")
+
+    # P4-D6-GT3 (D4-94; D6's N1 on #652; HR-23; plan section 2B, (3)): a
+    # UDP flow the outstation starts. Over UDP a SEL-751 sends unsolicited
+    # messages on its own, while over TCP it sends them only on a session a
+    # master opened (S22 p. D.6). M5's session on O1 has UNSOLn := Y and
+    # PUNSOLn := Y, so no function 20 comes first, and both ends are on
+    # 20000 as in dnp3-udp; which port each end sends from is inference
+    # that H-23 and H-24 settle. O1's unsolicited response, one binary
+    # input event, is the flow's first datagram; M5 confirms it, then sends
+    # dnp3-udp's poll and operate on the same 5-tuple, then writes a
+    # deadband (g34v1, class write), which it is not authorized to do.
+    def unsolicited_then_requests(s):
+        m = {}
+        m["uns"] = s.unsolicited(0, dnp3.binary_event(0, s.conv.clock.ns // 1_000_000))
+        m["confirm"] = s.confirm(0)
+        m.update(poll_then_operate(s))
+        m["write"], seq = s.request(dnp3.WRITE, dnp3.deadband16(0, 100))
+        m["write_resp"] = s.reply(seq)
+        return m
+
+    add("dnp3-udp-unsolicited", "M5", NET["outstation"]["port"], unsolicited_then_requests, [
+        {"marks": ["req", "resp"], "rules": ["new-service", "unknown-pair"], "context": "acknowledged", "sa": "none",
+         "note": "DNP3 over UDP on O1, both ends on 20000, on a 5-tuple whose first datagram is O1's unsolicited "
+                 "response (function 130, frame 1), which M5 confirms (function 0, frame 2); neither is a "
+                 "function. M5's poll on that 5-tuple: a service and a pair the baseline never saw, one alert "
+                 "from each rule for the flow, and new-service for 192.0.2.20 udp/20000, never for M5's port 20000"},
+        {"marks": ["op", "op_resp"], "rules": [], "context": "acknowledged", "sa": "none",
+         "note": "the authorized master's operate on the 5-tuple the outstation started; dnp3_no_sa, and no "
+                 "alert beyond the flow's two"},
+        {"marks": ["write", "write_resp"], "rules": ["unauthorized-write"], "context": "acknowledged", "sa": "none",
+         "note": "a deadband write (function 2, g34v1, class write) from M5, which is authorized only to "
+                 "control O1, on the 5-tuple the outstation started; dnp3_no_sa"}], l4="udp")
     return out
 
 
@@ -427,6 +467,7 @@ DECODE = {
     "dnp3-udp-moved-port": {"l4": "udp", "port": NET["outstations"]["O2"]["port"]},
     "dnp3-udp-temp-port": {"l4": "udp", "port": NET["outstation"]["port"]},
     "dnp3-udp-req-port": {"l4": "udp", "port": NET["outstation"]["port"]},
+    "dnp3-udp-unsolicited": {"l4": "udp", "port": NET["outstation"]["port"]},
 }
 
 SERIES = {

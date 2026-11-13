@@ -18,7 +18,8 @@ What it sends for a capture, in the order a sensor would see the frames:
   is read as the difference between them (D1 on #548);
 - for each `flow` row a `start` at its first frame and an `end` with the
   row's packets and bytes;
-- for each `service` row a `service` with `basis: content`;
+- for each `service` row a `service` with `basis: content`, its server at
+  `ip.dst` whichever end sent the flow's first frame;
 - for each `function` row a `function` with the row's code, objects, `sa`
   and `sa_error_from`, citing the row's frames.
 
@@ -115,9 +116,16 @@ class Source:
         for r in self.rows:
             nums = [int(n) for n in r["frames"].split(",")] if r["frames"] else []
             if r["kind"] == "service":
-                flow = next(f for f in flows if (f["dst"], f["dport"], f["l4"]) == (r["dst"], r["dport"], r["l4"]))
-                events.append((nums[0], 1, lambda flow=flow, nums=nums: self._observation(
-                    "service", flow, nums, len(nums), True, {"basis": "content"})))
+                # The server is at ip.dst even where it sent the flow's first
+                # frame (C13 0.2's CH-49: dnp3-udp-unsolicited).
+                server = (r["dst"], r["dport"])
+                flow = next(f for f in flows
+                            if f["l4"] == r["l4"] and server in ((f["src"], f["sport"]), (f["dst"], f["dport"])))
+                ends = [(flow["src"], flow["sport"]), (flow["dst"], flow["dport"])]
+                other = ends[0] if ends[1] == server else ends[1]
+                ip = dict(flow, src=other[0], sport=other[1], dst=server[0], dport=server[1])
+                events.append((nums[0], 1, lambda ip=ip, nums=nums: self._observation(
+                    "service", ip, nums, len(nums), True, {"basis": "content"})))
             elif r["kind"] == "function":
                 body = {"code": int(r["code"]), "objects": [o for o in r["objects"].split(",") if o not in ("", "?")]}
                 for k in ("sa", "sa_error_from"):

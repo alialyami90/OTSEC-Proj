@@ -21,7 +21,8 @@ sensor's output:
 - every labelled `insecure` use is flagged, with its reason (V-M6's list;
   today the derived Modbus capture's `modbus-tcp`);
 - every observation cites its packets: each cited frame's hash is one of
-  the frames the label row lists (for a service, any frame of its flow),
+  the frames the label row lists (for a service, any frame of a labelled
+  flow with the server at either end),
   and its number too when the product read the GT file itself (`file:`
   capture IDs);
 - nothing is recorded that no label holds: an extra service, flow,
@@ -100,14 +101,19 @@ def check(rows, observations, moved_port=False):
                 continue
             matched += 1
             used.update(hit)
-            flow = next(f for f in flows if (f["dst"], f["dport"], f["l4"]) == (r["dst"], r["dport"], r["l4"]))
+            # Its frames: those of every labelled flow with the server at
+            # either end, since a service's key is the same whichever flow
+            # carries it (C13 0.2's CH-49; D4's N3 on #648).
+            mine = [f for f in flows if f["l4"] == r["l4"]
+                    and (r["dst"], r["dport"]) in ((f["src"], f["sport"]), (f["dst"], f["dport"]))]
+            service_frames = {k: ",".join(f[k] for f in mine) for k in ("frames", "frame_sha256")}
             for o in (obs[i] for i in hit):  # every record of the key, not the first alone
                 if moved_port and o["service"]["basis"] != "content":
                     bad.append(f"{what}: found by {o['service']['basis']}, not by content, on a moved port")
                 asset = o.get("node", {}).get("dst_asset")
                 if asset is not None and asset != r["asset"]:
                     bad.append(f"{what}: recorded against {asset}, the label says {r['asset']}")
-                _cites(o, flow, what, bad)
+                _cites(o, service_frames, what, bad)
         elif r["kind"] == "flow":
             labelled += 1
             what = f"flow {r['src']}:{r['sport']} {r['dst']}:{r['dport']}/{r['l4']}"
