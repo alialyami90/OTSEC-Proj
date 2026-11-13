@@ -791,7 +791,16 @@ def public(out):
 S1, S0 = "zeek-probe", "zeek-modbus-sig"
 SIG_CONDITIONS = "tests/integration/gt_pcap/modbus-signature-conditions.tsv"
 CORPUS = "tests/fixtures/network/modbus-sig-corpus"
-PUBLIC_SEEN = "43314221626, 43315465228"
+# judge-seen: every earlier run of S0 over the corpus, by run ID, with the
+# head it ran at and the signature it loaded (modbus-sig.zeek and
+# modbus-sig.sig, SHA-256 prefixes). Runs of d4-engine-linux-eval.yml on #643.
+SEEN = (
+    ("43314221626", "21ffb801", "4a8b75d4/beda1433"),
+    ("43315465228", "51540b17", "4a8b75d4/beda1433"),
+    ("43344298828", "4011e49e", "7be2c6a2/96f335c0"),
+    ("43345170729", "4da1f1c8", "7be2c6a2/96f335c0"),
+    ("43346878016", "7bfa398a", "7be2c6a2/96f335c0"),
+)
 
 
 def modbus_named(d):
@@ -815,6 +824,83 @@ def modbus_named(d):
 
 def verdict(r):
     return "unknown" if r.startswith("unknown") else "pass" if r.startswith("pass") else "fail"
+
+
+def synthesized(source):
+    """A member the project wrote (D4's synth_corpus.py, `synthesized (D4)`,
+    or GT-PCAP's `GT-PCAP (D6), synthesized`), not a public capture (D6's N1
+    on #643)."""
+    return "synthesized" in source
+
+
+def det_verdict(r, ctl_ok, ctl_unknown, baseline_fails):
+    """One det- row under S0 (D6's ctl-502 and ctl-baseline): with the
+    baseline passing too, unknown; with the control on 502 not run, unknown;
+    with it failing, `fail (also fails on port 502)`, never a pass (D6's N2
+    on #643)."""
+    if baseline_fails:
+        return "unknown (the baseline passes too)"
+    if ctl_ok:
+        return verdict(r)
+    return "unknown (control on port 502 not run)" if ctl_unknown else "fail (also fails on port 502)"
+
+
+def judge_held(rows):
+    """One held-out flow under S0 (D6's held-502 and held-other). rows:
+    (condition, code, (result, cite), control), control None for held-other
+    and else the same row's (result, cite) on 502. Returns (state, ctl_pass,
+    lines), state one of pass, fail, unknown, listed:
+
+    - a row that fails under S0 with its control passing, or with none, fails
+      the flow;
+    - a row that fails on 502 too is `fail (also fails on port 502)`, listed
+      and counted against nothing;
+    - a row that fails under S0 while its control did not run is unknown,
+      never a pass (D6's B1 on #643), as is a row that did not run;
+    - a flow none of whose rows was judged is listed, not a pass (D6's N3)."""
+    out, ctl_pass, unknown, fail, judged = [], True, False, False, 0
+    for cnd, code, (r, cite), c in rows:
+        name = f"{cnd}{' ' + code if code else ''}"
+        cv = verdict(c[0]) if c else None
+        rv = verdict(r)
+        if c is not None and cv != "pass":
+            ctl_pass = False
+        if rv == "fail" and cv == "fail":
+            out.append(f"{name}: fail (also fails on port 502)")
+            continue
+        judged += 1
+        ctl = f"; control on 502: {c[0]}" if c else ""
+        if rv == "fail" and cv in (None, "pass"):
+            fail = True
+        elif rv == "fail":
+            unknown = True
+            out.append(f"{name}: unknown (fails under S0, and its control on 502 did not run) {r} {cite}".strip() + ctl)
+            continue
+        unknown |= rv == "unknown"
+        out.append(f"{name}: {r} {cite}".strip() + ctl)
+    state = "fail" if fail else "unknown" if unknown else "pass" if judged else "listed"
+    return state, ctl_pass, out
+
+
+def held_tally(hs):
+    """held-502 or held-other over its flows: (verdict, detail). Listed flows
+    (refused, or every row also failing on 502) are named apart and are in no
+    pass (D6's N3 on #643)."""
+    st = collections.Counter(h.get("state", "listed") for h in hs)
+    if not st["pass"] + st["fail"] + st["unknown"]:
+        return "unknown (no flow judged)", f"{len(hs)} flows, {st['listed']} listed"
+    failed = [h for h in hs if h.get("state") == "fail"]
+    return ("fail" if st["fail"] else "unknown" if st["unknown"] else "pass",
+            f"{st['pass']} pass, {st['fail']} fail, {st['unknown']} unknown, {st['listed']} listed, of {len(hs)}; fail: "
+            + (", ".join(f"{h['cap']} {h['lab']['src']}:{h['lab']['sport']}" for h in failed) or "none"))
+
+
+def held_count_gate(v):
+    """held-count: with fewer counting flows, both held- rows are unknown,
+    whatever they read (D6's N2 on #643)."""
+    if v["held-count"][0] != "pass":
+        for key in ("held-502", "held-other"):
+            v[key] = ("unknown (held-count)", v[key][1])
 
 
 def sig(s, root, work):
@@ -893,12 +979,7 @@ def sig(s, root, work):
             v[key] = ("unknown (not run)", "")
             continue
         r, cite = hit[0]
-        if v["ctl-baseline"][0] == "fail":
-            v[key] = ("unknown (the baseline passes too)", r)
-        elif not ctl_ok:
-            v[key] = ("fail (also fails on port 502)" if verdict(r) == "fail" else verdict(r), r)
-        else:
-            v[key] = (verdict(r), f"{r} {cite}")
+        v[key] = (det_verdict(r, ctl_ok, ctl_unknown, v["ctl-baseline"][0] == "fail"), f"{r} {cite}")
     pairs = list(zip(res[S1], res[S0]))
     s1_pass = [(a, b) for a, b in pairs if verdict(a[1]) == "pass"]
     lost = [a[0] for a, b in s1_pass if verdict(b[1]) != "pass"]
@@ -920,7 +1001,7 @@ def sig(s, root, work):
             continue
         meta = by_stem.get(lab["capture"])
         mb = meta["modbus"] if meta else ""
-        public = meta is not None and not meta["source"].startswith("synthesized")
+        public = meta is not None and not synthesized(meta["source"])
         no_roles = lab["syn"] != "client" and lab["first"] == "server"
         if mb == "tcp/502":
             cap, ctlcap, port = (MOVED if lab["capture"] == CONTROL else lab["capture"] + "-moved-port"), lab["capture"], MOVED_PORT
@@ -978,35 +1059,14 @@ def sig(s, root, work):
             h.setdefault("result", "listed: no rows judged")
             h["counts"] = False
             continue
-        out_rows, ctl_pass, any_unknown, fail = [], True, False, False
-        for cnd, code, (r, cite), c in h[S0]:
-            cv = verdict(c[0]) if c else None
-            rv = verdict(r)
-            if c is not None and cv != "pass":
-                ctl_pass = False
-            if rv == "fail" and cv == "fail":
-                out_rows.append(f"{cnd}{' ' + code if code else ''}: fail (also fails on port 502)")
-                continue
-            if rv == "fail" and (cv is None or cv == "pass"):
-                fail = True
-            any_unknown |= rv == "unknown"
-            out_rows.append(f"{cnd}{' ' + code if code else ''}: {r} {cite}".strip()
-                            + (f"; control on 502: {c[0]}" if c else ""))
-        h["fail"], h["unknown"] = fail, any_unknown
-        h["counts"] = h["public"] and not h["no_roles"] and (h["kind"] == "held-other" or ctl_pass) and not any_unknown
-        h["counts_any"] = not h["no_roles"] and (h["kind"] == "held-other" or ctl_pass) and not any_unknown
-        h["result"] = "; ".join(out_rows)
+        state, ctl_pass, out_rows = judge_held(h[S0])
+        h["state"] = state
+        ok = state in ("pass", "fail") and not h["no_roles"] and (h["kind"] == "held-other" or ctl_pass)
+        h["counts"] = h["public"] and ok
+        h["counts_any"] = ok
+        h["result"] = ("listed: every row also fails on port 502; " if state == "listed" else "") + "; ".join(out_rows)
     for key in ("held-502", "held-other"):
-        hs = [h for h in held if h["kind"] == key]
-        judged = [h for h in hs if "fail" in h]
-        if not judged:
-            v[key] = ("unknown (no flow judged)", f"{len(hs)} flows")
-            continue
-        failed = [h for h in judged if h["fail"]]
-        unk = [h for h in judged if h["unknown"] and not h["fail"]]
-        v[key] = ("fail" if failed else "unknown" if unk else "pass",
-                  f"{len(judged) - len(failed) - len(unk)} of {len(hs)} pass; fail: "
-                  + (", ".join(f"{h['cap']} {h['lab']['src']}:{h['lab']['sport']}" for h in failed) or "none"))
+        v[key] = held_tally([h for h in held if h["kind"] == key])
     pub = [h for h in held if h.get("counts")]
     pub_caps = {h["lab"]["capture"] for h in pub} - {CONTROL}
     allc = [h for h in held if h.get("counts_any")]
@@ -1016,10 +1076,7 @@ def sig(s, root, work):
                        f"public held-out flows that count: {len(pub)}, from {len(pub_caps)} captures other than modbus.pcap "
                        f"(D1's ruling 6840362704: public only); with the synthesized ones, as the file alone reads: {len(allc)}, "
                        f"from {len(all_caps)}")
-    if v["held-count"][0] != "pass":
-        for key in ("held-502", "held-other"):
-            if v[key][0] == "pass":
-                v[key] = ("unknown (held-count)", v[key][1])
+    held_count_gate(v)
 
     # 3. False positives (fp-flows, fp-floor, fp-near, fp-control) and the labels' rows.
     def fp_count(rows_, cfg):
@@ -1045,7 +1102,7 @@ def sig(s, root, work):
     v["fp-floor"] = ("pass" if len(floor) >= 300 else "fail", f"{len(floor)} not-modbus TCP flows with payload and a flow record "
                      f"under S0 (the labels hold {len(labelled_floor)}); captures with no flow record under S0: "
                      + (", ".join(f"{c} ({n})" for c, n in sorted(undecoded.items())) or "none"))
-    synth = lambda l: by_stem.get(l["capture"], {}).get("source", "").startswith("synthesized")
+    synth = lambda l: synthesized(by_stem.get(l["capture"], {}).get("source", ""))
     near = [l for l in floor if l["near_miss"] == "yes"]
     near_protos = {l["protocol"] for l in near}
     rtu = [l for l in near if l["protocol"] == "modbus-rtu"]
@@ -1067,7 +1124,8 @@ def sig(s, root, work):
     big = per.most_common(1)[0] if per else ("-", 0)
     need = {"iec104", "mms", "enip", "dnp3"}
     v["corpus-protocols"] = ("pass" if len(per) >= 8 and need <= set(per) and big[1] * 2 <= len(floor) else "fail",
-                             f"{len(per)} protocols; the largest is {big[0]} with {big[1]} of {len(floor)}; "
+                             f"{len(per)} protocol names, counted by capture (the manifest's `protocol` is one name per capture, "
+                             f"so a capture's other flows carry its name); the largest is {big[0]} with {big[1]} of {len(floor)}; "
                              f"{', '.join(sorted(need - set(per))) or 'none'} of IEC 104, MMS, EtherNet/IP and DNP3 missing")
     tcp_pay = [l for l in labels if l["l4"] == "tcp" and (int(l["payload_src"]) or int(l["payload_dst"]))]
     disputed = [l for l in tcp_pay if l["class"] == "disputed"]
@@ -1081,8 +1139,11 @@ def sig(s, root, work):
                 "cfg-alone": "does not arise: S0 carries no redef", "judge-port": "read at review-text, not measured by the run",
                 "judge-named": "applied: conn.log `service`, modbus.log; analyzer.log not read",
                 "judge-verdict": "applied", "judge-counted": "the header above",
-                "judge-seen": f"earlier runs of S0 over the corpus: {PUBLIC_SEEN} (the signature as at 3436c8dc), and this PR's "
-                              "rehearsals of the amendment, which the PR lists by run ID; the manifest's `seen` column marks each capture",
+                "judge-seen": "earlier runs of S0 over the corpus, run ID at head (modbus-sig.zeek/modbus-sig.sig): "
+                              + "; ".join(f"{r} at {h} ({sg})" for r, h, sg in SEEN)
+                              + f". The signature is unchanged since {SEEN[2][1]} (the hashes above against the last listed); "
+                              "the earlier signature ran over the captures the manifest's `seen` column marks. A run of S0 after "
+                              f"{SEEN[-1][0]} that is not this one is not in this list",
                 "review-text": "read by D2 and D6 on the PR, not measured by the run", "corpus-members": "the manifest",
                 "corpus-sources": "the manifest's header (D7 and D6 confirm)", "corpus-terms": "the manifest's header (D7 confirms)",
                 "corpus-pins": "pins.env and the header above", "corpus-not-held": "the manifest's header",

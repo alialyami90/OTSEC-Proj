@@ -19,7 +19,9 @@ For each flow that flows.py reads (TCP and UDP):
   server. `not-modbus` (`label-not-modbus`): the source says the flow is
   not Modbus/TCP (Modbus RTU framing in raw TCP included), tshark's
   defaults read no Modbus/TCP on it, and told the port, no request to the
-  server is answered. `disputed`: anything else;
+  server is answered; the manifest's `modbus` must be `none` or `rtu`, so a
+  flow in a capture whose source names only Modbus/TCP is never `not-modbus`.
+  `disputed`: anything else;
 - near_miss (`fp-near`): for one end or the other, the first 8 octets it
   sent, as flows.py reassembles them, have octets 2 and 3 zero and octets
   4 and 5, big-endian, at least 2. The octets themselves are not written.
@@ -143,7 +145,11 @@ def label(manifest, capdir, flows_path, out_path, any_tshark=False):
                 klass = "modbus" if reqs else "disputed"
                 protocol = "modbus"
             else:
-                klass = "not-modbus" if by_default == "none" and not answered else "disputed"
+                # label-not-modbus's first half: the source names no Modbus/TCP
+                # in the capture (`none`), or names the flow's framing as RTU.
+                # A capture whose source names only Modbus/TCP names nothing
+                # for its other flows, so they are disputed (D6's B2 on #643).
+                klass = "not-modbus" if mb in ("none", "rtu") and by_default == "none" and not answered else "disputed"
                 protocol = "modbus-rtu" if mb == "rtu" else m["protocol"]
             s, c = ("a", "b") if server == (f["a"], f["ap"]) else ("b", "a")
             out.append([cap, m["source"], l4, client[0], client[1], server[0], server[1],
