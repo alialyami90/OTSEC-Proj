@@ -1882,6 +1882,8 @@ The owner's words in the CLI on 2026-11-13: "can you make a modification and all
 
 ## D4-93: six roles' effort lowered to `medium` (owner, 2026-11-13)
 
+*Partly superseded by D4-98: D3's effort is `high`.*
+
 The owner's words in the CLI on 2026-11-13, asked whether the uncommitted `effort` lines in six role files should be committed: "Keep and commit them". The owner had made the change in the working tree; D1 did not write it. Evidence class: `desk`. D4-92 is the number D1 announced on #640 to #645 for the approval of P4-4-L6's documents, which is open, so this entry takes the next number, as D4-89 did.
 
 - **The change.** `effort` goes from `high` to `medium` in the role files of D2, D3, D4, D5, D7 and D8. Nothing else in those files changes. Every role stays on `opus`.
@@ -1926,6 +1928,8 @@ No new words from the owner. Evidence class: `desk`. Nothing is built. This numb
 
 ## D4-94: the Modbus signature is not adopted, and E-D4-03's thirteen new rows (D1, 2026-11-13)
 
+*Partly superseded by D4-98: HR-22 and HR-23 no longer close on the owner's acceptance.*
+
 No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs, `desk` for the rest.
 
 - **P4-4-E2's counted run** (run 43373373987 from `main` at `5c909280`; #643 merged as `5c909280`; D1's ruling on #643, 6845247619): the Modbus/TCP content signature is **not adopted**. `held-502` 25 of 27 (an unanswered Read Device Identification request and a session opening with function code 0); `adopt-when` not met, on `held-502` and on `review-text` (which the run does not measure; D6's reading of (c)). False positives 0 over 530 flows. The conditions (#642, `7b242b85…4418`) and D1's threshold were fixed before the run and did not change after the rehearsals showed the outcome. **HR-22 stands**, with its measured limits in the threat model. Any later signature is a new brief with new held-out captures.
@@ -1935,6 +1939,8 @@ No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs
 - **Merged on 2026-11-13:** #640, #642, #643, #646, #647, #648, #649, #650, #651, #652, #641, #644, #645.
 
 ## D4-95: HR-24 needs a detector change before item 4's gate (the owner, 2026-11-13)
+
+*Partly superseded by D4-98: its line that HR-22 and HR-23 keep the owner's acceptance.*
 
 The owner gave this answer in D1's session on 2026-11-13. D1 had asked whether to "(a) accept it for now, or (b) require a detector change before item 4's gate", and the owner replied "Go with b". Evidence class: `desk`. Nothing is built.
 
@@ -2025,11 +2031,12 @@ Those stay with the owner, below.
   - HR-23's parts (a) and (b), in its row of `docs/threat-model.md`;
   - for HR-22, a new signature brief with new held-out captures (D4-94).
 
-  D1 briefs both in the third part. The `undecoded` signal stays in item 4's gate. This replaces, for HR-22 and HR-23, D4-94's "or on the owner's acceptance".
-- **The Windows measurement HR-24 stage 2 needs** (`BytesRetrans` under loss, D1 on #664) runs on a GitHub-hosted Windows runner with a packet-dropping tool, not on the owner's PC. That is the safer place for a test driver. If a hosted runner cannot do it, it comes back to the owner.
+  D1 briefs both in the third part. The `undecoded` signal stays in item 4's gate. This replaces, for HR-22 and HR-23, D4-94's "or on the owner's acceptance" and D4-95's line that they keep it. Until D3 amends the two rows in `docs/threat-model.md`, their words "or the owner's acceptance" are superseded by this entry.
+- **The Windows measurement HR-24 stage 2 needs** (`BytesRetrans` under loss, D1 on #664) runs on a GitHub-hosted Windows runner with a packet-dropping tool, not on the owner's PC. That is the safer place for a test driver. The tool (D4 named WinDivert on #664) needs D7's inventory entry before it is used (D4-79). If a hosted runner cannot do it, it comes back to the owner.
 - **The sensor's host (#640):** every row O-1 to O-12 of `docs/phase4/D1-sensor-host-recommendation.md` is adopted as recommended. Some parts stay open:
   - O-7: the project ships a signed image, and the release key's holder stays the owner's (TB9).
-  - Questions 1 to 5 there are facts about the sites. Until the owner answers them, each row uses its stated conservative default. For example, a link with no answer counts as carrying protection traffic with no tolerance for an interruption.
+  - Questions 1 to 5 there are facts about the sites. Question 5 has a stated default: a link with no answer counts as carrying protection traffic with no tolerance for an interruption. Questions 1 to 4 have none. So the rows that depend on them (O-1, O-4, O-5, O-10 and O-12) are not applied at a site until that site's answer is recorded.
+  - O-7 changes what the product is. The owner may reverse it.
   - Buying lab equipment, and any outage window or switch change at a site, still need the owner's word when the time comes.
 - **R6.7's insecure list** gains IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68).
 - **Item 3's questions** (D4-65 and HR-17):
@@ -2037,7 +2044,7 @@ Those stay with the owner, below.
   - No SNMP v1 or v2c path is added, so its approval key is not needed.
   - Which SEL switches the sites run, and the model naming for set authors, stay with the owner as facts.
 - **From D4-65:**
-  - the reserve fails closed on a volume that cannot hold real space (compressed or copy-on-write);
+  - the reserve fails (drain-only, as D4-65 states) on a volume that cannot hold real space (compressed or copy-on-write);
   - the store gets a Windows folder flush;
   - the rare starts over 6 s are briefed at low priority.
 - **Still the owner's:**
@@ -2048,7 +2055,7 @@ Those stay with the owner, below.
   - any device contact;
   - the word to start D8's first brief. D1 recommends it waits until the foundational workflows are proven (CLAUDE.md §4).
 - **Follow-up:**
-  - D3 amends HR-22's and HR-23's rows for "not accepted", and D3's note follows the #640 rows.
-  - D2 records R6.7's additions in `docs/requirements.md`.
+  - D3 amends HR-22's and HR-23's rows for "not accepted", HR-17's row for "no v1 or v2c path is added", and D3's note for the #640 rows.
+  - R6.7's line in `docs/requirements.md` is updated in this entry's PR.
   - D5 takes D4-65's items in a brief.
   - D1 issues the HR-22 and HR-23 fix briefs.

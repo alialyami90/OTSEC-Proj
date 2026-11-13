@@ -95,7 +95,7 @@ Constraint: never silently discard important native event information.
 | R6.4 | Rule-based and behavioral anomaly detection. | contracted | As R6.1. Deterministic rules only. No detection rate, false-positive rate or latency is measured. |
 | R6.5 | Explainable security alerts with supporting packet/event evidence. | contracted | As R6.1. Alert retention and the two network store classes are merged (D4-71). |
 | R6.6 | Documented network visibility limitations (PRP topology, encrypted communication, unsupported protocols, sensor placement). | investigating | Phase 0's Q4 visibility limits, and ADR-0009's sensor options. The owner's answers on the sites' protocols, SPAN or TAP, and PRP are owed (D4-66). No measured visibility statement exists. |
-| R6.7 | Passive identification, per asset, of exposed services, protocol versions and insecure protocols in use, recorded as evidence for R9. (Added 2026-10-26, ADR-0008.) | contracted | As R6.1. D6 runs V-M6 over GT-PCAP after the sensor is built. The additions to the insecure list wait for the owner (D4-68). |
+| R6.7 | Passive identification, per asset, of exposed services, protocol versions and insecure protocols in use, recorded as evidence for R9. (Added 2026-10-26, ADR-0008.) | contracted | As R6.1. D6 runs V-M6 over GT-PCAP after the sensor is built. The insecure list gains IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports and raw TCP serial tunnels (D4-98, on D4-68's proposal). |
 
 Constraints: evaluate Zeek and Suricata before developing proprietary detection. Deterministic rules and explainable statistical baselines first; machine learning only after measured benefit.
 

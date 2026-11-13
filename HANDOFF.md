@@ -59,7 +59,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
      - D6 records in F-027 (`docs/verification.md`) the closings of #662 and #663 (F2, F5, F6, F7, F9's cap, F10), corrects its F11 sentence, and updates points 3 and 4 of its gate for D4-96.
   7. **The approved contracts in code** (C13 0.2, C7 0.11, C8 0.13, C4 0.4, with D6's contract tests): the first of the later briefs of the third part, after P4-4-F27. Item 3's C8 sentence folds into it.
   8. **Issued briefs not yet delivered:** P4-D6-RR, P4-D6-I100, P4-D6-MUT and P4-D7-2 (D4-88, D4-90).
-  9. **D4-98's follow-ups:** D1 issues the HR-22 and HR-23 fix briefs; D3 amends both rows for "not accepted" and its note for the #640 rows; D2 records R6.7's additions; D5 takes D4-65's items.
+  9. **D4-98's follow-ups:** D1 issues the HR-22 and HR-23 fix briefs; D3 amends both rows for "not accepted" and its note for the #640 rows; D5 takes D4-65's items; D7 inventories the packet-dropping tool before HR-24 stage 2 uses it.
   10. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
 - **The sensor's own brief** also waits for the owner's answers on the sensor's host (#640, "Waiting on the owner" item 1).
 - **F-027's gate stands (D4-96):** no `network_sensor` section outside the tests, no release, and no product wiring of any sensor path.
@@ -86,17 +86,18 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 What D4-98 leaves with the owner:
 
-1. **The sites' facts:** questions 1 to 5 of `docs/phase4/D1-sensor-host-recommendation.md`, the protocols on each site's networks, and which SEL switches the sites run. Until these are answered, the conservative defaults apply.
+1. **The sites' facts:** questions 1 to 5 of `docs/phase4/D1-sensor-host-recommendation.md`, the protocols on each site's networks, which SEL switches the sites run, and the model naming for set authors (`SEL-2731M`). Until questions 1 to 4 are answered, the rows that depend on them are not applied at a site (D4-98).
 2. **The DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5), a licensed copy only the owner can provide (D4-68).
-3. **HR-18:** who publishes the advisory set and holds its signing key.
+3. **HR-18:** who publishes the advisory set and holds its signing key. No real advisory is entered until then.
 4. **The release key's holder** (TB9), for O-7's signed image.
 5. **Purchases and site changes,** when the time comes: lab TAPs and machines, and a site's outage window or switch change (#640).
 6. **The word to start D8's first brief.** D1 recommends that it waits (D4-98).
+7. **O-7, a product-scope change, was adopted under the delegation (D4-98).** The project ships a signed image. The owner may reverse it.
 8. **Authorization for any device contact:** a lab relay or switch before any H-test or Q3, and any SNMPv3 contact.
 9. **Test runs on the owner's PC** are resumed for ordinary local runs (D4-83, 2026-11-11). Runs that create Windows services stay in the owner's elevated session. Nothing is owed here.
 10. **The branch cleanup is done** (D4-83). Nothing is owed here.
 11. **ADR-0007** (Windows site node) is still `proposed`.
-12. **D7 and D8** (D4-79): D7's first brief is done (#615, D4-84). Still owed: the word to start D8's first brief, and who holds the release key and where it is kept (TB9).
+12. **D7 and D8** (D4-79): D7's first brief is done (#615, D4-84). What is still owed is in items 4 and 6 above.
 13. **Nothing: D1 merges its own reviewed PRs** (D4-85, which supersedes D4-82).
 14. **Nothing: the owner chose option (b)** (D4-85).
 15. **Nothing: D1 decided that mutants are committed as patch files with a dispatch-only workflow,** and no scratch branch is pushed (D4-85). D6's mutants for the closing legs are brief P4-D6-MUT (D4-88, D4-90).
