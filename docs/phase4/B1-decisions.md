@@ -2009,3 +2009,46 @@ The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes an
   - the build summaries above.
   - Not adopted: smaller models for `records-auditor` and `ci-triage`.
 - **The rules are in CLAUDE.md**, "Working rules". They apply to work started after this PR merges. PRs open now finish under their own rounds.
+
+## D4-98: the owner's open questions settled on D1's recommendations, and D3's effort (the owner, 2026-11-13)
+
+The owner wrote, in D1's session on 2026-11-13: "For things waiting on me go with your recommended choice for a better and secure product. D3 can be high." Evidence class: `desk`.
+
+The delegation covers choices D1 can make from the records. It does not reach:
+- facts only the owner holds;
+- anything CLAUDE.md reserves for the owner's explicit authorization: device or network contact, purchases, a site outage or a switch change, and credentials or keys.
+
+Those stay with the owner, below.
+
+- **D3's effort is `high`** (`.claude/agents/d3-security-access.md`). This replaces D4-93 for D3 only.
+- **HR-22 and HR-23 are not accepted.** Each closes only on a fix measured on a counted run, as HR-24 does (D4-95). The owner's acceptance is no longer a way to close them. The fixes:
+  - HR-23's parts (a) and (b), in its row of `docs/threat-model.md`;
+  - for HR-22, a new signature brief with new held-out captures (D4-94).
+
+  D1 briefs both in the third part. The `undecoded` signal stays in item 4's gate. This replaces, for HR-22 and HR-23, D4-94's "or on the owner's acceptance".
+- **The Windows measurement HR-24 stage 2 needs** (`BytesRetrans` under loss, D1 on #664) runs on a GitHub-hosted Windows runner with a packet-dropping tool, not on the owner's PC. That is the safer place for a test driver. If a hosted runner cannot do it, it comes back to the owner.
+- **The sensor's host (#640):** every row O-1 to O-12 of `docs/phase4/D1-sensor-host-recommendation.md` is adopted as recommended. Some parts stay open:
+  - O-7: the project ships a signed image, and the release key's holder stays the owner's (TB9).
+  - Questions 1 to 5 there are facts about the sites. Until the owner answers them, each row uses its stated conservative default. For example, a link with no answer counts as carrying protection traffic with no tolerance for an interruption.
+  - Buying lab equipment, and any outage window or switch change at a site, still need the owner's word when the time comes.
+- **R6.7's insecure list** gains IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68).
+- **Item 3's questions** (D4-65 and HR-17):
+  - A report shows a severity score only as its source published it, labelled with that source. The platform computes none.
+  - No SNMP v1 or v2c path is added, so its approval key is not needed.
+  - Which SEL switches the sites run, and the model naming for set authors, stay with the owner as facts.
+- **From D4-65:**
+  - the reserve fails closed on a volume that cannot hold real space (compressed or copy-on-write);
+  - the store gets a Windows folder flush;
+  - the rare starts over 6 s are briefed at low priority.
+- **Still the owner's:**
+  - the sites' networks;
+  - the DNP3 Secure Authentication text, a licensed copy only the owner can provide;
+  - HR-18's advisory publisher and key;
+  - the release key's holder (TB9);
+  - any device contact;
+  - the word to start D8's first brief. D1 recommends it waits until the foundational workflows are proven (CLAUDE.md §4).
+- **Follow-up:**
+  - D3 amends HR-22's and HR-23's rows for "not accepted", and D3's note follows the #640 rows.
+  - D2 records R6.7's additions in `docs/requirements.md`.
+  - D5 takes D4-65's items in a brief.
+  - D1 issues the HR-22 and HR-23 fix briefs.
