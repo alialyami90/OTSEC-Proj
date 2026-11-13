@@ -51,6 +51,7 @@ In older records A6, B6 and C6 mean the role D6 now holds. Contract names (C1 to
 - Before any sign-off, reconcile two roles' conflicting results for the same check.
 - A simulator result is marked `simulated`. Passive functions must be shown to send no control or write command.
 - V-M8's paired runs need root and `unshare -n`. In `tests/contract`, alias `contracts/node` as `cnode`.
+- **Several instances of D6 may run at once** (the owner's word, D4-91). You may not be the only one. Work only on the task your brief names, on its PR or branch; another D6 instance may have worked on it before you, and none works on it beside you. If you write files, do it in your own worktree. Never review a PR or a change that another D6 instance wrote: the brief names who wrote what you review. When your brief gives a new F-number, H-row or GT-PCAP case id, use that one and no other.
 - Probe tests and mutant scripts are scratch files: keep them out of the commit. The one exception is the mutants of brief P4-D6-MUT, which are committed as patch files on your four conditions of D4-85.
 
 ## Open items on 2026-11-10 (`main` at `82daa04`, after #604 and D4-76)

@@ -1,0 +1,19 @@
+# GT-PCAP labels for dnp3-udp-moved-port.pcap (D6, plan sections 1, 2B, 2C and 4). desk until reviewed by D4 and D2.
+# labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: -d udp.port==20001,dnp3; gtlabel.py applies C13 section 4's rules to tshark's fields.
+# fields: frame.number, frame.len, ip.src, ip.dst, udp.srcport, udp.dstport, dnp3.ctl.dir, dnp3.al.func, dnp3.al.seq, dnp3.al.obj, dnp3.al.fragment.reassembled.length. objects are dnp3.al.obj as g<group>v<variation>, sorted.
+# a DNP3 frame is the master's when dnp3.ctl.dir is set and the outstation's when it is clear, whichever end of the flow sent first; a service row's server is the outstation's end.
+# the labeller is told this capture's transport (udp) and the outstation's port (20001) from the asset table's settings, never from the product (plan section 2B). A UDP flow has direction none, and its src is the first datagram's sender (C13 section 4.1).
+# objects '?': the request's APDU is longer than its 2-octet header, but this tshark dissects no object header in it (function 22 in 4.2.2). Unlabelled: the checker compares the code only.
+# sa_reply_timeout_ms: 5000 (C13 default). sa empty means unknown.
+# group 120 objects are synthetic at header level (no SA specification is held): only their headers are labelled.
+# frames are 1-based tshark frame numbers; frame_sha256 hashes each frame's link-layer bytes, no record header.
+# case rules: every rule D4's note expects; empty is a near-miss that must raise nothing.
+# counter rows: the difference between the heartbeats that bracket this capture's replay (D1 on #548).
+kind	src	dst	sport	dport	l4	protocol	version	direction	asset	frames	frame_sha256	packets	bytes	code	objects	sa	sa_error_from	rules	context	note
+flow	192.0.2.14	192.0.2.21	20001	20001	udp	dnp3		none	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a21	1,2,3,4	e33d69d8535a8747e35d2017b3808a65b4667c2fac2ded56f3e634d97571e91f,4dfc2f28faea8d7bf4cf683b70264c9abbaef26c21a60b05e2902b4d011f85b4,8a92ea26026ab43ad9214cdf21f33be3b04921acc6c953ef00045d18e2ba7eab,5bae104aac6841574432be40c0659ba8fb1b6e337cbca19358e829ff443848d7	4	285							
+service		192.0.2.21		20001	udp	dnp3			6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a21	1	e33d69d8535a8747e35d2017b3808a65b4667c2fac2ded56f3e634d97571e91f									
+function	192.0.2.14	192.0.2.21	20001	20001	udp	dnp3		none	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a21	1,2	e33d69d8535a8747e35d2017b3808a65b4667c2fac2ded56f3e634d97571e91f,4dfc2f28faea8d7bf4cf683b70264c9abbaef26c21a60b05e2902b4d011f85b4			1	g60v1,g60v2,g60v3,g60v4	none				
+function	192.0.2.14	192.0.2.21	20001	20001	udp	dnp3		none	6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a21	3,4	8a92ea26026ab43ad9214cdf21f33be3b04921acc6c953ef00045d18e2ba7eab,5bae104aac6841574432be40c0659ba8fb1b6e337cbca19358e829ff443848d7			5	g12v1	none				
+counter						dnp3														dnp3_seq_reused=0
+case					udp	dnp3				1,2	e33d69d8535a8747e35d2017b3808a65b4667c2fac2ded56f3e634d97571e91f,4dfc2f28faea8d7bf4cf683b70264c9abbaef26c21a60b05e2902b4d011f85b4					none		new-service,unknown-pair	acknowledged	DNP3 over UDP 20001 on O2, both ends on 20001 (DNPNUM and that session's DNPUDPn := 20001), so no end is on the registered port 20000: a service and a pair the baseline never saw, one alert from each rule for the flow
+case					udp	dnp3				3,4	8a92ea26026ab43ad9214cdf21f33be3b04921acc6c953ef00045d18e2ba7eab,5bae104aac6841574432be40c0659ba8fb1b6e337cbca19358e829ff443848d7					none			acknowledged	the authorized master's operate on the same flow; dnp3_no_sa, and no alert beyond the flow's two

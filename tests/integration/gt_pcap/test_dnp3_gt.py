@@ -194,6 +194,39 @@ def test_the_udp_case_is_one_link_frame_per_datagram():
         assert len(payload) == 10 + (payload[2] - 5) + 2 * -(-(payload[2] - 5) // 16)  # header, user data, CRCs
 
 
+def udp_ends(name):
+    """(source port, destination port, link DIR bit) of each datagram of a
+    UDP case, read from its bytes."""
+    cases = {n: f for n, f, _ in dnp3_cases.cases()}
+    out = []
+    for f in cases[name]:
+        proto, sport, dport, payload = l4_payload(f.data)
+        assert proto == synth.UDP and payload[:2] == b"\x05\x64" and payload.count(b"\x05\x64") == 1
+        out.append((sport, dport, payload[3] >> 7))
+    return out
+
+
+def test_the_udp_moved_port_case_has_no_end_on_20000():
+    """D2's note 1 on #637: dnp3-udp's pass came on the registered port, so
+    this case holds DNP3 over UDP where neither end is on 20000. O2's
+    DNPNUM is 20001, and that session's DNPUDPn := 20001."""
+    o2 = dnp3_cases.NET["outstations"]["O2"]["port"]
+    assert dnp3_cases.DECODE["dnp3-udp-moved-port"] == {"l4": "udp", "port": o2} and o2 != 20000
+    assert udp_ends("dnp3-udp-moved-port") == [(o2, o2, 1), (o2, o2, 0)] * 2
+
+
+def test_the_temporary_port_case_answers_on_a_second_5_tuple():
+    """DNPUDPn stays 20000 while M5 sends from 41017: each request goes from
+    41017 to 20000, and each response from 20000 to 20000, so the
+    responses' flow starts with the outstation's datagram."""
+    assert udp_ends("dnp3-udp-temp-port") == [(41017, 20000, 1), (20000, 20000, 0)] * 2
+
+
+def test_the_req_port_case_answers_to_the_requests_port():
+    """DNPUDPn := REQ: one 5-tuple, the master's end on its temporary port."""
+    assert udp_ends("dnp3-udp-req-port") == [(41018, 20000, 1), (20000, 41018, 0)] * 2
+
+
 def test_the_baseline_series_never_holds_the_two_new_services():
     """Both captures are new-service samples only if the R6.2 series never
     shows O2, O1 over UDP, or M5. Checked on the two committed series
@@ -215,7 +248,9 @@ def test_the_labeller_is_told_the_port_and_transport_from_the_settings():
     assert gtlabel.fields_for("tcp") is gtlabel.FIELDS
     assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-moved-port"]) == ["-d", "tcp.port==20001,dnp3"]
     assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-udp"]) == []
+    assert gtlabel.options_for(dnp3_cases.DECODE["dnp3-udp-moved-port"]) == ["-d", "udp.port==20001,dnp3"]
     udp = gtlabel.fields_for("udp")
+    assert "dnp3.ctl.dir" in udp and "dnp3.ctl.dir" in gtlabel.FIELDS  # who sent a frame, from its link header
     assert "udp.srcport" in udp and "udp.dstport" in udp and not [f for f in udp if f.startswith("tcp.")]
     # Every capture named under DECODE is a case, so each gets its label.
     assert set(dnp3_cases.DECODE) <= {n for n, _, _ in dnp3_cases.cases()}

@@ -100,6 +100,19 @@ dnp3-udp	protocol	udp	192.0.2.14	20000	192.0.2.20	20000						dnp3	none
 dnp3-udp	service	udp			192.0.2.20	20000					1	dnp3	
 dnp3-udp	function	udp	192.0.2.14	20000	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		1,2	dnp3	none
 dnp3-udp	function	udp	192.0.2.14	20000	192.0.2.20	20000	5	g12v1	none		3,4	dnp3	none
+dnp3-udp-moved-port	protocol	udp	192.0.2.14	20001	192.0.2.21	20001						dnp3	none
+dnp3-udp-moved-port	service	udp			192.0.2.21	20001					1	dnp3	
+dnp3-udp-moved-port	function	udp	192.0.2.14	20001	192.0.2.21	20001	1	g60v1,g60v2,g60v3,g60v4	none		1,2	dnp3	none
+dnp3-udp-moved-port	function	udp	192.0.2.14	20001	192.0.2.21	20001	5	g12v1	none		3,4	dnp3	none
+dnp3-udp-req-port	protocol	udp	192.0.2.14	41018	192.0.2.20	20000						dnp3	none
+dnp3-udp-req-port	service	udp			192.0.2.20	20000					1	dnp3	
+dnp3-udp-req-port	function	udp	192.0.2.14	41018	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		1,2	dnp3	none
+dnp3-udp-req-port	function	udp	192.0.2.14	41018	192.0.2.20	20000	5	g12v1	none		3,4	dnp3	none
+dnp3-udp-temp-port	protocol	udp	192.0.2.14	41017	192.0.2.20	20000						dnp3	none
+dnp3-udp-temp-port	service	udp			192.0.2.20	20000					1	dnp3	
+dnp3-udp-temp-port	protocol	udp	192.0.2.20	20000	192.0.2.14	20000						dnp3	none
+dnp3-udp-temp-port	function	udp	192.0.2.14	41017	192.0.2.20	20000	1	g60v1,g60v2,g60v3,g60v4	none		1,2	dnp3	none
+dnp3-udp-temp-port	function	udp	192.0.2.14	41017	192.0.2.20	20000	5	g12v1	none		3,4	dnp3	none
 dnp3-unauthorized-operate	protocol	tcp	192.0.2.11	41006	192.0.2.20	20000						dnp3	client-server
 dnp3-unauthorized-operate	service	tcp			192.0.2.20	20000					1	dnp3	
 dnp3-unauthorized-operate	function	tcp	192.0.2.11	41006	192.0.2.20	20000	5	g12v1	none		4,6	dnp3	client-server

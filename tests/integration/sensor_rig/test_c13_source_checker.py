@@ -30,7 +30,7 @@ def records(name):
 def test_the_checker_passes_the_sources_records_for_every_labelled_case(name):
     rows, frames, sha = c13_stream.load(name)
     recs = c13_source.Source(rows, frames, sha).records()
-    assert moved(name) == (name == "dnp3-moved-port")
+    assert moved(name) == (name in ("dnp3-moved-port", "dnp3-udp-moved-port"))
     got = gt_checker.check(rows, recs, moved_port=moved(name))
     assert got["problems"] == []
     assert got["recall"] == 1 and got["precision"] == 1 and got["extra"] == 0

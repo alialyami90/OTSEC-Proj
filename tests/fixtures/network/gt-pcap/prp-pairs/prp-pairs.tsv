@@ -1,0 +1,30 @@
+# GT-PCAP labels for prp-pairs.pcap (D6, P4-D6-GT2; plan section 2C). desk until reviewed by D4 and D2.
+# labeller: TShark (Wireshark) 4.2.2 (Git v4.2.2 packaged as 4.2.2-1.1build3).; options: --enable-protocol prp; fields: frame.number, frame.len, eth.src, vlan.id, vlan.priority, ip.len, prp.trailer.prp_sequence_nr, prp.trailer.prp_lan, prp.trailer.prp_size.
+# frame rows: the header is 18 octets when tshark reads vlan.id, else 14; the RCT is the six octets after the IPv4 packet (tshark's ip.len), with suffix 0x88FB and LSDU size ip.len + 6. rct_offset is its first octet, 0-based; after_rct counts the octets that follow it.
+# tshark_rct: what tshark's PRP dissector reads, which it reads only as a frame's last six octets (PRP-1); none where octets follow the RCT.
+# pair rows: C13 0.2 CH-28's comparison (a proposal, not approved) on the two frames, the first to arrive first: the frame from the destination MAC through the RCT, the whole 802.1Q tag left out, the LAN ID masked, nothing after the RCT. Equal, with LAN IDs that differ: the second is discarded, prp_discards 1, and prp_tag_differs 1 if the tags differ. Unequal: both passed, prp_mismatched 1. One LAN ID twice: both passed, nothing counted.
+# total row: the capture's frames, how many a discard stage passes, and each counter's rise over the capture (the difference between the heartbeats that bracket its replay).
+# frame_sha256 hashes each frame's link-layer bytes, no record header. Every frame is synthesized (prp_pairs.py).
+kind	pair	frames	lan	src_mac	vlan_id	vlan_pcp	rct_seq	rct_offset	lsdu	after_rct	tshark_rct	frame_sha256	verdict	prp_discards	prp_tag_differs	prp_mismatched	note
+frame	identical	1	A	02:00:00:00:00:14			0x2001	69	61	0	prp-1 seq 0x2001 lan A size 61	0c4d928b1a1fef2282cb594a820dfb89d37c3b5abf6eaf166f869e6897c09ed2					
+frame	identical	2	B	02:00:00:00:00:14			0x2001	69	61	0	prp-1 seq 0x2001 lan B size 61	ffef0af34dfd6e510257a79bc9524ad625d9e9e745458803be28a5753a1ddc51					
+pair	identical	1,2											second-discarded	1	0	0	the reference pair: both copies untagged and equal
+frame	tag-vid	3	A	02:00:00:00:00:14	10	0	0x2002	73	61	0	prp-1 seq 0x2002 lan A size 61	5b4c47bf206c53ab861d08c2995bb23b4f69104271e5a4de1fa182d6b687d54e					
+frame	tag-vid	4	B	02:00:00:00:00:14	20	0	0x2002	73	61	0	prp-1 seq 0x2002 lan B size 61	69d5eb71edc4d2bc855bb0b3d3cc41b2a9aec6836d9eab784886c2a4631f23b2					
+pair	tag-vid	3,4											second-discarded	1	1	0	VID 10 on LAN A, VID 20 on LAN B
+frame	tag-absent	5	A	02:00:00:00:00:14			0x2003	69	61	0	prp-1 seq 0x2003 lan A size 61	9e6af9fae81fa5586c7fb8748debcf340d520498efd0b2b499a98bffdadc44a6					
+frame	tag-absent	6	B	02:00:00:00:00:14	10	0	0x2003	73	61	0	prp-1 seq 0x2003 lan B size 61	0a5d5936733d15e4fcc14357df79173cd53b66873d550870dcb049e6d2984b60					
+pair	tag-absent	5,6											second-discarded	1	1	0	untagged on LAN A, VID 10 on LAN B
+frame	priority	7	A	02:00:00:00:00:14	10	4	0x2004	73	61	0	prp-1 seq 0x2004 lan A size 61	2cccaeff334ca0a833dfd401d45fcc1914e2f9a7ab1365d7a115cc3e774910ae					
+frame	priority	8	B	02:00:00:00:00:14	10	0	0x2004	73	61	0	prp-1 seq 0x2004 lan B size 61	e8af3ced661c380d01ba6c5e58514e318211deab9fd118b70d7724acc21478f1					
+pair	priority	7,8											second-discarded	1	1	0	VID 10 on both LANs, PCP 4 on LAN A and 0 on LAN B
+frame	padding	9	A	02:00:00:00:00:14	10	0	0x2005	56	44	0	prp-1 seq 0x2005 lan A size 44	d096540471c38acb2c949908fbff2c8a4ba0ce841564eb9cd7c33d8d95b93497					
+frame	padding	10	B	02:00:00:00:00:14			0x2005	52	44	2	none	b6a2b4b9191d068951ce873b7f8ef04d1d5dac20ee848a845a7a02e6a05ebd1b					
+pair	padding	9,10											second-discarded	1	1	0	a short frame, VID 10 on LAN A; on LAN B a bridge stripped the tag and padded the 58 octets left to 60 after the RCT
+frame	one-octet	11	A	02:00:00:00:00:14			0x2006	69	61	0	prp-1 seq 0x2006 lan A size 61	2d73f3228e07f96dc4385f3aa2c53d9bc6e0300b3524884b5d7826748904869c					
+frame	one-octet	12	B	02:00:00:00:00:14			0x2006	69	61	0	prp-1 seq 0x2006 lan B size 61	1a7587aa5b1ab4b1a5efcf8c0cc344db1e59e77f95f8f4387d110ee1d11dea6c					
+pair	one-octet	11,12											both-passed	0	0	1	a control: LAN B's copy has its IPv4 TTL 63 for 64, its header checksum as sent
+frame	same-lan	13	A	02:00:00:00:00:14			0x2007	69	61	0	prp-1 seq 0x2007 lan A size 61	9e304cb562c3873d347c17b51b6ed2c7e414580c094ed67e34758bf5911dadc1					
+frame	same-lan	14	A	02:00:00:00:00:14			0x2007	69	61	0	prp-1 seq 0x2007 lan A size 61	9e304cb562c3873d347c17b51b6ed2c7e414580c094ed67e34758bf5911dadc1					
+pair	same-lan	13,14											both-passed	0	0	0	a control: the same frame twice on LAN A, a repeat on one LAN
+total		14											passed=9	5	4	1	
