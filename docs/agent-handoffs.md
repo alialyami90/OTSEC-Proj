@@ -1900,7 +1900,7 @@ Code for those paths may merge unwired, reached only from tests. Every new entry
   | F4, the link's lock | the fairness rule (item 4), tested in process with control 2 (the rule removed, with a seam that slows the network commit). **The interim behaviour on a timeout:** the run goes on, its session stays untied, and the base rules judge that session (D3's condition: a cap that protects collection does not switch off the independent check). Tested, with a control that treats a timed-out session as tied. Item 9's `recover` in the scheduler calls, asserted to the same interim behaviour. | `TestSchedulerPanicTakenAsTimeout` (C13's T-12) and `TestResultTimeoutKeepsSession` as written, whose alerts under `hold-timeout` need C13 0.2's `Alert`: owed by the C13 0.2 contract brief and D4's detector change. The lock's wait over a real link, by the rig. |
   | F8, the audit class | none: `main` has no `node-sensors` consumer, and §1.3 adds it beside the required consumers (`suspend.go` l.571 to l.573) | all of §1.9 item 6 (the consumer's cursor rule, `TestLinkRefusedOncePerStretch`, SL-T13's leg (d)), owed by the dialer-and-enrolment brief. Changing item 6's rule needs D1 with D3. |
   | F11, the link key | D3's link-key reader with `TestLinkKeyNotInRegister`, NK-6 and the reader's own checks; and D5's wiring with `TestLinkKeyFaultNodeStarts`'s start leg and `TestLinkKeyClash`'s alarm and listener legs. Each comes with its control. | the legs that need a dial (`TestLinkKeyFaultNodeStarts`'s "no SYN", `TestLinkKeyClash`'s "no dial"), and NK-3 and NK-4's handshake: owed by the dialer-and-enrolment brief |
-  | Item 9 in the manager | `TestSensorPanicContained`'s legs that run on `main`: a panic in the detector's drive is recovered, a run is still sent and stored, and `sensor-failed` stands. Control: no `recover`. | the poison record in `sensorrun.json` and its restart leg, owed by the C13 0.2 intake brief |
+  | Item 9 in the manager | `TestSensorPanicContained`'s legs that run on `main`: a panic in the detector's drive is recovered, a run is still sent and stored, and `sensor-failed` stands. Control: no `recover`. | the poison record in `sensorrun.json` and its restart leg, owed by the C13 0.2 intake brief; the read loop's `recover` (D6's N5 on #676, D4-101) |
   | Item 10, the stop | `TestCloseWithStuckSensorResume`, with its control | none |
   | SL-T13's legs (d) and (e) | none | owed by the C13 0.2 intake brief (heartbeats and gaps) and the dialer-and-enrolment brief (hellos) |
   | §1.9 item 8's rig legs (a), (b), (c), (f), (g) and (h) | none | owed by the sensor's brief and D6's rig brief |
@@ -2091,3 +2091,29 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no test code.
 - Uncertainty or safety risks: none beyond accuracy.
 - Scratch files: `d6-f027r-*`
+
+### P4-4-HR25 (D4; D2, D3, D6 and D7 review): HR-25's fix, a DNP3 analyzer that survives a bad frame (issued 2026-11-14, D4-101)
+- Objective and rationale: HR-25 (#677). One failed frame, a TCP content gap, or a link-only frame blinds Zeek's DNP3 analyzer for the rest of a flow, so a later write goes unseen (T0855).
+- Owner, and the reviewers: D4 writes the design and the build. D2 reviews for DNP3, D3 for the sensor host's parse surface (HR-21), D6 for testability, and D7 for the patch's pins.
+- Required inputs and dependencies:
+  - `docs/phase4/D4-hr23-design.md` §5.2 **at `52c7592c`**, the candidate design;
+  - every blocking finding on it, each of which this brief must answer: D2's B1, N1 and N2 (6866220392); D3's B4, B5 and N6 to N9 (6866236602); D6's B1 (a) to (c) and B2's resync parts (6866520537);
+  - HR-25's row, and D1's split ruling 6866534402.
+  - It starts after #675 merges, because it patches the same file as HR-23's option (i).
+- Files or modules each role may modify:
+  - D4: a new `docs/phase4/D4-hr25-design.md`, and later `modules/telemetry/experiments/engine-linux/zeek-patch/`;
+  - D6: the GT-PCAP paths.
+- Expected interfaces: C13 0.2. Carrying the per-flow failure count to the node is a C13 minor that goes with the `undecoded` brief (D4-90), and D1 approves it.
+- Deliverable:
+  1. The design note, with its options agreed in comments first (D4-99).
+  2. D6's cases (the `dnp3-resync-*` ids, each naming its transport) and pass conditions, pinned before any counted run.
+  3. The build and its counted run, as one patch on top of HR-23's option (i).
+- Acceptance tests:
+  - the cases pass on the counted run, with the control as on `main`, C1p, and the option (i) build as controls;
+  - the fuzz terms of D1's 6864990229 are met, with the resync paths in the coverage condition;
+  - no E-D4-03 row regresses;
+  - each implementer runs the self-check list in this file and says in the PR which items apply.
+- Owed: the rig legs, by the sensor's brief.
+- Explicit exclusions: no device contact (the TCP-after-bad-CRC H-row needs the owner's authorization); no reading of session content.
+- Uncertainty or safety risks: new hand-written C++ in `DNP3.cc`'s buffer code (D3), and a scan that an attacker could use to smuggle frames (D2, D3).
+- Scratch files: `d4-hr25-*`, `d6-hr25-*`
