@@ -72,8 +72,19 @@ def test_one_instance_of_each_role_and_any_number_of_roles(run, role):
     assert not launch(run, role)  # launched, not yet started
     run("SubagentStart", agent_type=role, agent_id="a1")
     assert not launch(run, role)  # running
+    age(run.locks / role, 61)
+    assert not launch(run, role)  # still running, however old the lock
     assert launch(run, "d6-verification-safety")
     assert launch(run, next(other for other in LOCKED_ROLES if other != role))
+    run("SubagentStop", agent_type=role, agent_id="a1")
+    assert launch(run, role)
+
+
+def test_a_d6_lock_from_before_the_exception_refuses_nothing(run):
+    run.locks.mkdir(parents=True)
+    (run.locks / "d6-verification-safety").write_text("old-agent")
+    assert launch(run, "d6-verification-safety")
+    assert launch(run, "d6-verification-safety")
 
 
 @pytest.mark.parametrize("helper", ["ci-triage", "records-auditor", "d6-verification-safety"])
