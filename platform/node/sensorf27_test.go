@@ -16,6 +16,7 @@ import (
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/sensorlink"
+	"otsec.local/otsec/platform/store"
 )
 
 // Brief P4-4-F27, deliverable (3): F1 (the platform-class floor and
@@ -101,6 +102,66 @@ func TestPlatformFloorShortNodeStarts(t *testing.T) {
 	}
 	if n != 1 || !strings.Contains(detail, "below collection's need") {
 		t.Fatalf("%d sensor-platform-floor alarms: %q", n, detail)
+	}
+}
+
+// F9's health event under F1's ceiling (section 1.9 items 1 and 5; D6's B2
+// on #676): a real mode change of the network database, made by the
+// manager's step as in TestSensorModeChangeCapped (blocked at each
+// startup, failed at each Resume), with the platform class at the ceiling,
+// writes no mode_changed health event, and health_held rises. Control:
+// recordMode's event sent through Runtime.health, which writes it.
+func TestSensorModeChangeHeldPastCeiling(t *testing.T) {
+	c, _ := holdConfig(t)
+	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
+	r, _ := startClocked(t, g, SensorSeams{
+		Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
+			rep := c5.RunStartup(ctx, env, p)
+			if db, ok := store.AsDB(rep.Store); ok {
+				db.Close()
+			}
+			return c5.Report{Mode: c5.ModeBlocked, Unlock: rep.Unlock}
+		},
+		Resume: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy, prev c5.Report) c5.Report {
+			return c5.Report{Mode: c5.ModeFailed, Unlock: prev.Unlock}
+		}})
+	defer r.Close()
+	db := r.Store(HealthStream)
+	events := func() (n int) {
+		recs, err := db.Read(bg, HealthStream, 0, 10000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range recs {
+			if ev, err := event.Decode(s.Event); err == nil && ev.Health != nil && ev.Health.Type == c5.HealthModeChanged && ev.Health.Details["database"] == string(NetworkDB) {
+				n++
+			}
+		}
+		return n
+	}
+	if n := events(); n != 1 {
+		t.Fatalf("%d mode_changed events at start, want 1", n)
+	}
+	heldManager(r, func() {
+		used, err := db.ClassBytes(bg, c5.ClassPlatform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		col, _ := r.cfg.PlatformFloor()
+		r.cfg.Store.Quotas["platform"] = used + col + 1 // nothing fits beneath it
+	})
+	before := r.sensorHeld.Load()
+	g.advance(time.Hour) // past the cap's monotonic hour
+	was := r.Mode(NetworkDB)
+	tick(t, r)
+	if r.Mode(NetworkDB) == was {
+		t.Fatalf("no mode change in the step: %s", was)
+	}
+	if n := events(); n != 1 {
+		t.Fatalf("%d mode_changed events past the ceiling, want only the start's", n)
+	}
+	if n := r.sensorHeld.Load() - before; n == 0 {
+		t.Fatal("no sensor event held, want the mode change's")
 	}
 }
 
@@ -659,6 +720,49 @@ func TestNoHoldAfterSensorFailed(t *testing.T) {
 	}
 	if st := r.sensor.Load().link.Stats(); st.Hold.Runs != 0 {
 		t.Fatalf("hold %+v", st.Hold)
+	}
+}
+
+// The sensor-failed half of D6's item 3 on #663 (D6's N3 on #676): a
+// connection already being served when the sensor's work fails commits
+// nothing more; its record is dropped and counted under store. Control:
+// liveAppender with no sensorFailed check, which commits it.
+func TestLiveAppenderSensorFailedDrops(t *testing.T) {
+	c, dir := holdConfig(t)
+	var r *Runtime
+	r, _ = startSeams(t, c, dir, SensorSeams{Append: func(context.Context) { r.sensorFailed.Store(true) }})
+	defer r.Close()
+	if err := r.ServeSensor(bg, sensorChannel(t, relayFlow(1))); err != nil {
+		t.Fatal(err)
+	}
+	if st := r.sensor.Load().link.Stats(); st.Committed != 0 || st.Dropped[sensorlink.DropStore] != 1 {
+		t.Fatalf("after sensor-failed mid-connection: %d committed, drops %v", st.Committed, st.Dropped)
+	}
+}
+
+// The Result half of holds after sensor-failed (carried from #663; D6's N3
+// on #676): a run held before the sensor's work failed gets no Result
+// call, so the link still holds it, and session_missing rises. Control:
+// resultHold with no sensorFailed check, which calls the link and
+// releases the run.
+func TestNoResultAfterSensorFailed(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, _ := startSeams(t, c, dir, SensorSeams{})
+	defer r.Close()
+	s := newScheduler(t, r, &fakeCollector{})
+	h := s.dispatchHold(bg, c.Schedule[0], s.newID())
+	if h == nil {
+		t.Fatal("the hold doesn't watch the run")
+	}
+	r.sensorFailed.Store(true)
+	if got := s.resultHold(bg, h, okInvocation, ownSession); got != nil {
+		t.Fatalf("session details after sensor-failed: %v", got)
+	}
+	r.intake.mu.Lock()
+	missing := r.intake.sessionMissing
+	r.intake.mu.Unlock()
+	if st := r.sensor.Load().link.Stats(); st.Hold.Runs != 1 || missing == 0 {
+		t.Fatalf("hold %+v, session_missing %d; want the run still held and counted", st.Hold, missing)
 	}
 }
 

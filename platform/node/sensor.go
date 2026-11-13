@@ -131,8 +131,10 @@ type SensorStatus struct {
 	DispatchTimeouts uint64 `json:"dispatch_timeouts"`
 	ResultTimeouts   uint64 `json:"result_timeouts"`
 	LockWaitMaxMS    int64  `json:"lock_wait_max_ms"`
-	// HealthHeld counts the sensor's health events not written past the
-	// platform class's ceiling since start (section 1.9 item 5).
+	// HealthHeld counts the ceiling's refusals of the sensor's health
+	// events since start, not the events: an event tried again, as a
+	// forwarder's owed report or a drop count is, is counted at each try
+	// (section 1.9 item 5; D4's N2 on #676).
 	HealthHeld uint64 `json:"health_held"`
 }
 

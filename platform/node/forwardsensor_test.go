@@ -298,6 +298,73 @@ func TestSensorSessionUnreachableNamed(t *testing.T) {
 	}
 }
 
+// F1's ceiling on the sensor session's forward.unreachable (section 1.9
+// item 5; D6's N2 on #676): with the platform class at the ceiling, the
+// sensor session's unreachable alarm stands, but its health event is not
+// written and is counted in health_held. Control: reach's sensor branch
+// sent through Runtime.health, which writes it.
+func TestSensorSessionUnreachableUnderCeiling(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	c, _ := sensorForwardConfig(t, true, 9) // the forwarders are never run
+	st := NewStatus("", nil, clock)
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Now: clock, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	waitSensor(t, r)
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	req := *tg.t
+	req.Class = syslog.ClassRequired // as in TestSensorSessionUnreachableNamed
+	tg.t = &req
+	heldManager(r, func() {
+		used, err := r.Store(HealthStream).ClassBytes(bg, c5.ClassPlatform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		col, _ := r.cfg.PlatformFloor()
+		r.cfg.Store.Quotas["platform"] = used + col + 1 // nothing fits beneath it
+	})
+	caughtUp := func(open time.Time, ids []c5.StreamID) forward.Status {
+		fs := forward.Status{Open: open, Streams: map[c5.StreamID]forward.StreamStatus{}}
+		for _, id := range ids {
+			if db := r.Store(id); db != nil {
+				last, _ := db.LastCommitted(bg, id)
+				fs.Streams[id] = forward.StreamStatus{Cursor: last, Confirmed: last}
+			}
+		}
+		return fs
+	}
+	before := r.sensorHeld.Load()
+	sensorDown := caughtUp(time.Time{}, tg.sstreams)
+	sensorDown.LastErr = errNotOpenForTest
+	fw.checkSessions(bg, tg, caughtUp(clock(), tg.streams), &sensorDown)
+	advance(UnreachableAfter + time.Second)
+	fw.checkSessions(bg, tg, caughtUp(clock(), tg.streams), &sensorDown)
+	n := 0
+	for _, a := range st.Snapshot("site-a-node1").Alarms {
+		if a.Code == AlarmForwardUnreachable && strings.HasPrefix(a.Detail, SensorSessionPrefix) {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d sensor-session forward-unreachable alarms, want 1", n)
+	}
+	if ev := forwardUnreachableEvents(t, r); len(ev) != 0 {
+		t.Fatalf("forward.unreachable written past the ceiling: %v", ev)
+	}
+	if r.sensorHeld.Load() == before {
+		t.Fatal("the sensor session's forward.unreachable was not counted in health_held")
+	}
+}
+
 var errNotOpenForTest = errors.New("node: the database holding network-alert is not open")
 
 // forwardUnreachableEvents are the details of the forward.unreachable

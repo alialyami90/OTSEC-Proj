@@ -13,9 +13,11 @@ import (
 // each network commit and each hold save, and the scheduler's calls
 // (Dispatch, Result, Abandon) take it too. The scheduler goes first: while
 // a scheduler call waits, the read loop does not take the lock again until
-// that call has had it, so a scheduler call waits for at most the one
-// record in commit. It waits at most HoldLockWait; past it the call gives
-// up, holds and ties nothing, and the run goes on untied.
+// that call has had it, so a scheduler call waits for at most the turn of
+// the holder it found: one record in commit for the read loop, and several
+// releases for TickHold, RecoverHold or a new run's giveWay, which hold the
+// lock across them (D6's N5 on #676). It waits at most HoldLockWait; past
+// it the call gives up, holds and ties nothing, and the run goes on untied.
 
 // HoldLockWait is the most a scheduler call waits for the link's lock
 // (section 1.10; unmeasured).

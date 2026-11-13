@@ -99,8 +99,8 @@ type Runtime struct {
 	// sensorFailed: the sensor's work panicked and is stopped until a
 	// restart (sensormgr.go).
 	sensorFailed atomic.Bool
-	// sensorHeld counts the sensor's health events not written past the
-	// platform class's ceiling (sensorceiling.go).
+	// sensorHeld counts the ceiling's refusals of the sensor's health
+	// events, each try of an event once (sensorceiling.go).
 	sensorHeld atomic.Uint64
 	// startMono is the monotonic time of the node's start, the origin of
 	// the sensor-unreachable timer however late the intake starts (D4-73).
