@@ -55,17 +55,40 @@ def test_an_agent_with_no_file_is_refused(run, agent):
     assert not launch(run, agent)
 
 
-def test_one_instance_of_each_role_and_any_number_of_roles(run):
+LOCKED_ROLES = [
+    "d1-principal-architect",
+    "d2-ied-integration",
+    "d3-security-access",
+    "d4-telemetry-ids",
+    "d5-platform",
+    "d7-release-supply-chain",
+    "d8-ui-ux",
+]
+
+
+@pytest.mark.parametrize("role", LOCKED_ROLES)
+def test_one_instance_of_each_role_and_any_number_of_roles(run, role):
+    assert launch(run, role)
+    assert not launch(run, role)  # launched, not yet started
+    run("SubagentStart", agent_type=role, agent_id="a1")
+    assert not launch(run, role)  # running
+    age(run.locks / role, 61)
+    assert not launch(run, role)  # still running, however old the lock
     assert launch(run, "d6-verification-safety")
-    assert not launch(run, "d6-verification-safety")  # launched, not yet started
-    run("SubagentStart", agent_type="d6-verification-safety", agent_id="a1")
-    assert not launch(run, "d6-verification-safety")  # running
-    assert launch(run, "d3-security-access")
-    assert launch(run, "d5-platform")
+    assert launch(run, next(other for other in LOCKED_ROLES if other != role))
+    run("SubagentStop", agent_type=role, agent_id="a1")
+    assert launch(run, role)
 
 
-@pytest.mark.parametrize("helper", ["ci-triage", "records-auditor"])
-def test_a_helper_runs_any_number_of_instances(run, helper):
+def test_a_d6_lock_from_before_the_exception_refuses_nothing(run):
+    run.locks.mkdir(parents=True)
+    (run.locks / "d6-verification-safety").write_text("old-agent")
+    assert launch(run, "d6-verification-safety")
+    assert launch(run, "d6-verification-safety")
+
+
+@pytest.mark.parametrize("helper", ["ci-triage", "records-auditor", "d6-verification-safety"])
+def test_a_helper_or_d6_runs_any_number_of_instances(run, helper):
     for agent_id in ("a1", "a2", "a3"):
         assert launch(run, helper)
         run("SubagentStart", agent_type=helper, agent_id=agent_id)
@@ -92,13 +115,13 @@ def test_another_agents_stop_does_not_release_the_lock(run):
 def test_stopping_the_agent_with_taskstop_releases_its_lock(run):
     assert launch(run, "d3-security-access")
     run("SubagentStart", agent_type="d3-security-access", agent_id="a1")
-    assert launch(run, "d6-verification-safety")
-    run("SubagentStart", agent_type="d6-verification-safety", agent_id="a2")
+    assert launch(run, "d5-platform")
+    run("SubagentStart", agent_type="d5-platform", agent_id="a2")
     run("PostToolUse", tool_name="TaskStop", tool_input={"task_id": "a1"})
     assert launch(run, "d3-security-access")
-    assert not launch(run, "d6-verification-safety")
+    assert not launch(run, "d5-platform")
     run("PostToolUse", tool_name="TaskStop", tool_input={"shell_id": "a2"})
-    assert launch(run, "d6-verification-safety")
+    assert launch(run, "d5-platform")
 
 
 def age(lock, seconds):

@@ -1,7 +1,8 @@
 """Claude Code hook: only the agents in .claude/agents run, one instance of each role.
 
-The owner's rule (CLAUDE.md, "Subagents"; D4-89). The two helper agents are the
-exception: any number of instances of each may run, and they take no lock.
+The owner's rule (CLAUDE.md, "Subagents"; D4-89). The two helper agents and D6
+are the exception (D4-91): any number of instances of each may run, and they
+take no lock.
 .claude/settings.json wires this script to five events, and each sends its JSON
 on stdin:
 
@@ -34,8 +35,8 @@ from pathlib import Path
 
 AGENTS = Path(__file__).resolve().parent.parent / "agents"
 
-# The helper agents. Any number of instances of each may run.
-MANY_INSTANCES = {"ci-triage", "records-auditor"}
+# The helper agents, and D6 (D4-91). Any number of instances of each may run.
+MANY_INSTANCES = {"ci-triage", "records-auditor", "d6-verification-safety"}
 
 # A lock with no agent id this old is a launch that never started, for example
 # one the user declined at the permission prompt.
