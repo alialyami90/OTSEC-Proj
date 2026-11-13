@@ -36,9 +36,12 @@ import (
 // that a handle's Sign method alone exposes the key.
 //
 // Limit: the test reads static types. A signer handed out as any, or in
-// an interface without crypto.Signer's methods, is not found, and nor is
-// what the package itself does with the key, a listener included; D3's
-// review of the wiring is the check there.
+// an interface without crypto.Signer's methods, is not found; nor is a
+// method that signs in any other form, such as SignDigest(d), or a Sign
+// whose parameter types are not exactly crypto.Signer.Sign's; and nor is
+// what the package itself does with the key, a listener included. D3's
+// review of D5's wiring is the check there, and it reads the handle's
+// exported methods for any that signs.
 
 const sensorlinkPath = "otsec.local/otsec/platform/sensorlink"
 
