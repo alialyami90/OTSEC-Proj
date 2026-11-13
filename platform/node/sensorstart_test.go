@@ -14,10 +14,9 @@ import (
 )
 
 // waitSensor waits for the sensor manager's first step, which runs after
-// Start returns and ends with the sensor's tick, which starts the detector,
-// then does the retention consumer's first tick, which starts it. In a node
-// the first Tick does that. So a test reads the sensor as Start used to
-// leave it.
+// Start returns, starts the retention consumer and ends with the sensor's
+// tick, which starts the detector. So a test reads the sensor as Start
+// used to leave it.
 func waitSensor(t *testing.T, r *Runtime) {
 	t.Helper()
 	select {
@@ -25,7 +24,6 @@ func waitSensor(t *testing.T, r *Runtime) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the sensor manager's first step did not end within 30 s")
 	}
-	r.tickRetention(bg)
 }
 
 // sensorStep asks the sensor manager for a step, as Tick does, and waits

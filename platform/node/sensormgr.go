@@ -68,6 +68,10 @@ type SensorSeams struct {
 	// Observe, when set, runs before the detector takes each observation:
 	// a test's slow detector.
 	Observe func()
+	// Retention, when set, runs before each step of the alert stream's
+	// retention consumer (retentionStep): a test's network database that
+	// stalls on the retention calls.
+	Retention func(ctx context.Context)
 }
 
 // SensorDriveEvery is how often the manager drives the detector between
@@ -291,7 +295,8 @@ func (r *Runtime) kickSensorManager() {
 // asks for, is the store set, the intake, the held mode changes, the prune
 // and the sensor's tick (tickSensor: the hold's deadlines, a drive of the
 // detector and its checkpoint, the drop counts, the alarms and the sensor
-// section of status). Any other step is a drive of the detector. A panic
+// section of status), with the alert stream's retention consumer
+// (tickRetention) before the prune. Any other step is a drive of the detector. A panic
 // anywhere in either is recovered: it raises AlarmSensorFailed, naming the
 // sensor, and stops the sensor's work until a restart, and managerStep
 // reports false. The node and every other stream go on (section 1.9 item
@@ -336,6 +341,7 @@ func (r *Runtime) managerStep(ctx context.Context, full bool) (ok bool) {
 	}
 	r.startIntake(ctx)
 	r.flushModeChanges(ctx)
+	r.tickRetention(ctx)
 	r.pruneSensorStores(ctx)
 	if ctx.Err() != nil {
 		return false

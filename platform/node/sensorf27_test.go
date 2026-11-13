@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
@@ -245,6 +246,55 @@ func mustHealth(t *testing.T, r *Runtime) c5.Record {
 		t.Fatal(err)
 	}
 	return rec
+}
+
+// F3 for the retention consumer (section 1.9 item 3; D1's point 4 on
+// #676): with the network database stalled on a retention call, Tick
+// returns, again and again, and a collection still runs through to its
+// collection.run. Control: tickRetention inside Tick, where Tick waits
+// for the stalled call.
+func TestTickReturnsWithStalledRetention(t *testing.T) {
+	c, dir := holdConfig(t)
+	var stall atomic.Bool
+	stuck, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	r, _ := startSeams(t, c, dir, SensorSeams{Retention: func(context.Context) {
+		if stall.Load() {
+			once.Do(func() { close(stuck) })
+			<-release
+		}
+	}})
+	defer r.Close()
+	defer close(release)
+	if r.retention == nil {
+		t.Fatal("the first step did not start the retention consumer")
+	}
+	stall.Store(true)
+	ticked := make(chan struct{})
+	go func() {
+		defer close(ticked)
+		for range 3 {
+			r.Tick(bg)
+		}
+	}()
+	select {
+	case <-stuck:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the retention call was not reached")
+	}
+	select {
+	case <-ticked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Tick did not return within 5 s with the retention call stalled")
+	}
+	var seq uint64
+	s := newScheduler(t, r, wireCollector(t, func(*authz.CollectorRequest) {}, &seq))
+	if rep := s.RunOnce(bg, 0); rep.Outcome != "ok" {
+		t.Fatalf("a run with the retention call stalled: %+v", rep)
+	}
+	if n := len(healthRuns(t, r)); n != 1 {
+		t.Fatalf("%d collection.run events, want 1", n)
+	}
 }
 
 // ownSession is the ok-0.9 fixture's session, which ownFlow lies in.

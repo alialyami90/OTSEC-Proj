@@ -478,12 +478,13 @@ func (r *Runtime) Tick(ctx context.Context) {
 		}
 		r.health(ctx, x.a.Code.HealthType(), details)
 	}
-	r.tickRetention(ctx)
 	// The sensor's work runs on the sensor manager's goroutine, which this
 	// kick starts a step of; Tick does not wait for it, so a slow detector
 	// or network database never holds Tick, the evidence database's Resume
-	// or the status write (F3, section 1.9 item 3). The status Tick writes
-	// holds the sensor section the manager last set.
+	// or the status write (F3, section 1.9 item 3). The alert stream's
+	// retention consumer is in that step too, as it reads the network
+	// database. The status Tick writes holds the sensor and retention
+	// sections the manager last set.
 	r.kickSensorManager()
 	r.Prune(ctx)
 	r.opt.Status.Write(string(r.cfg.NodeID))
