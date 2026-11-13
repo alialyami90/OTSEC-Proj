@@ -1,10 +1,10 @@
 # HR-24 stage 1: judging a tied Telnet or SNMPv3 session (D4)
 
-Brief P4-4-HR24, stage 1 (`docs/agent-handoffs.md`), under D4-95. D4, 2026-11-13.
+Brief P4-4-HR24, stage 1 (`docs/agent-handoffs.md`), under D4-95. D4, 2026-11-13. Revised the same day for D3's review (6853844544) and D2's review (6853897935) of `dd114c10`, under D1's rulings (6853911271). §8 maps each finding to its answer.
 
-- **Evidence class: `desk`.** Nothing here is built or run. Every source is cited at `main` `650a62be` unless another commit is named.
+- **Evidence class: `desk`.** Nothing here is built or run. Every source is cited at `main` `650a62be` unless another commit is named. Zeek is cited at tag `v9.0.1`, the approved engine's version, from its source as published; nothing of it was run here.
 - **Reviewers:** D3 reviews the security design, D2 what the collector's sessions look like on the wire, and D6 testability.
-- **Contract changes:** §7 lists what the rule needs from a contract. Each item comes back to D1 before stage 2 (brief: "If the note needs a C13 or C4 change, it comes back to D1 first").
+- **Contract changes:** none in this note. §7 sketches the C13 minor change D1 approved in principle, the C2 minor change D2 drafts, and one more C13 field that comes back to D1 first.
 
 ## 0. The problem in one paragraph
 
@@ -12,142 +12,209 @@ A `flow` that intake ties to one of the node's own collector runs (`node.platfor
 
 ## 1. Every route by which a spoofed flow can tie
 
-The routes come from HR-24's row, AP-35 (`docs/threat-model.md`), SL-17 (`docs/phase4/D3-sensor-link.md`) and the baseline note §5. Each route below is checked against what the detector would see.
+The routes come from HR-24's row, AP-35 (`docs/threat-model.md`), SL-17 (`docs/phase4/D3-sensor-link.md`), D5's node design §1.6 and the baseline note §5. D3 checked them against `hold.go` (l.520 to l.539, l.857): a tie needs a connected result, so a failed dial or a never-connected run ties nothing, and there is no seventh route.
 
 | # | Route | Source | What the detector sees for that invocation |
 | --- | --- | --- | --- |
-| T1 | **Move branch.** The sensor's clock moves after the last sampled tick, so a record captured after the move ties to an earlier window: live, or through the late index (one flow per entry, then spent) | HR-24; SL-17; D5 §1.6 | The run's own flow, tied, **and** a second flow tied to the same invocation. Where the spoofer reuses the run's exact 5-tuple, both flows share one key. |
-| T2 | **Eviction branch.** Across a node start, records numbered before the tied one are evicted after the last sampled tick, so the capture floor has not yet risen when the tie is decided | HR-24; SL-17; CH-20 | As T1, or, where the run's own records are among those evicted, **only** the spoofed flow, tied. |
-| T3 | **Forged exact 5-tuple** inside the run's window, from the node's MAC on its segments, or from any MAC across a router (`node-address-spoofed` does not fire then) | AP-35; D4-73 | One key tied to the invocation, carrying the run's own traffic **plus** the spoofer's. TCP cannot hold both sessions at once, so in practice this means a connection right after the run's, inside `ended_at` + *g*. |
+| T1 | **Move branch.** The sensor's clock moves after the last sampled tick, so a record captured after the move ties to an earlier window, either live in the run's hold or through the late index | HR-24; SL-17; D5 §1.6 | **Live:** the run's own flow and the spoofed flow both tied, possibly on one key. **Late index:** only a session released with no flow tied enters the index, and an entry ties one flow and is then spent (D5 §1.6). So a late-index tie is always the **only** tied flow of its run. If the run's own flow arrives later, it commits untied and alerts as `own-session-outside-record` (noisy). If the run's own records are lost, nothing else alerts. This path is ordinary, not rare: Zeek writes a connection's record at its end (A6 on #627), so a Telnet run's own flow usually reaches intake after the result. |
+| T2 | **Eviction branch.** Across a node start, records numbered before the tied one are evicted after the last sampled tick, so the capture floor has not yet risen when the tie is decided | HR-24; SL-17; CH-20 | As T1, or, where the run's own records are among those evicted, **only** the spoofed flow, tied. The evicted spans are declared `lost` (CH-20, CH-40). |
+| T3 | **Forged exact 5-tuple** inside the run's window, from the node's MAC on its segments, or from any MAC across a router (`node-address-spoofed` does not fire then) | AP-35; D4-73 | One key tied to the invocation, carrying the run's own traffic **plus** the spoofer's. TCP cannot hold both sessions at once, so in practice this is a connection right after the run's, inside `ended_at` + *g*. |
 | T4 | **The `window` tie on a C2 0.8 result** (no `local_addr`): an attacker's connection that starts inside the window before the platform's is tied in its place | AP-35; baseline note §5 | Only the spoofed flow, tied. The platform's own flow is untied and already alerts as `own-session-outside-record`, so this route is noisy, not hidden. |
-| T5 | **Injection into an open tied flow** (or one whose `end` was lost) before its open-flow entry expires | AP-35 residual (D4-73) | The run's own key, with more packets and bytes, and a later `last_utc`, than the run produced. |
-| T6 | **Into the next reuse:** an SNMPv3 run that reuses an open conversation's 5-tuple re-points the entry, and the forger's later records tie to the new run | AP-35 residual (D4-73) | The new run's key, with more datagrams and bytes than that run sent and received. |
-| — | The midstream reply, with the device as `ip.src` | AP-35 residual | **Not a tie.** Neither own-session rule judges it. The base rules do, once the baseline is acknowledged. Out of scope here. |
+| T5 | **Injection into an open tied flow** (or one whose `end` was lost) before its open-flow entry expires, during or after the run | AP-35 residual (D4-73) | The run's own key, with more than the run produced, or, for a same-length substitution, the same amounts (§5 item 2). |
+| T6 | **Into the next reuse:** an SNMPv3 run that reuses an open conversation's 5-tuple re-points the entry, and the forger's later records tie to the new run | AP-35 residual (D4-73) | The new run's key, with more datagrams and octets than that run sent and received. |
+| — | The midstream reply, with the device as `ip.src` | AP-35 residual | **Not a tie.** The base rules judge it once the baseline is acknowledged. Out of scope here. |
 
-**What every route shares:** on each one, the traffic tied to an invocation is either more than the run produced (T1, T3, T5, T6, and T2 when the run's own flow survives) or different from it (T2 with the run's records evicted, T4). That is the property the rule tests.
+**What the routes share:** the traffic tied to an invocation is either more than the run produced (T1 live, T3, T5, T6, T2 when the run's own flow survives), different from it (T1 through the late index, T2 with the run's records evicted, T4), or, on a shared key, the same amounts with different content (T5's same-length substitution). The rule tests the first two. The third needs the signal in §3, M6.
 
 ## 2. What is known about a collector run's session, and when
 
-**Before the run** (the C3 register and the collector's limits) the node knows the protocol, the endpoint (address, transport and port), the approved commands, and the bounds (deadline, maximum received bytes, step limits). That gives limits, not a profile: what the relay sends back (SER rows, varbind values) is not known until it arrives. **So the rule judges after the run's result, never before.**
+**Before the run** (the C3 register and the collector's limits) the node knows the protocol, the endpoint, the approved commands, and the bounds (deadline, step timeout, maximum received bytes, `max_reply_bytes`). That gives limits, not a profile: what the device sends back is not known until it arrives. **So the rule judges after the run's result, never before.**
 
-**After the run**, the collector's C2 result (`contracts/adapter/result.go`) gives the node the following. The node already reads these in `configread.go`, `snmp.go` and `identity.go`.
+**After the run**, the collector's C2 result (`contracts/adapter/result.go`) gives the node the following. The node already reads it in `configread.go`, `snmp.go` and `identity.go`.
 
 | Item | Field | Telnet | SNMPv3 |
 | --- | --- | --- | --- |
 | The session's local end and connect time | `session.local_addr`, `session.connected_at` (C2 0.9) | yes | yes |
-| Start and end | `started_at`, `ended_at` | yes | yes |
+| Start, end and outcome | `started_at`, `ended_at`, the outcome | yes | yes |
 | Whether it connected | `session.connected` | yes | yes |
-| Every chunk sent or received, with direction, phase, time and length | `transcript.segments[]` | the NVT data stream only. Telnet commands are removed (`modules/ied/telnet` package doc), and the client's 3-octet refusals are not in the transcript: `Stats` counts them, and the C2 result does not carry `Stats` | one segment per datagram sent or received, every retry included (`modules/ied/snmpv3` `Segment`), in its stored form: the scoped PDU in plaintext in place of `encryptedPDU`, the digest zeroed |
-| Credential sent | `session.credential_sent` | once per session (`SendSecret`) | n/a (USM) |
+| Every chunk the client sent or **read**, with direction, phase, time and length | `transcript.segments[]` | the NVT data stream the adapter read. Telnet commands are removed (`modules/ied/telnet` package doc). The client's 3-octet refusals are not in it; `Stats` counts them, and the C2 result does not carry `Stats` | one segment per datagram the client sent or read inside an await, every retry included (`snmpv3/session.go` `record`, l.285 to l.305), in its stored form: the scoped PDU in plaintext in place of `encryptedPDU`, the digest zeroed |
+| Credential sent | `session.credential_sent` | once per session; stored as `[REDACTED]\r\n`, 12 octets (`sel751/transcript.go`) | n/a (USM) |
 | The agent's engine ID | `session.snmp.engine_id` | n/a | yes, pinned |
 
-**What the collector does, from D2's facts in the baseline note §5:** the SEL-751 adapter opens at most one established connection per run, and retries the dial only when it fails before any byte is sent. The collector never runs two sessions to one asset at once. An SNMP run is one UDP conversation. **So each invocation owns exactly one established flow.**
+**The transcript is exact for what the client sent, and for what it read. It is not a record of everything the device sent** (D2's finding 1):
 
-**What the sensor's records show of a flow** (C13 0.1 §4.1 and §4.3, unchanged in 0.2):
+- **Telnet:** `await` (`sel751/run.go` l.1196 to l.1255) stops reading at the step timeout, the deadline or the response budget, and `commit` records only `s.reply`. Data already decoded but not returned, data the collector's kernel acknowledged but the adapter never read, and data in flight at close never reach the transcript. That happens on every run that ends `failed.timeout` or `failed.response_too_large`, and on every run that ends without QUI (`quitAfter`, l.1094).
+- **SNMPv3:** `await` (l.321 to l.361) records only datagrams that arrive while it runs. The late answer to a request that timed out at the last step or at the deadline, and the answer to a first send that arrives after the retry's answer was accepted, are on the wire and not in the transcript.
 
-- `flow` `start` and `end`, with `packets` and `bytes`. `bytes` is the wire length summed over both directions, TCP retransmissions included.
-- `first_utc` and `last_utc` on the sensor's clock.
-- The `end` reason and `syn_only`.
-- For Telnet, an `insecure` record with `login.user` and `login.attempts`.
-- For SNMPv3, an `encrypted` record with `engine_id`, `user`, `level`, `boots` and `time`. It is emitted **once per flow, at the first message**, which is the run's noAuthNoPriv discovery. So `level` and `user` show the discovery, never the authPriv steps.
+**What the collector does** (D2, `sel751/run.go` l.446 to l.475, `snmpv3/session.go` l.34 to l.36): the SEL-751 adapter keeps at most one established connection per run and retries the dial only when the dial fails. An SNMPv3 request goes out at most twice, each time with a fresh msgID. The collector never runs two sessions to one asset at once. **So each invocation owns exactly one established flow.** The project's SNMPv3 target is the SEL-2731/2741 switch family (S29, `docs/phase4/C2-snmp-family.md`), all `documented-untested`; the SEL-751 manual never mentions SNMP.
 
-## 3. What the detector can compare from sizes, counts and timing
+**What the sensor's records show of a flow** (C13 0.2 §4.1 and §4.3):
 
-The rule is one new rule, working name **`own-session-mismatch`** (§7). It judges each `(invocation_id, flow key)` that intake tied, once the invocation's result is known and the flow has ended, or its open-flow entry has expired.
+- `flow` `start` and `end`, with `packets` and `bytes` **over both directions combined**. `bytes` is link-layer octets with any 802.1Q tag and the PRP RCT, without the FCS (C13 l.187), TCP retransmissions included.
+- `first_utc` and `last_utc` on the sensor's clock, the `end` reason, and `syn_only`.
+- For Telnet, an `insecure` record with `login.user` and `login.attempts`. On a SEL-751 the login has no user name: `ACC`, then `Password: ?` (S22 p. 7.32).
+- For SNMPv3, an `encrypted` record emitted once per flow, at the first message, which is the run's noAuthNoPriv discovery.
+
+**What the engine already computes and C13 does not carry** (Zeek `v9.0.1`, read from source):
+
+- `conn`'s `orig_bytes` and `resp_bytes` are `c$orig$size` and `c$resp$size` (`base/protocols/conn/main.zeek` l.275, l.276). For TCP, `TCP_Endpoint::Size()` (`TCP_Endpoint.cc` l.131 to l.163) is the sequence span: the larger of the highest sequence sent and the highest acknowledged, less the start, less the SYN octet and a FIN octet, in a 64-bit space that counts wraps. A retransmission does not extend it. For UDP, `size` is the sum of the payload lengths sent in that direction (`UDPSessionAdapter.cc` l.40 to l.71).
+- `orig_pkts`, `resp_pkts`, `orig_ip_bytes` and `resp_ip_bytes` (`main.zeek` l.278 to l.285), from the conn-size analyzer.
+- Zeek documents that these counts can be stale inside early events (`init-bare.zeek` l.946 to l.951). The sensor reads them at the connection's end. Whether `num_pkts` counts a fragmented datagram once, after Zeek's reassembly, is inference and a stage 2 check.
+
+## 3. What the detector compares, from sizes, counts and timing
+
+The rule is one new rule, working name **`own-session-mismatch`** (§7 item 1). It judges each `(invocation_id, flow key)` that intake tied, once the invocation's result is known and the flow has ended or its open-flow entry has expired.
+
+**Direction (D1's ruling 2).** Every byte and packet test is per direction. **To the device, the test is strict**: that is where a write shows. **From the device, the bound depends on the run's outcome**, because data that arrives after the adapter stops reading never reaches the transcript.
+
+**Every comparison alerts only on more than the bound.** None is a lower bound, so loss cannot make an own run fail one, and none is switched off under loss or degraded coverage (§4).
 
 | # | Comparison | Telnet | SNMPv3 | Routes it catches |
 | --- | --- | --- | --- | --- |
-| M1 | **One established flow per invocation.** A second established flow tied to the same invocation (`syn_only: false`, or carrying any other observation), by any tie path, the late index included, is a mismatch. So is a second `client-server` `start` of the same TCP key after that key's `end: fin` or `end: rst`. | yes | yes (a second conversation) | T1, T2 when the run's flow also tied, and T3 |
-| M2 | **Packets.** | lower bound only: 3 for the handshake, plus at least one per segment of the transcript in each direction; ACKs and coalescing make it loose | **exact:** the number of transcript segments, one datagram each, with each retry recorded. The only exceptions are IP fragments of a datagram larger than the path MTU, which the sensor counts as more packets (inference; D2 to say whether a relay's responses ever exceed it) | T5, T6, and T1 and T3 on a shared key |
-| M3 | **Bytes per direction.** | needs per-direction TCP payload (§7 item 2). With C13 0.2's combined wire `bytes`, the slack is per-packet header variance, padding and retransmissions: about 6 to 18 octets per packet. Over a 30 to 100 packet run that is hundreds of octets, enough to hide a short command, so it is not proposed as the Telnet measure | **near exact:** each segment's wire length is its stored length minus the change the stored form makes to the outer lengths (inference; D2 to confirm, §7 item 3), plus 8 + 20 + 14 octets per datagram, + 4 with a VLAN tag (`l2.vlan`). The PRP trailer is not counted, because `bytes` is after the discard | T5, T6, and T1 and T3 on a shared key |
-| M4 | **Duration.** `last_utc` − `first_utc` of the tied key against `ended_at` − `connected_at`, + 2*g*. A difference within one sensor clock is unchanged by a constant move (T1). A move during the flow can only shorten it (§5). | yes | yes | T5 (a flow kept alive past the run) |
-| M5 | **Login attempts.** `login.attempts` ≠ 1 on the tied Telnet flow, while the run sent its credential once | yes | n/a | a second login on a shared key |
+| M1 | **One established flow per invocation.** The node keeps, with the profile, the number of established flows already tied to the invocation. A second established flow tied to it (`syn_only: false`, or carrying any other observation), on any tie path, is a mismatch. So is a second `client-server` `start` of the same TCP key after that key's `end: fin` or `end: rst`. | yes | yes (a second conversation) | T1 live, T2 when the run's flow also tied, T3. **Never** a late-index tie (§1). |
+| M2 | **Datagrams per direction.** | **not used.** It could only be a lower bound, and the rule alerts only on more (D2's note 1, D3's B5) | **to the agent, exactly** the sent segments. **From the agent,** at most the received segments + *U* + *R*, where *U* is the requests with no counted reply and *R* the retried requests (D2's finding 1). Judged on datagrams only where §7 item 2's per-direction counts give reassembled datagrams; on C13 0.2's frame counts, each datagram counts as at most ⌈(IP length − 20) / 552⌉ frames, the fragment count at IPv4's minimum MTU of 576 (1,232 octets of payload per fragment on IPv6's 1,280) | T5, T6, and T1 and T3 on a shared key |
+| M3 | **Payload octets per direction** (§7 item 2). | **To the relay, strictly:** at most the transcript's sent octets + 3 × `refusals` + 2. The credential slot is 12 stored octets and the secret plus CR LF on the wire; SEL-751 passwords are at most 12 characters (S22 p. 7.70), so the wire carries 9 octets fewer to 2 more than the transcript (D2's finding 2). One credential per session gives + 2. That catches one added line: `2AC` CR LF plus a password line is at least 8 octets. **From the relay, only when the run read to the end** (it sent QUI and did not end on a timeout, a response limit or the deadline): at most the transcript's received octets + `command_octets_received` + 2 × the redacted echoes. Otherwise the from-relay direction is not judged (§5 item 4). | **To the agent, exactly:** each sent datagram's wire length from its stored form by D2's formula, wire = stored − H(b) + H(b + 1 + L(N)) + 1 + L(N), with b the stored outer SEQUENCE's content length, L(n) the number of length octets for n and H(n) = 1 + L(n). AES-128-CFB adds no padding (RFC 3826 §3.1). **From the agent:** each received datagram's length by the same formula + 4 (the agent may use non-minimal long-form lengths on the two headers the stored form drops, RFC 3417 §8; 1 or 2 octets each in practice, D2), plus (*U* + *R*) × `max_reply_bytes` | T5, T6, and T1 and T3 on a shared key |
+| M4 | **Duration.** `last_utc` − `first_utc` of the tied key against `ended_at` − `connected_at` + 2*g*. | **`unknown`; not judged** until a device is authorized. No source says whether the relay holds a half-close after the client's FIN; if it does, its keepalives (`ETCPKA := Y`, `KAIDLE := 10` s by default, S22 p. 4.250) put `last_utc` tens of seconds past `ended_at` (D2's note 3). M3's to-relay span covers an injection past the run instead. | yes, + the step timeout when *U* + *R* > 0 or the run ended on a timeout (D2) | T5 (SNMPv3 kept alive past the run) |
+| M5 | **Login attempts.** `login.attempts` ≠ (`credential_sent` ? 1 : 0) on the tied Telnet flow | yes, if `attempts` counts password lines sent, not prompts. After a wrong password the relay prompts again up to three times (S22 p. 7.33) and the adapter sends nothing more. §7 item 2 states the count. | n/a | a second login on a shared key; a login on the key of an ID-only run |
+| M6 | **To-device retransmissions with different content**, from the engine, as a count (§3.1). | proposed, two forms (§3.1) | n/a | the same-length substitution on a shared key (T5), in the cases §3.1 states |
 
-**Not proposed:**
+**Not proposed:** the SNMPv3 `encrypted` record's `level` and `user` (they show only the discovery), `engine_id` (a spoofer talking to the real device gets the real one), and Telnet's `login.user` (a spoofer with the credentials types the same name, and a SEL-751 login has none). None of them separates a spoofer who holds the credentials, which HR-24 assumes.
 
-- `level` and `user` of the SNMPv3 `encrypted` record: they show only the discovery message (§2).
-- `engine_id`: a spoofer talking to the real relay gets its real engine ID, so it never differs.
-- Telnet `login.user`: a spoofer with the credentials types the same user name.
-- Each of these reads only what C13 already carries, and none of them separates a spoofer who holds the credentials, which HR-24 assumes.
+**T1 through the late index, T2 with the run's records evicted, and T4:** only the spoofed flow is tied, so M1 is silent. M2 to M6 then compare the spoofed flow with a run it did not carry, and they catch it unless it was shaped to the run's profile (§5 item 1). T4, and T1 through the late index when the run's own flow is seen, also raise `own-session-outside-record` on the run's own flow.
 
-**T2 with the run's records evicted, and T4:** only the spoofed flow is tied, so M1 is silent. M2 to M5 then compare the spoofed flow with a run it did not carry, and they catch it unless it was shaped to the run's profile (§5). T4 also raises `own-session-outside-record` on the platform's own flow today.
+### 3.1 M6: the same-length substitution, and what the engine gives
 
-**Evidence and alert.** The rule cites the tied flow's `start` and `end` (C13 §7.1). The alert says what was seen and nothing more, for example "flow from 192.0.2.x:p to the relay's 23/tcp tied to run R: 2 established flows, 1 expected" or "… 1,912 octets to the relay, the run sent 318". It never says "spoofed" (D4-68 ruling 10).
+**The attack (D3's B3).** An attacker who sees the session's sequence numbers injects N octets at the relay's `rcv_nxt` just before the collector sends its own N-octet command. The relay executes the attacker's bytes and drops the collector's segment as a retransmission. The collector receives the ACK it expected, and the relay's reply lands in its transcript. Per direction, the sequence span equals the run's, the duration and the single login are unchanged, and M1 to M5 are silent. That is a write, for example `2AC` against an approved command of the same length, hidden whole on the shared key. The transcript is not an independent profile of the received direction on a shared key, because the attacker's induced replies land in it.
 
-**What the node must keep.** The profile of each run (per-direction totals, segment count, `connected_at`, `ended_at`, connected or not) must be kept with the run's tie state: in the hold, and in the late index entry, until that entry is spent or expires. T1 and T2 tie after the result has committed, so the profile must outlive the result in memory. That is node state, D5's, not a contract (§7 item 4).
+**What Zeek gives (checked against its source at `v9.0.1`; not run):**
 
-## 4. False-positive risk on the platform's own runs
+- **There is no weird named `retransmission_inconsistency`.** The signal is the event `rexmit_inconsistency(c, t1, t2, tcp_flags)` (`src/event.bif` l.325 to l.346). `TCP_Reassembler::Overlap` (`TCP_Reassembler.cc` l.397 to l.411) raises it when an overlapping segment's bytes differ from the bytes the reassembler holds for that range (`memcmp`), except a one-octet overlap on a connection whose peer has done nothing (keep-alives).
+- **It compares only against data the reassembler still holds.** That is data not yet acknowledged, plus at most `tcp_max_old_segments` older segments, which is 0 by default (`init-bare.zeek` l.1918 to l.1921). Worse, `TCP_Reassembler::DataSent` (l.420 to l.437) drops a segment that lies wholly below the receiver's acknowledgement before any comparison ("We've already delivered this and it's been acked"). So, in the attack's order, if the sensor sees the relay's ACK of the injected octets before the collector's segment, **no event is raised, whatever `tcp_max_old_segments` is.** It is raised only when the collector's segment arrives before that ACK, which depends on timing the attacker controls.
+- **The event hands both payloads to the script.** The stock handler, `policy/protocols/conn/weirds.zeek`, writes them into a Notice, so it must never be loaded. The project's script would count the event per direction and discard `t1` and `t2`.
+- **A content-free retransmission count exists.** `update_last_seq` (`TCPSessionAdapter.cc` l.470 to l.502) calls `DidRxmit` for any payload segment whose end does not advance the highest sequence seen. In the attack's order the collector's segment is exactly that, whatever the ACK's timing. Zeek also raises `tcp_rexmit(c, is_orig, seq, len, data_in_flight, window)` for each retransmitted segment (`src/analyzer/protocol/tcp/events.bif` l.303 to l.318), which carries no payload.
 
-Each of these must give no alert, and stage 2 builds a case for each:
+**So M6 has two forms. Both come back to D1 before stage 2:**
 
-| Source of a false positive | Answer in the rule |
+- **M6a, inconsistent retransmissions to the device: `rexmit_inconsistency` count > 0.** The engine makes the comparison; only the count leaves the sensor. D1's ruling 1 lets the rule use it. It catches the substitution **only when the collector's segment reaches the sensor before the relay's ACK**, so an attacker who times the injection evades it. It is also the one form that survives PRP duplicates (§4), because an identical duplicate raises nothing. D1 to confirm that the script's handler receiving `t1` and `t2`, and discarding them, stays inside D4-95.
+- **M6b, retransmitted octets to the device above the collector's own.** The sensor counts the to-device octets of `tcp_rexmit` segments, leaving out one-octet segments (keep-alives and zero-window probes). The collector reports the octets its own socket retransmitted. A to-device excess means a segment covered sequence space twice that the collector sent once. That catches the substitution **in both orders**, with no content read anywhere. It needs a C13 field (§7 item 2, (c)) and a C2 field from the collector's socket: Linux `TCP_INFO`'s `tcpi_bytes_retrans`, Windows `SIO_TCP_INFO`'s `BytesRetrans` (inference, unchecked; D2 and D3 own the collector). It is a new request, not one D1 approved.
+- **Neither form is in D1's approval of the two C13 requests.** If D1 refuses both, the substitution stays the known miss of §5 item 2.
+
+### 3.2 Evidence, alert text and what the node keeps
+
+**The profile carries numbers and times only** (D3's N1). The node computes it where it receives the C2 result, from segment lengths, directions and times, the outcome, and the counts above. No segment byte reaches `sensorlink` or `netdetect`. A stage 2 test pins the profile's Go type to numeric and time fields, so a field that could hold a byte slice or a string fails to compile the test.
+
+**The alert states the excess only, never the run's own totals.** The client-to-relay total of an own Telnet run, less the lengths of the approved commands, gives the length of the password. So an alert reads, for example, "flow from 192.0.2.x:p to the relay's 23/tcp tied to run R: 2 established flows, 1 expected", "… 1,594 octets to the relay above the run's bound", or "… 3 retransmitted octets to the relay with different content". It never says "spoofed" (D4-68 ruling 10). It cites the tied flow's `start` and `end` (C13 §7.1), and the reason it was judged as it was (§4: `prp-table-full`, `no-profile`).
+
+**What the node keeps with the run's tie state,** in the hold and in the late index entry until it is spent or expires: the profile and the count of established flows tied so far (D3's N3). T1 and T2 tie after the result has committed, so the profile outlives the result in memory. That is D5's node state, not a contract (§7 item 5).
+
+**A tied flow with no profile fails closed** (D3's N2). Across a node start, a recovered hold or an open-table entry may tie a flow whose run's profile is not held. Such a flow is never skipped: it raises `own-session-mismatch` with the reason `no-profile`, and the base rules judge it as if it were untied.
+
+## 4. False positives on the platform's own runs, and states an attacker can cause
+
+Each of these must give no alert on an own run, and stage 2 builds a case for each.
+
+| Source | Answer in the rule |
 | --- | --- |
-| A sensor drop, or a run under degraded coverage, gives fewer packets or bytes than the run | M2 and M3 alert only on **more** than the run produced, never on less. A flow observed with any `degraded`, or with a seq gap or declared loss in its stretch, is judged on M1 only. The gap is visible elsewhere (`own-session-unseen`, coverage) |
-| TCP retransmissions, duplicate ACKs, window updates | Not counted, if Telnet's M3 uses the sequence-number span (§7 item 2). Telnet's M2 is a lower bound only |
-| PRP duplicates | `packets` and `bytes` are counted after the discard (C13 §4.3) |
-| VLAN tags, Ethernet padding, TCP options | M3 for SNMPv3 takes the VLAN from `l2.vlan`. Padding and options do not touch a payload measure |
-| Telnet option negotiation | Each direction's tolerance is bounded by `MaxCommands` × 3 octets plus `MaxSubnegotiation`, unless the C2 result carries Telnet's `Stats` (§7 item 3) |
-| A Telnet dial retried before any byte | Gives `syn_only` flows, which M1 does not count (§3) |
-| SNMPv3 retries and the time-window resend | Each is a transcript segment, so M2 and M3 count it |
-| A run that fails (refused login, timeout, deadline, engine ID mismatch) | The transcript holds what was sent and received, so the profile is still exact. A run that never connected expects no flow |
-| A run longer than `flow_idle_s`, cut by `idle` | Several `start`/`end` pairs of one key are summed by key (C13 §4.3), and an `idle` restart of the same key is not a second flow for M1. Only a new `client-server` `start` after `fin`/`rst` is |
-| The sensor restarting during a run | A `midstream` `start` of the same key on a new sensor `run_id` is not a second flow for M1. Counts from before the restart are summed |
-| Collector and sensor clocks apart | M4 compares durations, never absolute times, with 2*g* |
-
-**How many own runs stage 2 needs.**
-
-- At least **200 own runs per protocol**, spread over that matrix.
-- **Telnet:** SER collections with 0, 1 and many rows; an `ID`-only run; a refused login; a slow device that hits step timeouts; a run at its deadline; a wake sent; with and without a VLAN; PRP duplicates; 1 % loss with retransmissions; reordering.
-- **SNMPv3:** discovery, time sync and 1 to N steps; a lost response and its retry; a response near the message-size limit; an engine ID mismatch; a time-window Report.
-- With 0 alerts in 200 runs, the false-positive rate per run is below 1.5 % at 95 % confidence (rule of three). D6 sets the number in stage 2; this is the floor I propose.
-- These are `simulated` runs. A real relay's own-run false-positive rate stays unverified until a device is authorized.
+| **Loss, a sensor drop, degraded coverage, a declared loss, a seq gap** | They only take packets, octets and time away. Every comparison tests for more, so every comparison **stays on** (D3's B1). With §7 item 2, Telnet's span counts a hole inside it, so loss cannot shrink it below what was sent either. Nothing is switched off, so flooding the segment (HR-21, AP-30) turns no comparison off, and §6 case 3's T2 alerts on its declared loss. |
+| **`prp_table_full` or `prp_mismatched` rose in the flow's stretch** (CH-29) | Frames pass without the duplicate check, so a duplicate doubles a count, and neither state is in `coverage.degraded` (D3's B2). On such a stretch, M2 and M3 for SNMPv3 judge against **twice** the run's bound, and the alert names `prp-table-full` or `prp-mismatched`. Telnet's span (M3) is unaffected, since a duplicate does not extend it. M6b is not judged on that stretch, because a duplicate is an identical retransmission; M6a is, because an identical duplicate raises nothing. A line-rate flood of minimum-size frames fills the table (CH-29), so §5 item 5 states what the doubled bound hides. |
+| **TCP retransmissions, duplicate ACKs, window updates, keep-alives, zero-window probes** | Not in the span: a retransmission does not extend it, and a keep-alive's sequence number is `snd.nxt` − 1, carrying at most one octet, which does not extend it either (D2's note 2). M6b leaves one-octet segments out, and the collector's own retransmissions are subtracted. |
+| **The PRP RCT, VLAN tags, Ethernet padding, IPv6, TCP options** | None of them touches a payload measure (§7 item 2). On C13 0.2's wire `bytes`, which counts the RCT (C13 l.187), the fallback adds 14 + 4 (`l2.vlan`) + 6 (`prp`) + 20 or 40 (IPv4 or IPv6) + 8 octets per frame (D2's finding 3). |
+| **IP fragmentation of an SNMPv3 reply** | `max_reply_bytes` may be as large as 65,507 (`contracts/register/doc.go` l.60), so a reply may fragment. With §7 item 2 the counts are per datagram and in UDP payload octets, after Zeek's reassembly (inference, stage 2 check). On the fallback, M2 and M3 count each datagram at its minimum-MTU fragment bound (§3). Whether the switch family's replies fragment is `unknown` (S29 p. 47 gives no `snmpEngineMaxMessageSize` value). |
+| **Telnet option negotiation** | To the relay: the client's only bytes outside the lines are refusals, 3 octets each, at most `maxCommands` = 64 (`run.go` l.42), so 192 octets; `refusals` in the C2 result gives them exactly. From the relay: `decode` strips every command, subnegotiation contents included, about 64 × 261 ≈ 16.7 KB at worst, and an `IAC IAC` on the wire is one data octet; `command_octets_received` in the C2 result gives them exactly (D2's finding 2). What a SEL relay sends in negotiation is `unknown` (`docs/phase0/A3-security-feasibility.md` l.269). |
+| **The redacted secret** | To the relay, + 2 per session (§3, M3). From the relay, each redacted echo of the secret changes the stored length by (secret length − 10), at most + 2 on a SEL-751. The node never learns the secret's length from the result. For a Telnet family other than the SEL-751, the + 2 becomes (its longest secret − 10). |
+| **A Telnet dial retried after `connect_timeout`** | A SYN-ACK that arrives after the timeout is answered with an RST, so that flow is SYN, SYN-ACK, RST and `syn_only` is false (C13 l.187). Under C2 0.9 it does not tie, because its source port differs, so M1 is unaffected. It falls to `own-session-outside-record` today, which is noise on an own run that stage 2 measures and this rule does not change (D2's note 5). |
+| **SNMPv3 retries, the time-window resend, late answers** | Every sent datagram is a segment, so the to-agent count is exact. Late answers and answers to a first send are bounded by *U* + *R* (§3). |
+| **A run that times out, hits its response budget or its deadline, or ends without QUI** | Telnet: the from-relay direction is not judged (§3, M3); to the relay stays strict. SNMPv3: the from-agent bound and M4 widen by *U* + *R* and the step timeout. |
+| **A run longer than `flow_idle_s`, cut by `idle`** | Several `start`/`end` pairs of one key are summed by key (C13 §4.3), and an `idle` restart is not a second flow for M1. Only a new `client-server` `start` after `fin`/`rst` is. |
+| **The sensor restarting during a run** | A `midstream` `start` of the same key on a new sensor `run_id` is not a second flow for M1. Counts are summed; the second run's span starts at its first sequence seen, so the sum stays at or below what was sent. |
+| **Collector and sensor clocks apart** | M4 compares durations, never absolute times, with 2*g*. |
 
 ## 5. What an attacker who knows the rule can still hide
 
-1. **A session shaped to the run's profile, on a route where the run's own flow is not counted.** That means T2 with the run's records evicted, or T4 on a 0.8 result, which is noisy anyway. The attacker matches M2 to M5: packets, per-direction payload within the tolerance, and duration.
-   - **Telnet:** the run's approved reads are replaced by commands of the same total length, in a session with one login. On a SEL relay a write needs `2AC` and the level-2 password, an exchange the run does not have. The attacker must drop some of the run's reads to make room, and must predict the relay's reply sizes. That is feasible for someone who has seen earlier runs.
+1. **A session shaped to the run's profile, on a route where the run's own flow is not tied:** T1 through the late index or T2, each with the run's own records lost, or T4 (noisy anyway). The attacker matches every per-direction bound.
+   - **Telnet:** the run's approved reads are replaced by commands of the same total length, in a session with one login. A write needs `2AC` and the level-2 password, so the attacker must drop some of the run's reads to make room, and must predict the relay's reply sizes. That is feasible for someone who has seen earlier runs.
    - **SNMPv3:** a `SET` at authPriv of the same encrypted size as the run's `GET` is invisible to any size measure. The collector never sends `SET` (`snmpv3` package doc), but the attacker can.
-   - This is the **known miss** stage 2 labels and reports. It is not counted as a pass.
-2. **Anything within the tolerance.** Injection (T5) of fewer octets than the tolerance per direction, in a flow kept alive within `flow_idle_s` + *g*. With M3 on payload, the tolerance is the Telnet negotiation bound, or zero for SNMPv3.
-3. **Anything while the flow's coverage is degraded,** since M2 to M4 are then skipped (§4). The attacker can cause degradation by flooding the monitored segment (HR-21, AP-30). The degradation is visible, but it does not alert on this flow.
-4. **A move of the sensor's clock during the spoofed flow** shortens its apparent duration, which helps M4 only. M1 to M3 are unaffected.
-5. **The route preconditions stay as HR-24 states them:** spoofing the node's IP and MAC, control of the clock or the sensor host, and the relay's credentials. The rule does not remove a precondition. It removes "hidden whole" from every route where the run's own flow is also tied or where the session is not shaped.
+2. **The same-length substitution on a shared key** (§3.1; D3's B3). Preconditions: the attacker sees the session's sequence numbers, which the node's MAC on its segment allows, injects as the node at `rcv_nxt` before the collector's command of the same length, and holds the relay's level-2 password. Without M6 it is hidden whole, writes included. With M6a alone it is hidden whenever the relay's ACK reaches the sensor first. With M6b it is caught in both orders, except on a stretch where the PRP table is full (item 5). **This is a write a holder of the credentials can make unseen**, so under D1's ruling 5 HR-24 goes back to the owner with the measurement unless M6b is adopted and measured.
+3. **Anything within the tolerance.** Telnet to the relay: 3 × `refusals` + 2 octets, less than one added line; without `refusals` in the C2 result, 194 octets, enough for several short commands. SNMPv3 to the agent: none. From the device, the tolerance is wider (*U* + *R* replies of up to `max_reply_bytes`, `command_octets_received`), but a write shows in the direction to the device.
+4. **The from-relay direction of a Telnet run that did not read to the end** is not judged. An attacker who makes the run time out (by delaying the relay's replies) loses nothing to M3 from the relay, but the to-relay direction, where the write is, stays strict.
+5. **A filled PRP table** doubles the SNMPv3 bound for that stretch, which hides an injection of up to the run's own size in each direction, and suspends M6b. The fill shows in coverage (CH-29); it does not alert on this flow.
+6. **Telnet duration (M4) is not judged**, so a Telnet flow kept alive past the run without payload to the relay is not caught by this rule; with payload to the relay, M3 catches it.
+7. **The sensor host** (AP-36, one of HR-24's preconditions). Every comparison reads the sensor's records. An attacker who holds the sensor host defeats all of them and needs no tie to do it. This branch is **not narrowed** by the rule and stays with HR-21 and AP-36 (D3's N4).
+8. **A move of the sensor's clock during the spoofed flow** shortens its apparent duration, which helps against M4 only.
+9. **The route preconditions stay as HR-24 states them:** spoofing the node's IP and MAC, control of the clock, and the relay's credentials. The rule removes no precondition.
 
-So HR-24 would narrow from "hidden whole on every route" to "hidden only when shaped to the run's profile, on the eviction branch with the run's records lost (or T4, which alerts on the run's own flow)". Whether that is enough to close it is D1's call at stage 3, on the measurement.
+So HR-24 would narrow, outside the sensor-host branch, from "hidden whole on every route" to: hidden when shaped to the run's profile on a route where the run's own flow is not tied (T1 through the late index or T2, with the run's records lost); hidden within the tolerances of item 3 and on a filled PRP table (item 5); and, unless M6b is adopted, the same-length substitution on a shared key (item 2). Whether that closes HR-24 is D1's call at stage 3, on the measurement, and item 2 brings it back to the owner as ruling 5 says.
 
 ## 6. The measurement that would close HR-24
 
-Stage 2 is D6's. This section is what I propose to D6 and D1.
+Stage 2 is D6's. This section is what I propose to D6 and D1 (D3's N5).
 
-- **Where.** In process, over synthesized C13 observation streams paired with synthesized C2 results, through intake's tie and the detector, the way `modules/detection/netdetect` and `platform/node` are tested today (`simulated`). The tie routes are produced by building the stream that each route leaves: for T1, a record whose capture time lies inside the earlier window, read after the result; for T2, the run's records declared lost. The sensor's clock move and the node start are modelled by their outcome, not reproduced. A rig leg on a real sensor follows with the sensor's brief.
-- **Spoofed cases, each of which must raise `own-session-mismatch`**, for Telnet and for SNMPv3 (D6 assigns the ids):
-  1. T1: a second flow tied to one invocation, on a new 5-tuple.
-  2. T1 and T3: the same 5-tuple reused after the run's `fin`, carrying a write-sized session.
-  3. T2: the run's records evicted, a spoofed flow with more payload than the run, tied.
-  4. T5: injection of more than the tolerance into an open tied flow.
-  5. T6 (SNMPv3): datagrams after the run's on a re-pointed entry.
-  6. Telnet: a second login on a shared key (M5).
-
-  Each case has the node's IP and, on the node's segments, the node's MAC, so `node-address-spoofed` stays silent (brief).
-- **Own runs: none may alert.** The matrix of §4, at least 200 per protocol.
-- **Known miss, reported and not counted:** a T2 session shaped to the run's profile (§5 item 1), for each protocol.
-- **Control:** the detector as on `main` at `34201bfd`, with the base-rule skip and no new rule. It must raise nothing on any spoofed case. That shows the measurement can fail.
-- **Pass conditions, pinned by D6 before the counted run:**
-  - every spoofed case alerts with `own-session-mismatch`, citing the tied flow;
-  - no own run alerts;
-  - the control raises nothing on every spoofed case;
-  - the known miss is reported.
+- **Where.** In process, over synthesized C13 observation streams paired with synthesized C2 results, through intake's tie and the detector, the way `modules/detection/netdetect` and `platform/node` are tested today (`simulated`). Each route is produced by building the stream it leaves: for T1 live, a record whose capture time lies inside the earlier window, read during the hold; for T1 through the late index, the same record read after the release; for T2, the run's records declared lost. The clock move and the node start are modelled by their outcome. A rig leg on a real sensor follows with the sensor's brief, and it is where M6's engine behaviour (§3.1) is measured, since a synthesized stream cannot show what Zeek raises.
+- **Spoofed cases.** For each, the condition is **an `own-session-mismatch` alert that cites the spoofed flow** and names the comparison expected. For Telnet and for SNMPv3 (D6 assigns the ids):
+  1. T1 live: a second flow tied to one invocation, on a new 5-tuple (M1).
+  2. T1 and T3: the same 5-tuple reused after the run's `fin`, carrying a write-sized session (M1).
+  3. T2: the run's records evicted and declared lost, a spoofed flow with more payload than the run, tied (M3).
+  4. T5: injection of the tolerance + 1 octet to the device into an open tied flow (M3); and the same at exactly the tolerance, which must **not** alert (boundary, D3's N5 (c)).
+  5. T6 (SNMPv3): one datagram more than the run's to the agent on a re-pointed entry (M2), and the same with one octet more (M3).
+  6. Telnet: a second login on a shared key, and a login on the key of an ID-only run (M5).
+  7. T1 through the late index, with the run's own flow arriving later: the run's flow alerts `own-session-outside-record`; and with the run's records lost: the shaped session is the labelled known miss of §5 item 1 (D3's B4).
+  8. Cases 3 and 4 repeated under declared loss, under a flood that degrades coverage, and with `prp_table_full` risen (D3's B1, B2), each with the injection above the doubled bound where it applies.
+  9. The same-length substitution of §5 item 2, in both orders of the relay's ACK and the collector's segment: a detection under M6b if adopted, under M6a in the collector-first order, and otherwise a labelled known miss. On the rig only.
+  10. A tied flow with no profile held (`no-profile`).
+- **Mutants.** One per comparison: M1 to M6 each removed in turn, each mutant compiling. Every spoofed case must fail under the mutant of the comparison it names, and pass under the others, which shows each case is caught by the comparison it names and not by another (D3's N5 (b)).
+- **Own runs: none may alert.** Every row of §4, for each protocol, with a minimum number of runs **in each cell**, set by D6 (D3's N5 (f)). Telnet cells: SER collections with 0, 1 and many rows; an `ID`-only run; a refused login; step timeouts; the deadline; the response budget; a wake; with and without a VLAN; PRP duplicates; the PRP table full; 1 % loss with retransmissions; reordering; keep-alives during a 10 s step. SNMPv3 cells: discovery, time sync and 1 to N steps; a lost response and its retry; a late answer after the last step; a reply near `max_reply_bytes`, fragmented; an engine ID mismatch; a time-window Report; IPv6.
+- **The rate it implies.** With 0 alerts in *n* runs of one cell, the per-run rate is below 3/*n* at 95 % (rule of three). A site that runs every 15 minutes makes 96 runs a day per asset and protocol, so 3/*n* is a ceiling of 288/*n* false alerts a day per asset; *n* = 200 allows about 1.4 a day. D6 states the operational rate the floor implies, and sets *n* from it (D3's N5 (g)).
+- **Known misses, reported and not counted:** §5 items 1 and 2 (unless M6b is adopted), and the bound of item 5, each for the protocols it applies to.
+- **Control:** the detector as on `main` at `34201bfd`, with the base-rule skip and no new rule. **No alert may cite the spoofed flow** in any spoofed case (D3's N5 (a)). That shows the measurement can fail.
+- **Pass conditions, pinned by D6 before the counted run:** every spoofed case alerts as stated; the boundary case does not; each mutant fails exactly its own cases; no own run alerts in any cell; the control cites no spoofed flow; the known misses are reported with their conditions.
 
 ## 7. What this needs from contracts and from other roles (for D1)
 
+### 7.1 Proposal sketch: the C13 minor change (D1's ruling 3, approved in principle)
+
+Drafted with the stage 2 work and reviewed by the affected roles. No contract file changes in this PR.
+
+1. **The rule token `own-session-mismatch`.** `Rules` is a closed set (`contracts/netobs/alert.go` l.43), so this is a C13 minor change. **An earlier reader** refuses a stored alert carrying the token, as CH-29 records for a new `degraded` value. The proposal states what follows on the node: a node rolled back across the change refuses those stored alerts on read, counts each under the refusal count, and loses none from the store, so a later upgrade reads them again; D7's record of versions that roll back together lists the change. The C4 `netobs.alert` event forwarded upstream carries the token as text, and no upstream reader parses `Rules`. The reasons `prp-table-full`, `prp-mismatched` and `no-profile` are in the alert's text, not new tokens.
+2. **Per-direction counts on the `flow` `end` record.**
+   - **(a) Payload octets per direction, `orig_payload` and `resp_payload`.** D1 asked me first to check whether the engine's per-direction byte counts already give them. **They do** (§2): Zeek's `orig_bytes` and `resp_bytes` are the sequence span for TCP, without the SYN and FIN octets, wrap-safe, and the summed payload lengths for UDP. So the sensor computes nothing new; it copies them. What C13 still needs is the field, because 0.2 carries `bytes` over both directions only. Its definition: the TCP sequence span per direction, without the SYN and FIN, over 64 bits with wraps; for a midstream join, from the first sequence number seen; for UDP, the sum of payload lengths. Each `end` carries the difference since the previous `end` of the same connection, so a checker's sum by key holds. **What inflates it:** a segment far ahead in sequence, and an ACK beyond the data sent (the span takes the larger of the two); both are noisy, not hiding. **What does not:** keep-alives (`snd.nxt` − 1, at most one octet), the PRP RCT (outside the IP datagram), retransmissions, zero-window probes, VLAN tags and padding. Zeek's `missed_bytes` beside it shows the holes inside the span.
+   - **(b) Packets per direction, `orig_pkts` and `resp_pkts`,** from Zeek's conn-size analyzer, for SNMPv3's M2. Whether a fragmented datagram counts once is a stage 2 check (§2).
+   - **(c) Only if D1 adopts M6b: `orig_rexmit_octets` and `resp_rexmit_octets`,** the octets of retransmitted segments of more than one octet, from `tcp_rexmit`; and **only if D1 adopts M6a: `orig_rexmit_inconsistent` and `resp_rexmit_inconsistent`,** the count of `rexmit_inconsistency` events. Not in D1's approval in principle.
+   - **Who reads them** (D3's N1): the same readers, the same forwarding and the same retention as `login.user`. On an own Telnet flow, `orig_payload` less the approved commands' lengths gives the password's length. A stolen node already learns each secret's length from the redaction marker (C13 §3.2, D4-67), so the field adds no new reader at the site; it never reaches an alert, since the alert states the excess only. The residual is recorded when HR-24 closes.
+3. **`login.attempts`** counts password lines the client sent, not prompts (D2's note 4); C13 0.2 says only "the number of attempts".
+
+### 7.2 Other needs
+
 | # | Need | Contract or role | Why |
 | --- | --- | --- | --- |
-| 1 | A new alert rule token, `own-session-mismatch` | C13 (`Rules` is closed: `contracts/netobs/alert.go` l.43) | No existing rule means "tied, but not the run's traffic" |
-| 2 | Per-direction TCP payload octets on the `flow` `end` record, from the sequence-number span, so retransmissions do not count | C13 (a new field on `flow`) | Telnet's M3. Without it, Telnet's byte test is too loose to catch a short write (§3). Under option (b) the sensor is D4's own code, so it can compute this |
-| 3 | Telnet's negotiation octets per direction (`Stats`) in the C2 result, or D2's statement of what a SEL relay sends; D2's confirmation of the SNMPv3 wire length from the stored form | C2 (D2), or D2's evidence | Sets the Telnet tolerance and makes SNMPv3's M3 exact |
-| 4 | The run's profile kept with the hold and the late index entry, until the entry is spent or expires | D5's node design (§1.6), node state, no contract | T1 and T2 tie after the result has committed |
-| 5 | The detector receives the profile per invocation | `modules/detection/netdetect` (D4), in process | No stored observation changes: `node.platform_session` stays `{invocation_id, tie}` |
+| 4 | `refusals` and `command_octets_received` for a Telnet session in the C2 result, where `command_octets_received` counts every octet received on the wire that is not delivered as data: commands, subnegotiations with their contents, and the second octet of an escaped 0xFF | C2 minor, drafted by D2 for D1's approval (D1's ruling 4) | Sets Telnet's M3 tolerances (§3). Without it, the to-relay tolerance is 194 octets and from-relay is about 16.7 KB, which is no test. |
+| 5 | The profile and the count of established flows tied, kept with the hold and the late index entry until it is spent or expires; a tied flow with no profile handed to the detector as such | D5's node design (§1.6), node state, no contract | T1 and T2 tie after the result has committed; D3's N2 and N3 |
+| 6 | The detector receives the profile per invocation | `modules/detection/netdetect` (D4), in process | No stored observation changes: `node.platform_session` stays `{invocation_id, tie}` |
+| 7 | For M6b only: the octets the collector's socket retransmitted, per direction, in the C2 result | C2, D2 and D3 (the collector) | §3.1. Not yet asked of anyone; D1 decides first. |
 
-**Not needed:** no C4 change, no content read (brief exclusion), no change to the collector's sessions, and no SSH (D4-95).
+**Not needed:** no C4 change, no content read in the node or the detector, no change to the collector's sessions, and no SSH (D4-95). D2 drops item 3 of the earlier draft (`Stats` as such); item 4 replaces it.
 
-**If D1 refuses item 2:** the Telnet half of stage 3 measures M1, M2's lower bound, M4 and M5 only. The note then states that a short Telnet write on a shared key, on T3 or T5, is not caught.
+**If D1 refuses item 2 (a):** Telnet has no byte test at all on a shared key within the run's duration, so a write of any length is missed there; only M1 (a reuse after `fin`) and M5 remain (D3's B5). SNMPv3 falls back to C13 0.2's combined wire counts with the per-frame overhead of §4, judged on both directions together, so the to-agent direction can no longer be judged strictly.
+
+## 8. Findings and their answers
+
+| Finding | Answer |
+| --- | --- |
+| D3 B1, degraded skip | §3 and §4: no comparison is switched off under loss or degradation; all test for more |
+| D3 B2, PRP table full or mismatched | §4: twice the bound for SNMPv3, the reason named; M6b suspended, M6a kept; §5 item 5; §6 case 8 |
+| D3 B3, same-length substitution | §3.1 and M6; §5 item 2 as a named known miss with its preconditions; §6 case 9 |
+| D3 B4, late index | §1 T1; §3 M1; §5 item 1; §6 case 7 |
+| D3 B5, Telnet M2 | §3: M2 not used for Telnet; §7.2's closing paragraph states the gap without item 2 (a) |
+| D3 N1 | §3.2 (numbers only, a type test, excess only); §7.1 item 2's readers |
+| D3 N2, N3 | §3.2; §7.2 item 5 |
+| D3 N4 | §5 item 7 and the closing sentence |
+| D3 N5 (a) to (g) | §6 |
+| D3 N6, N7 | §7.1 items 1 and 2 |
+| D3 N8, N9 | dropped, as D3 says |
+| D2 finding 1 | §2 and §3: to the device strictly, from the device by outcome; SNMPv3 *U* + *R*; M4 widened by the step timeout |
+| D2 finding 2 | §3 M3 and §4: 3 × `refusals` + 2 to the relay; `command_octets_received` and echoes from the relay; §7.2 item 4 |
+| D2 finding 3 | §4: the RCT counted on the fallback, IPv6, fragmentation; §3 M2's minimum-MTU bound |
+| D2 notes 1 to 5 | §3 M2, §4's keep-alive row, §3 M4, §3 M5 and §7.1 item 3, §4's dial row |
+| D2 note 6 | dropped, as D2 says; §2 names the switch family |
+| D1 ruling 1 | §3.1: no `retransmission_inconsistency` weird; the event's limits; M6a and M6b back to D1 |
+| D1 ruling 3 | §7.1; item 2 (a) is in the engine already |
+| D1 ruling 5 | §5 item 2 |
