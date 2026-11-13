@@ -167,7 +167,9 @@ func TestDetectorLagAlarm(t *testing.T) {
 	g := &retentionRig{t: t, c: c, wall: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), mono: time.Minute}
 	r, st := startClocked(t, g, SensorSeams{})
 	defer r.Close()
-	heldManager(r, func() { r.alertAppend = func([]c5.Record) error { return errors.New("node test: the alert class refuses") } })
+	heldManager(r, func() {
+		r.alertAppend = func([]c5.Record) error { return errors.New("node test: the alert class refuses") }
+	})
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), relayFlow(2))); err != nil {
 		t.Fatal(err)
 	}
