@@ -18,7 +18,10 @@ on:
       - '!**.pptx'
       - '!**.xlsx'
       - '**/testdata/**'
+  # `labeled` lets D1 start the long legs on a PR's final head by adding
+  # the `full-ci` label (the owner, 2026-11-13, D4-97).
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths:
       - '**'
       - '!**.md'
@@ -32,6 +35,8 @@ permissions:
   contents: read
 jobs:
   go:
+    # Already run on this head; adding a label does not run it again (D4-97).
+    if: github.event.action != 'labeled'
     strategy:
       # A red leg does not cancel the other one, so the Windows leg always
       # gives its own result (D1, on #619).
@@ -161,6 +166,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: go test -count=1 -tags otsec_testclock -run TestTestClock ./platform/node ./cmd/...
   python:
+    # Already run on this head; adding a label does not run it again (D4-97).
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -179,6 +186,8 @@ jobs:
   # the product binaries the suite builds as they merge. The Windows leg runs
   # on the owner's PC (D1-26); rsyslog does not run on Windows.
   integration:
+    # Already run on this head; adding a label does not run it again (D4-97).
+    if: github.event.action != 'labeled'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -219,6 +228,13 @@ jobs:
   # below, and tests/integration/slice/conftest.py keeps the four out of
   # the integration job's run of the directory).
   integration-long:
+    # On a push to main always; on a pull request only once D1 adds the
+    # `full-ci` label after the reviewers' last pass, and on every later
+    # push while the label stays (the owner, 2026-11-13, D4-97).
+    if: >-
+      github.event_name == 'push' ||
+      (contains(github.event.pull_request.labels.*.name, 'full-ci') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'full-ci'))
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.file == 'test_slice_gtinj_ser_e2e.py' && 50 || 20 }}
     strategy:

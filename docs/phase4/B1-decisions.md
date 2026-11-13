@@ -1989,3 +1989,17 @@ No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 at 
   - Brief P4-4-F27, rewritten (`docs/agent-handoffs.md`).
   - D6 updates point 3 of F-027's gate.
   - D5 aligns the opening of §1.9 in its note.
+
+## D4-97: working rules for productivity (the owner, 2026-11-13)
+
+The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes and recommended the first five. The owner replied: "Implement everything except 6." The sixth (several D4 and D5 instances) is not adopted. Evidence class: `desk`.
+
+- **CI.** `ci.yml`'s twenty `integration-long` legs run on every push to `main`, and on a pull request only after D1 adds the `full-ci` label, after the reviewers' last pass. Every other job runs on every push, as before. The merge rule is unchanged in substance: every job, the long legs included, is green on the merged head.
+- **Non-blocking notes:** fixed in the same PR or dropped, never carried to a follow-up brief, unless D1 records them as a risk.
+- **One source for each decision:** the decision log. Other files carry one line and the D-number. Code and documents are cited by function, section or heading. A line number is used only with the commit SHA it was read at.
+- **Cheap checks first:**
+  - the brief template, amended, for every brief;
+  - `records-auditor` before D6 on records PRs;
+  - the self-check list (`docs/agent-handoffs.md`) before any review.
+- **Build summaries:** at most 150 lines, for each design document over 500 lines, written by its owner. They are briefed when each owner is free: D4 for C13 0.2, D5 for `D5-sensor-node.md`, D3 for `D3-sensor-link.md`.
+- **The rules are in CLAUDE.md**, "Working rules". They apply to work started after this PR merges. PRs open now finish under their own rounds.

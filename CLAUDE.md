@@ -51,8 +51,8 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 
 ## Testing and merging
 
-- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs twenty-four jobs on every pull request: Go on Linux and Windows, pytest, `integration`, and twenty `integration-long` legs. `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
-- **A PR merges when its reviewers accept it and every job in both workflows is green on its head.** Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). A reviewer's verdict names a head, and the merge is at that head.
+- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs Go on Linux and Windows, pytest and `integration` on every push to a pull request. Its twenty `integration-long` legs run on every push to `main`, and on a pull request only after D1 adds the `full-ci` label, which D1 does after the reviewers' last pass (D4-97). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
+- **A PR merges when its reviewers accept it and every job in both workflows is green on its head, the `integration-long` legs included** (run under `full-ci`; D4-97). Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). A reviewer's verdict names a head, and the merge is at that head.
 - A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both workflows and merges on review. A push to `main` with only such changes skips `ci.yml` too.
 - A PR that touches GT-PCAP (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) or `.github/workflows/a6-gt-pcap.yml` also needs `a6-gt-pcap` green.
 - **The owner's PC is the second Windows run**, and the fallback when GitHub Actions is unavailable. The owner resumed ordinary local test runs on it on 2026-11-11 (D4-83). A run that creates Windows services happens only in the owner's own elevated session. Never register the PC as a GitHub self-hosted runner. The limits on what may be installed and run there are in `HANDOFF.md`.
@@ -60,6 +60,17 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 ## The owner's rules
 
 Where one of these differs from the brief below, the rule here wins.
+
+### Working rules (the owner, 2026-11-13, D4-97)
+
+- **A non-blocking review note is fixed in the same PR before it merges, or dropped.** It is not carried to a follow-up brief, unless D1 records it as a risk: a threat-model row or an open item in the decision log. The reviewer's note says which it asks for.
+- **One source for each decision:** the decision log. HANDOFF, this file, the role files and the briefs carry one line and the D-number, never a restatement.
+- **Cite code and documents by function, section or heading.** A line number is used only together with the commit SHA it was read at.
+- **Cheap checks run first.**
+  - D1 fills the brief template in `docs/agent-handoffs.md` for every brief.
+  - `records-auditor` reads every records PR before D6 does.
+  - Every implementer runs the self-check list in `docs/agent-handoffs.md` before asking for review.
+- **Build summaries.** Each design document over 500 lines gets a build summary of at most 150 lines, written by its owner. An agent reads the summary first, and in the full document only the sections its task needs. The full document stays the record, and the summary cites its sections.
 
 ### Scope: every OT device class, SEL first
 
