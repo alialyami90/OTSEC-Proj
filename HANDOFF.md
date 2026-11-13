@@ -26,6 +26,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **CHECKPOINT (D1), 2026-11-13, work paused at the owner's word.** No agent is running, and no PR is open once this checkpoint merges. The first full CI of `main` at `459594ff` (#663's tree) passed: `ci` run 43442328706 (4 of 4) and `ci-long` run 43442328628 (20 of 20).
 
+- **Resumed later on 2026-11-13 (D4-100).** D5 has P4-4-F27 (3) and D3 has (4)'s link-key reader. D4-100 rules on HR-23's part (b) and ADR-0009's third turning condition, settles #655's follow-ups, and issues P4-4-HR24P, P4-4-HR23, P4-4-HR22S, P4-4-DO (F-028) and P4-D6-F027R, which replace items 3, 4 and 6 below and D4-98's brief follow-ups.
 - **Merged on 2026-11-13, after D4-92:**
   - #657 and #659 (the DNP3 unsolicited case and its pin);
   - #658 (D4-95);

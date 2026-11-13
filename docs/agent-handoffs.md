@@ -1954,3 +1954,132 @@ Code for those paths may merge unwired, reached only from tests. Every new entry
   - **P4-4-HR24 stage 3** (D4).
   - **The `undecoded` signal** (D4-90), with D6's legs.
   - These are issued after P4-4-F27's deliverables merge. The sensor's own brief also waits for D1 to have the owner's answers on the sensor's host (#640).
+
+## After D4-100: the next briefs of the third part (issued 2026-11-13, D4-100)
+
+The common rules are those of "The third part of item 4: implementation", F-027's gate included. Each role runs one task at a time (CLAUDE.md, "Subagents"). So these briefs start when their role is free, in this order: P4-4-F27 (3) and (4) first, then P4-4-HR24P and P4-D6-F027R, then P4-4-DO and P4-4-HR23, and P4-4-HR22S last.
+
+### P4-4-HR24P (D4, D2 and D3): the C13 and C2 minors and SL-3, before HR-24's stage 2 pins
+- Objective and rationale: HR-24's stage 2 reads fields that C13 0.2 and C2 0.9 do not carry, and a frame-stage pipe that SL-3 does not name (D4-95; D1's merge comment on #664, 6855339974). D1 approves the three proposals before stage 2's pass conditions are pinned.
+- Owner, and the reviewers (CLAUDE.md §5.6, shared contracts):
+  - D4 writes the C13 minor (C13 0.3, proposed). D5, D3 and D6 review it.
+  - D2 writes the C2 minor (C2 0.10, proposed), with D3 for the collector's `rexmit_octets`. D3, D4 and D6 review it.
+  - D3 amends SL-3. D4, D5 and D6 review it.
+- Required inputs and dependencies:
+  - `docs/phase4/D4-hr24-design.md` §3.1, §3.3, §7.1 and §7.2 (items 4 and 7);
+  - the stage-2 risks in D3's 6855320671 and D6's 6855330731 on #664;
+  - `docs/phase4/D4-c13-0.2-proposal.md`, `contracts/adapter` (C2 0.9), and `docs/phase4/D3-sensor-link.md` SL-3;
+  - D4-100 item 5, for the #655 follow-ups each role takes into its PR.
+- Files or modules each role may modify:
+  - D4: a new `docs/phase4/D4-c13-0.3-proposal.md`;
+  - D2: a new `docs/phase4/D2-c2-0.10-proposal.md`;
+  - D3: `docs/phase4/D3-sensor-link.md`.
+  - No contract code changes. The code comes with the brief "The approved contracts in code".
+- Expected interfaces:
+  - C13 0.2 to 0.3: the rule token `own-session-mismatch`; `orig_payload` and `resp_payload`; `orig_pkts` and `resp_pkts`; `orig_overlap_octets` and `incomplete`; `orig_rexmit_inconsistent`; and `login.attempts` as password lines sent. Each with what an earlier reader does with it (§7.1 item 1).
+  - C2 0.9 to 0.10: `refusals`, `command_octets_received`, and `rexmit_octets` or `unknown`, which fails closed.
+  - SL-3: the frame stage's new pipe, and what crosses it.
+- Deliverable: three documents PRs, one for each role, which may run at the same time.
+  - Each states its reader rule and its rollback, and names the contract tests that D6 will write.
+  - D4's PR also states the #655 corrections to C13 0.2's text (D4-100 item 5). D3's PR fixes its #655 items still open on `main`.
+- Acceptance tests: `records-auditor` reads each PR, then its reviewers pass it, then D1 approves it in a decision entry. A proposal that changes a value of `docs/phase4/D5-sensor-node.md` §1.10 fails.
+- Owed: the code and D6's contract tests (the brief "The approved contracts in code"), and stage 2's cases (P4-4-HR24, D6).
+- Explicit exclusions: no code; nothing that reads session content (P4-4-HR24's exclusions); no SSH.
+- Uncertainty or safety risks:
+  - On an own Telnet flow, `orig_payload` less the approved commands' lengths gives the password's length (D3's N1, §7.1 item 2). The proposal states the readers and the residual.
+  - `rexmit_octets` is read by `SIO_TCP_INFO` under D3's read rule, which the hosted Windows measurement checks (D4-98).
+- Scratch files: `d4-hr24p-*`, `d2-hr24p-*`, `d3-hr24p-*`
+
+### P4-4-HR23 (D4; D2, D3 and D7 review; D6 for the cases): HR-23's fix
+- Objective and rationale: HR-23 must close on a measured fix before item 4's gate (D4-98). The fix has two parts: (a) the server taken from DNP3's DIR bit in the project's script, and (b) the analyzer kept on a flow the relay starts. D4-100 admits a change outside the script for (b), on its conditions.
+- Owner, and the reviewers:
+  - D4 writes stages 1 and 3.
+  - D2 reviews for DNP3, D3 for the sensor host's parsing path (HR-21), D6 for testability, and D7 for any option outside the script (licence, build and pin).
+  - D6 writes stage 2.
+- Required inputs and dependencies:
+  - HR-23 in `docs/threat-model.md`; D4's reading 6852704517 on #657;
+  - D4-98 and D4-100; ADR-0009, "The engine under (b)";
+  - `docs/phase4/D4-engine-linux-eval.md` 5.8; the project's script in `modules/telemetry/experiments/engine-linux/`;
+  - Zeek 9.0.1's DNP3 analyzer source at the note's pin.
+- Stages:
+  - **Stage 1, the design (D4, documents only).** A short note, `docs/phase4/D4-hr23-design.md`, that covers:
+    - from Zeek's source: whether part (b) can be done from the script;
+    - part (a)'s rule;
+    - if (b) needs a change outside the script: options (i) to (iii) of D4-100, each with its size, its build and pin path, and its parse surface. These are agreed in comments before D1 picks one;
+    - the cases and pass conditions the measurement needs.
+  - **Stage 2, the cases (D6).** Written before the build and pinned before the counted run. Labels come from how each case was built, never from an engine.
+    - The cases: `dnp3-udp-temp-port`'s service row; `dnp3-udp-unsolicited`'s five rows; and the new `dnp3-udp-relay-write` and `dnp3-udp-relay-restart` (D4-100 item 3).
+    - The control: the engine as on `main`, which must fail them.
+    - The regression: every row of E-D4-03's conditions file.
+    - D4 and D2 review the labels.
+  - **Stage 3, the build and the counted run (D4).** The script's change, and any change D1 picked in stage 1, each with unit and negative tests. D6 measures on the counted run.
+- Files or modules each role may modify:
+  - D4: the note; `modules/telemetry/experiments/engine-linux/`; and `.github/workflows/d4-engine-linux-eval.yml`, with D6's review of the workflow change.
+  - D6: the GT-PCAP paths that P4-D6-GT3 used.
+  - A change outside the script names its path in stage 1, and D1 assigns its owner.
+- Expected interfaces: C13 0.2, CH-49 (a service's server is the end the protocol's content shows). No contract change unless stage 1 asks D1 for one.
+- Deliverable: stage 1's note PR, then stage 2's cases PR, then stage 3's PR. `a6-gt-pcap` must be green on each PR that touches GT-PCAP.
+- Acceptance tests:
+  - Stage 1: D2, D3, D6 (and D7 when an option outside the script is chosen) pass the note.
+  - Stage 2: D4 and D2 pass the labels, and the conditions are pinned before any counted run.
+  - Stage 3: the counted run passes the pinned conditions, the control fails as named, and no E-D4-03 row regresses. D1 then closes HR-23 in the decision log, or brings it back to the owner with the measurement (D4-98).
+- Owed: the same cases on the real sensor over the rig (the sensor's brief and D6's rig brief).
+- Explicit exclusions: no Suricata change beyond the comparison; no detector rule that takes a DNP3 service from a flow's responder; no session content read beyond the script's; no device contact.
+- Uncertainty or safety risks:
+  - A patched or added analyzer is new parsing code for untrusted traffic on the sensor host (HR-21).
+  - Which ports relays and masters use is `inference` until H-23 (D2).
+- Scratch files: `d4-hr23-*`, `d6-hr23-*`
+
+### P4-4-HR22S (D4; D6 for the held-out set): a Modbus/TCP signature measured on new held-out captures
+- Objective and rationale: HR-22 stands open at item 4's gate. It closes only when a signature is adopted on a counted run with new held-out captures (D4-94, D4-98).
+- Owner, and the reviewers: D4 builds the signature. D6 picks and pins the held-out set and the pass conditions. D2 reviews for Modbus, and D7 reviews the held-out captures' licences.
+- Required inputs and dependencies:
+  - HR-22 and its measured limits (a) to (e);
+  - `docs/phase4/D4-engine-linux-eval.md` section 10;
+  - D6's pass conditions on #642 and #647, and D1's ruling 6845247619 on #643.
+- Files or modules each role may modify: D4, `modules/telemetry/experiments/engine-linux/`; D6, the GT-PCAP paths. A held-out capture is committed only when its licence allows it. Otherwise it is fetched by pinned hash in the workflow, as D7 decides.
+- Expected interfaces: C13 0.2, unchanged.
+- Deliverable:
+  - D6's held-out set and conditions come first, chosen before D4 sees them, with `adopt-when` stated;
+  - then D4's signature PR and the counted run.
+- Acceptance tests: `adopt-when` is met on the counted run, with its control on port 502 and no regression of E-D4-03's rows. D1 rules on adoption, and on whether HR-22 closes.
+- Owed: none in this brief.
+- Explicit exclusions: no per-site port list as a fix (D1 on #637); no device contact.
+- Uncertainty or safety risks: a signature is also an evasion surface, as limit (c) shows.
+- Scratch files: `d4-hr22s-*`, `d6-hr22s-*`
+
+### P4-4-DO (D3, D5 and D6): the `drain-only` audit gap on `main` (F-028)
+- Objective and rationale: a sensor database's `drain-only` mode yields an audit reason that C8's pattern refuses, so the change is not recorded (D3's finding on #663, 6852333699). D1 ruled that the writer maps `-` to `_` (`drain_only`), and that C8's pattern stays (6852845352). This brief also carries D5's #655 follow-ups (D4-100 item 5).
+- Owner, and the reviewers:
+  - D3 drafts the C8 0.13 sentence, and D5 drafts the C5 sentence. D1 approves both.
+  - D5 builds `modeReason` with its node test.
+  - D6 adds the contract test and records F-028 in `docs/verification.md`.
+  - D6 and D3 review D5's PR (§5.6).
+- Required inputs and dependencies: D3's 6852333699 and D1's 6852845352 on #663; C8 0.13 and C5, as approved in D4-92. It starts after P4-4-F27 (3) merges, because D5 runs one task at a time.
+- Files or modules each role may modify:
+  - D5: `platform/node/`, `docs/phase4/D5-sensor-node.md`, and the C5 sentence in its proposal file;
+  - D3: the C8 sentence in its proposal file;
+  - D6: `tests/contract/` and `docs/verification.md`.
+- Expected interfaces: C8 0.13 and C5, with the two sentences as D1 approves them.
+- Deliverable: one PR. D3's and D5's sentences and D5's code come first; D6 then pushes its contract test to the same branch. The PR merges once.
+- Acceptance tests:
+  - a node test in which a database goes `drain-only` and the audit record shows `drain_only` and passes C8's pattern. Control: the mapping removed, which fails validation.
+  - D6's contract test, with its control.
+  - Both `go` jobs green.
+- Owed: none.
+- Explicit exclusions: no change to C8's pattern; no other mode is renamed.
+- Uncertainty or safety risks: an audit record that fails validation is lost, which is a P5 observability gap.
+- Scratch files: `d5-do-*`, `d3-do-*`, `d6-do-*`
+
+### P4-D6-F027R (D6): F-027's record for #662 and #663, and its gate for D4-96
+- Objective and rationale: HANDOFF's checkpoint, item 6. F-027 in `docs/verification.md` must say what #662 and #663 closed: F2, F5, F6, F7, F9's cap and F10, with each test and its control. It must correct its F11 sentence against D1's ruling 3 on #660 (6851490813), and update points 3 and 4 of its gate for D4-96. It also takes D6's N1 on #656 (D4-100 item 5).
+- Owner, and the reviewers: D6 writes it. `records-auditor` reads it, and then a second D6 instance, which did not write it, reviews it (D4-91).
+- Required inputs and dependencies: F-027; D4-96; `docs/phase4/D5-sensor-node.md` §1.9 at `main`; the reviews and D1's rulings on #660, #662 and #663.
+- Files or modules each role may modify: `docs/verification.md` only.
+- Expected interfaces: none.
+- Deliverable: one documents PR.
+- Acceptance tests: each closing named in F-027 cites its test by name and the merged PR. No coupling is written as closed that the table in P4-4-F27 owes.
+- Owed: P4-4-F27 (3) and (4)'s closings, recorded by D6 when they merge.
+- Explicit exclusions: no test code.
+- Uncertainty or safety risks: none beyond accuracy.
+- Scratch files: `d6-f027r-*`

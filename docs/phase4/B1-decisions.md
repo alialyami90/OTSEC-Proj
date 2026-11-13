@@ -1919,11 +1919,11 @@ No new words from the owner. Evidence class: `desk`. Nothing is built. This numb
   - D6's N1 on `71fde2ac` taken (the agent syncs before each tick); the lying host's floor an accepted limit for 0.2 (6847521755).
   - **The one-tick tie residual** (6848042423, corrected by 6848404829): a tied flow uses the run's own protocol and endpoint and is hidden whole. D1's first ruling claimed an owed mitigation narrowed it to read-only flows; D6 showed it narrows nothing today, and the claim is withdrawn. The residual is **HR-24**, open and high.
   - **Counting precedence** when more than one cause refuses a tie: one count per refusal, decided by the first that refuses in the order the latest sample, the alarm, the rule on the two clocks, the capture floor counted by what last raised it (the start, M or the first break's heartbeats: `skew_prestart_windows`; a stated span: `skew_span_windows`) (6849345925 on #645, which replaces 6849235477; it agrees with T-13 (h), #644 l.292 and SL-17 l.593 as approved). Owed as text in CH-41, #644 §1.5 item 5 and SL-17 (below).
-- **Accepted limits of C13 0.2:** a lying sensor host's capture floor outlives a rebuild of that host (a fresh floor at re-enrolment is a later brief); the capture floor never falls, so a forward excursion of the sensor's clock, once corrected, costs its whole length in refused ties, shown in status and the `clock-skew` counts (D1 on D6's N3 at `94834c5a`); a stale run copy after a lost sensor database leaves the window C13 l.1562 states; the heartbeat-stall remainder rests on an assumption about the unbuilt agent (AP-35, T-11); the C4 size figures are an estimate; D3's item 9 for #645 (a span brought to the node's clock by E) is not taken.
+- **Accepted limits of C13 0.2:** a lying sensor host's capture floor outlives a rebuild of that host (a fresh floor at re-enrolment is a later brief); the capture floor never falls, so after a forward excursion of the sensor's clock is corrected, ties are refused until true time passes the top of the excursion, across node starts and with no bound (AP-35; wording corrected by D4-100), shown in status and the `clock-skew` counts (D1 on D6's N3 at `94834c5a`); a stale run copy after a lost sensor database leaves the window C13 l.1562 states; the heartbeat-stall remainder rests on an assumption about the unbuilt agent (AP-35, T-11); the C4 size figures are an estimate; D3's item 9 for #645 (a span brought to the node's clock by E) is not taken.
 - **Open high risks for the owner** (the rows in `docs/threat-model.md` are authoritative; these are summaries):
   - **HR-22:** Modbus/TCP on a moved port is not identified (D4-94).
   - **HR-23:** on a DNP3 flow the relay starts (a temporary port, an unsolicited response, or a sensor starting mid-session), the approved engine takes the wrong end as the server, so a master's write on that flow can be missed, a false negative of `unauthorized-write`, as well as a false `new-service` (D4-94; D6's N1 on #652).
-  - **HR-24:** the one-tick tie residual. A move of the sensor's clock, by the site's time source or through the sensor host (AP-36, reachable by hostile traffic, HR-21, AP-30), timed into one tick interval (longer while ticks are late or early), or an eviction of earlier records across a node start, can tie a session from the node's IP (and, on the node's own segments, its MAC) to a collector run and hide it whole: a Telnet, SSH or SNMP session, writes included, for a holder of the relay's credentials. One session per move, and moves can repeat.
+  - **HR-24:** the one-tick tie residual. A move of the sensor's clock, by the site's time source or through the sensor host (AP-36, reachable by hostile traffic, HR-21, AP-30), timed into one tick interval (longer while ticks are late or early), or an eviction of earlier records across a node start, can tie a session from the node's IP (and, on the node's own segments, its MAC) to a collector run and hide it whole: a Telnet, SSH or SNMP session, writes included, for a holder of the relay's credentials. At most one session for each run window a move or an eviction reaches, and moves and evictions can repeat (the HR-24 row; wording corrected by D4-100).
   - D1 decides when a row closes: on a fix measured on a counted run that D1 judges sufficient (for HR-22, adoption of a signature alone is not), or on the owner's acceptance. **D1 recommends that the owner require a detector change for HR-24 before item 4's gate** (one that judges a tied Telnet, SSH or SNMP session), and brings HR-24 to the owner with this entry.
 - **Owed before the third part's implementation briefs:** brief P4-4-L7 (`docs/agent-handoffs.md`, "After D4-92"), the non-blocking notes of the final rounds.
 - **Next:** P4-4-L7; the owner's answers on the sensor host (#640) and on HR-24; then the third part's implementation briefs, with D5 closing F1 to F11 first (D4-87, D4-88).
@@ -2093,3 +2093,40 @@ Evidence class: `desk`. D1's first proposal 1, a restart habit for the main sess
   - The design documents are 13% of tool reads, and agents already read them in slices.
   - Each summary would be a second copy that needs its own reviews and can drift from the original.
 - **Next decision number:** D4-100.
+
+## D4-100: HR-23's fix and ADR-0009's third turning condition, the next briefs, and #655's follow-ups (D1, 2026-11-13)
+
+No new words from the owner. Evidence class: `desk` for the rulings; the runs cited are `CI-Linux`, `simulated`.
+
+- **1. ADR-0009's third turning condition is met, and the choice does not turn.**
+  - The condition is "cannot read DNP3 over UDP where the sites use it". On `dnp3-udp-unsolicited` (#657; the counted run 43419437949 at `650a62be`) every configuration tested fails all five rows: the master's 2-octet confirm stops Zeek's `DNP3_UDP` analyzer, and nothing after it is seen (D4's reading 6852704517 of the rehearsal run 43423267197).
+  - It does not turn the choice, for the reason D1 gave for Modbus on #637: no engine tested meets it. Suricata 8.0.8 identifies DNP3 over UDP in none of GT-PCAP's five UDP captures.
+  - Whether a site uses DNP3 over UDP, and whether its relays send unsolicited responses, is a site fact that the owner holds (HANDOFF, "Waiting on the owner", item 1).
+  - This replaces D1's ruling on #652 that the condition is not met. That ruling predates the case.
+  - HR-23 stays open and high, and it blocks item 4's gate (D4-98). ADR-0009 records this under D1's ruling on #637.
+- **2. Part (b) of HR-23's fix may be a change outside the approved engine's script.**
+  - Part (b) keeps the analyzer on a flow the relay starts. That it cannot be done from the script is `inference`, since no one has read Zeek's source for it. Stage 1 of brief P4-4-HR23 settles it from Zeek 9.0.1's source before anything is built.
+  - If a change outside the script is needed, it is admitted as HR-23's fix, on these conditions:
+    - It amends ADR-0009's approved engine ("Zeek 9.0.1 with the project's script"). D1 decides it on the counted run, and ADR-0009 records it.
+    - The options are agreed in comments before any is written (D4-99): (i) a patch to Zeek 9.0.1's DNP3 analyzer, offered upstream; (ii) a Zeek plugin with an analyzer of its own; (iii) the project's own decoder for DNP3 over UDP on the sensor, outside Zeek. For each, D4 states its size, how the sensor's image builds and pins it (O-7, AP-31), and what untrusted traffic it parses, in which language. Unless the evidence says otherwise, D1 prefers the smallest change to the parser that already runs, so (i), then (ii). (iii) comes last, because it brings back option (c)'s cost: a protocol decoder the project must keep.
+    - D7 inventories the change, with its licence, before it ships. D3 reviews it as code on the sensor host's parsing path (HR-21).
+    - The counted run reruns every row of E-D4-03's conditions file and every GT-PCAP DNP3 case on the changed engine, with the engine as on `main` as the control, so that a regression shows.
+    - It reads no session content beyond what the script reads now.
+- **3. The case without the confirm is wanted** (D4 on #657). Two new GT-PCAP cases are built in P4-4-HR23's stage 2:
+  - `dnp3-udp-relay-write`: a flow the relay starts, then a master's write and no confirm. It measures HR-23's item (1) apart from the confirm's failure.
+  - `dnp3-udp-relay-restart`: a flow the relay starts, then a master's request with no object headers (a cold restart, code 13). It tests D4's inference that any message of the master shorter than 4 octets stops the analyzer.
+- **4. Briefs issued** (`docs/agent-handoffs.md`, "After D4-100"): P4-4-HR24P (the C13 and C2 minors and SL-3 before HR-24's stage 2 pins), P4-4-HR23, P4-4-HR22S (a new Modbus signature), P4-4-DO (the `drain-only` audit gap, F-028) and P4-D6-F027R (F-027's record). This issues the HR-23 and HR-22 briefs that D4-98 asked for.
+- **5. #655's follow-up list, taken or dropped** (D4-97: none is carried further):
+  - **D1's items:**
+    - D6's N4 on #653 ("costs its whole length") is corrected in D4-92;
+    - D6's N3 on #653 ("one session per move") is corrected in D4-92, in the HR-24 row's words;
+    - N6 was already answered by D4-94's note;
+    - N7 is dropped, because its two wording points misstate no rule.
+  - **D3's items:**
+    - The HR-23 "asks D6" line and the D4-95 citations are already fixed on `main` (#666).
+    - D6's N2 and notes on #654, and SL-17's "sustained skew" wording, are taken into P4-4-HR24P's D3 PR, which edits the same note. D3 fixes those still open on `main`, and says which were already closed.
+  - **D4's items** (N2 (a) to (e) on #655, CH-17's wording, T-13 (h), CH-49's `l2` question; the stale line in #656's body is dropped, because a merged PR body is not a record) are taken into P4-4-HR24P's D4 proposal, which states them as corrections to C13 0.2's text. No value changes.
+  - **D5's items** are taken into P4-4-DO's D5 PR, which is D5's next change to its note. For N1 (a clean stop within the minute after a `sensor.counters` commit), the double is listed beside case (iv), and no new mechanism is added.
+  - **D6's N1 on #656** is taken into P4-D6-F027R.
+- **Next decision number:** D4-101.
+
