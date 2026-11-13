@@ -44,7 +44,7 @@ Eight roles, D1 to D8, each a subagent in [.claude/agents/](.claude/agents/), wi
 | `tests/fixtures/ied/` | Sanitized real device outputs | D2 |
 | `tests/fixtures/network/` | Sanitized captures and labeled traffic | D4 |
 | `tests/contract/`, `tests/integration/`, `tests/security/`, `tests/safety/` | Independent verification | D6 |
-| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s jobs, its `integration-long` legs run on a PR under the `full-ci` label (D4-97), and `govulncheck.yml`'s one job are the main test path; Markdown-only PRs skip both) | D1 (`a6-*.yml` workflows: D6; `a5-windows-experiments.yml`: D5, changes authorized by D1) |
+| `go.mod`, `.github/workflows/ci.yml`, `.github/workflows/ci-long.yml`, `.github/workflows/govulncheck.yml` | Dependencies and CI (`ci.yml`'s jobs, `ci-long.yml`'s `integration-long` legs, run on a PR under the `full-ci` label (D4-97), and `govulncheck.yml`'s one job are the main test path; Markdown-only PRs skip both) | D1 (`a6-*.yml` workflows: D6; `a5-windows-experiments.yml`: D5, changes authorized by D1) |
 | `contracts/internal/strictjson`, `contracts/node`, `.gitattributes`, `.gitignore` | Shared helpers and repository settings | D1 (`contracts/node` maintained by D4) |
 
 The package-level table and the import rules are in [D2-1](docs/phase2/A1-decisions.md). A role modifies only its owned paths unless explicitly authorized. Shared contracts change only through D1, with a documented proposal and review by the affected owners.
