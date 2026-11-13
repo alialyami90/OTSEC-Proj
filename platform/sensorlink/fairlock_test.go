@@ -81,12 +81,16 @@ func others(g *holdRig, n int) []any {
 // The scheduler goes first: while the read loop commits a flood at 100 ms
 // a record, and the manager's TickHold takes the lock as often as it can,
 // each Dispatch waits for at most about the one record in commit, and none
-// times out. Control 2 (the fairness rule removed: Lock does not yield to a
-// waiting scheduler call) lets the read loop and TickHold take the lock
-// before a waiting call, so a call waits for several records.
+// times out. Each woken call checks the lock only after the first check
+// Lock makes after the lock was freed (orderAfterLock), so the order is
+// the test's, not the Go scheduler's. Control 2 (the fairness rule
+// removed: Lock does not yield to a waiting scheduler call) then lets the
+// read loop or TickHold take the lock before a waiting call every time,
+// so the first call waits out HoldLockWait.
 func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	s := &gatedStore{delay: 100 * time.Millisecond}
 	g := gatedRig(t, s)
+	orderAfterLock(&g.l.cmu)
 	recs := others(g, 60)
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
@@ -116,6 +120,30 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// orderAfterLock sets f's seams so that a scheduler call woken from its
+// wait checks the lock only once Lock has checked since the last signal,
+// and under the same hold of f.mu as that finding. A caller of Lock that
+// runs hot (here TickHold) checks soon, so the wait ends.
+func orderAfterLock(f *fairLock) {
+	tried := make(chan struct{}, 1)
+	f.tried = func() {
+		select {
+		case tried <- struct{}{}:
+		default:
+		}
+	}
+	f.woken = func() {
+		for {
+			f.mu.Lock()
+			if f.checks > f.signalled {
+				return // with f.mu held
+			}
+			f.mu.Unlock()
+			<-tried
+		}
 	}
 }
 
