@@ -15,8 +15,10 @@ import (
 // NK-2, D6's N3 on #672, option (a). The import test shows only that no
 // package but platform/sensorlink names the reader. That the signer stays
 // in platform/sensorlink depends on what that package exports, and this
-// test reads its exported declarations with go/types: none of them hands
-// an importer, platform/node among them, a value of a signer type.
+// test reads its exported declarations with go/types: none of them exposes
+// a signer to an importer, platform/node among them. A type may hold one in
+// unexported fields, so the node can keep an opaque handle and pass it back
+// to the package's dialer (D5 on #672, D3's ruling).
 //
 // A value flows out to the importer from an exported variable, from an
 // exported type, and from the results of an exported function or method.
@@ -29,12 +31,14 @@ import (
 // node may hand the package its providers (nodekey.Keys).
 //
 // A signer type is crypto.Signer, crypto.PrivateKey, linkkey.Key,
-// tls.Certificate, tls.Config, or any type, interface or concrete, that
-// has crypto.Signer's methods.
+// tls.Certificate, tls.Config, any type, interface or concrete, that has
+// crypto.Signer's methods, or a function of crypto.Signer.Sign's form, so
+// that a handle's Sign method alone exposes the key.
 //
 // Limit: the test reads static types. A signer handed out as any, or in
-// an interface without crypto.Signer's methods, is not found; D3's review
-// of the wiring is the check there.
+// an interface without crypto.Signer's methods, is not found, and nor is
+// what the package itself does with the key, a listener included; D3's
+// review of the wiring is the check there.
 
 const sensorlinkPath = "otsec.local/otsec/platform/sensorlink"
 
@@ -88,7 +92,9 @@ func leaks(t *testing.T, pkg *types.Package) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := &walk{signer: crypto.Scope().Lookup("Signer").Type().Underlying().(*types.Interface), seen: map[seen]bool{}}
+	signer := crypto.Scope().Lookup("Signer").Type().Underlying().(*types.Interface)
+	sign, _, _ := types.LookupFieldOrMethod(signer, false, nil, "Sign")
+	w := &walk{signer: signer, sign: sign.Type().(*types.Signature), seen: map[seen]bool{}}
 	s := pkg.Scope()
 	for _, name := range s.Names() {
 		switch o := s.Lookup(name); {
@@ -114,6 +120,7 @@ type seen struct {
 
 type walk struct {
 	signer *types.Interface
+	sign   *types.Signature
 	seen   map[seen]bool
 	found  []string
 }
@@ -122,6 +129,9 @@ func (w *walk) isSigner(t types.Type) bool {
 	if n, ok := t.(*types.Named); ok && n.Obj().Pkg() != nil &&
 		slices.Contains(signerNames, n.Obj().Pkg().Path()+"."+n.Obj().Name()) {
 		return true
+	}
+	if s, ok := t.(*types.Signature); ok {
+		return types.Identical(s, w.sign)
 	}
 	if types.IsInterface(t) {
 		return types.Implements(t, w.signer)
@@ -192,7 +202,7 @@ func (w *walk) visit(t types.Type, out bool, at string) {
 }
 
 // TestSensorlinkKeepsSigner: no exported declaration of platform/sensorlink
-// hands out a signer type. Control: platform/sensorlink exports a function
+// exposes a signer. Control: platform/sensorlink exports a function
 // that returns *linkkey.Key (D6's K11 on #672).
 func TestSensorlinkKeepsSigner(t *testing.T) {
 	pkg, err := source().ImportFrom(sensorlinkPath, ".", 0)
@@ -203,12 +213,14 @@ func TestSensorlinkKeepsSigner(t *testing.T) {
 		t.Fatalf("only %d declarations read in %s", n, sensorlinkPath)
 	}
 	for _, l := range leaks(t, pkg) {
-		t.Errorf("%s hands out a signer type: %s", sensorlinkPath, l)
+		t.Errorf("%s exposes a signer: %s", sensorlinkPath, l)
 	}
 }
 
 // TestSignerCheckBites: on packages of one declaration each, the check
-// finds each way of handing out a signer, and passes what is not one.
+// finds each way of exposing a signer, and passes what is not one. Each
+// rule of walk.visit, leaks and isSigner has a case that fails without it
+// (D6's N6 on #672).
 func TestSignerCheckBites(t *testing.T) {
 	const head = `package x
 
@@ -216,6 +228,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/tls"
+	"io"
 
 	"otsec.local/otsec/modules/security/linkkey"
 	"otsec.local/otsec/modules/security/nodekey"
@@ -227,6 +240,7 @@ var (
 	_ *tls.Config
 	_ *linkkey.Key
 	_ nodekey.Keys
+	_ io.Reader
 )
 
 `
@@ -251,6 +265,12 @@ var (
 		"a pointer it can write":   {`func F(dst *crypto.Signer) {}`, true},
 		"a slice it can write":     {`func F(dst []crypto.Signer) {}`, true},
 		"a returned function":      {`func F() func() crypto.Signer { return nil }`, true},
+		"an interface passed in":   {`type KeyUser interface{ Use(crypto.Signer) }; func Register(u KeyUser) {}`, true},
+		"a channel's element":      {`func Keys() <-chan crypto.Signer { return nil }`, true},
+		"an array's element":       {`func A() [1]crypto.Signer { return [1]crypto.Signer{} }`, true},
+		"a callback variable":      {`var OnKey func(crypto.Signer)`, true},
+		"a map's key":              {`func M() map[crypto.Signer]bool { return nil }`, true},
+		"a handle's Sign method":   {`type LinkKey struct{ key *linkkey.Key }; func (*LinkKey) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) { return nil, nil }`, true},
 		"an unexported field":      {`type H struct{ key crypto.Signer }; func New() *H { return nil }`, false},
 		"an unexported method":     {`type H struct{}; func (H) key() crypto.Signer { return nil }`, false},
 		"an unexported function":   {`func key() crypto.Signer { return nil }`, false},
@@ -258,6 +278,7 @@ var (
 		"the node's providers":     {`func Load(keys func(nodekey.Provider) (nodekey.Keys, error)) (pin string, err error) { return "", nil }`, false},
 		"a public key":             {`func P() crypto.PublicKey { return nil }`, false},
 		"an unexported type's use": {`type h struct{ Key crypto.Signer }; func use(*h) {}`, false},
+		"an opaque handle":         {`type LinkKey struct{ key *linkkey.Key }; func (*LinkKey) Pin() string { return "" }; func Read() (*LinkKey, error) { return nil, nil }; func Dial(k *LinkKey, addr string) error { return nil }`, false},
 	} {
 		f, err := parser.ParseFile(srcFset, "x.go", head+c.src+"\n", 0)
 		if err != nil {
