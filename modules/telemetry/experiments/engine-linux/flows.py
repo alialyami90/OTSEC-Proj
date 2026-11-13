@@ -1,18 +1,29 @@
-"""P4-4-E2 (D4): the TCP flows in each capture, read by this stdlib reader
-and never by an engine, so the Modbus signature's corpus counts flows the
-way its labels do and not the way the engine under test does.
+"""P4-4-E2 (D4): the TCP and UDP flows in each capture, read by this stdlib
+reader and never by an engine, so the Modbus signature's corpus is labelled
+from the capture and not from the engine under test (D6's `label-flow`).
 
-A flow is a pair of TCP ends (address, port), in either direction. For each
-flow it prints the TCP payload octets each end sent, taken from the IP and
-TCP headers (IPv4 total length or IPv6 payload length, less the headers),
-so a capture cut short by its snap length still counts what was sent.
+A flow is a pair of ends (address, port) on one transport, in either
+direction. For each flow it prints, per end:
+
+- packets sent, and payload octets sent, taken from the IP and transport
+  headers (IPv4 total length or IPv6 payload length, less the headers), so
+  a capture cut short by its snap length still counts what was sent;
+- `syn`: the end that sent a SYN without ACK (TCP), the client by RFC 9293;
+- `first`: the end that sent the flow's first frame, and `first_payload`,
+  the end that sent its first payload;
+- `head`: the first 8 octets that end sent, in hex. For TCP they are read
+  from the reassembled stream: from the sequence number after the end's
+  SYN, or, with no SYN, from the first payload segment the end sent, with
+  segments placed by sequence number (D2's N1 on #642). For UDP they are
+  the first datagram's. `head` is for the near-miss test only; the labels
+  carry no payload byte (`label-flow`), and this output is not uploaded.
 
 Reads classic pcap (either byte order, micro- or nanosecond) and pcapng
 (section, interface, enhanced, simple and obsolete packet blocks). Link
 types: Ethernet (1, with 802.1Q and 802.1ad tags), Linux cooked (113 and
 276), BSD loopback (0, either byte order), raw IP (12, 14, 101, 228, 229).
-IPv4 fragments after the first, IPv6 with an extension header before TCP,
-other link types and other transports are counted as skipped, not read.
+IPv4 fragments after the first, IPv6 with an extension header before the
+transport, other link types and other transports are counted as skipped.
 
 Usage: python -I flows.py CAPTURE...   (TSV on stdout; one `#` line per
 capture with its frame and skipped counts)
@@ -24,6 +35,9 @@ import struct
 import sys
 
 PCAP_MAGIC = {b"\xd4\xc3\xb2\xa1": "<", b"\xa1\xb2\xc3\xd4": ">", b"\x4d\x3c\xb2\xa1": "<", b"\xa1\xb2\x3c\x4d": ">"}
+HEAD = 8
+COLUMNS = ["capture", "l4", "a", "ap", "b", "bp", "packets_a", "packets_b", "octets_a", "octets_b", "syn", "first",
+           "first_payload", "head_a", "head_b"]
 
 
 def records(raw):
@@ -83,43 +97,95 @@ def network(lt, f):
     return None
 
 
-def tcp(v, p):
-    """((src, sport), (dst, dport), payload octets) of a TCP segment, or None."""
-    if v == 4 and len(p) >= 20 and p[9] == 6 and not struct.unpack("!H", p[6:8])[0] & 0x1FFF:
+def segment(v, p):
+    """(l4, (src, sport), (dst, dport), payload octets sent, payload bytes
+    captured, TCP flags, TCP sequence number) of a TCP or UDP packet, or None."""
+    if v == 4 and len(p) >= 20 and p[9] in (6, 17) and not struct.unpack("!H", p[6:8])[0] & 0x1FFF:
         ihl, total = (p[0] & 0x0F) * 4, struct.unpack("!H", p[2:4])[0] or len(p)
-        a, b, t = str(ipaddress.IPv4Address(p[12:16])), str(ipaddress.IPv4Address(p[16:20])), p[ihl:]
+        a, b, proto, t = str(ipaddress.IPv4Address(p[12:16])), str(ipaddress.IPv4Address(p[16:20])), p[9], p[ihl:]
         size = total - ihl
-    elif v == 6 and len(p) >= 40 and p[6] == 6:
-        a, b, t = str(ipaddress.IPv6Address(p[8:24])), str(ipaddress.IPv6Address(p[24:40])), p[40:]
+        t = t[:max(0, size)]
+    elif v == 6 and len(p) >= 40 and p[6] in (6, 17):
+        a, b, proto, t = str(ipaddress.IPv6Address(p[8:24])), str(ipaddress.IPv6Address(p[24:40])), p[6], p[40:]
         size = struct.unpack("!H", p[4:6])[0]
+        t = t[:size]
     else:
         return None
+    if proto == 17:
+        if len(t) < 8:
+            return None
+        sport, dport = struct.unpack("!HH", t[:4])
+        return "udp", (a, str(sport)), (b, str(dport)), max(0, size - 8), t[8:], 0, 0
     if len(t) < 14:
         return None
-    sport, dport = struct.unpack("!HH", t[:4])
-    return (a, str(sport)), (b, str(dport)), max(0, size - (t[12] >> 4) * 4)
+    sport, dport, seq = struct.unpack("!HHI", t[:8])
+    hl = (t[12] >> 4) * 4
+    return "tcp", (a, str(sport)), (b, str(dport)), max(0, size - hl), t[hl:], t[13], seq
+
+
+class End:
+    def __init__(self):
+        self.packets = self.octets = 0
+        self.isn = None  # sequence number after this end's SYN
+        self.segs = []  # (seq, captured payload) of payload segments, until HEAD octets are placed
+
+    def head(self, l4):
+        if not self.segs:
+            return ""
+        if l4 == "udp":
+            return self.segs[0][1][:HEAD].hex()
+        start = self.isn if self.isn is not None else self.segs[0][0]
+
+        def rel(seq):  # signed distance from start, modulo 2**32
+            d = (seq - start) & 0xFFFFFFFF
+            return d - (1 << 32) if d >= 1 << 31 else d
+
+        buf = bytearray()
+        for seq, data in sorted(self.segs, key=lambda s: rel(s[0])):
+            off = rel(seq)
+            if off < 0:
+                data, off = data[-off:], 0
+            if off > len(buf):
+                break  # a gap: the octets after it are not the stream's next ones
+            buf[off:off + len(data)] = data
+            if len(buf) >= HEAD:
+                break
+        return bytes(buf[:HEAD]).hex()
 
 
 def flows(path):
-    out, frames, skipped = {}, 0, 0
+    out, order, frames, skipped = {}, [], 0, 0
     with open(path, "rb") as fh:
         raw = fh.read()
     for lt, f in records(raw):
         frames += 1
         n = network(lt, f)
-        seg = tcp(*n) if n else None
+        seg = segment(*n) if n else None
         if seg is None:
             skipped += 1
             continue
-        src, dst, size = seg
-        key = tuple(sorted([src, dst]))
-        sent = out.setdefault(key, {key[0]: 0, key[1]: 0})
-        sent[src] += size
+        l4, src, dst, size, data, flags, seq = seg
+        key = (l4,) + tuple(sorted([src, dst]))
+        if key not in out:
+            out[key] = {"ends": {src: End(), dst: End()}, "syn": None, "first": src, "first_payload": None}
+            order.append(key)
+        fl = out[key]
+        e = fl["ends"][src]
+        e.packets += 1
+        e.octets += size
+        if l4 == "tcp" and flags & 0x02:
+            e.isn = (seq + 1) & 0xFFFFFFFF
+            if not flags & 0x10 and fl["syn"] is None:
+                fl["syn"] = src
+        if size:
+            fl["first_payload"] = fl["first_payload"] or src
+            if data and (l4 == "tcp" or not e.segs) and len(e.segs) < 64:
+                e.segs.append((seq, bytes(data)))
     return out, frames, skipped
 
 
 def main(paths):
-    print("capture\ta\tap\tb\tbp\toctets_a\toctets_b")
+    print("\t".join(COLUMNS))
     for path in paths:
         name = os.path.splitext(os.path.basename(path))[0]
         try:
@@ -127,9 +193,16 @@ def main(paths):
         except (ValueError, IndexError, struct.error) as e:
             print(f"# {name}: not read ({e})")
             continue
-        print(f"# {name}: {frames} frames, {skipped} not read as TCP, {len(fl)} TCP flows")
-        for (x, y), sent in sorted(fl.items()):
-            print(f"{name}\t{x[0]}\t{x[1]}\t{y[0]}\t{y[1]}\t{sent[x]}\t{sent[y]}")
+        tcp = sum(1 for k in fl if k[0] == "tcp")
+        print(f"# {name}: {frames} frames, {skipped} not read as TCP or UDP, {tcp} TCP flows, {len(fl) - tcp} UDP flows")
+        for key in sorted(fl):
+            l4, x, y = key
+            f = fl[key]
+            side = {x: "a", y: "b", None: "-"}
+            ex, ey = f["ends"][x], f["ends"][y]
+            print("\t".join([name, l4, x[0], x[1], y[0], y[1], str(ex.packets), str(ey.packets), str(ex.octets),
+                             str(ey.octets), side[f["syn"]], side[f["first"]], side[f["first_payload"]],
+                             ex.head(l4), ey.head(l4)]))
 
 
 if __name__ == "__main__":
