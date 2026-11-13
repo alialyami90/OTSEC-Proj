@@ -58,7 +58,12 @@ D5 found four ways, D6 five more, D5 a tenth on the second read, and D3 an eleve
     - `sensor-failed` names the sensor, and its detail is capped at `SensorFailedDetailBytes`.
     - Tests: `TestSensorManagerPanicContained`, `TestSensorPrunePanicContained` and `TestRunAfterSensorFailed` (a run is still sent and stored).
     - Controls: no `recover`; the prune outside the `recover`.
-- **F10:** its wiring goes in the manager PR once D4's change to `modules/telemetry/forward/` has merged. It is not written yet.
+- **F10, in the same PR (#663), on D4's second session (#662, `aea7eef0`):**
+  - `NewForwarding` gives each target a second session that carries only its streams in the sensor store set, with `HealthCursors` on the health stream. A node without the section gets none.
+  - `Check` judges each session's reachability on its own status. The sensor session's `forward-unreachable` alarm and `forward.unreachable` event name it and its streams (D6's N2 on #662).
+  - Tests: `TestForwardSessionsSplit`, `TestSensorStoreNotOpenForwardingGoesOn` (F5's forwarded-SER leg) and `TestSensorSessionUnreachableNamed` (`platform/node`).
+  - Controls: one session for every stream, as on `main`; a stream in both sessions; the sensor session not judged; its alarm not named.
+- **D6's C1 and C2 on #663:** `TestSensorUnreachableFromNodeStart` (`sensortest`; control, the origin at the intake's start) and `TestSensorStartupAlarmConcurrent` (`platform/node`; control, no lock around the startup alarms' record).
 - **Not yet closed:** F1, F3 and F4 (deliverable (3)), F8 (owed in full by the dialer-and-enrolment brief), and F11 (deliverable (4)). §1.9 lists the owed tests.
 
 Also read for this note (`desk`): `Runtime.Collecting` iterates every database, but no product code calls it, so it reaches nothing. And no file under `platform/node`, `platform/sensorlink` or `cmd/otsec` calls `recover`, so a panic in the sensor's work, today inside `Tick`, ends the node (D6; §1.9 item 9).
@@ -438,9 +443,11 @@ So:
 - **F5's tests:**
   - `TestSensorDrainOnlyDoesNotStallSyslog` checks the entry points that the run path and the Syslog intake append through: `Log` and `Mode` on the health, audit and listener streams.
   - `TestRunWhileSensorResumeHeld` sends a scheduled run, which stores its SER rows within 2 s.
-  - A forwarded SER event is F10's test.
-- **The intake waits for a collecting database.** It starts only while the observation stream's database is open and accepts events, since nothing could commit otherwise.
-- **F10 is not built here.** It waits for D4's change to `modules/telemetry/forward/` (D4-96).
+  - `TestSensorStoreNotOpenForwardingGoesOn` forwards a run's SER events while the network database is not open, and while its `Resume` is held.
+- **The intake waits for a collecting database.** It starts only while the observation stream's database is open and accepts events. The store itself would commit them; what forbids it is C5's rule that a drain-only database takes no new events and that collectors must not start (D6's note on #663).
+  - **The detector waits with the intake.** It starts only from `tickSensor`, which needs a published intake. So while the intake waits, nothing confirms observations, and a drain-only network database's `Resume` prunes nothing from that class. It leaves drain-only only if its reserves can be re-created from space found elsewhere. Before this PR, the detector could start over a drain-only database (D6, by reading).
+  - The gate holds at the intake's first start only. A published intake keeps appending if a later retry of a failed database comes back drain-only, as on `main`; that is step (3)'s.
+- **F10 (the forwarder bullet above) is built** on D4's second session (#662). Each target's sensor session carries its streams in the sensor store set; `HealthCursors` reads the main session's saved cursor on the health stream, through the accessor. A node without the section gets no second session. `Check` judges each session on its own status. The sensor session's `forward-unreachable` detail starts with `SensorSessionPrefix` and its streams, and its `forward.unreachable` event carries `session: sensor` and `streams`. The target's status shows both sessions' streams; its `open`, `last_confirmed` and `last_error` are the main session's.
 - **A finding on `main`, not changed here.** C8's reason-code pattern (`contracts/audit`, `^[a-z][a-z0-9_]{0,47}$`) refuses `drain-only`. So any database's change to drain-only writes no `store.mode_change` audit record, only `store-commit-failed` in status. `TestSensorModeChangeCapped` therefore flaps between `blocked` and `failed`.
 
 **Code changed (as planned):** `runtime.go` (`Start`, `startDB`, `Tick`, `Log`, `Store`, `Close`), `prune.go`, `layout.go` (`Layout` returns the sensor set apart), and a new `platform/node/sensormgr.go`. **Tests**, each with a control: `TestSensorDrainOnlyDoesNotStallSyslog` (a sensor database held drain-only with a slow-prune seam while Syslog arrives, a run is due and a target forwards SER events: Syslog commits, the run is sent within 2 s, SER events reach the target, and `Tick` returns; controls: `main`'s `Tick`, and the manager's lock held across `Resume`); `TestSensorStoreNotOpenForwardingGoesOn` (a sensor database not open while SER events forward: they reach the target; control: one session for every stream, `main`'s `NewForwarding`); `TestCannotKeepPrunesEvidenceOnly` (adapter-evidence near its limit and a network class over target, with a slow prune seam; control: `main`'s `Prune`); `TestSensorStoreFailsOpenNodeStarts` (a network database whose first read fails: the node starts and stores a run; control: `main`'s `startDB`); `TestSensorModeChangeCapped` (control: uncapped).
