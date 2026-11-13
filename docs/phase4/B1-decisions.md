@@ -2144,7 +2144,7 @@ The owner wrote on 2026-11-14: "merge all PRs then find a safe checkpoint and pa
   - #672 (P4-4-F27 (4), first half: the link-key reader, unwired).
 - **2. Left open, and not merged:**
   - **#673 (C13 0.3) and #677 (SL-3, and the HR-22, HR-23 and new HR-25 rows):** no review yet. Their reviewers start together: D5, D3 and D6 for #673, and D4, D5 and D6 for #677.
-  - **#675 (HR-23's design):** D2, D3 and D7 pass it at `542a42cf`. D6 asks for text-only fixes before it can pin stage 2 (6866817721: P1, P2 and N-A).
+  - **#675 (HR-23's design):** D2 and D3 pass it at `542a42cf` (6866616668, 6866616486), and D7 passed it at `52c7592c` (6866209008), before D1 narrowed it; D7 re-reads the narrowed note. D6 asks for text-only fixes before it can pin stage 2 (6866817721: P1, P2 and N-A).
 - **3. Rulings on #676** (D1's comments 6862097501, 6863786261, 6864119672, 6864640960 and 6865801345):
   - H is `network_sensor.outage_hours`.
   - `TestSchedulerFirstOnLinkLock` passes on a count, not a time bound. The 250 ms figure was the test's proxy, not a value of §1.10.
@@ -2168,8 +2168,8 @@ The owner wrote on 2026-11-14: "merge all PRs then find a safe checkpoint and pa
 - **7. Open items, recorded under CLAUDE.md's working rule:**
   1. #676, D6's N1 (6866863147): a regression test for the order of the re-save and the open table's rollback, which D6's probe `d6-676t-probe_test.go` shows. Owed by D5's next brief.
   2. #676, D6's N2: §1.0, §1.9 item 9 and the merged PR body say `sched_panics` counts every recovered panic, but a panic inside the re-save counts only in `checkpoint_failures`. D5 corrects §1.0 and §1.9 in its next change.
-  3. #676, D3's N2: sensor health events held under the ceiling are counted but not written until the C13 0.2 intake brief. Added to F-027's owed list.
-  4. #676: a panic inside `AppendBatch` after its commit, then a restart, commits those records twice, one copy tied and one untied. The worst effect is a duplicate alert and one doubled baseline count (§1.9).
+  3. #676, D3's N2: sensor health events held under the ceiling are counted but not written until the C13 0.2 intake brief. D6 adds it to F-027's owed list in its next change to `docs/verification.md`.
+  4. #676: a panic inside `AppendBatch` after its commit, then a restart, commits those records twice, one copy tied and one untied. The worst effect is a duplicate alert and one doubled baseline count (§1.9; D5's 6865851789, D3's 6865873165 and D4's 6865875376).
   5. #676, D6's N5: the read loop's `recover` is owed in P4-4-F27's table.
   6. `platform/node` on Windows took 816 to 886 s, against its 720 s budget. A brief is owed (D5, with D6 for the CI change).
   7. C2 0.10 §10: the routes to the password's length. D3 writes the risk row when HR-24 closes.

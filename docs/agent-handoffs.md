@@ -2111,7 +2111,8 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Acceptance tests:
   - the cases pass on the counted run, with the control as on `main`, C1p, and the option (i) build as controls;
   - the fuzz terms of D1's 6864990229 are met, with the resync paths in the coverage condition;
-  - no E-D4-03 row regresses.
+  - no E-D4-03 row regresses;
+  - each implementer runs the self-check list in this file and says in the PR which items apply.
 - Owed: the rig legs, by the sensor's brief.
 - Explicit exclusions: no device contact (the TCP-after-bad-CRC H-row needs the owner's authorization); no reading of session content.
 - Uncertainty or safety risks: new hand-written C++ in `DNP3.cc`'s buffer code (D3), and a scan that an attacker could use to smuggle frames (D2, D3).
