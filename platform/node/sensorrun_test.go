@@ -121,7 +121,7 @@ func TestIntakeRetryRecoversAndRepairs(t *testing.T) {
 	if runs, _ := repairedRuns(t, r, id); runs != 0 {
 		t.Fatalf("%d collection.run before the retry", runs)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	for deadline := time.Now().Add(10 * time.Second); r.sensor.Load() == nil; time.Sleep(5 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the intake did not start at the tick")
@@ -167,7 +167,7 @@ func TestIntakeNotPublishedOnFailedRecovery(t *testing.T) {
 	if r.sensor.Load() != nil || countAlarms(st, AlarmSensorIntakeNotStarted) != 1 {
 		t.Fatalf("intake at the first step: started %v", r.sensor.Load() != nil)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	for deadline := time.Now().Add(10 * time.Second); r.smgr.steps.Load() < 2; time.Sleep(5 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("the tick's step did not end")
@@ -260,7 +260,7 @@ func TestRunAfterSensorFailed(t *testing.T) {
 			panic("node test: a fault in the sensor's work")
 		}})
 	defer r.Close()
-	r.Tick(bg)
+	tick(t, r)
 	for deadline := time.Now().Add(10 * time.Second); countAlarms(st, AlarmSensorFailed) == 0; time.Sleep(5 * time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("sensor-failed was not raised")

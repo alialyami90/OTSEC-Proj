@@ -202,6 +202,9 @@ func (r *Runtime) lastSeq(ctx context.Context, stream c5.StreamID) uint64 {
 // saveIntake is the hold's HoldConfig.Save: it commits rec as a
 // netcheckpoint.intake document before the change takes effect.
 func (r *Runtime) saveIntake(ctx context.Context, rec sensorlink.RunRecord) error {
+	if f := r.opt.SensorSeams.SaveIntake; f != nil {
+		f()
+	}
 	d := intakeDoc{Schema: IntakeSchema, HealthHead: r.lastSeq(ctx, HealthStream), AuditHead: r.lastSeq(ctx, AuditStream),
 		EvidenceHead: r.lastSeq(ctx, SERStream(rec.Run.AssetID)), RunRecord: rec}
 	b, err := json.Marshal(d)
@@ -323,10 +326,15 @@ type heldRun struct{ run sensorlink.HoldRun }
 // dispatchHold starts holding the run's endpoint, before the request is
 // sent. It returns nil when the hold doesn't watch the run. A save that
 // fails holds nothing: the run's flows commit untied, its collection.run
-// has no session, and both are counted in status.
+// has no session, and both are counted in status. So does a Dispatch that
+// did not have the link's lock within sensorlink.HoldLockWait, or panicked
+// (section 1.9 items 4 and 9): the run goes on, its session stays untied
+// and the base rules judge it. After sensor-failed nothing is held: the
+// sensor's work, which gives a held run's flows way at its deadline, is
+// stopped until a restart.
 func (s *Scheduler) dispatchHold(ctx context.Context, col Collection, requestID string) *heldRun {
 	in := s.rt.sensor.Load()
-	if in == nil {
+	if in == nil || s.rt.sensorFailed.Load() {
 		return nil
 	}
 	ep, l4, ok := s.rt.cfg.holdEndpoint(col)
@@ -343,7 +351,7 @@ func (s *Scheduler) dispatchHold(ctx context.Context, col Collection, requestID 
 
 // abandonHold releases a run that ended without a result, untied.
 func (s *Scheduler) abandonHold(ctx context.Context, h *heldRun) {
-	if h == nil {
+	if h == nil || s.rt.sensorFailed.Load() {
 		return
 	}
 	_, _ = s.rt.sensor.Load().link.Abandon(ctx, h.run.RequestID)
@@ -353,10 +361,24 @@ func (s *Scheduler) abandonHold(ctx context.Context, h *heldRun) {
 // resultHold ties the run's held flows by its result's session and commits
 // them, and returns the session details its collection.run carries, so
 // the run's session can be rebuilt from the committed record (D1 on the
-// split of PR B). It returns nil when the hold doesn't watch the run, or
-// when the observation stream's head can't be read.
+// split of PR B). It returns nil when the hold doesn't watch the run, and
+// when the Result fails: its lock not had within sensorlink.HoldLockWait,
+// a panic in it before the release's batch is in the store, or the
+// stream's head before the release unreadable, as it is while the network
+// database is swapped out for a Resume. In each the link has committed
+// nothing tied and kept the run held: the run goes on, its collection.run
+// carries no session, its flows commit untied at the run's deadline and
+// the base rules judge them. A panic after the batch is in the store does
+// not fail the Result: the link finishes the release and returns the
+// receipts' after_seq, so the session is handed on and judged (section 1.9
+// items 4 and 9; D6's note 1 on #663; D1's ruling on #676). After
+// sensor-failed the link is not called.
 func (s *Scheduler) resultHold(ctx context.Context, h *heldRun, invocationID string, res sessionResult) map[string]string {
 	if h == nil {
+		return nil
+	}
+	if s.rt.sensorFailed.Load() {
+		s.rt.intake.missing()
 		return nil
 	}
 	sess := sensorlink.Session{InvocationID: invocationID, Connected: res.Connected}

@@ -476,6 +476,9 @@ func TestSensorUnreachableFromNodeStart(t *testing.T) {
 	}
 	g.advance(20 * time.Second)
 	r.Tick(bg)
+	if err := r.WaitSensorStep(bg); err != nil { // Tick does not wait for the manager (F3)
+		t.Fatal(err)
+	}
 	if n := alarms(st, node.AlarmSensorUnreachable); n != 1 {
 		t.Fatalf("60 s after the start, 20 s after the intake's: %d sensor-unreachable alarms", n)
 	}

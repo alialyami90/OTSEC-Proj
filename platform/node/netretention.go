@@ -73,8 +73,11 @@ func (s *Status) SetNetRetention(n *NetRetentionStatus) {
 }
 
 // tickRetention starts the retention consumer if it isn't running, and
-// otherwise lets it move. It runs at Start and at every Tick; the consumer
-// itself moves at most once an hour.
+// otherwise lets it move. It runs in each full step of the sensor manager,
+// the first after Start and then one for each Tick, on the manager's
+// goroutine, so a network database that stalls holds only the sensor's
+// work, never Tick (F3, section 1.9 item 3). The consumer itself moves at
+// most once an hour.
 func (r *Runtime) tickRetention(ctx context.Context) {
 	if !r.cfg.NetRetentionOn() {
 		return
@@ -120,6 +123,9 @@ func (r *Runtime) tickRetention(ctx context.Context) {
 }
 
 func (r *Runtime) retentionStep(ctx context.Context) error {
+	if f := r.opt.SensorSeams.Retention; f != nil {
+		f(ctx)
+	}
 	if r.retention != nil {
 		return r.retention.Tick(ctx)
 	}

@@ -471,7 +471,7 @@ func TestIntakeCeilingRefuses(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1))); err != nil {
 		t.Fatal(err)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	obs := observations(t, r)
 	if len(obs) != 1 || (obs[0].Node != nil && obs[0].Node.PlatformSession != nil) {
 		f := st.Snapshot("x").Sensor
@@ -574,7 +574,7 @@ func TestIntakeResultFailsCounted(t *testing.T) {
 		t.Fatal("the hold doesn't watch the run")
 	}
 	g.advance(sensorlink.HoldRunLimit + netobs.DefaultTieGraceS*time.Second + time.Second)
-	r.Tick(bg) // the hold gives way at its deadline
+	tick(t, r) // the hold gives way at its deadline
 	d := r.find(NetworkDB)
 	r.state.RLock()
 	db := d.db
@@ -583,7 +583,7 @@ func TestIntakeResultFailsCounted(t *testing.T) {
 	if got := s.resultHold(bg, h, okInvocation, sessionResult{Connected: true, StartedAt: "2026-11-01T00:00:00Z", EndedAt: "2026-11-01T00:00:01Z"}); got != nil {
 		t.Fatalf("session details with no head: %v", got)
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if f := st.Snapshot("x").Sensor; f == nil || f.SessionMissing != 1 {
 		t.Fatalf("status: %+v", f)
 	}
@@ -628,7 +628,7 @@ func TestIntakeResultNotStoredKeeps(t *testing.T) {
 	if rep.Alarm != AlarmEvidenceNotStored || len(healthRuns(t, r)) != 0 {
 		t.Fatalf("run: %+v, %d collection.run records", rep, len(healthRuns(t, r)))
 	}
-	r.Tick(bg)
+	tick(t, r)
 	kept := 0
 	for _, d := range func() []intakeDoc { _, d := intakeDocs(t, r); return d }() {
 		if d.Run.RequestID == rep.RequestID {

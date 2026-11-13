@@ -124,7 +124,31 @@ type SensorStatus struct {
 	// report of its totals and time, which the node checks only for
 	// monotonic counters (C13 section 6, AP-36 (2)).
 	Heartbeat *SensorHeartbeat `json:"heartbeat,omitempty"`
+	// DispatchTimeouts and ResultTimeouts count the scheduler calls on
+	// the link that did not have its lock within sensorlink.HoldLockWait,
+	// or panicked, so their run went on untied; LockWaitMaxMS is the
+	// longest any of them waited (section 1.9 items 4 and 9).
+	DispatchTimeouts uint64 `json:"dispatch_timeouts"`
+	ResultTimeouts   uint64 `json:"result_timeouts"`
+	LockWaitMaxMS    int64  `json:"lock_wait_max_ms"`
+	// SchedPanics counts the panics recovered in those calls: one before a
+	// release's receipts is also a timeout above, and one after them is
+	// also an intake checkpoint failure (hold.checkpoint_failures), which
+	// raises intake-checkpoint-failed (section 1.9 item 9; D6's B1 on
+	// #676's 98aa92e8).
+	SchedPanics uint64 `json:"sched_panics"`
+	// HealthHeld counts the ceiling's refusals of the sensor's health
+	// events since start, not the events: an event tried again, as a
+	// forwarder's owed report or a drop count is, is counted at each try
+	// (section 1.9 item 5; D4's N2 on #676).
+	HealthHeld uint64 `json:"health_held"`
 }
+
+// AlarmNetworkSessionNotTied: a scheduler call on the link timed out or
+// panicked, so a run's session was not tied: its flows commit untied and
+// the base rules judge them (D3's condition). It is raised once for each
+// stretch of ticks in which dispatch_timeouts or result_timeouts rises.
+const AlarmNetworkSessionNotTied = "network-session-not-tied"
 
 // SensorHeartbeat is the part of a heartbeat status shows.
 type SensorHeartbeat struct {
@@ -267,6 +291,15 @@ func (r *Runtime) startIntake(ctx context.Context) {
 		return
 	}
 	m := r.smgr
+	// No refusal at load: below the platform floor the node starts and
+	// collects, and the sensor is not started (section 1.9 item 5).
+	if short, why := r.cfg.platformFloorShort(); short {
+		if !m.floorShort {
+			m.floorShort = true
+			r.opt.Status.Raise("", AlarmSensorPlatformFloor, why)
+		}
+		return
+	}
 	err := errors.New("the network database is not open")
 	if db, _, mode := r.view(r.dbFor(NetObservationStream(s.SensorID))); db != nil && !mode.AcceptsEvents() {
 		err = fmt.Errorf("the network database is %s", mode)
@@ -284,24 +317,44 @@ func (r *Runtime) startIntake(ctx context.Context) {
 }
 
 // liveAppender appends to stream through the Log of its database as it is
-// now, so a database that Tick reopens is picked up.
+// now, so a database that the manager reopens is picked up. It appends
+// nothing while the database is in a mode that accepts no new events, such
+// as drain-only after a retry, or after sensor-failed: the link drops and
+// counts the record (D6's item 3 on #663).
 type liveAppender struct {
 	r      *Runtime
 	stream c5.StreamID
 }
 
-func (a liveAppender) Append(ctx context.Context, rec c5.Record) (c5.Receipt, error) {
-	log := a.r.Log(a.stream)
+func (a liveAppender) log(ctx context.Context) (*c5.Log, error) {
+	if f := a.r.opt.SensorSeams.Append; f != nil {
+		f(ctx)
+	}
+	if a.r.sensorFailed.Load() {
+		return nil, errors.New("node: the sensor's work has failed")
+	}
+	_, log, mode := a.r.view(a.r.dbFor(a.stream))
 	if log == nil {
 		return nil, errors.New("node: the network database is not open")
+	}
+	if !mode.AcceptsEvents() {
+		return nil, fmt.Errorf("node: the network database is %s, which accepts no new events", mode)
+	}
+	return log, nil
+}
+
+func (a liveAppender) Append(ctx context.Context, rec c5.Record) (c5.Receipt, error) {
+	log, err := a.log(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return log.Append(ctx, rec)
 }
 
 func (a liveAppender) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
-	log := a.r.Log(a.stream)
-	if log == nil {
-		return nil, errors.New("node: the network database is not open")
+	log, err := a.log(ctx)
+	if err != nil {
+		return nil, err
 	}
 	return log.AppendBatch(ctx, recs)
 }
@@ -356,11 +409,15 @@ func (in *sensorIntake) counts(st sensorlink.Stats) dropCounts {
 // SensorDropReportEvery unless final, raises sensor-record-refused for a
 // new reason, and sets the sensor section. final is the clean stop's call.
 // A write that fails raises store-commit-failed on the health stream's
-// database, as Runtime.health does, and is tried again a minute later.
-func (r *Runtime) tickSensor(ctx context.Context, final bool) {
+// database, as Runtime.health does, and is tried again a minute later; one
+// past the platform class's ceiling is counted in health_held and tried
+// again a minute later. Only the sensor manager's goroutine calls it, at
+// each step Tick asks for and at its stop. It reports whether the
+// detector's drive stopped at its bound, with more to read.
+func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 	in := r.sensor.Load()
 	if in == nil || r.sensorFailed.Load() {
-		return
+		return false
 	}
 	in.link.TickHold(ctx)
 	r.pruneIntake(ctx, "")
@@ -376,8 +433,9 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 			in.detectorDown = false
 		}
 	}
-	r.tickDetector(ctx)
+	more = r.tickDetector(ctx)
 	st := in.link.Stats()
+	r.notTied(st)
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	now := in.counts(st)
@@ -419,7 +477,37 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) {
 	if h := st.Heartbeat; h != nil {
 		s.Heartbeat = &SensorHeartbeat{AtUTC: h.AtUTC, Counters: h.Counters, RingOldestUTC: h.RingOldestUTC, InterfaceCheck: h.InterfaceCheck}
 	}
+	s.DispatchTimeouts, s.ResultTimeouts, s.LockWaitMaxMS = st.DispatchTimeouts, st.ResultTimeouts, st.LockWaitMax.Milliseconds()
+	s.SchedPanics = st.SchedPanics
+	s.HealthHeld = r.sensorHeld.Load()
 	r.opt.Status.SetSensor(s)
+	return more
+}
+
+// notTied raises AlarmNetworkSessionNotTied once for each stretch of
+// steps in which the scheduler calls' timeouts rise.
+func (r *Runtime) notTied(st sensorlink.Stats) {
+	m := r.smgr
+	n := st.DispatchTimeouts + st.ResultTimeouts
+	switch {
+	case n > m.timeouts && !m.notTied:
+		m.notTied = true
+		r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmNetworkSessionNotTied, At: r.opt.Now(), Stream: NetObservationStream(r.sensorID()),
+			Detail: fmt.Sprintf("%d scheduler calls on the sensor link since start (%d dispatches, %d results) did not have its lock within %s or panicked, so their runs' flows commit untied and the base rules judge them",
+				n, st.DispatchTimeouts, st.ResultTimeouts, sensorlink.HoldLockWait)})
+	case n == m.timeouts:
+		m.notTied = false
+	}
+	m.timeouts = n
+}
+
+// driveSensor is a drive of the detector between the steps Tick asks for
+// (section 1.9 item 3). It reports whether the drive stopped at its bound.
+func (r *Runtime) driveSensor(ctx context.Context) bool {
+	if r.sensor.Load() == nil || r.detector == nil {
+		return false
+	}
+	return r.driveOnce(ctx, r.detector)
 }
 
 // reportDrops writes now as rep's intake.drop-counted event when it
@@ -434,7 +522,9 @@ func (r *Runtime) reportDrops(ctx context.Context, rep *dropReport, now dropCoun
 	}
 	at := r.opt.Now().UTC()
 	rep.triedMono, rep.everTried = m, true
-	if _, err := (healthSink{r}).Emit(ctx, event.Health{Type: event.HealthDropCounted, Details: details()}); err != nil {
+	if _, err := r.sensorHealth(ctx, event.Health{Type: event.HealthDropCounted, Details: details()}); errors.Is(err, errPastCeiling) {
+		return // held: the counts are written once room returns
+	} else if err != nil {
 		var db c5.DatabaseID
 		if d := r.dbFor(HealthStream); d != nil {
 			db = d.spec.ID

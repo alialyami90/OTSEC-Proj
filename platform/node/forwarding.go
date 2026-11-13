@@ -119,7 +119,10 @@ func NewForwarding(rt *Runtime) (*Forwarding, error) {
 	for _, t := range rt.cfg.ForwardTargets() {
 		tg := &target{t: t, held: map[c5.StreamID]string{}, since: rt.opt.Now(), ready: make(chan struct{})}
 		cfg := forward.Config{Target: t, HealthStream: HealthStream, Health: healthSink{rt}}
-		scfg := forward.Config{Target: t, HealthStream: HealthStream, HealthCursors: liveStore{rt, HealthStream}, Health: healthSink{rt}}
+		// The sensor session's forward.* reports are about the sensor's
+		// streams, so they go under the platform class's ceiling (F1; D6's
+		// N3 on #662).
+		scfg := forward.Config{Target: t, HealthStream: HealthStream, HealthCursors: liveStore{rt, HealthStream}, Health: sensorHealthSink{rt}}
 		for _, c := range consumers {
 			if string(c.ID) != t.Name {
 				continue
@@ -417,7 +420,11 @@ func (fw *Forwarding) reach(ctx context.Context, tg *target, sensor bool, st for
 		}
 		details["reason"] = detail
 		fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardUnreachable, detail)
-		fw.rt.health(ctx, event.HealthForwardUnreachable, details)
+		if sensor {
+			fw.rt.sensorHealthEvent(ctx, event.HealthForwardUnreachable, details) // under the ceiling (F1)
+		} else {
+			fw.rt.health(ctx, event.HealthForwardUnreachable, details)
+		}
 	case !down:
 		*unreachable = false
 	}

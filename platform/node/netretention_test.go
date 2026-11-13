@@ -122,7 +122,7 @@ func TestNetRetentionRuntime(t *testing.T) {
 	advance(time.Hour)
 	alert()
 	advance(30*24*time.Hour - time.Hour + time.Minute) // the first two are past the retention
-	r.Tick(bg)
+	tick(t, r)
 	m = moves(r)
 	if len(m) != 2 || m[1].Retention.Bound != audit.BoundWall || m[1].Retention.FromSeq != 0 || m[1].Retention.ToSeq != 2 {
 		t.Fatalf("after the retention: %+v", m[len(m)-1].Retention)
@@ -171,7 +171,7 @@ func TestNetRetentionRuntime(t *testing.T) {
 	r, _ = g.start()
 	defer r.Close()
 	advance(2 * time.Hour)
-	r.Tick(bg)
+	tick(t, r)
 	m = moves(r)
 	if len(m) != 3 || m[2].Retention.Bound != audit.BoundWall || m[2].Retention.FromSeq != 2 || m[2].Retention.ToSeq != 3 {
 		t.Fatalf("after a restart: %+v", m[len(m)-1].Retention)
@@ -194,7 +194,7 @@ func TestNetRetentionOffWithTarget(t *testing.T) {
 	}
 	defer r.Close()
 	waitSensor(t, r)
-	r.Tick(bg)
+	tick(t, r)
 	for _, rec := range auditRecords(t, r) {
 		if rec.Action == audit.ActionStoreRetentionMoved {
 			t.Fatalf("a retention record with a target: %+v", rec)
@@ -220,7 +220,7 @@ func TestNetRetentionStall(t *testing.T) {
 
 	r.retentionRecord = func(context.Context, audit.Retention) error { return errors.New("audit refused") }
 	for range 3 {
-		r.Tick(bg)
+		tick(t, r)
 		g.advance(time.Minute)
 	}
 	if n := alarms(st, AlarmNetRetentionStalled); n != 1 {
@@ -237,19 +237,19 @@ func TestNetRetentionStall(t *testing.T) {
 		}
 		return context.Canceled
 	}
-	r.Tick(bg)
+	tick(t, r)
 	if m := g.moves(r); len(m) != 2 || m[1].Retention.ToSeq != 2 {
 		t.Fatalf("the committed move: %+v", m[len(m)-1].Retention)
 	}
 	r.retentionRecord = nil
 	g.advance(time.Minute)
-	r.Tick(bg)
+	tick(t, r)
 	if s := st.Snapshot("x").NetRetention; !s.Running || s.Error != "" || s.Cursor != 2 {
 		t.Fatalf("status after the stall %+v", s)
 	}
 	g.alert(r)
 	g.advance(30*24*time.Hour + time.Hour)
-	r.Tick(bg)
+	tick(t, r)
 	m := g.moves(r)
 	if last := m[len(m)-1].Retention; len(m) != 3 || last.FromSeq != 2 || last.ToSeq != 3 {
 		t.Fatalf("the move after the re-sync: %+v", last)
@@ -263,7 +263,7 @@ func TestNetRetentionStall(t *testing.T) {
 	g.alert(r)
 	g.advance(30*24*time.Hour + time.Hour)
 	r.retentionRecord = func(context.Context, audit.Retention) error { return errors.New("audit refused") }
-	r.Tick(bg)
+	tick(t, r)
 	if n := alarms(st, AlarmNetRetentionStalled); n != 2 {
 		t.Fatalf("a new stall raised %d alarms in all, want 2", n)
 	}
@@ -288,12 +288,12 @@ func TestNetRetentionLagAndUnrecorded(t *testing.T) {
 	}
 	// The bound gains an hour an hour on the wall cutoff.
 	g.advance(22 * time.Hour)
-	r.Tick(bg)
+	tick(t, r)
 	if s := lag(); !s.Lagging || s.LagS != int64((R+time.Hour)/time.Second) || alarms(st, AlarmNetRetentionLagging) != 1 || alarms(st, AlarmNetRetentionLagCleared) != 0 {
 		t.Fatalf("an hour over the retention: %+v", s)
 	}
 	g.advance(time.Hour)
-	r.Tick(bg)
+	tick(t, r)
 	if s := lag(); s.Lagging || s.LagS != int64(R/time.Second) || alarms(st, AlarmNetRetentionLagCleared) != 1 {
 		t.Fatalf("at the retention: %+v", s)
 	}
@@ -326,13 +326,13 @@ func TestNetRetentionIdleNoLag(t *testing.T) {
 	defer r.Close()
 	g.alert(r)
 	g.advance(30*24*time.Hour + time.Hour)
-	r.Tick(bg)
+	tick(t, r)
 	if m := g.moves(r); len(m) != 2 || m[1].Retention.ToSeq != 1 {
 		t.Fatalf("the alert not passed: %+v", m[len(m)-1].Retention)
 	}
 	for range 60 {
 		g.advance(24 * time.Hour)
-		r.Tick(bg)
+		tick(t, r)
 		if s := st.Snapshot("x").NetRetention; s.LagS != 0 || s.Lagging {
 			t.Fatalf("an idle stream lags: %+v", s)
 		}
@@ -408,7 +408,7 @@ func TestNetRetentionLagEdge(t *testing.T) {
 		}
 		for range 48 {
 			g.advance(time.Hour)
-			r.Tick(bg)
+			tick(t, r)
 		}
 		if s := st.Snapshot("x").NetRetention; s.Lagging || alarms(st, AlarmNetRetentionLagging) != c.lagging || alarms(st, AlarmNetRetentionLagCleared) != c.lagging {
 			t.Fatalf("lag R + %s, two days on: %+v, raised %d, cleared %d", c.over, s,
@@ -440,7 +440,7 @@ func TestNetRetentionLagCloses(t *testing.T) {
 				g.advance(time.Hour)
 			}
 			g.advance(30*day - 24*time.Hour) // the first day's alerts are past the retention
-			r.Tick(bg)
+			tick(t, r)
 			before := g.moves(r)
 			persisted, _ := time.Parse(time.RFC3339Nano, before[len(before)-1].Retention.CutoffUTC)
 			r.Close()
@@ -464,7 +464,7 @@ func TestNetRetentionLagCloses(t *testing.T) {
 				g.alert(r)
 				g.advance(6 * time.Hour)
 				k += 6 * time.Hour
-				r.Tick(bg)
+				tick(t, r)
 				s := st.Snapshot("x").NetRetention
 				if want := max(lag0-k, 0); s.LagS != int64(want/time.Second) {
 					t.Fatalf("after %s: lag %ds, want %s", k, s.LagS, want)
@@ -512,7 +512,7 @@ func TestNetRetentionBackwardStepRestart(t *testing.T) {
 			r, st := g.start()
 			g.alert(r) // seq 1
 			g.advance(R + 24*time.Hour)
-			r.Tick(bg) // passes seq 1
+			tick(t, r) // passes seq 1
 			mark := g.now()
 			if s := st.Snapshot("x").NetRetention; s.Cursor != 1 {
 				t.Fatalf("seq 1 not passed: %+v", s)
@@ -545,7 +545,7 @@ func TestNetRetentionBackwardStepRestart(t *testing.T) {
 			step := func(d time.Duration) {
 				t.Helper()
 				g.advance(d)
-				r.Tick(bg)
+				tick(t, r)
 				since += d
 				if s := st.Snapshot("x").NetRetention; since <= bound && s.Cursor >= 2 {
 					t.Fatalf("seq 2 passed %s after its commit (monotonic), within %s: %+v", since, bound, s)

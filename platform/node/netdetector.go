@@ -109,6 +109,11 @@ type DetectorStatus struct {
 	OrderingFaults     int64   `json:"ordering_faults"`
 	CheckpointsWritten int64   `json:"checkpoints_written"`
 	CheckpointFailures int64   `json:"checkpoint_failures"`
+	// LagS is the node-clock seconds since the oldest observation the
+	// detector has not read was committed, 0 when it has read them all;
+	// Lagging says network-detector-lag stands for this stretch.
+	LagS    int64 `json:"lag_s"`
+	Lagging bool  `json:"lagging"`
 }
 
 // netDetector is the runtime's detector and its driver's state.
@@ -151,6 +156,8 @@ type netDetector struct {
 	start    time.Duration
 	st       DetectorStatus
 	raised   map[string]bool
+	// lagging: AlarmDetectorLag is raised for this stretch.
+	lagging bool
 }
 
 // unsentAlert is what the node keeps of an unsent alert beside its record:
@@ -405,19 +412,33 @@ func (r *Runtime) rebuildFrameIndex(ctx context.Context, nd *netDetector) error 
 	return nil
 }
 
-// tickDetector runs the driver to the barrier, and checkpoints when the
-// detector took an observation or a session since the last checkpoint,
-// at each tick and so at a clean stop too (D1 in D4-74). A session counts
-// because a restart must find it taken: one skipped, handed over again to
-// a restored detector, would be judged.
-func (r *Runtime) tickDetector(ctx context.Context) {
+// AlarmDetectorLag: the oldest observation the detector has not read was
+// committed more than DetectorLagRaise ago on the node's clock, so alerts
+// come late. It is raised once for each stretch, which ends when the lag
+// is below DetectorLagClear; status shows the lag (section 1.9 item 3).
+const AlarmDetectorLag = "network-detector-lag"
+
+// DetectorLagRaise and DetectorLagClear are the lag alarm's bounds
+// (section 1.10).
+const (
+	DetectorLagRaise = 60 * time.Second
+	DetectorLagClear = 30 * time.Second
+)
+
+// tickDetector drives the detector once, within a drive's bounds, and
+// checkpoints when the detector took an observation or a session since
+// the last checkpoint. It runs at each step Tick asks for, so a checkpoint
+// is written at most once a TickInterval (60 s), and at a clean stop (D1 in
+// D4-74; section 1.9 item 3); the drives between steps never checkpoint. A
+// session counts because a restart must find it taken: one skipped, handed
+// over again to a restored detector, would be judged. It reports whether
+// the drive stopped at its bound, with more to read.
+func (r *Runtime) tickDetector(ctx context.Context) (more bool) {
 	nd := r.detector
 	if nd == nil {
-		return
+		return false
 	}
-	if r.flushAlerts(ctx, nd) {
-		r.driveDetector(ctx, nd)
-	}
+	more = r.driveOnce(ctx, nd)
 	if len(nd.unsent) == 0 && (nd.d.Through() != nd.written || nd.moved) {
 		r.checkpointDetector(ctx, nd)
 	} else if c5.Seq(nd.written) > nd.saved || len(nd.ckpts) > 1 {
@@ -426,6 +447,80 @@ func (r *Runtime) tickDetector(ctx context.Context) {
 		r.saveDetectorCursor(ctx, nd)
 	}
 	r.detectorStatus(nd)
+	return more
+}
+
+// driveOnce commits the alerts still unsent, then drives the detector
+// within one drive's bounds, and judges its lag. It reports whether the
+// drive stopped at its bound.
+func (r *Runtime) driveOnce(ctx context.Context, nd *netDetector) (more bool) {
+	if r.flushAlerts(ctx, nd) {
+		more = r.driveDetector(ctx, nd, newDrive())
+	}
+	r.detectorLag(ctx, nd)
+	return more
+}
+
+// drive bounds one drive of the detector: at most DriveObservations
+// observations, and DriveTime of the process's monotonic clock, which
+// bounds the manager's own work and is no rule on the node's clock.
+// DriveTime counts from the drive's first observation, so a drive whose
+// work before it (flushAlerts, the head, the health stream's sessions) is
+// slow still takes one, and a backlog is still worked off (D4's B1 on #676).
+type drive struct {
+	left  int
+	until time.Time // zero until the first observation
+	spent bool
+}
+
+func newDrive() *drive { return &drive{left: DriveObservations} }
+
+// take reports whether the drive may take one more observation.
+func (dv *drive) take() bool {
+	now := time.Now()
+	if dv.until.IsZero() {
+		dv.until = now.Add(DriveTime)
+	}
+	if dv.left <= 0 || !now.Before(dv.until) {
+		dv.spent = true
+		return false
+	}
+	dv.left--
+	return true
+}
+
+// detectorLag sets the detector's lag in status: the node-clock time since
+// the oldest observation it has not read was committed, 0 when it has read
+// them all. It raises AlarmDetectorLag once a stretch past
+// DetectorLagRaise, and the stretch ends below DetectorLagClear. A read that
+// fails leaves the lag as it was.
+func (r *Runtime) detectorLag(ctx context.Context, nd *netDetector) {
+	db := r.Store(nd.obs)
+	if db == nil {
+		return
+	}
+	head, err := db.LastCommitted(ctx, nd.obs)
+	if err != nil {
+		return
+	}
+	var lag time.Duration
+	if through := nd.d.Through(); through < uint64(head) {
+		got, err := db.Read(ctx, nd.obs, c5.Seq(through), 1)
+		if err != nil || len(got) == 0 {
+			return
+		}
+		lag = max(r.opt.Now().Sub(got[0].CommittedAt), 0)
+	}
+	nd.st.LagS = int64(lag / time.Second)
+	switch {
+	case lag > DetectorLagRaise && !nd.lagging:
+		nd.lagging = true
+		r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmDetectorLag, At: r.opt.Now(), Stream: nd.obs,
+			Detail: fmt.Sprintf("the oldest observation the detector has not read was committed %s ago, more than %s, so its alerts come late", lag.Round(time.Second), DetectorLagRaise)})
+	case lag < DetectorLagClear:
+		nd.lagging = false
+	}
+	nd.st.Lagging = nd.lagging
 }
 
 // driveDetector feeds the detector the sessions and observations committed
@@ -437,20 +532,22 @@ func (r *Runtime) tickDetector(ctx context.Context) {
 // health stream already. Observations go to min(head, barrier), and each
 // session is handed over, in health-stream seq order, before the
 // observations past its after_seq (D4's finding 4 on #576). It stops at an
-// alert that isn't committed.
-func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector) {
+// alert that isn't committed, and at dv's bound before a session whose
+// after_seq it has not reached, which keeps the ordering rule; it reports
+// whether it stopped at the bound.
+func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector, dv *drive) bool {
 	odb, hdb := r.Store(nd.obs), r.Store(HealthStream)
 	if odb == nil || hdb == nil {
-		return
+		return false
 	}
 	head, err := odb.LastCommitted(ctx, nd.obs)
 	if err != nil {
-		return
+		return false
 	}
 	limit := min(head, r.intake.barrier(head))
 	runs, end, err := r.newSessions(ctx, hdb, nd)
 	if err != nil {
-		return
+		return false
 	}
 	// The health position moves past a collection.run only once it is
 	// handed over, or counted when it doesn't parse, so one the driver
@@ -459,18 +556,19 @@ func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector) {
 		if e.bad {
 			r.intake.missing() // D3 on #590
 		} else {
-			if r.observeTo(ctx, nd, min(e.s.AfterSeq, limit)); len(nd.unsent) > 0 {
-				return
+			if r.observeTo(ctx, nd, min(e.s.AfterSeq, limit), dv); len(nd.unsent) > 0 || dv.spent {
+				return dv.spent && len(nd.unsent) == 0
 			}
 			r.handOver(ctx, nd, e.s)
 		}
 		nd.health = e.seq
 		if len(nd.unsent) > 0 {
-			return
+			return false
 		}
 	}
 	nd.health = end
-	r.observeTo(ctx, nd, limit)
+	r.observeTo(ctx, nd, limit, dv)
+	return dv.spent && len(nd.unsent) == 0
 }
 
 // runEntry is a collection.run record on the health stream: its session,
@@ -554,17 +652,24 @@ func (nd *netDetector) beforeRetained(s RunSession) bool {
 	return err != nil || nd.firstObs.IsZero() || start.Add(-g).Before(nd.firstObs.Add(g))
 }
 
-// observeTo feeds the detector the observations after its Through, to to.
-func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64) {
+// observeTo feeds the detector the observations after its Through, to to,
+// within dv's bound.
+func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64, dv *drive) {
 	db := r.Store(nd.obs)
 	for nd.d.Through() < to {
+		if db == nil {
+			return
+		}
 		got, err := db.Read(ctx, nd.obs, c5.Seq(nd.d.Through()), int(min(to-nd.d.Through(), detectorReadPage)))
 		if err != nil || len(got) == 0 {
 			return
 		}
 		for _, st := range got {
-			if st.Key.Seq > to {
+			if st.Key.Seq > to || !dv.take() {
 				return
+			}
+			if f := r.opt.SensorSeams.Observe; f != nil {
+				f()
 			}
 			id := event.EventID{NodeID: r.cfg.NodeID, Stream: event.Stream(nd.obs), Seq: st.Key.Seq}
 			o, err := observationOf(st)

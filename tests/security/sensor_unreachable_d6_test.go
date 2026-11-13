@@ -87,6 +87,19 @@ func waitFirstStep(t *testing.T, r *node.Runtime) {
 	}
 }
 
+// waitStep waits for the sensor manager's step that a Tick asked for, and
+// the drives it leaves (WaitSensorStep). Tick does not wait for the
+// sensor's work (F3, D5-sensor-node.md section 1.9 item 3), so a test that
+// reads what that work did after a Tick waits here first.
+func waitStep(t *testing.T, r *node.Runtime) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := r.WaitSensorStep(ctx); err != nil {
+		t.Fatalf("the sensor manager's step did not end within 30 s: %v", err)
+	}
+}
+
 func (n *unrNode) now() time.Time { n.mu.Lock(); defer n.mu.Unlock(); return n.wall }
 
 func (n *unrNode) monoNow() time.Duration { n.mu.Lock(); defer n.mu.Unlock(); return n.mono }
@@ -136,6 +149,7 @@ func (n *unrNode) heartbeat() *netobs.Heartbeat {
 func (n *unrNode) tick(at string, alarms int, flag bool) {
 	n.t.Helper()
 	n.r.Tick(context.Background())
+	waitStep(n.t, n.r)
 	s := n.st.Snapshot("site-a-node1")
 	got := 0
 	for _, a := range s.Alarms {

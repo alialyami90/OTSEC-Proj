@@ -99,12 +99,15 @@ type Runtime struct {
 	// sensorFailed: the sensor's work panicked and is stopped until a
 	// restart (sensormgr.go).
 	sensorFailed atomic.Bool
+	// sensorHeld counts the ceiling's refusals of the sensor's health
+	// events, each try of an event once (sensorceiling.go).
+	sensorHeld atomic.Uint64
 	// startMono is the monotonic time of the node's start, the origin of
 	// the sensor-unreachable timer however late the intake starts (D4-73).
 	startMono time.Duration
 	intake    intakeRecords // the intake hold's records (netintake.go)
 	// detector is the detector consumer, nil until it starts
-	// (netdetector.go). Only Start, Tick and Close touch it.
+	// (netdetector.go). Only the sensor manager's goroutine touches it.
 	detector *netDetector
 	// afterRelease, when set, runs between a run's release and its entry
 	// in the handover barrier at its after_seq: a test's way to tick there.
@@ -467,10 +470,21 @@ func (r *Runtime) Tick(ctx context.Context) {
 		if x.a.Stream != "" {
 			details["stream"] = string(x.a.Stream)
 		}
+		if isSensorDB(x.db) {
+			// Under the platform class's ceiling, as every sensor health
+			// event is (F1).
+			r.sensorHealthEvent(ctx, x.a.Code.HealthType(), details)
+			continue
+		}
 		r.health(ctx, x.a.Code.HealthType(), details)
 	}
-	r.tickRetention(ctx)
-	r.tickSensor(ctx, false)
+	// The sensor's work runs on the sensor manager's goroutine, which this
+	// kick starts a step of; Tick does not wait for it, so a slow detector
+	// or network database never holds Tick, the evidence database's Resume
+	// or the status write (F3, section 1.9 item 3). The alert stream's
+	// retention consumer is in that step too, as it reads the network
+	// database. The status Tick writes holds the sensor and retention
+	// sections the manager last set.
 	r.kickSensorManager()
 	r.Prune(ctx)
 	r.opt.Status.Write(string(r.cfg.NodeID))
@@ -542,15 +556,16 @@ func (r *Runtime) Mode(id c5.DatabaseID) c5.Mode {
 	return m
 }
 
-// Close records service.stop, stops the sensor manager, closes every
-// database and releases the locks. A sensor database the manager is still
-// in a call on after SensorStopTimeout is left to the process's exit.
+// Close stops the sensor manager, which writes its final drop counts and
+// the detector's position within SensorStopTimeout if it can, records
+// service.stop, closes every database and releases the locks. A sensor
+// database the manager is still in a call on after SensorStopTimeout is
+// left to the process's exit.
 func (r *Runtime) Close() error {
+	r.closeSensorStores()
 	if len(r.dbs) > 0 {
-		r.tickSensor(context.Background(), true)
 		r.audit(context.Background(), audit.ActionServiceStop, audit.OutcomeInfo, "", "otsec node stopping")
 	}
-	r.closeSensorStores()
 	r.state.Lock()
 	defer r.state.Unlock()
 	var errs []error
