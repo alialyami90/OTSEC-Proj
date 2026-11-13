@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/audit"
@@ -82,31 +83,63 @@ type sensorManager struct {
 	kick   chan struct{}
 	cancel context.CancelFunc
 	done   chan struct{}
-	// notOpen: AlarmSensorStoreNotOpen is raised for the database.
+	// first is closed when the first step has ended (SensorFirstStep), and
+	// steps counts the steps ended.
+	first chan struct{}
+	steps atomic.Uint64
+	// notOpen: AlarmSensorStoreNotOpen is raised for the database. raised
+	// are the startup alarm codes raised for it in this stretch, so a retry
+	// raises each at most once until the database opens (D6's B4).
 	notOpen map[c5.DatabaseID]bool
+	raised  map[c5.DatabaseID]map[c5.AlarmCode]bool
 	// modes is each database's mode-change cap.
 	modes map[c5.DatabaseID]*modeCap
 	// intakeDown: AlarmSensorIntakeNotStarted is raised (sensor.go).
 	intakeDown bool
 }
 
-// modeCap is when a database's last mode change was recorded, and how
-// many changes since were not.
+// modeCap is when a database's last mode change was recorded and to which
+// mode, and how many changes since were not.
 type modeCap struct {
 	at   time.Duration
 	ever bool
+	to   c5.Mode
 	held int
 }
 
-// startSensorManager starts the manager's goroutine. Without a sensor
-// database there is none.
+// SensorFailedDetailBytes caps the panic and stack in sensor-failed's
+// detail.
+const SensorFailedDetailBytes = 2048
+
+// newSensorManager makes the manager when there is a sensor database. Its
+// goroutine starts with startSensorManager.
+func (r *Runtime) newSensorManager() {
+	m := &sensorManager{first: make(chan struct{}), notOpen: map[c5.DatabaseID]bool{},
+		raised: map[c5.DatabaseID]map[c5.AlarmCode]bool{}, modes: map[c5.DatabaseID]*modeCap{}}
+	if len(r.sdbs) == 0 {
+		close(m.first)
+	}
+	r.smgr = m
+}
+
+// SensorFirstStep returns a channel closed once the sensor manager's first
+// step has ended, whatever it found: the sensor store set opened or not,
+// the intake started or not. Start returns before it; a node without the
+// network_sensor section has it closed at once. It only signals: a test,
+// or a reader of status, waits on it before it reads the sensor.
+func (r *Runtime) SensorFirstStep() <-chan struct{} { return r.smgr.first }
+
+// startSensorManager starts the manager's goroutine, after Start's own
+// work, and kicks it once, so that its first step does not wait for the
+// first tick. Without a sensor database there is none.
 func (r *Runtime) startSensorManager() {
-	if len(r.sdbs) == 0 || r.smgr == nil {
+	m := r.smgr
+	if len(r.sdbs) == 0 {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	m := r.smgr
 	m.kick, m.cancel, m.done = make(chan struct{}, 1), cancel, make(chan struct{})
+	m.kick <- struct{}{}
 	go func() {
 		defer close(m.done)
 		for {
@@ -115,10 +148,9 @@ func (r *Runtime) startSensorManager() {
 				return
 			case <-m.kick:
 			}
-			if !r.sensorStep(ctx, newStartTimes()) {
+			if !r.managerStep(ctx) {
 				return
 			}
-			r.pruneSensorStores(ctx)
 		}
 	}()
 }
@@ -133,35 +165,59 @@ func (r *Runtime) kickSensorManager() {
 	}
 }
 
-// sensorStep opens what is not open of the sensor store set, resumes what
-// is blocked or drain-only, and starts the intake if it is not started.
-// Start runs the first step, and the
-// manager each later one. A panic in it is recovered: it raises
-// AlarmSensorFailed and stops the sensor's work, and sensorStep reports
-// false.
-func (r *Runtime) sensorStep(ctx context.Context, starts *startTimes) (ok bool) {
-	if len(r.sdbs) == 0 || r.sensorFailed.Load() {
-		return false
-	}
-	if r.smgr == nil {
-		r.smgr = &sensorManager{notOpen: map[c5.DatabaseID]bool{}, modes: map[c5.DatabaseID]*modeCap{}}
-	}
+// managerStep is one step of the manager's loop: the store set, the
+// intake, the held mode changes and the prune. A panic anywhere in it is
+// recovered: it raises AlarmSensorFailed, naming the sensor, and stops the
+// sensor's work until a restart, and managerStep reports false. The node
+// and every other stream go on (section 1.9 item 9; D6's B1).
+func (r *Runtime) managerStep(ctx context.Context) (ok bool) {
+	m := r.smgr
 	defer func() {
 		if p := recover(); p != nil {
 			r.sensorFailed.Store(true)
-			r.opt.Status.Raise("", AlarmSensorFailed, fmt.Sprintf("the sensor's work panicked and is stopped until the node restarts; SER, Syslog and forwarding go on: %v\n%s", p, debug.Stack()))
+			detail := fmt.Sprintf("%v\n%s", p, debug.Stack())
+			if len(detail) > SensorFailedDetailBytes {
+				detail = detail[:SensorFailedDetailBytes] + "..."
+			}
+			r.opt.Status.Raise("", AlarmSensorFailed, fmt.Sprintf("sensor %s: the sensor's work panicked and is stopped until the node restarts; SER, Syslog and forwarding go on: %s",
+				r.sensorID(), detail))
 			ok = false
 		}
+		if m.steps.Add(1) == 1 {
+			close(m.first)
+		}
 	}()
+	if r.sensorFailed.Load() {
+		return false
+	}
+	starts := newStartTimes()
 	for _, d := range r.sdbs {
+		if ctx.Err() != nil {
+			return false
+		}
 		r.stepSensorDB(ctx, d, starts)
 	}
+	if ctx.Err() != nil {
+		return false
+	}
 	r.startIntake(ctx)
+	r.flushModeChanges(ctx)
+	r.pruneSensorStores(ctx)
 	return true
+}
+
+// sensorID is the configured sensor's ID, or "" without the section.
+func (r *Runtime) sensorID() string {
+	if s := r.cfg.NetworkSensor; s != nil {
+		return s.SensorID
+	}
+	return ""
 }
 
 // stepSensorDB opens d when it is not open, or resumes it when it is
 // blocked or drain-only, with smu held only to read and swap its handle.
+// A step the node's stop has cancelled stops after its store call, and
+// writes nothing more.
 func (r *Runtime) stepSensorDB(ctx context.Context, d *database, starts *startTimes) {
 	r.smu.Lock()
 	prev, started := d.report, d.env != nil
@@ -174,6 +230,12 @@ func (r *Runtime) stepSensorDB(ctx context.Context, d *database, starts *startTi
 	case !started || (prev.Mode == c5.ModeFailed && !prev.OpenBusy()):
 		release(prev)
 		next, err = r.startDB(ctx, d.spec, r.consumers, starts)
+		if ctx.Err() != nil {
+			if next != nil {
+				release(next.report)
+			}
+			return
+		}
 		if err != nil {
 			next = &database{spec: d.spec, report: c5.Report{Mode: c5.ModeFailed}}
 			r.opt.Status.SetMode(d.spec.ID, c5.ModeFailed)
@@ -188,6 +250,14 @@ func (r *Runtime) stepSensorDB(ctx context.Context, d *database, starts *startTi
 		sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
 		cur.report = r.resume(sctx, &cur, prev)
 		cancel()
+		if ctx.Err() != nil {
+			// The stop's release closes prev's store; a new one is closed
+			// here.
+			if cur.report.Store != prev.Store {
+				release(cur.report)
+			}
+			return
+		}
 		next = &cur
 		if err = r.adopt(next); err != nil {
 			release(next.report)
@@ -212,24 +282,85 @@ func (r *Runtime) stepSensorDB(ctx context.Context, d *database, starts *startTi
 		r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: AlarmSensorStoreNotOpen, At: r.opt.Now(), Detail: detail})
 	case open:
 		m.notOpen[d.spec.ID] = false
+		delete(m.raised, d.spec.ID)
 	}
 	if mc, changed := c5.ModeChangeOf(prev, d.report, r.opt.Now()); changed {
 		r.sensorModeChanged(ctx, d, mc)
 	}
 }
 
+// sensorStoreClosed reports whether id is a database of the sensor store
+// set that is not open, or is swapped out: one only the manager's startup
+// or Resume can raise an alarm for.
+func (r *Runtime) sensorStoreClosed(id c5.DatabaseID) bool {
+	for _, d := range r.sdbs {
+		if d.spec.ID == id {
+			db, _, _ := r.view(d)
+			return db == nil
+		}
+	}
+	return false
+}
+
+// sensorStartupAlarm raises a sensor database's startup or Resume alarm,
+// at most once for each code until the database opens, so a database the
+// manager retries at every tick never pushes another alarm out of status
+// (MaxStatusAlarms; D6's B4). Only the manager's goroutine calls it.
+func (r *Runtime) sensorStartupAlarm(id c5.DatabaseID, a c5.Alarm) {
+	m := r.smgr
+	if m.raised[id] == nil {
+		m.raised[id] = map[c5.AlarmCode]bool{}
+	}
+	if m.raised[id][a.Code] {
+		return
+	}
+	m.raised[id][a.Code] = true
+	r.opt.Status.Alarm(id, a)
+}
+
 // sensorModeChanged records a sensor database's mode change, at most once
 // every SensorModeChangeEvery for each database (F9). A change within it is
 // counted, and the next record's detail says how many were not recorded.
 func (r *Runtime) sensorModeChanged(ctx context.Context, d *database, mc c5.ModeChange) {
-	m := r.smgr.modes[d.spec.ID]
+	m := r.modeCapOf(d.spec.ID)
+	if m.ever && r.opt.Mono()-m.at < SensorModeChangeEvery {
+		m.held++
+		return
+	}
+	r.recordMode(ctx, d, mc, m)
+}
+
+// flushModeChanges writes, for each sensor database with held changes
+// whose hour has passed, the one record and event the cap allows, naming
+// the mode it is in now, so the audit and health streams never show a
+// mode the database has left for longer than SensorModeChangeEvery (D3's
+// B1).
+func (r *Runtime) flushModeChanges(ctx context.Context) {
+	for _, d := range r.sdbs {
+		m := r.modeCapOf(d.spec.ID)
+		if m.held == 0 || r.opt.Mono()-m.at < SensorModeChangeEvery || ctx.Err() != nil {
+			continue
+		}
+		r.smu.Lock()
+		now := d.report.Mode
+		r.smu.Unlock()
+		r.recordMode(ctx, d, c5.ModeChange{From: m.to, To: now, At: r.opt.Now()}, m)
+	}
+}
+
+func (r *Runtime) modeCapOf(id c5.DatabaseID) *modeCap {
+	m := r.smgr.modes[id]
 	if m == nil {
 		m = &modeCap{}
-		r.smgr.modes[d.spec.ID] = m
+		r.smgr.modes[id] = m
 	}
-	now := r.opt.Mono()
-	if m.ever && now-m.at < SensorModeChangeEvery {
-		m.held++
+	return m
+}
+
+// recordMode writes one store.mode_change record and its health event,
+// carrying the changes held since the last one.
+func (r *Runtime) recordMode(ctx context.Context, d *database, mc c5.ModeChange, m *modeCap) {
+	if ctx.Err() != nil {
 		return
 	}
 	detail := modeDetail(d, mc)
@@ -240,7 +371,7 @@ func (r *Runtime) sensorModeChanged(ctx context.Context, d *database, mc c5.Mode
 	}
 	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
 	r.health(ctx, c5.HealthModeChanged, details)
-	m.at, m.ever, m.held = now, true, 0
+	m.at, m.ever, m.to, m.held = r.opt.Mono(), true, mc.To, 0
 }
 
 // pruneSensorStores prunes the sensor store set as Prune prunes

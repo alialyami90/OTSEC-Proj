@@ -222,7 +222,7 @@ func (r *Runtime) startSensor(ctx context.Context) error {
 		return err
 	}
 	now := r.opt.Now().UTC()
-	in := &sensorIntake{link: link, stream: stream, refused: map[string]bool{}, quietFrom: r.opt.Mono(),
+	in := &sensorIntake{link: link, stream: stream, refused: map[string]bool{}, quietFrom: r.startMono,
 		base: dropCounts{map[string]uint64{}, map[string]uint64{}}, alerts: dropCounts{map[string]uint64{}, map[string]uint64{}},
 		obs: dropReport{stream: stream, since: now}, alert: dropReport{stream: NetAlertStream(s.SensorID), since: now}}
 	if d, at, ok := r.lastDropCounts(ctx, stream); ok {
@@ -257,7 +257,8 @@ const AlarmSensorIntakeNotStarted = "sensor-intake-not-started"
 
 // startIntake starts the intake when the section is set and it has not
 // started. It does not start while the observation stream's database is
-// not open, and raises AlarmSensorIntakeNotStarted when it fails. Only the sensor manager's
+// not open or accepts no events, since nothing could commit, and raises
+// AlarmSensorIntakeNotStarted when it fails. Only the sensor manager's
 // step calls it.
 func (r *Runtime) startIntake(ctx context.Context) {
 	s := r.cfg.NetworkSensor
@@ -266,7 +267,9 @@ func (r *Runtime) startIntake(ctx context.Context) {
 	}
 	m := r.smgr
 	err := errors.New("the network database is not open")
-	if db, _, _ := r.view(r.dbFor(NetObservationStream(s.SensorID))); db != nil {
+	if db, _, mode := r.view(r.dbFor(NetObservationStream(s.SensorID))); db != nil && !mode.AcceptsEvents() {
+		err = fmt.Errorf("the network database is %s", mode)
+	} else if db != nil {
 		err = r.startSensor(ctx)
 	}
 	if err != nil {
