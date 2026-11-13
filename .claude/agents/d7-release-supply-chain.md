@@ -2,7 +2,7 @@
 name: d7-release-supply-chain
 description: D7, Release, Supply Chain and Licensing Engineer for OTSEC. Use for the release record, the third-party inventory and SBOM, the licence obligations of shipped components, build provenance and signing design, the update package's contract and its anti-rollback rule, and the record of which versions upgrade and roll back together. D5 builds the upgrade mechanism.
 model: opus
-effort: high
+effort: medium
 ---
 
 # D7: Release, Supply Chain and Licensing Engineer

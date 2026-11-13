@@ -1441,7 +1441,7 @@ The owner's words are from the CLI session, at about 21:10Z and 21:20Z. Evidence
   - A lab role: H-tests need the owner's authorization and the owner's hands, and D6 writes them.
 - **Model and effort**, set in each agent file's frontmatter (`model` and `effort`):
   - D1, D3 and D6: `fable`, `high`. (Superseded by D4-89: the owner moved all three to `opus`, and D6 to `xhigh`.)
-  - D2, D4, D5, D7 and D8: `opus`, `high`.
+  - D2, D4, D5, D7 and D8: `opus`, `high`. (Superseded by D4-93: the owner moved all five to `medium` on 2026-11-13.)
   - `records-auditor`: `sonnet`, `high`. `ci-triage`: `haiku`, `medium`.
   - **The reason.** The most capable model goes where an error costs most and a test catches it least: the architecture and the gates (D1), the trust boundaries (D3), and the independent verification (D6). The implementing roles work against approved contracts, with tests and reviewers behind them. D2's, D4's, D5's, D7's and D8's work is reviewed by D6, an agent on a different model from its author. D1 and D3 share `fable` with D6, so that does not hold for them; D3's second reviewer, D2, is on `opus`. By list price on 2026-11-03, `opus` costs half of `fable`, `sonnet` a quarter, and `haiku` about one eightieth. (D4-89: D1, D3 and D6 are on `opus` since 2026-11-12, so what this bullet says about `fable`, and about D6 reviewing from a different model, no longer holds.)
   - **These are a starting point.** No run has measured these models on this repository. Raise D3 or D6 to `xhigh` for a gate if a later check finds what a review at `high` missed. Lower a role if its reviewers find nothing through a whole item. (D4-89: the owner raised D6 to `xhigh` on 2026-11-12.)
@@ -1821,7 +1821,7 @@ The owner's words in the CLI on 2026-11-12: "update the project so that it canno
   - No session can fall back to a general-purpose subagent briefed from a role's file, as the first CLI session did (D4-77). When the agent files do not load, no subagent starts: start `claude` inside the checkout.
   - `Explore`, `Plan` and Claude Code's own guide agent do not run in this project. D1 reads and searches in its own context, or gives the reading to a role.
 - **Three agents change model**, in the owner's working tree, committed at their word. This supersedes the first line of D4-79's "Model and effort" for these three, and that line is marked.
-  - D1 and D3: `fable` to `opus`, effort `high` as before.
+  - D1 and D3: `fable` to `opus`, effort `high` as before. (Superseded for D3 by D4-93: D3's effort is `medium` since 2026-11-13.)
   - D6: `fable` to `opus`, and effort `high` to `xhigh`.
   - Every role is now on `opus`. The helpers are unchanged (`records-auditor` on `sonnet`, `ci-triage` on `haiku`).
   - The owner gave no reason, and D1 did not ask for one. One consequence, for the record: D4-79 noted that D6 reviews the implementing roles from a different model than their author's. That no longer holds, for any role.
@@ -1877,3 +1877,14 @@ The owner's words in the CLI on 2026-11-13: "can you make a modification and all
 - **D6 instances started in the session that made the change** got CLAUDE.md as it was when the session started, without the exception. They got their role file as the session last read it, which lagged the working tree. The review of `8c11adef` (launched at 23:59:12Z) had no line on the exception. The review of `3704a8e2` (launched at 00:09:17Z) had `8c11adef`'s line 54, although `3704a8e2`'s had been on disk since 00:08:34Z. Until a session starts after the merge, a D6 instance may hold none of the conditions, or an older wording of them, so D1's brief states them (D6's N5 on #646, corrected in its review of `3704a8e2`).
 - **The session reloads agent files while it runs** (the same evidence). So a change to a role file in the working tree may govern launches before it is committed or reviewed.
 - **Review.** D1 wrote this PR, so it merges on D6's acceptance (D4-85). It changes a script, so both workflows run on it.
+
+## D4-93: six roles' effort lowered to `medium` (owner, 2026-11-13)
+
+The owner's words in the CLI on 2026-11-13, asked whether the uncommitted `effort` lines in six role files should be committed: "Keep and commit them". The owner had made the change in the working tree; D1 did not write it. Evidence class: `desk`. D4-92 is the number D1 announced on #640 to #645 for the approval of P4-4-L6's documents, which is open, so this entry takes the next number, as D4-89 did.
+
+- **The change.** `effort` goes from `high` to `medium` in the role files of D2, D3, D4, D5, D7 and D8. Nothing else in those files changes. Every role stays on `opus`.
+- **Unchanged:** D1 (`opus`, `high`), D6 (`opus`, `xhigh`), `records-auditor` (`sonnet`, `high`) and `ci-triage` (`haiku`, `medium`).
+- **Superseded:** D4-79's line for D2, D4, D5, D7 and D8, and D4-89's line for D3's effort. Both are marked.
+- **The owner gave no reason, and D1 did not ask for one.** One consequence, for the record: D3, the boundary's owner, now works at a lower effort than D6, which reviews it. D4-79's advice still stands: raise a role again if its reviewers find what a review at its effort missed.
+- **The change was live before it was committed.** The session reloads agent files while it runs (D4-91), so roles launched in the session of 2026-11-13 after the owner's edit may already have run at `medium`. D1 did not record which.
+- **Review.** D1 wrote this PR, so it merges on D6's acceptance (D4-85). It changes Markdown only, so it skips both workflows.

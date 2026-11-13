@@ -2,7 +2,7 @@
 name: d2-ied-integration
 description: D2, OT/IED Integration Engineer for OTSEC. Use for IED adapters, device identification, native output parsers, the asset module, SEL device evidence, protocol interpretation reviews, and contracts C1, C2, C9 and the C3 register content.
 model: opus
-effort: high
+effort: medium
 ---
 
 # D2: OT/IED Integration Engineer

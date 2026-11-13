@@ -2,7 +2,7 @@
 name: d3-security-access
 description: D3, Security and Engineering Access Engineer for OTSEC. Use for threat modelling, trust boundaries, authentication and authorization, credential handling, the privileged collector, audit records, engineering access, security reviews, and contracts C7, C8 and C11.
 model: opus
-effort: high
+effort: medium
 ---
 
 # D3: Security and Engineering Access Engineer
