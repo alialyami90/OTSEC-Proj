@@ -946,7 +946,8 @@ def sig(s, root, work):
             h["rows"].append(dict(e, condition="protocol"))
             if not h["no_roles"]:
                 h["rows"].append(dict(e, condition="service", src="", sport="", direction=""))
-                for f in fn.get(ends(lab["src"], lab["sport"], lab["dst"], h["port"]), []):
+                # held-other: its protocol and service rows only.
+                for f in fn.get(ends(lab["src"], lab["sport"], lab["dst"], h["port"]), []) if h["kind"] == "held-502" else ():
                     if f["src"] == lab["src"]:
                         h["rows"].append(dict(e, condition="function", code=f["code"]))
             rows += h["rows"]
@@ -1146,7 +1147,8 @@ def sig(s, root, work):
           f"{len(unseen_fp)} false positives among them.\n")
     print("**Disputed flows** (in no count; named here if S0 names one): "
           + ("; ".join(f"{l['capture']} {l['src']}:{l['sport']} > {l['dst']}:{l['dport']} ({l['by_tshark']})"
-                       + (" **named by S0**" if not isinstance(run_of(S0, l['capture']), str)
+                       + (" **named by S0**" + (" (on 502, Zeek's own port registration)" if l["dport"] == CONTROL_PORT else "")
+                          if not isinstance(run_of(S0, l['capture']), str)
                           and (l['l4'], ends(l['src'], l['sport'], l['dst'], l['dport'])) in run_of(S0, l['capture'])[0] else "")
                        for l in labels if l["class"] == "disputed") or "none") + "\n")
     return v

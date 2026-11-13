@@ -17,9 +17,9 @@ function ports_of(proto: transport_proto): vector of count
 	return sort(v);
 	}
 
-function show(when: string)
+function show(at: string)
 	{
-	print fmt("likely_server_ports at %s: tcp %s; udp %s", when, ports_of(tcp), ports_of(udp));
+	print fmt("likely_server_ports at %s: tcp %s; udp %s", at, ports_of(tcp), ports_of(udp));
 	}
 
 event zeek_init() &priority=-1000

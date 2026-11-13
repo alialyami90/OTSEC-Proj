@@ -209,7 +209,7 @@ sig() {
       writer:*dnp3_cases.py) f=$s/gt/$n ;;
       writer:*synth_corpus.py) f=$s/synth/$n ;;
       *) f=$cache/$n
-         if ! echo "$sha  $f" | sha256sum -c --status; then
+         if ! echo "$sha  $f" | sha256sum -c --status 2> /dev/null; then
            f=$s/fetch/$n
            curl -fsSL --retry 5 --retry-delay 20 -o "$f" "$url" || echo "not fetched: $n"
          fi ;;
@@ -220,7 +220,9 @@ sig() {
     fi
     case $n in *.gz) n=${n%.gz}; gunzip -c "$f" > "$s/pcaps/$n" ;; *) cp "$f" "$s/pcaps/$n" ;; esac
     st=${n%.*}
-    if [ -n "$moved" ]; then
+    # Empty fields are written `-`: a tab is whitespace to `read`, so an
+    # empty field would shift the next one into its place.
+    if [ "$moved" != - ]; then
       if python3 "$gp/movedport.py" "$s/pcaps/$n" "$s/pcaps" > /dev/null \
         && echo "$moved  $s/pcaps/$st-moved-port.pcap" | sha256sum -c --status; then
         python3 "$gp/modbus_label.py" "$s/pcaps/$n" "$s/pcaps/$st-moved-port.pcap" 15020 "$s/labels/$st-moved-port.tsv" \
