@@ -2002,4 +2002,10 @@ The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes an
   - `records-auditor` before D6 on records PRs;
   - the self-check list (`docs/agent-handoffs.md`) before any review.
 - **Build summaries:** at most 150 lines, for each design document over 500 lines, written by its owner. They are briefed when each owner is free: D4 for C13 0.2, D5 for `D5-sensor-node.md`, D3 for `D3-sensor-link.md`.
+- **Usage** (the owner, in the same session: "Do 1-3 and 5. Don't Do 4.", answering D1's five proposals to reduce usage):
+  - a new task for a role starts a fresh agent, and an agent is resumed only to continue the same task;
+  - reports to D1 are at most 15 lines;
+  - a re-review reads only the diff since the last reviewed head;
+  - the build summaries above.
+  - Not adopted: smaller models for `records-auditor` and `ci-triage`.
 - **The rules are in CLAUDE.md**, "Working rules". They apply to work started after this PR merges. PRs open now finish under their own rounds.

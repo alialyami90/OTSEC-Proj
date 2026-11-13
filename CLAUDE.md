@@ -61,7 +61,7 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 
 Where one of these differs from the brief below, the rule here wins.
 
-### Working rules (the owner, 2026-11-13, D4-97)
+### Working rules (the owner, 2026-11-13, D4-97; for work started after D4-97 merged)
 
 - **A non-blocking review note is fixed in the same PR before it merges, or dropped.** It is not carried to a follow-up brief, unless D1 records it as a risk: a threat-model row or an open item in the decision log. The reviewer's note says which it asks for.
 - **One source for each decision:** the decision log. HANDOFF, this file, the role files and the briefs carry one line and the D-number, never a restatement.
@@ -70,6 +70,9 @@ Where one of these differs from the brief below, the rule here wins.
   - D1 fills the brief template in `docs/agent-handoffs.md` for every brief.
   - `records-auditor` reads every records PR before D6 does.
   - Every implementer runs the self-check list in `docs/agent-handoffs.md` before asking for review.
+- **Agent context.** A new task for a role starts a fresh agent with its brief. An agent is resumed only to continue the same task.
+- **Reports to D1** are at most 15 lines: the verdict or result, the link, and the blocking findings. The detail is on GitHub.
+- **A re-review** reads only the diff since the last reviewed head, and the reviewer's own findings.
 - **Build summaries.** Each design document over 500 lines gets a build summary of at most 150 lines, written by its owner. An agent reads the summary first, and in the full document only the sections its task needs. The full document stays the record, and the summary cites its sections.
 
 ### Scope: every OT device class, SEL first

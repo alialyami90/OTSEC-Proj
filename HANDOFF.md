@@ -56,7 +56,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## Test policy
 
-1. **GitHub Actions first.** `ci.yml` (twenty-four jobs) and `govulncheck.yml` (one job) are the gate. The merge rules are in CLAUDE.md, "Testing and merging". When a head's CI is older than `main`, verify the merged result before merging.
+1. **GitHub Actions first.** `ci.yml` and `govulncheck.yml` are the gate, with `ci.yml`'s twenty `integration-long` legs run on a PR under the `full-ci` label (D4-97). The merge rules are in CLAUDE.md, "Testing and merging". When a head's CI is older than `main`, verify the merged result before merging.
 2. **The owner's PC second.** It is the second Windows run, and the fallback when GitHub Actions is unavailable or a run needs a real installation. A local run never replaces a green CI run for a merge. Label a PC result with its class (`desk` for Go and Python tests, `simulated` for the real binaries against the simulator), the Windows version and the commit SHA.
 3. **Never register the PC as a GitHub self-hosted runner,** and never put machine keys on it. The repository is public, so any outside PR could run code on a self-hosted runner.
 

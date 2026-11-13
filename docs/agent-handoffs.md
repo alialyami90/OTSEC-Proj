@@ -23,7 +23,7 @@ D1 issues a brief before assigning significant work.
 
 ### Self-check before asking for review (D4-97)
 
-Drawn from the defects D6's reviews found most often. The implementer runs it and says in the PR which items apply.
+Drawn from the defects D6's reviews found most often. The implementer runs it and says in the PR which items apply. Items 4, 5 and 8 are written for Go code and the sensor's work; elsewhere, their equivalent applies.
 
 1. Every new rule has a test, and a control (a named mutation) shown failing, with its diff, the command, where it ran, its evidence class and its output.
 2. **Boundaries:** an off-by-one mutant on every comparison of a count, a sequence number or a time is killed by a test.
@@ -31,7 +31,7 @@ Drawn from the defects D6's reviews found most often. The implementer runs it an
 4. **Locks:** no lock is held across a store call or any call that can block, and a lock that a `recover` can reach is released with `defer`.
 5. **Clocks:** code that runs on the test clock is tested on it, and no rule reads the wall clock by mistake.
 6. **Alarms and records:** each is raised once per condition, not once per retry, and the last state is always written; no held change is left unwritten.
-7. **Evidence:** each new test shows `--- PASS`, not SKIP, in both `go` jobs, cited by job URL.
+7. **Evidence:** each new test shows `--- PASS`, not SKIP, in both `go` jobs, cited by job URL. The `integration-long` legs' result comes after D1 adds `full-ci`, before the merge.
 8. **Gates:** owed tests are listed by name, F-027's merge-check greps are shown, and no approved bound changes.
 9. **Claims:** every rate, bound and "never" in the PR body or a note is what the code does, and is tested.
 
