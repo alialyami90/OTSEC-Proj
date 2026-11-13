@@ -1780,3 +1780,26 @@ Common rules as in "Phase 4 item 4, second part". Each PR body is written from a
 - **Deliverables.** The cases with their labels and pass conditions, in GT-PCAP, with D2's protocol review; `a6-gt-pcap` green.
 - **Acceptance.** D2 (the labels against the protocol and the capture's bytes), D4 (the labels against C13's records). Pass conditions are pinned before the engine run's next counted dispatch reads the cases; the engine's output is the thing measured, never the source of a label.
 - **Exclusions.** No real capture. Derived or synthetic captures only.
+
+
+## After D4-92: the notes owed before the third part (issued 2026-11-13, D4-92)
+
+Common rules as in "Phase 4 item 4, second part". Every brief names a scratch file unique to the role and task (the collision of 2026-11-13 on #643).
+
+### P4-4-L7 (D3, D4 and D5): the non-blocking notes of P4-4-L6's final rounds
+
+- **Objective.** Close, before any implementation brief of the third part, the notes the final reviews of #641, #644 and #645 left non-blocking, so that the approved texts carry no known gap.
+- **Inputs.** D4-92; the final reviews named there; `records-auditor`'s report on the merged heads (D1 relays it).
+- **Items.**
+  - D4 and D5: the counting precedence (D4-92) in C13 CH-41 and #644 §1.5 item 5, with a test whose control counts in the wrong order; #644 item 5's definition of `skew_prestart_windows` widened to its tests (M, the start bound, the first break's heartbeats).
+  - D5: the clear of `sensor-transmitted`: every raise sets the latest raise time even while the alarm stands, so a request waiting for room never clears a later transmit (D6's N5 on `dd67b995`), with a case in `TestTransmittedClear`; D6's N1, N3, N4 and N7 on `dd67b995`; the stale history lines (§1.11's lead about l.429; the §1.16 cell citing D4-92; §1.16 rows for the later rounds).
+  - D3: HR-24 names the eviction branch; the item-5 note on `unauthorized-write` reasons from P2's separately authorized writes, not "never writes" (D6's N1 and N2 on `643d3bde`); HR-23's D4-94 citations; HR-24's code citations labelled `desk`.
+  - D4: C13 l.28's citation, l.1568's history line, and D6's N4 on `35c2c701` (a case for spans read right after the message that states them) if D4 judges it worth a test.
+- **Acceptance.** `records-auditor`, then D6 on each, and the owner of each touched rule. No value changes; if one must, it comes back to D1 first.
+- **Exclusions.** No code.
+
+### P4-D6-GT3 (D6): the owed DNP3 unsolicited-response case
+
+- **Objective.** The GT-PCAP case D4-94 owes: DNP3 over UDP with an unsolicited response from the outstation, including a master request on the 5-tuple the outstation started.
+- **Inputs.** D4-94; D6's N1 on #652; `docs/phase4/D6-gt-pcap-plan.md` §2B variant 3; HR-23.
+- **Deliverables, acceptance and exclusions** as P4-D6-GT2. Labels from the protocol and the bytes, never from an engine's output.

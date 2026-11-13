@@ -1888,3 +1888,39 @@ The owner's words in the CLI on 2026-11-13, asked whether the uncommitted `effor
 - **The owner gave no reason, and D1 did not ask for one.** One consequence, for the record: D3, the boundary's owner, now works at a lower effort than D6, which reviews it. D4-79's advice still stands: raise a role again if its reviewers find what a review at its effort missed.
 - **The change was live before it was committed.** The session reloads agent files while it runs (D4-91), so roles launched in the session of 2026-11-13 after the owner's edit may already have run at `medium`. D1 did not record which.
 - **Review.** D1 wrote this PR, so it merges on D6's acceptance (D4-85). It changes Markdown only, so it skips both workflows.
+
+## D4-92: C13 0.2, the node's design, C7 0.11, C8 0.13 and C4 0.4 approved together (D1, 2026-11-13)
+
+No new words from the owner. Evidence class: `desk`. Nothing is built. This number was reserved for this approval on 2026-11-13 (comments on #640 to #645), so D4-93 (the owner's effort change, #650) precedes it in the file.
+
+- **Approved as contracts, at the merged texts:**
+  - **C13 `otsec.netobs/0.2`:** `docs/phase4/D4-c13-0.2-proposal.md`, #645 merged as `8f86792c` at head `fd96f42d`.
+  - **The node's design for the sensor link:** `docs/phase4/D5-sensor-node.md`, #644 merged as `4cfd8fbb` at head `0548af2e`.
+  - **C7 0.11 (`otsec.authz/0.11`) and C8 0.13 (`otsec.audit/0.13`):** `docs/phase4/D3-sensor-link.md` §11.1 and §11.2, with D3's trust rules (SL-16, SL-17, SL-30, SL-31, SL-R6, the step rule and the rule on the two clocks) and the threat rows AP-35, HR-22, HR-23 and HR-24 in `docs/threat-model.md`; #641 merged as `91ab3e38` at head `643d3bde`.
+  - **C4 0.4:** `docs/phase4/D4-c4-0.4-proposal.md`, #645 at the same head.
+  - The approval is of what the documents require. Nothing in them is built or has run; every test they name is a plan.
+- **Reviews on the merged heads** (the lesson of D4-90 applied: D1 merged only on the reviews the brief names). #641: D6 (6848641756). #644: D4 (6848584853), D6 (6848677531), D3 at `dd67b995` (6848066442) with the later diff checked by D6 and D4. #645: D5 (6848582184), D6 (6848622473), D3 at `35c2c701` (6848067008) with the later diff checked by D6 and D5. `records-auditor` on all three merged heads: no blocking error.
+- **How it got here.** Brief P4-4-L6 ran thirteen review rounds on #641. Each of D6's blocking findings was a way for unwatched time to land in no gap, or for a tie to hide a flow; two were security holes (a clock step letting a spoofed session tie to a collector run, D6 on `c0cf1ecc` and `50a67730`). D1 continued the rounds rather than set a stopping rule, because two of the last three found real holes.
+- **D1's rulings made on the PRs and recorded here** (the comments hold the reasoning):
+  - The gap rule fails closed (D4-90), with one closed set of nine causes including `silent` (a heartbeat silence on a live link); W, R, the floor and M as #641 states them.
+  - `MaxLinkCursorBytes` is 4,096 (6846045180); the cursor is at most 2,026 bytes, 2,032 with `unclean` in full, 930 with no span or `prior`.
+  - One rule for the three capture-loss counters; `drops_driver` in `capture_loss`; T-12 taken as a timeout; the C4 0.4 size figures an unreproduced estimate that E4-6 pins in CI (6840581561, 6840188059).
+  - **No tie waits for a tick** (D3's ruling 6847786554 on D6's B1 at `bc19358e`, which a probe against `main`'s detector proved); the closure (no tie while the node's clock has moved more than `max_skew_ms` since the latest sample's receipt).
+  - The node-stop residual, first accepted, was withdrawn when D6 found usable signals (6845693140); it is a rule (M, the start bound, the heartbeats and spans to the first current hello).
+  - D6's N1 on `71fde2ac` taken (the agent syncs before each tick); the lying host's floor an accepted limit for 0.2 (6847521755).
+  - **The one-tick tie residual** (6848042423, corrected by 6848404829): a tied flow uses the run's own protocol and endpoint and is hidden whole. D1's first ruling claimed an owed mitigation narrowed it to read-only flows; D6 showed it narrows nothing today, and the claim is withdrawn. The residual is **HR-24**, open and high.
+  - **Counting precedence** when more than one cause refuses a tie: one count per refusal, in the order the alarm, the latest sample, the rule on the two clocks, the start, the spans (D1 on #645, D4's question). Owed as text (below).
+- **Accepted limits of C13 0.2:** a lying sensor host's capture floor outlives a rebuild of that host (a fresh floor at re-enrolment is a later brief); the heartbeat-stall remainder rests on an assumption about the unbuilt agent (AP-35, T-11); the C4 size figures are an estimate; D3's item 9 is not taken.
+- **Open high risks for the owner:** HR-22 (Modbus/TCP on a moved port not identified; D4-94), HR-23 (the DNP3 server misattributed on a reply-only flow; D4-94) and **HR-24** (the one-tick tie residual: a capable insider who controls the site's time source, spoofs the node's IP and MAC, times a sensor clock move into one tick interval and holds the relay's credentials can hide one Telnet, SSH or SNMP session). Each closes on a measured fix or on the owner's acceptance. D1 brings HR-24 to the owner with this entry.
+- **Owed before the third part's implementation briefs:** brief P4-4-L7 (`docs/agent-handoffs.md`, "After D4-92"), the non-blocking notes of the final rounds.
+- **Next:** P4-4-L7; the owner's answers on the sensor host (#640) and on HR-24; then the third part's implementation briefs, with D5 closing F1 to F11 first (D4-87, D4-88).
+
+## D4-94: the Modbus signature is not adopted, and E-D4-03's thirteen new rows (D1, 2026-11-13)
+
+No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs, `desk` for the rest.
+
+- **P4-4-E2's counted run** (run 43373373987 from `main` at `5c909280`; #643 merged as `5c909280`; D1's ruling on #643, 6845247619): the Modbus/TCP content signature is **not adopted**. `held-502` 25 of 27 (an unanswered Read Device Identification request and a session opening with function code 0); `adopt-when` not met. False positives 0 over 530 flows. The conditions (#642, `7b242b85…4418`) and D1's threshold were fixed before the run and did not change after the rehearsals showed the outcome. **HR-22 stands**, with its measured limits in the threat model. Any later signature is a new brief with new held-out captures.
+- **D1's addition to HR-22 and HR-23:** each closes on a measured fix on a counted run **or on the owner's acceptance of the risk** (D1, by message to D3 and in this entry).
+- **E-D4-03 against #648's 123 rows:** the same run counts for E-D4-03 and governs the 13 rows #648 added; run 43092601088 still governs the original 110 (D1's ruling on #651). DNP3 over UDP on a moved port passes under every Zeek configuration; the temporary-port case's service row fails under every Zeek configuration (the master named as the server on the replies' flow). **ADR-0009's third turning condition is not met** (D1's ruling on #652): Zeek reads DNP3 over UDP; the failure is a server misattribution, recorded as **HR-23**.
+- **Owed GT-PCAP case:** DNP3 over UDP with an unsolicited response from the outstation, including a master request on the 5-tuple the outstation started (D6's N1 on #652). Brief P4-D6-GT3.
+- **Merged on 2026-11-13:** #640, #642, #643, #646, #647, #648, #649, #650, #651, #652, #641, #644, #645.
