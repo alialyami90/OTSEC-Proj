@@ -49,7 +49,22 @@
 //     forward.too-large naming it, and moves the cursor past it only after
 //     every earlier event of the stream and the forward.too-large event
 //     itself are confirmed by this target. The health stream must therefore
-//     be one of the target's streams (Config.HealthStream).
+//     be one of the target's streams (Config.HealthStream), except on a
+//     second session (below).
+//   - A second session. A target may have a second session that carries
+//     some of its event streams apart from its main session, so that a
+//     stream that cannot be read (a sensor's database not open) ends only
+//     the second session's attempt, never the main one (D5's note,
+//     section 1.9 item 1, F10). The main session keeps the health stream
+//     and the audit stream, and a second session may carry neither
+//     (Config.HealthCursors). Both use the target's name as their consumer,
+//     which C5 keys by stream, so their cursors never meet. A too-large
+//     event of the second session is passed once the main session's saved
+//     cursor on the health stream has reached its forward.too-large event:
+//     that cursor is saved only after this target confirmed the event, so
+//     the size rule holds unchanged, and the main session never waits on
+//     the second. While the main session is down, the second's too-large
+//     event holds its stream, and Status says why.
 //   - Held, never cut. An audit record that RenderAudit refuses, a stored
 //     event that does not decode or render, a forward.* event that is itself
 //     too large, and a too-large event on the health stream hold their
