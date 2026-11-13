@@ -5,11 +5,28 @@ import (
 	"net/netip"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/authz"
 	"otsec.local/otsec/platform/node/nodeconfigtest"
 	"otsec.local/otsec/platform/sensorlink"
 )
+
+// waitSensor waits for the sensor manager's first step, which runs after
+// Start returns, then does what Start's tail did before the step moved:
+// the retention consumer's and the intake's first ticks, which start the
+// retention consumer and the detector. In a node the first Tick does them.
+// So a test reads the sensor as Start used to leave it.
+func waitSensor(t *testing.T, r *Runtime) {
+	t.Helper()
+	select {
+	case <-r.SensorFirstStep():
+	case <-time.After(30 * time.Second):
+		t.Fatal("the sensor manager's first step did not end within 30 s")
+	}
+	r.tickRetention(bg)
+	r.tickSensor(bg, false)
+}
 
 // F2 (F-027; D5-sensor-node.md section 1.9 item 2): an intake hold record
 // that cannot be read does not fail the node's start. The node starts,

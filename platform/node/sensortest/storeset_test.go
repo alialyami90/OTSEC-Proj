@@ -3,6 +3,8 @@ package sensortest
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -100,7 +102,8 @@ func TestSensorDrainOnlyDoesNotStallSyslog(t *testing.T) {
 func TestCannotKeepPrunesEvidenceOnly(t *testing.T) {
 	g := newRig(t)
 	prune := newGate()
-	r, _ := g.start(node.SensorSeams{Prune: func(context.Context, c5.DatabaseID) error { prune.wait(); return nil }})
+	// Not waited for: the manager's first step ends with the prune it holds.
+	r, _ := g.startNoWait(node.SensorSeams{Prune: func(context.Context, c5.DatabaseID) error { prune.wait(); return nil }})
 	// The gate opens before Close, so a control that holds Close behind it ends.
 	t.Cleanup(func() { r.Close() })
 	t.Cleanup(prune.open)
@@ -114,34 +117,43 @@ func TestCannotKeepPrunesEvidenceOnly(t *testing.T) {
 // F7 (section 1.9 item 1): a network database that opens and then fails
 // its first read does not fail the node's start. The node starts, raises
 // sensor-store-not-open once, and collects; the database reads as not
-// open. The manager tries again at the next tick, and the database opens.
-// Control: the sensor database back in Runtime.dbs (main's startDB, whose
-// failure fails Start).
+// open. The manager tries again at each tick: a second failed try raises
+// nothing more, and the third opens it. Controls: the sensor database back
+// in Runtime.dbs (main's startDB, whose failure fails Start); the alarm
+// raised at every try (D6's MUT-E).
 func TestSensorStoreFailsOpenNodeStarts(t *testing.T) {
 	g := newRig(t)
 	var opens atomic.Int32
-	r, st := g.start(node.SensorSeams{Startup: failFirstRead(&opens)})
+	r, st := g.start(node.SensorSeams{Startup: failReads(&opens, 2)})
 	defer r.Close()
 	if n := alarms(st, string(node.AlarmSensorStoreNotOpen)); n != 1 || r.Mode(node.NetworkDB) != c5.ModeFailed || r.Store(node.NetAlertStream(sensorID)) != nil {
 		t.Fatalf("%d not-open alarms, mode %s", n, r.Mode(node.NetworkDB))
 	}
 	collecting(t, r, 1)
 	r.Tick(bg)
-	eventually(t, "the network database opened at a later tick", func() bool {
+	eventually(t, "the second try", func() bool { return opens.Load() == 2 })
+	// The third try starts only once the second's step has ended.
+	r.Tick(bg)
+	eventually(t, "the network database opened at the third try", func() bool {
 		return r.Mode(node.NetworkDB) == c5.ModeCollecting && r.Store(node.NetAlertStream(sensorID)) != nil
 	})
-	if n := alarms(st, string(node.AlarmSensorStoreNotOpen)); n != 1 || opens.Load() != 2 {
+	if n := alarms(st, string(node.AlarmSensorStoreNotOpen)); n != 1 || opens.Load() != 3 {
 		t.Fatalf("%d not-open alarms, %d opens", n, opens.Load())
 	}
 }
 
-// failFirstRead is a Startup seam: the first startup's store is closed
-// before the node reads it, so the node's first read of it fails; later
-// startups are C5's.
+// failFirstRead is failReads for the first startup only.
 func failFirstRead(opens *atomic.Int32) func(context.Context, c5.StartupEnv, c5.StartupPolicy) c5.Report {
+	return failReads(opens, 1)
+}
+
+// failReads is a Startup seam: the first n startups' stores are closed
+// before the node reads them, so the node's first read of each fails;
+// later startups are C5's.
+func failReads(opens *atomic.Int32, n int32) func(context.Context, c5.StartupEnv, c5.StartupPolicy) c5.Report {
 	return func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
 		rep := c5.RunStartup(ctx, env, p)
-		if opens.Add(1) == 1 {
+		if opens.Add(1) <= n {
 			if db, ok := store.AsDB(rep.Store); ok {
 				db.Close()
 			}
@@ -178,8 +190,10 @@ func TestIntakeStartRetried(t *testing.T) {
 // one store.mode_change record and one mode_changed health event an hour,
 // on the node's monotonic clock; the next record says how many were not
 // written. Six changes within the hour after the start's record write
-// nothing; the first after the hour writes one, naming the six. Control:
-// the cap removed.
+// nothing; a seventh after the wall clock alone moves two hours writes
+// nothing either; the first after the monotonic hour writes one, naming
+// the eight before it. Controls: the cap removed; the cap on the wall
+// clock (D6's MUT-F).
 func TestSensorModeChangeCapped(t *testing.T) {
 	g := newRig(t)
 	// The database flaps between blocked, at each startup, and failed, at
@@ -211,16 +225,23 @@ func TestSensorModeChangeCapped(t *testing.T) {
 		g.advance(time.Minute)
 		flap()
 	}
-	// The seventh change is seen only once the manager has finished the
-	// sixth's step, so every record the six could write is written by then.
-	g.advance(time.Hour)
+	g.advanceWall(2 * time.Hour)
+	flap()
+	// A change is seen only once the manager has finished the step before
+	// it, so every record the seven before could write is written by now.
+	g.advance(time.Minute)
+	flap()
+	if recs, evs := modeChanges(t, r, node.NetworkDB); len(recs) != 1 || len(evs) != 1 {
+		t.Fatalf("seven changes within the monotonic hour, one after a wall-clock step: %d records, %d events", len(recs), len(evs))
+	}
+	g.advanceMono(time.Hour)
 	flap()
 	eventually(t, "the record after the hour", func() bool {
 		recs, evs := modeChanges(t, r, node.NetworkDB)
 		return len(recs) >= 2 && len(evs) >= 2
 	})
 	recs, evs := modeChanges(t, r, node.NetworkDB)
-	if len(recs) != 2 || len(evs) != 2 || !strings.Contains(recs[1].Detail, "6 earlier mode changes") || evs[1]["not_recorded"] != "6" {
+	if len(recs) != 2 || len(evs) != 2 || !strings.Contains(recs[1].Detail, "8 earlier mode changes") || evs[1]["not_recorded"] != "8" {
 		t.Fatalf("after the hour: %d records, %d events; last %+v, %v", len(recs), len(evs), recs[len(recs)-1], evs[len(evs)-1])
 	}
 }
@@ -288,3 +309,147 @@ type errorString string
 func (e errorString) Error() string { return string(e) }
 
 func errorf(s string) error { return errorString(s) }
+
+// D3's B1 on #663: a held mode change is written once its hour has passed,
+// even when no later change comes, naming the mode the database is in now.
+// The database opens blocked (recorded), then fails within the hour (held),
+// and stays failed; after the hour a tick writes one record and one event,
+// to failed, with not_recorded 1, and nothing more. Control: the flush
+// removed.
+func TestSensorHeldModeChangeFlushed(t *testing.T) {
+	g := newRig(t)
+	var startups atomic.Int32
+	r, _ := g.start(node.SensorSeams{
+		Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
+			if startups.Add(1) > 1 {
+				return c5.Report{Mode: c5.ModeFailed}
+			}
+			rep := c5.RunStartup(ctx, env, p)
+			if db, ok := store.AsDB(rep.Store); ok {
+				db.Close()
+			}
+			return c5.Report{Mode: c5.ModeBlocked, Unlock: rep.Unlock}
+		},
+		Resume: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy, prev c5.Report) c5.Report {
+			return c5.Report{Mode: c5.ModeFailed, Unlock: prev.Unlock}
+		}})
+	defer r.Close()
+	g.advance(10 * time.Minute)
+	r.Tick(bg)
+	eventually(t, "the database failed", func() bool { return r.Mode(node.NetworkDB) == c5.ModeFailed })
+	r.Tick(bg) // a retry that stays failed: no change
+	eventually(t, "the retry", func() bool { return startups.Load() == 2 })
+	if recs, evs := modeChanges(t, r, node.NetworkDB); len(recs) != 1 || len(evs) != 1 {
+		t.Fatalf("within the hour: %d records, %d events", len(recs), len(evs))
+	}
+	g.advance(time.Hour)
+	r.Tick(bg)
+	eventually(t, "the held change written", func() bool {
+		recs, evs := modeChanges(t, r, node.NetworkDB)
+		return len(recs) >= 2 && len(evs) >= 2
+	})
+	for range 3 {
+		g.advance(time.Hour)
+		n := startups.Load()
+		r.Tick(bg)
+		eventually(t, "a retry", func() bool { return startups.Load() > n })
+	}
+	recs, evs := modeChanges(t, r, node.NetworkDB)
+	if len(recs) != 2 || len(evs) != 2 || recs[1].ReasonCode != string(c5.ModeFailed) || evs[1]["to"] != string(c5.ModeFailed) ||
+		evs[1]["not_recorded"] != "1" || !strings.Contains(recs[1].Detail, "1 earlier mode changes") {
+		t.Fatalf("after the hour: %d records, %d events; last %+v, %v", len(recs), len(evs), recs[len(recs)-1], evs[len(evs)-1])
+	}
+}
+
+// D6's B1 on #663 (section 1.9 item 9): a panic in the sensor store set's
+// prune, on the manager's goroutine, is recovered as the step's is.
+// sensor-failed is raised once, naming the sensor, with its detail capped;
+// the node goes on: Tick returns and every collecting stream commits
+// within 2 s. Control: the prune outside the recover.
+func TestSensorPrunePanicContained(t *testing.T) {
+	g := newRig(t)
+	r, st := g.start(node.SensorSeams{Prune: func(context.Context, c5.DatabaseID) error {
+		panic("sensortest: a fault in the sensor database's prune")
+	}})
+	defer r.Close()
+	eventually(t, "sensor-failed", func() bool { return alarms(st, node.AlarmSensorFailed) == 1 })
+	within(t, 2*time.Second, "Tick after the panic", func() error { r.Tick(bg); return nil })
+	collecting(t, r, 1)
+	for _, a := range st.Snapshot("x").Alarms {
+		if a.Code == node.AlarmSensorFailed && (!strings.Contains(a.Detail, sensorID) || len(a.Detail) > node.SensorFailedDetailBytes+512) {
+			t.Fatalf("sensor-failed detail (%d bytes): %.200s", len(a.Detail), a.Detail)
+		}
+	}
+	if n := alarms(st, node.AlarmSensorFailed); n != 1 {
+		t.Fatalf("%d sensor-failed alarms", n)
+	}
+}
+
+// D6's B4 on #663: a sensor database that C5 cannot open is retried at
+// every tick, and its startup alarms are raised once, not at every try, so
+// they never push another alarm out of status. With the database's file
+// overwritten, 210 tries leave the collection alarm raised before them in
+// status, and store-open-failed raised once. Control: the startup alarms
+// raised at every try.
+func TestSensorRetryAlarmsOnce(t *testing.T) {
+	g := newRig(t)
+	r, _ := g.start(node.SensorSeams{})
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(g.c.Store.Dir, string(node.NetworkDB)+".db"), bytes.Repeat([]byte("not a database "), 512), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var tries atomic.Int32
+	r, st := g.start(node.SensorSeams{Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
+		tries.Add(1)
+		return c5.RunStartup(ctx, env, p)
+	}})
+	defer r.Close()
+	if m := r.Mode(node.NetworkDB); m != c5.ModeFailed {
+		t.Fatalf("network database %s", m)
+	}
+	st.Raise(relayID, "collection-unauthorized-line", "sensortest: a collection alarm raised before the retries")
+	for range 210 {
+		n := tries.Load()
+		r.Tick(bg)
+		eventually(t, "a retry", func() bool { return tries.Load() > n })
+	}
+	if n := alarms(st, "collection-unauthorized-line"); n != 1 {
+		codes := map[string]int{}
+		for _, a := range st.Snapshot("x").Alarms {
+			codes[string(a.Database)+"/"+a.Code]++
+		}
+		t.Fatalf("the collection alarm is gone from status after the retries (%d); alarms %v", n, codes)
+	}
+	if n := alarms(st, string(c5.AlarmOpenFailed)); n != 1 {
+		t.Fatalf("%d store-open-failed alarms", n)
+	}
+}
+
+// D6's B3 on #663 (section 1.9 item 1, F7): a sensor database's startup
+// that never returns does not hold the node's start. Start returns within
+// 2 s, every collecting stream commits, and the manager's first step has
+// not ended. Control: the first step back in Start.
+func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
+	g := newRig(t)
+	stuck := newGate()
+	var r *node.Runtime
+	within(t, 2*time.Second, "Start", func() error {
+		r, _ = g.startNoWait(node.SensorSeams{Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
+			stuck.wait()
+			return c5.RunStartup(ctx, env, p)
+		}})
+		return nil
+	})
+	// The gate opens before Close, so the manager stops within its bound.
+	t.Cleanup(func() { r.Close() })
+	t.Cleanup(stuck.open)
+	stuck.entered(t, "the sensor database's startup")
+	collecting(t, r, 1)
+	select {
+	case <-r.SensorFirstStep():
+		t.Fatal("the first step ended while its startup is held")
+	default:
+	}
+}

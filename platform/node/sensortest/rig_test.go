@@ -73,13 +73,31 @@ func (g *rig) advance(d time.Duration) {
 	g.wall, g.mono = g.wall.Add(d), g.mono+d
 	g.mu.Unlock()
 }
+
+// advanceWall and advanceMono move one clock only.
+func (g *rig) advanceWall(d time.Duration) { g.mu.Lock(); g.wall = g.wall.Add(d); g.mu.Unlock() }
+func (g *rig) advanceMono(d time.Duration) { g.mu.Lock(); g.mono += d; g.mu.Unlock() }
+
 func (g *rig) options(s node.SensorSeams) node.RuntimeOptions {
 	return node.RuntimeOptions{Status: node.NewStatus("", nil, g.now), Now: g.now, Mono: g.monoNow, SensorSeams: s,
 		Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}}
 }
 
-// start starts the node with seams s.
+// start starts the node with seams s and waits for the sensor manager's
+// first step, which runs after Start returns.
 func (g *rig) start(s node.SensorSeams) (*node.Runtime, *node.Status) {
+	g.t.Helper()
+	r, st := g.startNoWait(s)
+	select {
+	case <-r.SensorFirstStep():
+	case <-time.After(30 * time.Second):
+		g.t.Fatal("the sensor manager's first step did not end within 30 s")
+	}
+	return r, st
+}
+
+// startNoWait starts the node with seams s and returns when Start does.
+func (g *rig) startNoWait(s node.SensorSeams) (*node.Runtime, *node.Status) {
 	g.t.Helper()
 	opt := g.options(s)
 	r, err := node.Start(bg, g.c, opt)
