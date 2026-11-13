@@ -48,8 +48,12 @@ type goImport struct {
 }
 
 // scanImports parses the imports of every Go file under root, by package.
-// It skips testdata, hidden directories and nested Go modules, as the go
-// command does.
+// Below root, only a directory that holds a go.mod file is skipped: it is
+// another module, and the go command builds none of it into this one.
+// Nothing is skipped by its name. The go command skips testdata and names
+// that start with "." or "_" only when it expands a pattern such as ./...;
+// it builds a package in any of them that another package imports, so a
+// scan that skipped them would miss that package's imports.
 func scanImports(t *testing.T, root string) map[string][]goImport {
 	t.Helper()
 	pkgs := map[string][]goImport{}
@@ -63,10 +67,6 @@ func scanImports(t *testing.T, root string) map[string][]goImport {
 		if d.IsDir() {
 			if rel == "." {
 				return nil
-			}
-			name := d.Name()
-			if name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
-				return filepath.SkipDir
 			}
 			if fi, err := os.Stat(filepath.Join(p, "go.mod")); err == nil && !fi.IsDir() {
 				return filepath.SkipDir
@@ -208,8 +208,17 @@ func TestD21ImportRules(t *testing.T) {
 	if len(pkgs) < 10 || pkgs[repoModule+"/contracts/adapter"] == nil {
 		t.Fatalf("scanned %d packages; the scan did not reach the repository", len(pkgs))
 	}
-	if v := checkImports(pkgs); len(v) > 0 {
-		t.Errorf("%d D2-1 import violations:\n%s", len(v), strings.Join(v, "\n"))
+	// The scan reads the checker's own fixture, testdata/imports/bad. Read
+	// from here its packages are under tests/, where only D2-2 applies, so
+	// its three unapproved dependencies are the only violations expected.
+	// TestD21ImportRulesCatch checks that tree in full.
+	want := []string{
+		"tests/contract/testdata/imports/bad/modules/ied/sel751/testdata/z.go: D2-2 dependency not approved: github.com/example/intestdata",
+		"tests/contract/testdata/imports/bad/modules/telemetry/forward/forward.go: D2-2 dependency not approved: github.com/example/relp",
+		"tests/contract/testdata/imports/bad/platform/store/store.go: D2-2 dependency not approved: modernc.org/sqlitefake",
+	}
+	if got := checkImports(pkgs); !slices.Equal(got, want) {
+		t.Errorf("import violations found:\n%s\n\nwant only the fixture's:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	var mods, node []string
 	for p := range pkgs {
@@ -231,13 +240,17 @@ func TestD21ImportRules(t *testing.T) {
 func TestD21ImportRulesCatch(t *testing.T) {
 	got := checkImports(scanImports(t, filepath.Join("testdata", "imports", "bad")))
 	want := []string{
+		"cmd/otsec: D2-1 node binary reaches modules/ied/sel751 via cmd/otsec -> platform/node -> platform/_relay -> modules/ied/sel751",
 		"cmd/otsec: D2-1 node binary reaches modules/ied/telnet via cmd/otsec -> platform/node -> platform/helper -> modules/ied/telnet",
 		"cmd/otsec: D2-1 node binary reaches modules/security/collector via cmd/otsec -> platform/node -> modules/security/collector",
 		"modules/ied/sel751/sel751.go: D2-1 module imports outside contracts/ and its own agent's modules: otsec.local/otsec/platform/store",
 		"modules/ied/sel751/sel751_test.go: D2-3 imports tests/: otsec.local/otsec/tests/contract",
+		"modules/ied/sel751/testdata/z.go: D2-2 dependency not approved: github.com/example/intestdata",
+		"modules/telemetry/.x/x.go: D2-1 module imports outside contracts/ and its own agent's modules: otsec.local/otsec/platform/store",
 		"modules/telemetry/forward/forward.go: D2-2 dependency not approved: github.com/example/relp",
 		"modules/telemetry/normalize/normalize.go: D2-1 module imports outside contracts/ and its own agent's modules: otsec.local/otsec/cmd/otsec",
 		"modules/telemetry/normalize/normalize.go: D2-1 module imports outside contracts/ and its own agent's modules: otsec.local/otsec/modules/ied/sel751",
+		"platform/node: D2-1 node binary reaches modules/ied/sel751 via platform/node -> platform/_relay -> modules/ied/sel751",
 		"platform/node: D2-1 node binary reaches modules/ied/telnet via platform/node -> platform/helper -> modules/ied/telnet",
 		"platform/node: D2-1 node binary reaches modules/security/collector via platform/node -> modules/security/collector",
 		"platform/store/store.go: D2-2 dependency not approved: modernc.org/sqlitefake",
@@ -246,10 +259,13 @@ func TestD21ImportRulesCatch(t *testing.T) {
 	// agent's telnet package; the collector importing modules/ied/ and its
 	// own client; cmd/otsec importing collectorclient; platform/node
 	// importing a telemetry module; modernc.org/sqlite and golang.org/x/sys;
-	// a nested Go module and a testdata directory, which are not scanned.
+	// a nested Go module, which is not scanned.
 	// modules/telemetry/forward holds a directory named go.mod. That is not
 	// a module's go.mod file, so the package is scanned and its violation is
-	// in want (brief P4-PC-1).
+	// in want (brief P4-PC-1). A testdata directory and directories named
+	// _relay and .x are scanned too, and their violations are in want: the
+	// go command builds a package in any of them that another package
+	// imports.
 	sort.Strings(want)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("violations found:\n%s\n\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
