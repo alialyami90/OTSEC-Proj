@@ -58,13 +58,14 @@ func (g *gate) entered(t *testing.T, what string) {
 func TestSensorDrainOnlyDoesNotStallSyslog(t *testing.T) {
 	g := newRig(t)
 	resume := newGate()
-	t.Cleanup(resume.open)
 	r, _ := g.start(node.SensorSeams{Startup: drainOnly,
 		Resume: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy, prev c5.Report) c5.Report {
 			resume.wait()
 			return c5.Resume(ctx, env, p, prev)
 		}})
-	defer r.Close()
+	// The gate opens before Close, so a control that holds Close behind it ends.
+	t.Cleanup(func() { r.Close() })
+	t.Cleanup(resume.open)
 	if m := r.Mode(node.NetworkDB); m != c5.ModeDrainOnly {
 		t.Fatalf("network database %s", m)
 	}
@@ -99,9 +100,10 @@ func TestSensorDrainOnlyDoesNotStallSyslog(t *testing.T) {
 func TestCannotKeepPrunesEvidenceOnly(t *testing.T) {
 	g := newRig(t)
 	prune := newGate()
-	t.Cleanup(prune.open)
 	r, _ := g.start(node.SensorSeams{Prune: func(context.Context, c5.DatabaseID) error { prune.wait(); return nil }})
-	defer r.Close()
+	// The gate opens before Close, so a control that holds Close behind it ends.
+	t.Cleanup(func() { r.Close() })
+	t.Cleanup(prune.open)
 	within(t, 2*time.Second, "Tick", func() error { r.Tick(bg); return nil })
 	prune.entered(t, "the sensor database's prune")
 	within(t, 2*time.Second, "Runtime.Prune while a sensor database's prune is held", func() error { r.Prune(bg); return nil })
