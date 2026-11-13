@@ -1,0 +1,17 @@
+{
+  "format": "otsec.nodekey-register/0.1",
+  "node_id": "site-a-node1",
+  "entries": [
+    {
+      "ref": "nodekey_relpclient1",
+      "kind": "tls-key",
+      "version": 1,
+      "state": "pending",
+      "provider": "cng-software",
+      "public_key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEMbI0L70IdNiKg8aKvOItQbb+25A+iVPjxLAZW2Em64iz11NTWUOMr0PWTCmUCJ+P1t+0pHW20GbKQEiNi7HxMg==",
+      "fingerprint": "4073fc222dbb428ddd7a8cb1bc523adb68119fb1569d8fc4a2f3223ab7ad01f7",
+      "installed_by": "admin@site-a",
+      "installed_at": "2026-11-13T12:00:00Z"
+    }
+  ]
+}
