@@ -70,10 +70,14 @@ Where one of these differs from the brief below, the rule here wins.
   - D1 fills the brief template in `docs/agent-handoffs.md` for every brief.
   - `records-auditor` reads every records PR before D6 does.
   - Every implementer runs the self-check list in `docs/agent-handoffs.md` before asking for review.
-- **Agent context.** A new task for a role starts a fresh agent with its brief. An agent is resumed only to continue the same task.
+- **Agent context.** A new task for a role starts a fresh agent with its brief. An agent is resumed only to continue the same task, and then by the size of the job (D4-99):
+  - a narrow confirm ("does this commit do what the notes asked") resumes the agent whatever its size;
+  - work of more than about 20 steps goes to a fresh agent once the earlier one is over about 200,000 tokens, with the review comments' IDs and the diff range in its brief.
 - **Reports to D1** are at most 15 lines: the verdict or result, the link, and the blocking findings. The detail is on GitHub.
 - **A re-review** reads only the diff since the last reviewed head, and the reviewer's own findings.
-- **Build summaries.** Each design document over 500 lines gets a build summary of at most 150 lines, written by its owner. An agent reads the summary first, and in the full document only the sections its task needs. The full document stays the record, and the summary cites its sections.
+- **Reviewers start together** on the same head; D1 does not bring a reviewer in after the others have passed (D4-99).
+- **A finding that needs a new mechanism** is settled first: the options are agreed in comments, then written once (D4-99).
+- **Batch independent reads and checks into one step** (a trial; D1 measures it after the next session, D4-99).
 
 ### Scope: every OT device class, SEL first
 

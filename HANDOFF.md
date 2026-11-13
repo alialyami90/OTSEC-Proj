@@ -52,7 +52,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
      - D3 amends SL-3 for the frame stage's new pipe.
 
      D1 approves each. The stage-2 risks are in D1's merge comment on #664.
-  5. **Build summaries (D4-97):** D4 for C13 0.2, D5 for `D5-sensor-node.md`, D3 for `D3-sensor-link.md`.
+  5. **Dropped: the build summaries** (D4-99).
   6. **D1's own records change:**
      - rule on whether HR-23's fix part (b) needs a change outside the approved engine's script, (D6's note 5 on #666, in D1's merge comment there, 6854399648), and on ADR-0009's third turning condition (HR-23's row, and D4's point 7 on #657, 6852704517);
      - the follow-up list in D1's merge comment on #655, which predates D4-97: D1 takes or drops each item there and carries none further;

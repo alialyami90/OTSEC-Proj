@@ -2000,6 +2000,8 @@ No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 at 
 
 ## D4-97: working rules for productivity (the owner, 2026-11-13)
 
+*Partly superseded by D4-99: the build summaries are dropped.*
+
 The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes and recommended the first five. The owner replied: "Implement everything except 6." The sixth (several D4 and D5 instances) is not adopted. Evidence class: `desk`.
 
 - **CI.** The twenty `integration-long` legs move to `ci-long.yml`. They run on every push to `main`, and on a pull request only after D1 adds the `full-ci` label, after the reviewers' last pass. Every other job runs on every push, as before. D1's merge check reads the head's check runs by name, not `gh pr checks` (D6's B1 on #665). The merge rule is unchanged in substance: every job, the long legs included, is green on the merged head.
@@ -2068,3 +2070,26 @@ Those stay with the owner, as listed below.
   - D7 inventories the packet-dropping tool.
   - D4 and D7 choose the operating system.
   - D1 issues the HR-23 fix brief and the HR-22 signature brief. The gate's Modbus bullet is marked with this entry in the same PR.
+
+## D4-99: the workflow review's changes (the owner, 2026-11-13)
+
+The owner's words in D1's session on 2026-11-13: "Do all 2 to 5 and the drop build summaries, then merge." They answer D1's review of the workflow, measured from this session's transcripts:
+- 32 subagents reread about 536M cached tokens. The six agents that peaked over 440,000 tokens made up 38% of that.
+- The main session reread about 299M, and its 161 short status replies were about 10% of that.
+- The long design documents were 13% of what agents read through tools.
+
+Evidence class: `desk`. D1's first proposal 1, a restart habit for the main session, is not adopted as a rule.
+
+- **2. Resume by the size of the job** (CLAUDE.md, "Working rules").
+  - A narrow confirm resumes the agent, whatever its size. Today's resumed confirms took 4 to 13 tool calls, while fresh reviewers took 30 to 66.
+  - Work of more than about 20 steps goes to a fresh agent once the earlier one is over about 200,000 tokens.
+- **3. Reviewers start together on the same head, and a finding that needs a new mechanism is settled in comments before it is written.**
+  - On #664, D6 joined after D2 and D3 had passed, which cost at least one round.
+  - Three of its eight versions each added a new mechanism invented in answer to a finding.
+  - D1 withdrew two other rules after re-checking them: "a fix commit holds only what was asked" and "a pass is final for Markdown". The six runs after the passes found three real problems.
+- **4. Batching independent reads and checks into one step,** as a trial. Agents made 1.16 tool calls per step. D1 reruns the measurement after the next session, with the scratch script `d1_usage_probe4.py`.
+- **5. The Linux `go` job runs `go test -v ./...`.** The hand-kept `-v` list of sensor tests is removed from both jobs. Windows already printed every test name, and the list had to be edited, and reviewed, on every PR that added a test. The rsyslog `-v` step stays.
+- **Dropped: the build summaries of D4-97.**
+  - The design documents are 13% of tool reads, and agents already read them in slices.
+  - Each summary would be a second copy that needs its own reviews and can drift from the original.
+- **Next decision number:** D4-100.
