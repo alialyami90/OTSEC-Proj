@@ -83,6 +83,38 @@ jobs:
           name: gt-pcap-dnp3
           path: ${{ runner.temp }}/dnp3/
           if-no-files-found: warn
+  # The PRP pairs for the discard stage's comparison (P4-D6-GT2; plan
+  # section 2C; C13 0.2's CH-28 and test P-2). prp_pairs.py writes the
+  # capture, the hashes pin it, and prp_pairs_label.py places each frame's
+  # tag and RCT from the pinned tshark's fields, checks the writer's claim
+  # for every pair against CH-28 on the bytes, and writes the label, which
+  # must equal the committed one. The capture is rebuilt here, never
+  # committed.
+  prp-pairs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tshark
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Write the PRP pairs, and check them against the committed hashes
+        run: |
+          python3 tests/integration/gt_pcap/prp_pairs.py "$RUNNER_TEMP/pairs"
+          cd "$RUNNER_TEMP/pairs" && sha256sum -c "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/prp-pairs/prp-pairs.sha256"
+      - name: Label them with tshark, and check every pair's claim
+        run: python3 tests/integration/gt_pcap/prp_pairs_label.py "$RUNNER_TEMP/pairs"
+      - name: The label equals the committed one
+        run: diff -u tests/fixtures/network/gt-pcap/prp-pairs/prp-pairs.tsv "$RUNNER_TEMP/pairs/prp-pairs.tsv"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gt-pcap-prp-pairs
+          path: ${{ runner.temp }}/pairs/prp-pairs.tsv
+          if-no-files-found: warn
   # Modbus/TCP on a moved port (D1 on #623; plan sections 2B and 2C).
   # GT-PCAP has no Modbus/TCP writer, so the case is derived from the public
   # capture modbus.pcap: movedport.py rewrites its server port and nothing

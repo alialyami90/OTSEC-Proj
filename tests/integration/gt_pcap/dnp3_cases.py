@@ -55,7 +55,8 @@ NET = {
         "M4": {"ip": "192.0.2.13", "mac": "02:00:00:00:00:13", "link": 4, "asset": None, "writes": []},
         # O1's UDP session (DNPTRn := UDP), authorized to control it. With
         # DNPUDPn at its default the relay answers to UDP 20000, so this
-        # master sends from 20000 too.
+        # master sends from 20000 too. It also holds O2's UDP session, with
+        # that session's DNPUDPn := 20001 (dnp3-udp-moved-port).
         "M5": {"ip": "192.0.2.14", "mac": "02:00:00:00:00:14", "link": 5,
                "asset": "6a1f3c2e-0d4b-4e8a-9c71-2b5d8e0f1a14",
                "c1_endpoint": {"transport": "ssh", "port": 22, "path": "direct"}, "writes": ["control"]},
@@ -68,7 +69,7 @@ NET = {
                "c1_endpoint": {"transport": "telnet", "port": 23, "path": "direct"}},
     },
     "authorized_writers": [["M1", "O1", "write"], ["M1", "O1", "control"],
-                           ["M1", "O2", "control"], ["M5", "O1", "control"]],
+                           ["M1", "O2", "control"], ["M5", "O1", "control"], ["M5", "O2", "control"]],
     "sa_reply_timeout_ms": 5000,
 }
 
@@ -80,17 +81,29 @@ TIME_MS = 1_762_545_600_000  # 2025-11-07T20:00:00Z, the series' wall clock in m
 class Session:
     """One master's TCP connection to an outstation (O1 unless named), or
     its UDP conversation with it, with DNP3 helpers. Over UDP each datagram
-    holds one link frame, and nothing below DNP3 is acknowledged."""
+    holds one link frame, and nothing below DNP3 is acknowledged. A UDP
+    session whose responses go to another port of the master's (reply_port,
+    the relay's DNPUDPn) sends them as a second conversation, `back`, from
+    the outstation's port to that one."""
 
-    def __init__(self, master, clock, sport, isn=1000, outstation="O1", l4="tcp"):
+    def __init__(self, master, clock, sport, isn=1000, outstation="O1", l4="tcp", reply_port=None):
         m = NET["masters"][master]
         o = NET["outstation"] if outstation == "O1" else NET["outstations"][outstation]
         self.m, self.o = m, o
         ends = synth.Host(m["mac"], m["ip"], sport), synth.Host(o["mac"], o["ip"], o["port"])
         self.conv = (synth.UDPConv(*ends, clock, ident=isn) if l4 == "udp" else
                      synth.TCPConv(*ends, clock, isn_c=isn, isn_s=isn + 50_000, ident=isn))
+        self.back = self.conv
+        if reply_port is not None:
+            self.back = synth.UDPConv(synth.Host(m["mac"], m["ip"], reply_port), ends[1], clock, ident=isn + 0x4000)
         self.tseq = {True: 0, False: 0}
         self.app = 0
+
+    def frames(self):
+        """Every frame of the session, both conversations, in the order sent."""
+        if self.back is self.conv:
+            return self.conv.frames
+        return sorted(self.conv.frames + self.back.frames, key=lambda f: f.ns)
 
     def _link(self, from_master, apdu):
         src, dst = (self.m["link"], self.o["link"]) if from_master else (self.o["link"], self.m["link"])
@@ -105,7 +118,7 @@ class Session:
         return self.conv.send(True, self._link(True, dnp3.request(seq, fc, objects)), gap_ns=gap_ns)[0], seq
 
     def reply(self, seq, fc=dnp3.RESPONSE, objects=b"", gap_ns=None):
-        return self.conv.send(False, self._link(False, dnp3.response(seq, fc, 0, objects)), gap_ns=gap_ns)[0]
+        return self.back.send(False, self._link(False, dnp3.response(seq, fc, 0, objects)), gap_ns=gap_ns)[0]
 
     def auth(self, seq, fc, objects):
         """A master's function 32 or 33 carrying group 120 objects, in the
@@ -130,14 +143,14 @@ class Session:
         return reqs
 
 
-def _case(clock, master, sport, body, outstation="O1", l4="tcp"):
-    s = Session(master, clock, sport, outstation=outstation, l4=l4)
+def _case(clock, master, sport, body, outstation="O1", l4="tcp", reply_port=None):
+    s = Session(master, clock, sport, outstation=outstation, l4=l4, reply_port=reply_port)
     if l4 == "tcp":
         s.conv.handshake()
     marks = body(s) or {}
     if l4 == "tcp":
         s.conv.close()
-    return s.conv.frames, marks
+    return s.frames(), marks
 
 
 def _frame_no(frames, fr):
@@ -331,6 +344,32 @@ def cases():
         {"frames": [rows[0]["frames"][0]], "rules": ["unauthorized-write"], "context": "acknowledged", "sa": "",
          "note": "derived from dnp3-unauthorized-operate, frames %d and %d removed and later frames renumbered; "
                  "emitted at sa_reply_timeout_ms with sa absent; latency includes that wait" % (resp, resp + 1)}]))
+
+    # P4-D6-GT2 (D1 on #637, D4-87; plan section 2B): DNP3 over UDP with no
+    # end on 20000, and the two other port arrangements a SEL-751's UDP
+    # settings allow (DNPUDPn, REQ or 1 to 65534, default 20000; S22 Table
+    # D.7, p. D.11, and SET.75). Each is dnp3-udp's poll and operate from
+    # M5, which no R6.2 series holds. Which port each end sends from, and
+    # what REQ does, are inference; H-23 settles them.
+    add("dnp3-udp-moved-port", "M5", NET["outstations"]["O2"]["port"], poll_then_operate,
+        decode_rows("DNP3 over UDP 20001 on O2, both ends on 20001 (DNPNUM and that session's DNPUDPn := 20001), "
+                    "so no end is on the registered port 20000"), outstation="O2", l4="udp")
+    # DNPUDPn stays 20000 while M5 sends from a temporary port: O1's
+    # responses go to M5's port 20000, a second 5-tuple whose first datagram
+    # is the outstation's. A response pairs with its request by (master,
+    # outstation, application sequence number), not by flow (C13 section 4.3).
+    add("dnp3-udp-temp-port", "M5", 41017, poll_then_operate, [
+        {"marks": ["req", "resp"], "rules": ["new-service", "unknown-pair"], "context": "acknowledged", "sa": "none",
+         "note": "DNP3 over UDP on O1 from M5's temporary port 41017 while DNPUDPn stays 20000, so the response "
+                 "comes back on a second 5-tuple, 192.0.2.20:20000 to 192.0.2.14:20000: unknown-pair for each of the "
+                 "two flows, since neither orientation of either pair is in the baseline, and new-service for "
+                 "192.0.2.20 udp/20000, never for the master's port 20000"},
+        {"marks": ["op", "op_resp"], "rules": [], "context": "acknowledged", "sa": "none",
+         "note": "the authorized master's operate, its response on the second 5-tuple; dnp3_no_sa, and no alert "
+                 "beyond the two flows' own"}], l4="udp", reply_port=NET["outstation"]["port"])
+    add("dnp3-udp-req-port", "M5", 41018, poll_then_operate,
+        decode_rows("DNP3 over UDP on O1 with DNPUDPn := REQ, so O1 answers to M5's temporary port 41018 on one "
+                    "5-tuple"), l4="udp")
     return out
 
 
@@ -385,6 +424,9 @@ def series(seed, start_ns, duration_s):
 DECODE = {
     "dnp3-moved-port": {"l4": "tcp", "port": NET["outstations"]["O2"]["port"]},
     "dnp3-udp": {"l4": "udp", "port": NET["outstation"]["port"]},
+    "dnp3-udp-moved-port": {"l4": "udp", "port": NET["outstations"]["O2"]["port"]},
+    "dnp3-udp-temp-port": {"l4": "udp", "port": NET["outstation"]["port"]},
+    "dnp3-udp-req-port": {"l4": "udp", "port": NET["outstation"]["port"]},
 }
 
 SERIES = {

@@ -32,7 +32,7 @@ def test_every_capture_has_its_protocol_service_and_function_rows():
     by = collections.defaultdict(collections.Counter)
     for r in rows():
         by[r["capture"]][r["condition"]] += 1
-    assert len(by) == 22  # 19 labelled DNP3 cases, the two R6.2 series, and the derived Modbus capture
+    assert len(by) == 25  # 22 labelled DNP3 cases, the two R6.2 series, and the derived Modbus capture
     for name, n in by.items():
         assert n["protocol"] >= 1 and n["service"] >= 1 and n["function"] >= 1, name
 
@@ -67,11 +67,33 @@ def test_the_moved_port_and_udp_rows():
     assert {(r["l4"], r["dport"]) for r in udp} == {("udp", "20000")}
     for case in (moved, udp):
         assert sorted(r["code"] for r in case if r["condition"] == "function") == ["1", "5"]
-    # Every other DNP3 capture is on TCP 20000, so these two are the only
+    # Every other DNP3 capture is on TCP 20000, so these five are the only
     # DNP3 rows that tell a port-only or TCP-only decoder apart.
-    rest = {(r["l4"], r["dport"]) for n, rs in got.items() if n not in ("dnp3-moved-port", "dnp3-udp") for r in rs
+    udp_cases = ("dnp3-udp", "dnp3-udp-moved-port", "dnp3-udp-temp-port", "dnp3-udp-req-port")
+    rest = {(r["l4"], r["dport"]) for n, rs in got.items() if n not in ("dnp3-moved-port",) + udp_cases for r in rs
             if r["protocol"] == "dnp3"}
     assert rest == {("tcp", "20000")}
+
+
+def test_the_three_udp_arrangements_of_p4_d6_gt2():
+    got = collections.defaultdict(list)
+    for r in rows():
+        got[r["capture"]].append(r)
+    for name in ("dnp3-udp-moved-port", "dnp3-udp-temp-port", "dnp3-udp-req-port"):
+        assert {r["l4"] for r in got[name]} == {"udp"}, name
+        assert sorted(r["code"] for r in got[name] if r["condition"] == "function") == ["1", "5"], name
+        assert [r["dport"] for r in got[name] if r["condition"] == "service"] == [
+            "20001" if name == "dnp3-udp-moved-port" else "20000"], name
+        assert {r["src"] for r in got[name] if r["condition"] == "function"} == {"192.0.2.14"}, name
+    # D2's note 1 on #637: no row of the moved case is on 20000, at either end.
+    assert "20000" not in {p for r in got["dnp3-udp-moved-port"] for p in (r["sport"], r["dport"])}
+    # The temporary-port case is two flows: the requests' and the responses',
+    # whose first datagram is the outstation's. Its one service is the
+    # outstation's end, never the master's port 20000.
+    flows = [(r["src"], r["sport"], r["dst"], r["dport"]) for r in got["dnp3-udp-temp-port"] if r["condition"] == "protocol"]
+    assert flows == [("192.0.2.14", "41017", "192.0.2.20", "20000"), ("192.0.2.20", "20000", "192.0.2.14", "20000")]
+    assert [(r["dst"], r["dport"]) for r in got["dnp3-udp-temp-port"] if r["condition"] == "service"] == [
+        ("192.0.2.20", "20000")]
 
 
 def test_the_derived_modbus_capture_has_its_rows_off_port_502():
