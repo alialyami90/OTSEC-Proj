@@ -24,7 +24,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-13, work paused at the owner's word.** Nothing is running, and no PR is open at this checkpoint.
+**CHECKPOINT (D1), 2026-11-13, work paused at the owner's word.** No agent is running, and no PR is open once this checkpoint merges. The first full CI of `main` at `459594ff` (#663's tree) passed: `ci` run 43442328706 (4 of 4) and `ci-long` run 43442328628 (20 of 20).
 
 - **Merged on 2026-11-13, after D4-92:**
   - #657 and #659 (the DNP3 unsolicited case and its pin);
@@ -40,24 +40,26 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
   1. **P4-4-F27 step (3), D5.** Covers F1 (the ceiling, with F9's health event and the forwarder's sensor-stream reports, D6's N3 on #662), F3 and F4, with item 9's `recover` in the scheduler calls. Also carries the owed items:
      - `after_seq` (with D4);
      - `tickSensor(final)` in `Close`;
-     - holds after `sensor-failed`.
+     - holds after `sensor-failed`;
+     - a published intake that keeps appending through `liveAppender` when a retry brings the network database back `drain-only` (D6's item 3 on #663, 6853957658).
 
      The brief's table in `docs/agent-handoffs.md` lists the owed tests.
-  2. **P4-4-F27 step (4).** D3 builds the link-key reader under `modules/security/`, settling NK-2 against NK-5. Then D5 wires F11.
-  3. **The `drain-only` audit gap on `main`** (D3's finding on #663, 6852333699). The writer maps it to `drain_only`. D3 drafts the C8 0.13 sentence and D5 the C5 one. D5 adds `modeReason` and its node test, and D6 adds the contract test and an F-number.
+  2. **P4-4-F27 step (4).** D3 builds the link-key reader under `modules/security/`, settling NK-2 against NK-5. Then D5 wires F11. That is allowed under the wiring ban because step (4) reads a local file and dials nothing (D1's ruling 3 on #660, 6851490813). Its dial legs stay owed.
+  3. **The `drain-only` audit gap on `main`** (D3's finding on #663, 6852333699). D1 ruled that the writer is to map it to `drain_only` (6852845352); nothing is built. D3 drafts the C8 0.13 sentence and D5 the C5 one. D5 adds `modeReason` and its node test, and D6 adds the contract test and an F-number.
   4. **Before HR-24 stage 2 can pin:**
-     - D4 drafts the C13 minor (the `own-session-mismatch` token, per-direction payload and packet counts, the overlap count);
+     - D4 drafts the C13 minor (`docs/phase4/D4-hr24-design.md` §7.1, and §7.2 items 4 and 7);
      - D2 drafts the C2 minor (`refusals`, `command_octets_received`, the collector's `BytesRetrans` with D3);
      - D3 amends SL-3 for the frame stage's new pipe.
 
      D1 approves each. The stage-2 risks are in D1's merge comment on #664.
   5. **Build summaries (D4-97):** D4 for C13 0.2, D5 for `D5-sensor-node.md`, D3 for `D3-sensor-link.md`.
   6. **D1's own records change:**
-     - rule on whether HR-23's fix part (b) needs a change outside the approved engine's script, and on ADR-0009's third turning condition (D6's note, in D1's merge comment on #666, 6854399648);
+     - rule on whether HR-23's fix part (b) needs a change outside the approved engine's script, (D6's note 5 on #666, in D1's merge comment there, 6854399648), and on ADR-0009's third turning condition (HR-23's row, and D4's point 7 on #657, 6852704517);
      - the follow-up list in D1's merge comment on #655, which predates D4-97: D1 takes or drops each item there and carries none further;
-     - D6 updates points 3 and 4 of F-027's gate for D4-96.
+     - D6 records in F-027 (`docs/verification.md`) the closings of #662 and #663 (F2, F5, F6, F7, F9's cap, F10), corrects its F11 sentence, and updates points 3 and 4 of its gate for D4-96.
   7. **The approved contracts in code** (C13 0.2, C7 0.11, C8 0.13, C4 0.4, with D6's contract tests): the first of the later briefs of the third part, after P4-4-F27. Item 3's C8 sentence folds into it.
-  8. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
+  8. **Issued briefs not yet delivered:** P4-D6-RR, P4-D6-I100, P4-D6-MUT and P4-D7-2 (D4-88, D4-90).
+  9. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
 - **The sensor's own brief** also waits for the owner's answers on the sensor's host (#640, "Waiting on the owner" item 1).
 - **F-027's gate stands (D4-96):** no `network_sensor` section outside the tests, no release, and no product wiring of any sensor path.
 - **CI under D4-97:** add `full-ci` after the last review, and merge only on the merge check in CLAUDE.md, "Testing and merging".
@@ -73,7 +75,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 ## Waiting on the owner
 
-0. **Item 4 has three open high risks (D4-92, D4-94, D4-95); two of them wait on the owner.** HR-23 is wider since the counted run 43419437949: on a DNP3-over-UDP flow the relay starts, nothing after the master's confirm is parsed, a write included (`docs/threat-model.md`). D1 brings a recommendation with its fix. HR-22 (Modbus/TCP on a moved port not identified) and HR-23 (on a DNP3 flow the relay starts, the wrong end taken as the server, so a master's write can be missed) each close on a fix measured on a counted run, or on the owner's acceptance; D1 decides when. **HR-24 stays open, but no longer waits on the owner:** the owner requires a detector change before item 4's gate (D4-95, 2026-11-13; brief P4-4-HR24), and acceptance does not close it.
+0. **Item 4 has three open high risks (D4-92, D4-94, D4-95); two of them wait on the owner.** HR-23 is wider since the counted run 43419437949: on a DNP3-over-UDP flow the relay starts, nothing after the master's confirm is parsed, a write included (`docs/threat-model.md`). D1 brings a recommendation with its fix. HR-22 (Modbus/TCP on a moved port not identified) and HR-23 (on a DNP3 flow the relay starts, the wrong end taken as the server, so a master's write can be missed) each close on a fix measured on a counted run, or on the owner's acceptance; D1 decides when. **HR-24 stays open, but no longer waits on the owner:** the owner requires a detector change before item 4's gate (D4-95, 2026-11-13; brief P4-4-HR24), and acceptance does not close it. It comes back to the owner with stage 3's measurement and its named misses before the gate (D1's merge comment on #664).
 0a. **Effort (D1's open question):** whether D3 goes back to `high` for security reviews. The owner's last choice is D4-93.
 0b. **Later, when HR-24 stage 2 needs it:** a packet-dropping driver on the owner's PC, to measure Windows' `BytesRetrans` (D1 on #664).
 1. **The sensor's host under option (b)** (D4-85): the hardware and the operating system of the Linux machine at each site, and who ships its image. D1's recommendation, choice by choice for O-1 to O-12, is `docs/phase4/D1-sensor-host-recommendation.md`. The choice of option (b) itself is made.
