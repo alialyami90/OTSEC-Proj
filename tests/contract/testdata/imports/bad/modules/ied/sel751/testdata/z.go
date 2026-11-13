@@ -1,5 +1,5 @@
 package z
 
 import (
-	_ "github.com/example/ignored"
+	_ "github.com/example/intestdata"
 )

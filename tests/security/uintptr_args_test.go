@@ -24,9 +24,10 @@ import (
 // and fails on any uintptr(unsafe.Pointer(...)) that is not a direct
 // argument of such a call. The compiler's escape report (nodekey's
 // TestCNGPointersEscape) checks that the directive works; this checks that
-// every site uses it. platform/experiments is a separate module that CI
-// does not build, and testdata holds fixtures, so both are left out.
-// Evidence class: desk (a source rule), any OS.
+// every site uses it. platform/experiments/phase0 is a separate module, and
+// its go.mod keeps it out; testdata is read, since the go command builds a
+// package there that another package imports. Evidence class: desk (a
+// source rule), any OS.
 func TestUintptrConversionsInCallArgs(t *testing.T) {
 	root := filepath.Join("..", "..")
 	checked, files, err := checkUintptrConversions(root, t.Errorf)
@@ -52,8 +53,10 @@ func TestUintptrConversionsInCallArgs(t *testing.T) {
 // hides no code of the module. On the owner's PC that is a worktree's copy
 // of the repository under .claude/, and the two local folders that Git
 // ignores; in the repository it is platform/experiments/phase0. Nothing is
-// skipped by its name alone, and a directory that is entered and cannot be
-// read is an error, never a silent skip.
+// skipped by its name alone, not testdata, .git or node_modules: the go
+// command builds a package in a testdata or "."-directory that another
+// package imports. A directory that is entered and cannot be read is an
+// error, never a silent skip.
 func checkUintptrConversions(root string, errorf func(format string, args ...any)) (checked, nfiles int, err error) {
 	fset := token.NewFileSet()
 	type parsed struct {
@@ -66,13 +69,6 @@ func checkUintptrConversions(root string, errorf func(format string, args ...any
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "testdata", "node_modules":
-				return filepath.SkipDir
-			}
-			if rel, _ := filepath.Rel(root, path); filepath.ToSlash(rel) == "platform/experiments" {
-				return filepath.SkipDir
-			}
 			if path != root {
 				if fi, err := os.Stat(filepath.Join(path, "go.mod")); err == nil && !fi.IsDir() {
 					return filepath.SkipDir
