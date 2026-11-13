@@ -4,7 +4,8 @@
 #
 # Members (corpus-members): GT-PCAP's DNP3 captures (gt-pcap/dnp3/dnp3.sha256, rebuilt by D6's dnp3_cases.py), MANIFEST.tsv's and
 # extra-captures.tsv's public captures, the corpus as rehearsed on #643, and the additions of P4-4-E2's amendment: thirteen public Zeek traces
-# and three synthesized captures. No derived capture is a member: a held-out capture's moved form (moved_sha256) is the run's, not the corpus's.
+# and three synthesized captures. GT-PCAP's three DNP3-over-UDP cases that #648 added (dnp3-udp-moved-port, -req-port, -temp-port)
+# are members from rehearsal 7 on #643; S0 first ran over them in rehearsal 43354762583's dnp3 job. No derived capture is a member: a held-out capture's moved form (moved_sha256) is the run's, not the corpus's.
 # Nothing is committed: every public capture is fetched in the run at its pin and checked, and a synthesized one is written in the run by its
 # writer and checked. A capture that fails its check is left out, and its rows read "not run".
 #
@@ -61,6 +62,9 @@ dnp3-sa-failed-outstation.pcap	65f214a85bcd510d25d5bc28419f2bb33b4be64b6dce036b0
 dnp3-sa-failed-unauthorized.pcap	2cbad39b3bf01f748c3a31b785afa65df8c98dd9ac5c18131a21c1f0966740cc	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	43314221626,43315465228
 dnp3-sa.pcap	874da918256c344fed98ad16e38c15a9a160b727cfa1036f151af2695e95620f	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	43314221626,43315465228
 dnp3-train.pcap	b38ff7fe572e9fb3921a23a894001b9e01c3561b556ad808fe88ccf7be57e2dc	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	43314221626,43315465228
+dnp3-udp-moved-port.pcap	798ce559d6a6b0158c4213747d1db2d2dea206c6c02ef34bc10a686c55981712	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	-
+dnp3-udp-req-port.pcap	7f7fac565ce05a841aa84ec0125f505280fc5c71d6ad3a0e11eaa5d76e8b0b32	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	-
+dnp3-udp-temp-port.pcap	a970f763e278c49591a4be32e661fc18c9e036421a1f09a77cf1a1560e3d9c34	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	-
 dnp3-udp.pcap	51f40a3214faf152a4a8b3c8a219dcb29a5b786113be1fbec0c4b8bb7b11c37f	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	43314221626,43315465228
 dnp3-unauthorized-operate-no-response.pcap	c3ddc039274d648de1529b815ba1530231cf6d564dac18bebf080ab527150af1	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	43314221626,43315465228
 dnp3-unauthorized-operate.pcap	78ef43625959e54060a9b38fd9d5dc9fe91d6c8421b883d58ea22aaa6e1be9f7	writer:tests/integration/gt_pcap/dnp3_cases.py	GT-PCAP (D6), synthesized	the project's own	dnp3	none	-	-	43314221626,43315465228
