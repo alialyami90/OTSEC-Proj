@@ -1955,3 +1955,27 @@ The owner gave this answer in D1's session on 2026-11-13. D1 had asked whether t
   - After #654 merges, D3's next change cites this entry in HR-24's row and in SL-17 (`docs/phase4/D3-sensor-link.md`, the "No mitigation narrows it today" item).
   - Item 4's gate report states HR-24's state.
   - When HR-24 closes, the threat model records what an attacker who knows the rule can still hide.
+
+## D4-96: F-027 closes in two steps, and the gate holds until the owed tests pass (D1, 2026-11-13)
+
+No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 (6851207952).
+
+- **The problem.** D4-87 and F-027 put §1.9's tests in the first brief of the third part, "before any dialer". Several of those tests need machinery that is not on `main`:
+  - F8's tests need refused hellos, `sensor.link_refused` and `rekey`;
+  - SL-T13's leg (e) needs heartbeats and coverage gaps;
+  - F11's dial tests need the dialer;
+  - some of F1's events need `sensorrun.json`, `sensor.redial-granted` or coverage gaps;
+  - the rig legs need a real sensor and link.
+
+  The first brief cannot meet that as written.
+- **The ruling.**
+  - Brief P4-4-F27 closes each coupling on `main`'s code, with the tests that can run there, each with its control. That includes in-process legs for F1's ceiling and F4's fairness rule, with controls 1 and 2.
+  - Every other test of §1.9 is owed by the brief that builds its machinery: the C13 0.2 intake, the dialer and enrolment, or the sensor and its rig. Each owing brief names its owed tests.
+  - The owed tests are release blockers.
+  - F-027's gate stays until every owed test has passed: no `network_sensor` section outside the tests, no release, no caller of `ServeSensor` outside the tests, and no caller of `Link.Serve` other than `ServeSensor`.
+  - The dialer and enrolment may be built and tested through tests before F-027 closes. Their product call to `ServeSensor` comes only in the PR that passes the last owed test.
+  - This replaces D4-87's "before any dialer" with "before any product caller of `ServeSensor`". D4-87's gate is otherwise unchanged.
+- **Ownership.**
+  - The link-key reader (NK-1 to NK-6) is D3's, as a new package under `modules/security/`.
+  - The forwarder's sensor-only session needs D4's change in `modules/telemetry/forward/`. D1 rules on that PR how the session's too-large events are released.
+- **Follow-up.** Brief P4-4-F27, rewritten (`docs/agent-handoffs.md`).

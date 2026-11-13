@@ -1850,46 +1850,82 @@ Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role
   - No change to the collector's own sessions.
   - No contact with any device.
 
-## The third part of item 4: implementation (issued 2026-11-13, D4-92, D4-95)
+## The third part of item 4: implementation (issued 2026-11-13, D4-92, D4-95, D4-96)
 
-Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role>-<brief>-*`, and no two roles share a name. The approved contracts (D4-92) are the interfaces. Any change to them comes back to D1 first. The F-027 gate stays until this first brief closes: no `network_sensor` section outside the tests, no release, no caller of `ServeSensor` outside the tests, and no caller of `sensorlink.Link.Serve` other than `ServeSensor`.
+Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role>-<brief>-*`, and no two roles share a name. The approved contracts (D4-92) are the interfaces. Any change to them comes back to D1 first.
 
-### P4-4-F27 (D5; D3 for F11's register): close the couplings F1 to F11 on `main`
+**F-027's gate stays until every test this section owes has passed (D4-96):**
+- no `network_sensor` section outside the tests;
+- no release;
+- no caller of `ServeSensor` outside the tests;
+- no caller of `sensorlink.Link.Serve` other than `ServeSensor`.
 
-- **Objective.** A sensor never stops SER collection, Syslog receive, forwarding or the node's start (R1.8, P5; F-027 in `docs/verification.md`). Each coupling F1 to F11 is closed as `docs/phase4/D5-sensor-node.md` §1.9 names it, and shown closed by a test whose control fails.
+The two `git grep` checks of F-027 are read as an invariant at each merge: one definition of `ServeSensor` and no product caller, and `ServeSensor` as the only caller of `Link.Serve`. Their line numbers may move.
+
+### P4-4-F27 (D5; D3 for the link key; D4 for the forwarder): close the couplings F1 to F11 on `main`
+
+- **Objective.** A sensor never stops SER collection, Syslog receive, forwarding or the node's start. This is the requirement of CLAUDE.md §1.8 and P5, R8.8 and the R8 constraint (`docs/requirements.md`), and F-027 in `docs/verification.md`. Each coupling F1 to F11 is closed as `docs/phase4/D5-sensor-node.md` §1.9 names it, on `main`'s code, and shown closed by a test whose control fails. A test that needs C13 0.2 machinery not yet on `main` is owed by the brief that builds that machinery (D4-96).
 - **Inputs.**
-  - F-027;
-  - `docs/phase4/D5-sensor-node.md`: §1.0 (the table of F1 to F11), §1.9 items 1 to 11 (what closes each, and the tests), §1.10 (the bounds) and §1.14 (the limits);
-  - C13 0.2 (`docs/phase4/D4-c13-0.2-proposal.md`) and C5;
-  - D4-87, D4-88 and D4-92.
+  - F-027.
+  - `docs/phase4/D5-sensor-node.md`: §1.0, §1.9 items 1 to 11, §1.10 and §1.14.
+  - `docs/phase4/D3-sensor-link.md` §11.4 (NK-1 to NK-6).
+  - C13 0.2 and C5.
+  - D4-87, D4-88, D4-92 and D4-96.
+- **What this brief closes, and what is owed** (D4-96). On `main` the intake is C13 0.1 in code. It has no heartbeats, coverage gaps, `sensorrun.json`, enrolment or dialer.
+
+  | Coupling | In this brief | Owed, and by which brief |
+  | --- | --- | --- |
+  | F2, the start | §1.9 item 2's test and control | none |
+  | F5, F6, F7, the store set | §1.9 item 1's tests and controls | none |
+  | F9, mode changes | the hourly cap on audit records and health events (item 1) | the health event under the ceiling, with F1 |
+  | F10, the forwarder | the sensor-only session (item 1), after D4's change below | none |
+  | F1, the platform ceiling | the ceiling in bytes, tested in process on the test clock over `main`'s events (`intake.drop-counted`, the network database's store alarms), with control 1 (the ceiling removed) | the events that need `sensorrun.json`, `sensor.redial-granted` or coverage gaps, owed by the dialer-and-enrolment brief and the C13 0.2 intake brief |
+  | F3, the detector's drive | the bound (item 3), with its control | none |
+  | F4, the link's lock | the fairness rule (item 4), tested in process with control 2 (the rule removed, with a seam that slows the network commit); item 9's `recover` in the scheduler calls (`TestSchedulerPanicTakenAsTimeout`) | the lock's wait under a real link, by the rig's legs |
+  | F8, the audit consumer | the rule, recorded in §1.9 item 6: no required `node-sensors` consumer. `main` has none. | its tests (refused hellos, `sensor.link_refused`, `rekey`), owed by the dialer-and-enrolment brief |
+  | F11, the link key | the link-key reader (D3), with `TestLinkKeyNotInRegister`, NK-6, and the reader's own checks, each with its control | the tests that need a dial (`TestLinkKeyFaultNodeStarts`'s "no SYN", `TestLinkKeyClash`'s "no dial", NK-3 and NK-4's handshake), owed by the dialer-and-enrolment brief |
+  | Item 9 in the manager, item 10 (the stop) | `TestSensorPanicContained` (as far as it runs on `main`), `TestCloseWithStuckSensorResume` | the poison record in `sensorrun.json`, owed by the C13 0.2 intake brief |
+  | SL-T13's legs (d) and (e) | none | owed by the C13 0.2 intake brief (heartbeats and gaps) and the dialer-and-enrolment brief (hellos) |
+  | §1.9 item 8's rig legs (a), (b), (c), (f), (g), (h) | none | owed by the sensor's brief and D6's rig brief |
+
+  The owing briefs are not yet issued. Each must carry its owed tests, listed by name. D5 keeps this table in §1.9 as tests close.
 - **May modify.**
-  - D5's paths: `platform/` (including the new package `platform/node/sensortest`, §1.9 item 8) and `cmd/otsec/`.
-  - F11: the remedy D1 adopted on #631 is the link key in a file apart from the register. If it needs a change in `modules/security/nodekey/`, D3 makes that change in its own PR, and D5's PR follows it.
-  - Nothing else. A change another role's path needs comes back to D1.
-- **Deliverables.**
-  - Small PRs, one per group, in this order:
-    1. F2, F5, F6, F7, F9 and F10: the ones that need only the configuration section;
-    2. F1, F3 and F4: the ones that need records to arrive, fed by the tests;
-    3. F8, as a rule on the audit consumer, and F11.
-  - Each PR names the couplings it closes, with each one's test and control, and shows the control failing: run it with the control applied, and give the failing output in the PR.
-  - §1.9 item 8's in-process tests, including SL-T13's legs (d) and (e).
-  - §1.9 item 8's rig legs (a), (b), (c), (f), (g) and (h) need a real sensor and link. They are owed to the sensor's implementation brief, not this one. Each PR says so.
-  - D5 updates §1.0's status column and F-027's acceptance cell (by D6) when the last group merges.
+  - **D5:** `platform/` and `cmd/otsec/`. `platform/node/sensortest` is a new package that holds `_test.go` files only. D5 also updates `docs/phase4/D5-sensor-node.md` §1.0 and §1.9 to say what closed.
+  - **D3:** the link-key reader (NK-1 to NK-6), as a new package under `modules/security/`, in its own PR before D5 wires it. `nodekey` does not change (NK-1, NK-6).
+  - **D4:** `modules/telemetry/forward/`, to allow a session that carries the sensor's streams only. Today `forward.New` requires the health stream and exactly one audit stream on an audit target, and uses the target's name as the consumer of every session (`forward.go` l.174 to l.192; `doc.go` l.48 to l.52 says why). D4 proposes, in its PR, the consumer name of the second session and how its too-large events are released. D1 rules on the PR before D5 wires it.
+  - **D6:** only D6 edits `docs/verification.md` (F-027).
+  - Nothing else. A change in another role's path comes back to D1.
+- **Deliverables: small PRs, in this order.**
+  - (1a) D5: F2.
+  - (1b) D5: the sensor manager and its store set (F5, F6, F7, F9's hourly cap), with §1.9 item 10 (`SensorStopTimeout`) and item 9's `recover` in the manager. Without the stop bound, a stuck `Resume` on the manager's goroutine holds `Runtime.Close`.
+  - (1c) D4: the forwarder change, then D5: F10.
+  - (2) D5: F1 (the ceiling, and F9's health event under it), F3 and F4, each with the item 9 `recover` that belongs to it.
+  - (3) D3: the link-key reader, then D5: F11's wiring.
+  - Each PR also carries:
+    - the couplings it closes, each with its test and its control;
+    - for each control: a diff against the head, the command, where it ran, its evidence class, and the failing output, so that D6 can rerun it;
+    - for each test: `--- PASS`, not SKIP, in the Linux and Windows `go` jobs, cited by job URL (F-026 is the precedent);
+    - how `sensortest` reaches its seams: exported test hooks or a build tag. If it uses a tag, `ci.yml` runs it in both `go` jobs;
+    - the owed tests it leaves, by name, and why;
+    - the output of the two `git grep` checks.
 - **Acceptance.**
-  - D6, which tries to reopen each coupling, and D3 for the trust boundaries (§5.6).
-  - CI is green on every job, on each head.
-  - The two `git grep` checks of F-027 still print what F-027 says, at each merge.
-  - D6 closes F-027 in `docs/verification.md` when all eleven are closed.
+  - D6 passes each PR, trying to reopen each coupling. D3 passes each for the trust boundaries (§5.6). D4 is also a reviewer of (1c) and (2).
+  - Every job in both workflows is green on the head.
+  - D6 records each closing in F-027. F-027 closes when the owed tests have passed too.
 - **Exclusions.**
-  - No dialer, no enrolment and no sensor.
+  - No dialer, no enrolment, no C13 0.2 intake and no sensor. Those briefs follow.
   - No caller of `ServeSensor` outside the tests, and no `network_sensor` section outside the tests.
   - No value in §1.10 changes without D1.
   - The owner's PC runs tests by name only (HANDOFF).
 - **Risks.**
-  - `platform/node`'s Windows run is near its 720 s warning (D4-44), so new tests go in `sensortest`.
+  - `platform/node`'s Windows run is near its 720 s warning (D4-44).
   - A fix in the store or the scheduler touches SER collection itself, so the slice's regression legs must stay green.
 
 ### Next in the third part (not yet issued)
 
-- **P4-4-HR24 stage 1** (D4), when D4's pin move (#657's follow-up) is done.
-- **The sensor's implementation briefs:** the dialer and enrolment (D5), the sensor agent and capture (D4), and the rig legs (D6). Each is issued after P4-4-F27 closes (F-027's gate: closing them comes before any dialer) and D1 has the owner's answers on the sensor's host (#640).
+- **P4-4-HR24:** stage 1 (D4) is issued (D4-95) and starts when D4's pin move (#657's follow-up) is done. Stage 3 comes with the sensor's briefs.
+- **The C13 0.2 contract code and intake** (D4 and D5): heartbeats, coverage gaps, the cursor and `sensorrun.json`. It carries the owed tests named above.
+- **The dialer and enrolment** (D5, with D3). It carries the owed tests named above, and the product call to `ServeSensor` comes only in the PR that passes the last owed test (D4-96).
+- **The sensor agent and capture** (D4), and the rig legs (D6).
+- **The `undecoded` signal** (D4-90), with D6's legs.
+- These briefs are issued after P4-4-F27's groups merge, and the sensor's own brief after D1 has the owner's answers on the sensor's host (#640).
