@@ -92,16 +92,17 @@ What D4-98 leaves with the owner:
 4. **HR-18:** who publishes the advisory set and holds its signing key. No real advisory is entered until then.
 5. **The release key's holder** (TB9), for O-7's signed image. O-7 was adopted under the delegation, and the owner may reverse it.
 6. **Purchases and site changes,** when the time comes: lab TAPs and machines, and a site's outage window or switch change (#640).
-7. **Returns to the owner before item 4's gate:**
-   - HR-24, with stage 3's measurement and its named misses (D1 on #664);
-   - HR-23, if its measured fix does not close the row (D4-98).
+7. **The word to start D8's first brief.** D1 recommends that it waits (D4-98).
 
-   D8's first brief waits for the owner's word, and D1 recommends that it waits (D4-98).
+**Returns to the owner before item 4's gate:**
+- HR-24, with stage 3's measurement and its named misses (D1 on #664);
+- HR-23, if its measured fix does not close the row (D4-98).
+
 8. **Authorization for any device contact:** a lab relay or switch before any H-test or Q3, and any SNMPv3 contact.
 9. **Test runs on the owner's PC** are resumed for ordinary local runs (D4-83, 2026-11-11). Runs that create Windows services stay in the owner's elevated session. Nothing is owed here.
 10. **The branch cleanup is done** (D4-83). Nothing is owed here.
 11. **ADR-0007** (Windows site node) is still `proposed`.
-12. **D7 and D8** (D4-79): D7's first brief is done (#615, D4-84). What is still owed is in items 4 and 6 above.
+12. **D7 and D8** (D4-79): D7's first brief is done (#615, D4-84). What is still owed is in items 5 and 7 above.
 13. **Nothing: D1 merges its own reviewed PRs** (D4-85, which supersedes D4-82).
 14. **Nothing: the owner chose option (b)** (D4-85).
 15. **Nothing: D1 decided that mutants are committed as patch files with a dispatch-only workflow,** and no scratch branch is pushed (D4-85). D6's mutants for the closing legs are brief P4-D6-MUT (D4-88, D4-90).
