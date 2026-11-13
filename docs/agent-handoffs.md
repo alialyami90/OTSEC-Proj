@@ -1803,3 +1803,28 @@ Common rules as in "Phase 4 item 4, second part". Every brief names a scratch fi
 - **Objective.** The GT-PCAP case D4-94 owes: DNP3 over UDP with an unsolicited response from the outstation, including a master request on the 5-tuple the outstation started.
 - **Inputs.** D4-94; D6's N1 on #652; `docs/phase4/D6-gt-pcap-plan.md` ("(3) Still owed: a flow the outstation starts"); HR-23.
 - **Deliverables, acceptance and exclusions** as P4-D6-GT2. Labels from the protocol and the bytes, never from an engine's output.
+
+## After D4-95: the detector change HR-24 needs (issued 2026-11-13, D4-95)
+
+Common rules as in "Phase 4 item 4, second part". Every brief names a scratch file unique to the role and task.
+
+### P4-4-HR24 (D4 with D3; D6 for the cases): judge a tied Telnet, SSH or SNMP session
+
+- **Objective.** Close HR-24 before item 4's gate (D4-95). A flow tied to a collector run must no longer be hidden whole. The detector must judge it against what that run is expected to look like, and raise an alert when it does not match.
+- **Inputs.** D4-92 and D4-95; HR-24 and AP-35 in `docs/threat-model.md`; SL-17 in `docs/phase4/D3-sensor-link.md`; C13 0.2; the node's design (`docs/phase4/D5-sensor-node.md`); `modules/detection/netdetect/detector.go` (the base-rule skip at l.262 on `main` at `34201bfd`); the collector's approved commands and their sessions (`contracts/authz/credential.go`, the adapter's command records).
+- **Stage 1, the design (D4, docs only).** A short design note covering:
+  - what is known in advance about a collector run's session (protocol, endpoint, the approved commands, expected byte counts, packet counts and duration, as far as the sensor's records show them);
+  - which of these the detector can compare without decoding Telnet, SSH or SNMPv3 content;
+  - the rule's false-positive risk on the platform's own runs;
+  - what an attacker who knows the rule can still hide.
+
+  D3 reviews it as a security design. D6 reviews it for testability. If the note needs a C13 or C4 change, it comes back to D1 first.
+- **Stage 2, the cases (D6).** GT-PCAP cases written before the implementation, with labels from the bytes:
+  - a spoofed session tied to a run, which must raise an alert;
+  - the platform's own run, which must not;
+  - a control that defeats the rule.
+
+  D1's briefs assign the case ids.
+- **Stage 3, the implementation (D4).** Issued with the third part's implementation briefs, after D5 closes F1 to F11 (D4-87, D4-88). It needs unit tests, negative tests, and the counted run that HR-24's row names.
+- **Acceptance.** Stage 1: D3 and D6 pass the note. Stage 3: D6 measures it on a counted run with a control, and D1 closes HR-24 in the decision log.
+- **Exclusions.** No decoding of SSH or SNMPv3 at authPriv. No change to the collector's own sessions. No contact with any device.

@@ -1931,3 +1931,12 @@ No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs
 - **E-D4-03 against #648's 123 rows:** the same run counts for E-D4-03 and governs the 13 rows #648 added; run 43092601088 still governs the original 110 (D1's ruling on #651). DNP3 over UDP on a moved port passes under every Zeek configuration; the temporary-port case's service row fails under every Zeek configuration (the master named as the server on the replies' flow). **ADR-0009's third turning condition is not met** (D1's ruling on #652): Zeek reads DNP3 over UDP; the failure is a server misattribution, recorded as **HR-23**.
 - **Owed GT-PCAP case:** DNP3 over UDP with an unsolicited response from the outstation, including a master request on the 5-tuple the outstation started (D6's N1 on #652). Brief P4-D6-GT3.
 - **Merged on 2026-11-13:** #640, #642, #643, #646, #647, #648, #649, #650, #651, #652, #641, #644, #645.
+
+## D4-95: HR-24 needs a detector change before item 4's gate (the owner, 2026-11-13)
+
+The owner's words, in this session on 2026-11-13, answering D1's question on HR-24 ("(a) accept it for now, or (b) require a detector change before item 4's gate"): "Go with b". Evidence class: `desk`. Nothing is built.
+
+- **The decision.** HR-24 is not accepted as a risk. Item 4's gate does not open while HR-24 is open. It closes only with a detector change that judges tied Telnet, SSH and SNMP sessions, measured on a counted run with a control (the closing condition in HR-24's row, `docs/threat-model.md`). The owner's acceptance is no longer one of the ways HR-24 can close.
+- **Why (D1's recommendation, D4-92).** A tied session skips every base rule (`modules/detection/netdetect/detector.go` l.262 on `main` at `34201bfd`: `r.base && ... o.Node.PlatformSession != nil`), so a session that ties is hidden whole, writes included. Unauthorized engineering access to a relay is what item 4 exists to catch. No mitigation narrows HR-24 today (D1's corrected ruling 6848404829 on #641).
+- **Not changed.** HR-22 and HR-23 stay open, each closing on a measured fix or on the owner's acceptance (D4-94). The approved contracts (D4-92) stand. The change is a detector rule within them; if it needs a contract change, that comes back to D1 first.
+- **Follow-up.** Brief P4-4-HR24 (`docs/agent-handoffs.md`). D3 updates HR-24's row to cite this entry in D3's next change after #654 merges. Item 4's gate report states HR-24's state.
