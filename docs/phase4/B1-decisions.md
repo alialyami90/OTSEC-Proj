@@ -2130,4 +2130,54 @@ No new words from the owner. Evidence class: `desk` for the rulings; the runs ci
   - **D4's items** (N2 (a) to (e) on #655, CH-17's wording, T-13 (h), CH-49's `l2` question; the stale line in #656's body is dropped, because a merged PR body is not a record) are taken into P4-4-HR24P's D4 proposal, which states them as corrections to C13 0.2's text. No value changes.
   - **D5's items** are taken into P4-4-DO's D5 PR, which edits §1.14 of D5's note; P4-4-F27 (3) edits only §1.0 and §1.9. For N1 (a clean stop within the minute after a `sensor.counters` commit), the double is listed beside case (iv), and no new mechanism is added.
   - **D6's N1 on #656** is a wording point in C13's CH-41, not a finding of `docs/verification.md`. It is taken into P4-4-HR24P's D4 proposal (#673) as a correction to C13 0.2's text (D1 on #674).
-- **Next decision number:** D4-101.
+
+## D4-101: the session of 2026-11-13 to 14, its rulings, its open items, and a pause (D1, 2026-11-14)
+
+The owner wrote on 2026-11-14: "merge all PRs then find a safe checkpoint and pause work". D1 merged every PR that its reviewers had accepted and that passed the merge check. The three that had not are left open, and their state is below. Evidence class: `desk` for the rulings, and `CI-Linux` and `CI-Windows` for the merged code's runs.
+
+- **1. Merged:**
+  - #670 (D4-100);
+  - #671 (the C2 0.10 proposal, merged as a proposal and not yet approved);
+  - #674 (F-027's record of #662 and #663);
+  - #678 (the import scans close a directory only on a `go.mod`);
+  - #676 (P4-4-F27 (3): F1, F3, F4 and the items carried from #663);
+  - #672 (P4-4-F27 (4), first half: the link-key reader, unwired).
+- **2. Left open, and not merged:**
+  - **#673 (C13 0.3) and #677 (SL-3, and the HR-22, HR-23 and new HR-25 rows):** no review yet. Their reviewers start together: D5, D3 and D6 for #673, and D4, D5 and D6 for #677.
+  - **#675 (HR-23's design):** D2, D3 and D7 pass it at `542a42cf`. D6 asks for text-only fixes before it can pin stage 2 (6866817721: P1, P2 and N-A).
+- **3. Rulings on #676** (D1's comments 6862097501, 6863786261, 6864119672, 6864640960 and 6865801345):
+  - H is `network_sensor.outage_hours`.
+  - `TestSchedulerFirstOnLinkLock` passes on a count, not a time bound. The 250 ms figure was the test's proxy, not a value of §1.10.
+  - `tickRetention`'s network calls left `Tick`.
+  - `after_seq` comes from the batch's receipts, and a release does not begin while the head cannot be read.
+  - `result` and `Abandon` have a phased `defer`, and the holding record is re-saved under its own `recover`.
+  - A scheduler panic after the receipts counts as a checkpoint failure, and `sched_panics` is in status.
+  - A failed release commits its record untied.
+- **4. Rulings on #672:**
+  - NK-2: only `platform/sensorlink` imports the reader, and no exported function or type of `sensorlink` exposes the signer. An opaque handle is allowed, with all its fields unexported, and a `Sign`-shaped method counts as exposing.
+  - NK-2's clash also refuses a shared reference, any certificate's key, and a retired `tls-key`'s key.
+  - NK-5: the file is read through `platform/sensorlink`.
+  - Owed by D5's F11 wiring PR: a static test that `platform/node` never opens the link key through its providers, and the legs #672 lists as owed.
+- **5. Rulings on #675** (6864990229, 6865138996, 6866095230, 6866203475 and 6866534402):
+  - HR-23's fix is option (i), with the parser chosen by function code: 129 to 131 as responses, every other code as a request.
+  - The servers named are those the frames show, so 0 to 2.
+  - **A reading of D4-100 item 2:** malformed inputs are judged one 5-tuple each, against expectations pinned per input.
+  - The fuzz run's terms are as D1's comment 6864990229 gives them, and nothing from it is published beyond pass or fail and its counts.
+  - **HR-25's fix is split out to brief P4-4-HR25.**
+- **6. HR-25 is a new high risk** (in #677, not yet merged). One failed DNP3 frame, a TCP content gap, or a link-only frame blinds Zeek's DNP3 analyzer for the rest of a flow, under the engine as on `main` and under option (i) alike. Whether it blocks item 4's gate is for D1 to bring to the owner.
+- **7. Open items, recorded under CLAUDE.md's working rule:**
+  1. #676, D6's N1 (6866863147): a regression test for the order of the re-save and the open table's rollback, which D6's probe `d6-676t-probe_test.go` shows. Owed by D5's next brief.
+  2. #676, D6's N2: §1.0, §1.9 item 9 and the merged PR body say `sched_panics` counts every recovered panic, but a panic inside the re-save counts only in `checkpoint_failures`. D5 corrects §1.0 and §1.9 in its next change.
+  3. #676, D3's N2: sensor health events held under the ceiling are counted but not written until the C13 0.2 intake brief. Added to F-027's owed list.
+  4. #676: a panic inside `AppendBatch` after its commit, then a restart, commits those records twice, one copy tied and one untied. The worst effect is a duplicate alert and one doubled baseline count (§1.9).
+  5. #676, D6's N5: the read loop's `recover` is owed in P4-4-F27's table.
+  6. `platform/node` on Windows took 816 to 886 s, against its 720 s budget. A brief is owed (D5, with D6 for the CI change).
+  7. C2 0.10 §10: the routes to the password's length. D3 writes the risk row when HR-24 closes.
+  8. HR-23: the conflict outcome, when both ends send frames with DIR clear, can be caused by an attacker and must fail closed in production (in #677).
+  9. D6's `c97f2569` on #676 was reviewed by D1 after the merge, not before (6866875566). That is D1's lapse.
+  10. H-rows written and not numbered: #671's half-close and third-connection rows, and #675's DIR-clear and TCP-after-bad-CRC rows. D1 numbers them with HR-24's stage-2 brief. Each needs the owner's authorization for device contact.
+- **8. For the owner:**
+  - whether HR-25 blocks item 4's gate;
+  - D7's N1 on #675: a written BSD-3 grant for the project's Zeek patch, before any upstream offer (LICENSE.md grants nothing);
+  - authorization for the H-rows in item 7.10, when the time comes.
+- **Next decision number:** D4-102.

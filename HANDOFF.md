@@ -26,7 +26,21 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **CHECKPOINT (D1), 2026-11-13, work paused at the owner's word.** No agent is running, and no PR is open once this checkpoint merges. The first full CI of `main` at `459594ff` (#663's tree) passed: `ci` run 43442328706 (4 of 4) and `ci-long` run 43442328628 (20 of 20).
 
-- **Resumed later on 2026-11-13 (D4-100).** D5 has P4-4-F27 (3) and D3 has (4)'s link-key reader. D4-100 rules on HR-23's part (b) and ADR-0009's third turning condition, settles #655's follow-ups, and issues P4-4-HR24P, P4-4-HR23, P4-4-HR22S, P4-4-DO (F-028) and P4-D6-F027R, which replace items 3, 4 and 6 below and D4-98's brief follow-ups.
+**CHECKPOINT (D1), 2026-11-14, work paused at the owner's word (D4-101).** No agent is running.
+- **Merged this session:** #670, #671 (C2 0.10, a proposal, not yet approved), #674, #678, #676 (P4-4-F27 (3)) and #672 (P4-4-F27 (4), the link-key reader).
+- **Open PRs, in the order to resume them:**
+  1. #675 (HR-23's design, option (i)): D4 fixes D6's P1, P2 and N-A (6866817721), text only; then D6 re-reads and pins stage 2.
+  2. #673 (C13 0.3): first review, by D5, D3 and D6 together; the `insecure` timing choice, (A) or (B), is settled in its comments.
+  3. #677 (SL-3, and the HR-22, HR-23 and new HR-25 rows): first review, by D4, D5 and D6 together.
+  4. Then D1 approves C2 0.10, C13 0.3 and SL-3 together in a decision entry.
+- **Then, as briefs allow:**
+  - P4-4-F27 (4) second half: D5's F11 wiring, with D4-101 item 4's owed test;
+  - P4-4-DO (F-028);
+  - P4-4-HR25 (after #675);
+  - HR-24's stage 2 (after the three contracts are approved);
+  - the Windows `platform/node` time brief;
+  - P4-4-HR22S.
+- **Open items and questions for the owner:** D4-101 items 7 and 8.
 - **Merged on 2026-11-13, after D4-92:**
   - #657 and #659 (the DNP3 unsolicited case and its pin);
   - #658 (D4-95);
