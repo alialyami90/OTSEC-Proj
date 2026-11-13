@@ -75,7 +75,7 @@ Where one of these differs from the brief below, the rule here wins.
   - work of more than about 20 steps goes to a fresh agent once the earlier one is over about 200,000 tokens, with the review comments' IDs and the diff range in its brief.
 - **Reports to D1** are at most 15 lines: the verdict or result, the link, and the blocking findings. The detail is on GitHub.
 - **A re-review** reads only the diff since the last reviewed head, and the reviewer's own findings.
-- **Reviewers start together** on the same head; D1 does not bring a reviewer in after the others have passed (D4-99).
+- **Reviewers start together** on the same head (D4-99). A reviewer that §5.6 requires for a later change is still added.
 - **A finding that needs a new mechanism** is settled first: the options are agreed in comments, then written once (D4-99).
 - **Batch independent reads and checks into one step** (a trial; D1 measures it after the next session, D4-99).
 

@@ -2082,7 +2082,7 @@ Evidence class: `desk`. D1's first proposal 1, a restart habit for the main sess
 
 - **2. Resume by the size of the job** (CLAUDE.md, "Working rules").
   - A narrow confirm resumes the agent, whatever its size. Today's resumed confirms took 4 to 13 tool calls, while fresh reviewers took 30 to 66.
-  - Work of more than about 20 steps goes to a fresh agent once the earlier one is over about 200,000 tokens.
+  - Work of more than about 20 steps goes to a fresh agent once the earlier one is over about 200,000 tokens, with the review comments' IDs and the diff range in its brief.
 - **3. Reviewers start together on the same head, and a finding that needs a new mechanism is settled in comments before it is written.**
   - On #664, D6 joined after D2 and D3 had passed, which cost at least one round.
   - Three of its eight versions each added a new mechanism invented in answer to a finding.

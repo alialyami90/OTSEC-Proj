@@ -60,7 +60,8 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
   7. **The approved contracts in code** (C13 0.2, C7 0.11, C8 0.13, C4 0.4, with D6's contract tests): the first of the later briefs of the third part, after P4-4-F27. Item 3's C8 sentence folds into it.
   8. **Issued briefs not yet delivered:** P4-D6-RR, P4-D6-I100, P4-D6-MUT and P4-D7-2 (D4-88, D4-90).
   9. **D4-98's follow-ups:** the list at the end of D4-98 in `docs/phase4/B1-decisions.md`.
-  10. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
+  10. **`platform/node` on Windows** took 770 s on #669's head and 777 s on `main`, over its 720 s budget (D6 on #669). D5 looks at it with step (3).
+  11. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
 - **The sensor's own brief** can be issued under the adopted #640 rows (D4-98). Applying them at a site waits for that site's facts ("Waiting on the owner" item 1).
 - **F-027's gate stands (D4-96):** no `network_sensor` section outside the tests, no release, and no product wiring of any sensor path.
 - **CI under D4-97:** add `full-ci` after the last review, and merge only on the merge check in CLAUDE.md, "Testing and merging".
