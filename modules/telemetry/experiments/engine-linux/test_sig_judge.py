@@ -125,3 +125,21 @@ def test_seen_same_compares_the_hashes():
     assert "first run at 4011e49e" in table.seen_same(same)
     other = same.replace("96f335c0", "aaaaaaaa")
     assert "**not**" in table.seen_same(other)
+
+
+def test_a_dnp3_confirm_is_never_a_request(tmp_path):
+    # D4's N3 on #657: on dnp3-udp-unsolicited the outstation O1 starts the
+    # flow, so Zeek takes the master M5 as the responder and the probe logs
+    # M5's confirm (function 0) and its read (1) with is_orig false. C13 0.1
+    # section 4.3: 0 is never a function, as 129, 130 and 131 are not.
+    import json
+    conn = {"ts": 1.0, "uid": "C1", "proto": "udp", "service": "dnp3", "id.orig_h": "192.0.2.20",
+            "id.orig_p": 20000, "id.resp_h": "192.0.2.14", "id.resp_p": 20000}
+    probe = [{"ts": 1.0 + i, "uid": "C1", "kind": "fc", "is_orig": o, "fc": fc}
+             for i, (o, fc) in enumerate([(True, 130), (False, 0), (False, 1), (True, 129)])]
+    (tmp_path / "conn.log").write_text(json.dumps(conn) + "\n")
+    (tmp_path / "otsec_probe.log").write_text("".join(json.dumps(r) + "\n" for r in probe))
+    s = table.zeek(str(tmp_path), "zeek-probe", {})
+    assert [(m["sender"], m["fc"]) for m in s.msgs if m["request"]] == [("192.0.2.14", 1)]
+    # The confirm and the responses are still read, as messages that are not requests.
+    assert [m["fc"] for m in s.msgs] == [130, 0, 1, 129]

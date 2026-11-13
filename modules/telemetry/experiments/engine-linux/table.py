@@ -69,7 +69,9 @@ PENDING = "pending D6's pass conditions"
 # The pipe case (D4-87): these configurations also read each capture from a pipe.
 PIPED = ("zeek", "zeek-probe", "zeek-icsnpp")
 CONDITIONS = "tests/integration/gt_pcap/engine-pass-conditions.tsv"
-RESPONSES = (129, 130, 131)
+# DNP3 codes that are never a request: the confirm (0, sent by both ends) and
+# the responses (129, 130, 131) (C13 0.1 section 4.3; D4's N3 on #657).
+NOT_REQUESTS = (0, 129, 130, 131)
 # modbus-moved-port is modbus.pcap with port 502 moved to 15020
 # (movedport.py's defaults); modbus.pcap is its control (D6's note, section 3).
 MOVED, CONTROL, MOVED_PORT, CONTROL_PORT = "modbus-moved-port", "modbus", "15020", "502"
@@ -174,7 +176,7 @@ def zeek(d, cfg, t):
             side = (r["uid"], r["is_orig"])
             if r["kind"] == "fc":
                 s.msg(f"otsec_probe.log:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
-                      r["fc"] not in RESPONSES, r["fc"])
+                      r["fc"] not in NOT_REQUESTS, r["fc"])
                 cur[side] = s.msgs[-1]
             elif side in cur:
                 cur[side]["objs"].append(f"g{r['group']}v{r['variation']}")
@@ -201,7 +203,7 @@ def zeek(d, cfg, t):
                 k = (r["uid"], r["is_orig"], r["ts"], r["function_code"])
                 if k not in group:
                     s.msg(f"{log}:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
-                          fc not in RESPONSES, fc)
+                          fc not in NOT_REQUESTS, fc)
                     group[k] = s.msgs[-1]
                     group[k]["rows"] = []
                 else:
