@@ -234,42 +234,49 @@ func (r *Runtime) startSensor(ctx context.Context) error {
 	in.obs.written, in.alert.written = in.base, dropCounts{maps.Clone(in.alerts.reason), maps.Clone(in.alerts.asset)}
 	// A release a restart interrupted commits once, and a release whose
 	// collection.run never committed gets one, before the sensor is
-	// served. The tick that started the intake then gives way the holds
-	// whose deadlines passed while the node was down (D3 on #576, D1 in
-	// D4-72). The intake is published only once its hold is recovered, so
-	// a failed start leaves nothing half started.
+	// served. The next tick then gives way the holds whose deadlines
+	// passed while the node was down (D3 on #576, D1 in D4-72). The intake
+	// is published only once its hold is recovered and repaired, so a
+	// failed start leaves nothing half started, and no tick works on the
+	// intake while the manager repairs it.
 	if err := link.RecoverHold(ctx); err != nil {
 		return fmt.Errorf("the intake hold's recovery: %w", err)
 	}
-	r.sensor.Store(in)
 	r.repairIntake(ctx)
 	r.pruneIntake(ctx, "")
+	r.sensor.Store(in)
 	return nil
 }
 
 // AlarmSensorIntakeNotStarted: the sensor's intake did not start, so
 // nothing is taken from the sensor and no run is held for it. The node
-// starts and collects without it, and tries again at each tick (F2,
-// D5-sensor-node.md section 1.9 item 2). It is raised once for each
-// stretch in which the intake is not started.
+// starts and collects without it, and the sensor manager tries again at
+// each tick (F2, D5-sensor-node.md section 1.9 item 2). It is raised once
+// for each stretch in which the intake is not started.
 const AlarmSensorIntakeNotStarted = "sensor-intake-not-started"
 
 // startIntake starts the intake when the section is set and it has not
-// started, and raises AlarmSensorIntakeNotStarted when it fails. It
-// reports the intake, nil when it is not started.
-func (r *Runtime) startIntake(ctx context.Context) *sensorIntake {
-	if in := r.sensor.Load(); in != nil || r.cfg.NetworkSensor == nil {
-		return in
+// started. It does not start while the observation stream's database is
+// not open, and raises AlarmSensorIntakeNotStarted when it fails. Only the sensor manager's
+// step calls it.
+func (r *Runtime) startIntake(ctx context.Context) {
+	s := r.cfg.NetworkSensor
+	if s == nil || r.sensor.Load() != nil {
+		return
 	}
-	if err := r.startSensor(ctx); err != nil {
-		if !r.intakeDown {
+	m := r.smgr
+	err := errors.New("the network database is not open")
+	if db, _, _ := r.view(r.dbFor(NetObservationStream(s.SensorID))); db != nil {
+		err = r.startSensor(ctx)
+	}
+	if err != nil {
+		if !m.intakeDown {
 			r.opt.Status.Raise("", AlarmSensorIntakeNotStarted, "the sensor's intake did not start, so nothing is taken from the sensor; the node collects without it and tries again at each tick: "+err.Error())
 		}
-		r.intakeDown = true
-		return nil
+		m.intakeDown = true
+		return
 	}
-	r.intakeDown = false
-	return r.sensor.Load()
+	m.intakeDown = false
 }
 
 // liveAppender appends to stream through the Log of its database as it is
@@ -312,9 +319,9 @@ func (a liveAppender) LastCommitted(ctx context.Context) (uint64, error) {
 // shows the link connected while it runs.
 func (r *Runtime) ServeSensor(ctx context.Context, rd io.Reader) error {
 	in := r.sensor.Load()
-	if in == nil {
+	if in == nil || r.sensorFailed.Load() {
 		if r.cfg.NetworkSensor != nil {
-			return errors.New("node: the sensor's intake is not started")
+			return errors.New("node: the sensor's intake is not started, or the sensor's work has failed")
 		}
 		return errors.New("node: no network_sensor section")
 	}
@@ -347,13 +354,8 @@ func (in *sensorIntake) counts(st sensorlink.Stats) dropCounts {
 // A write that fails raises store-commit-failed on the health stream's
 // database, as Runtime.health does, and is tried again a minute later.
 func (r *Runtime) tickSensor(ctx context.Context, final bool) {
-	var in *sensorIntake
-	if final {
-		in = r.sensor.Load()
-	} else {
-		in = r.startIntake(ctx)
-	}
-	if in == nil {
+	in := r.sensor.Load()
+	if in == nil || r.sensorFailed.Load() {
 		return
 	}
 	in.link.TickHold(ctx)
