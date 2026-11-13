@@ -1801,5 +1801,5 @@ Common rules as in "Phase 4 item 4, second part". Every brief names a scratch fi
 ### P4-D6-GT3 (D6): the owed DNP3 unsolicited-response case
 
 - **Objective.** The GT-PCAP case D4-94 owes: DNP3 over UDP with an unsolicited response from the outstation, including a master request on the 5-tuple the outstation started.
-- **Inputs.** D4-94; D6's N1 on #652; `docs/phase4/D6-gt-pcap-plan.md` §2B variant 3; HR-23.
+- **Inputs.** D4-94; D6's N1 on #652; `docs/phase4/D6-gt-pcap-plan.md` ("(3) Still owed: a flow the outstation starts"); HR-23.
 - **Deliverables, acceptance and exclusions** as P4-D6-GT2. Labels from the protocol and the bytes, never from an engine's output.

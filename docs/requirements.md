@@ -89,7 +89,7 @@ Constraint: never silently discard important native event information.
 
 | ID | Requirement | Status | Basis |
 | --- | --- | --- | --- |
-| R6.1 | Passive network traffic monitoring with OT protocol identification and analysis. | contracted | Item 4 is in progress and not at a gate. C13 `otsec.netobs/0.1`, C4 0.3, C5 0.9 and C2 0.9 are approved (D4-68, D4-69), and the node side is merged (D4-70 to D4-76). No sensor exists, and nothing captures traffic (ADR-0009 is `proposed`). Zeek and Suricata were evaluated for protocol coverage only (Phase 2 exit). |
+| R6.1 | Passive network traffic monitoring with OT protocol identification and analysis. | contracted | Item 4 is in progress and not at a gate. C13 `otsec.netobs/0.1`, C4 0.3, C5 0.9 and C2 0.9 are approved (D4-68, D4-69), and the node side is merged (D4-70 to D4-76). C13 0.2, the node's design for the sensor link, C7 0.11, C8 0.13 and C4 0.4 are approved (D4-92). ADR-0009 is accepted for option (b), with its engine (D4-90). No sensor exists, and nothing captures traffic. Zeek and Suricata were evaluated for protocol coverage only (Phase 2 exit). |
 | R6.2 | Network communication baselining. | contracted | As R6.1. The network baseline's acknowledgement is in C7 0.10 and C8 0.12. |
 | R6.3 | Detection of unauthorized engineering communication and unusual device or protocol behavior. | contracted | As R6.1. The node's detector consumer and its own-session detector are merged (D4-73, D4-75). No labelled capture has been run. |
 | R6.4 | Rule-based and behavioral anomaly detection. | contracted | As R6.1. Deterministic rules only. No detection rate, false-positive rate or latency is measured. |
