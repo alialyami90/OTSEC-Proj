@@ -19,18 +19,22 @@
 // # The reader
 //
 // Load is the one reader. It returns the active entry's signer and pin.
-// Its one other input is what the node already loaded of the node key
-// register (RegisterKeys): a link key whose public key is any key of the
-// register, or whose reference is any reference of the register, is
-// refused, and with a register that is set and not loaded the clash cannot
-// be checked, so the key is refused too (NK-2). Load never changes the
-// register and opens no register key. Every fault wraps one of the Err
-// values, which name the cause of the node's alarm, and none falls back.
+// Its other inputs are the reference the node's configuration names
+// (link_key_ref), which the file's must be, and what the node already
+// loaded of the node key register (RegisterKeys): a link key whose public
+// key is any key of the register, or whose reference is any reference of
+// the register, is refused, and with a register that is set and not loaded
+// the clash cannot be checked, so the key is refused too (NK-2). Load never
+// changes the register and opens no register key. Every fault wraps one of
+// the Err values, which name the cause of the node's alarm, and none falls
+// back.
 //
 // The caller passes the file read (protect.ReadFile, the protected-file
 // rule) and the providers the node may open (the lab-files provider only
 // behind lab_tls_files), as it does for the register. No package other
-// than platform/sensorlink imports this one (TestOnlySensorlinkImports).
+// than platform/sensorlink imports this one (TestOnlySensorlinkImports),
+// and no exported declaration of that package hands out a signer type
+// (TestSensorlinkKeepsSigner).
 //
 // # Limit
 //
@@ -78,11 +82,15 @@ const KindLinkKey nodekey.Kind = "link-key"
 // Each fault of Load wraps one of these. A caller tells them apart with
 // errors.Is, for the cause its alarm names.
 var (
-	ErrMissing           = errors.New("linkkey: the link key file is missing")
-	ErrUnreadable        = errors.New("linkkey: the link key file cannot be read")
-	ErrMalformed         = errors.New("linkkey: the link key file is malformed")
-	ErrEntry             = errors.New("linkkey: the link key entry fails its checks")
-	ErrNoKey             = errors.New("linkkey: the provider does not have the link key")
+	ErrMissing    = errors.New("linkkey: the link key file is missing")
+	ErrUnreadable = errors.New("linkkey: the link key file cannot be read")
+	ErrMalformed  = errors.New("linkkey: the link key file is malformed")
+	ErrEntry      = errors.New("linkkey: the link key entry fails its checks")
+	// ErrNoKey has three causes, which the wrapped text tells apart: the
+	// entry's provider is not available to the node (lab-files without
+	// lab_tls_files, say), the provider has no key under the entry's name,
+	// or it holds another key under that name, which is a replaced key.
+	ErrNoKey             = errors.New("linkkey: the provider is not available, has no key under the link key's name, or holds another key under it")
 	ErrClash             = errors.New("linkkey: the link key is also a key of the node key register")
 	ErrRegisterNotLoaded = errors.New("linkkey: the node key register is set and not loaded, so a clash cannot be checked")
 )
@@ -188,10 +196,11 @@ func (k RegisterKeys) clash(e *Entry) error {
 }
 
 // Load reads the link key file at path for nodeID and opens its active
-// key. read reads the file under the protected-file rule, with at most its
-// max bytes; keys returns the provider the node may open a key in. Load
+// key, which must be a version of ref, the configuration's link_key_ref.
+// read reads the file under the protected-file rule, with at most its max
+// bytes; keys returns the provider the node may open a key in. Load
 // refuses a key that clashes with reg (NK-2) before it opens the key.
-func Load(read func(path string, max int64) ([]byte, error), path, nodeID string,
+func Load(read func(path string, max int64) ([]byte, error), path, nodeID, ref string,
 	keys func(nodekey.Provider) (nodekey.Keys, error), reg RegisterKeys) (*Key, error) {
 	b, err := read(path, MaxFileBytes)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -203,6 +212,11 @@ func Load(read func(path string, max int64) ([]byte, error), path, nodeID string
 	f, err := parse(b, nodeID)
 	if err != nil {
 		return nil, err
+	}
+	// Every entry is of one reference that matches nodekey.RefPattern, so
+	// this also refuses a configured reference of any other form.
+	if f.Entries[0].Ref != ref {
+		return nil, fmt.Errorf("%w: the file holds %s, and link_key_ref is %q", ErrEntry, f.Entries[0].Ref, ref)
 	}
 	i := slices.IndexFunc(f.Entries, func(e Entry) bool { return e.State == nodekey.StateActive })
 	if i < 0 {

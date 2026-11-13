@@ -26,11 +26,12 @@ import (
 // Every key and certificate here is made by the test (D2-5).
 
 const (
-	testNode  = "site-a-node1"
-	admin     = "admin@site-a"
-	linkRef   = "nodekey_sensorlink1"
-	clientRef = "nodekey_relpclient1"
-	anchorRef = "nodekey_relpanchors1"
+	testNode   = "site-a-node1"
+	admin      = "admin@site-a"
+	linkRef    = "nodekey_sensorlink1"
+	clientRef  = "nodekey_relpclient1"
+	anchorRef  = "nodekey_relpanchors1"
+	pendingRef = "nodekey_relpclient2"
 )
 
 var now = time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
@@ -122,17 +123,26 @@ func encode(t testing.TB, f *File) []byte {
 
 func (f *fixture) load(t testing.TB, b []byte, reg RegisterKeys) (*Key, error) {
 	t.Helper()
-	return Load(readFile, f.write(t, b), testNode, labOnly(f.keys.Dir), reg)
+	return Load(readFile, f.write(t, b), testNode, linkRef, labOnly(f.keys.Dir), reg)
 }
 
 // TestLoad: the file's active key opens, its pin is the hash of the
 // signer's own public key, and every entry is returned for the node's
-// records. The file round-trips through Marshal.
+// records. The active entry sits between two retired entries with keys of
+// their own, so that the pin, the entry and the signer can only be the
+// active one's. The file round-trips through Marshal.
 func TestLoad(t *testing.T) {
 	f := newFixture(t)
-	old := entryFor(t, linkRef, 2, f.signer.Public())
-	old.State = nodekey.StateRetired
-	f.file.Entries = append(f.file.Entries, old)
+	retired := func(v uint32) Entry {
+		s, err := f.keys.Create(nodekey.KeyName(linkRef, v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		e := entryFor(t, linkRef, v, s.Public())
+		e.State = nodekey.StateRetired
+		return e
+	}
+	f.file.Entries = []Entry{retired(2), f.file.Entries[0], retired(3)}
 	b, err := f.file.Marshal()
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +157,7 @@ func TestLoad(t *testing.T) {
 	if !bytes.Equal(spkiOf(t, k.Signer.Public()), spkiOf(t, f.signer.Public())) {
 		t.Error("the signer is not the link key")
 	}
-	if k.Entry.Version != 1 || k.Entry.State != nodekey.StateActive || len(k.Entries) != 2 {
+	if k.Entry.Version != 1 || k.Entry.State != nodekey.StateActive || len(k.Entries) != 3 {
 		t.Errorf("entry %+v, %d entries", k.Entry, len(k.Entries))
 	}
 	digest := sha256.Sum256([]byte("otsec link key test"))
@@ -161,7 +171,7 @@ func TestLoad(t *testing.T) {
 // and no fault. Control: the missing file taken as no key (nil, nil).
 func TestLoadMissing(t *testing.T) {
 	f := newFixture(t)
-	k, err := Load(readFile, filepath.Join(f.dir, "absent.json"), testNode, labOnly(f.keys.Dir), NoRegister())
+	k, err := Load(readFile, filepath.Join(f.dir, "absent.json"), testNode, linkRef, labOnly(f.keys.Dir), NoRegister())
 	if k != nil || !errors.Is(err, ErrMissing) {
 		t.Fatalf("missing file: %v, %v; want ErrMissing", k, err)
 	}
@@ -182,7 +192,7 @@ func TestLoadUnreadable(t *testing.T) {
 		"refused":        {refused, filepath.Join(f.dir, "linkkey.json")},
 		"over the bound": {readFile, big},
 	} {
-		k, err := Load(c.read, c.path, testNode, labOnly(f.keys.Dir), NoRegister())
+		k, err := Load(c.read, c.path, testNode, linkRef, labOnly(f.keys.Dir), NoRegister())
 		if k != nil || !errors.Is(err, ErrUnreadable) || errors.Is(err, ErrMissing) {
 			t.Errorf("%s: %v, %v; want ErrUnreadable", name, k, err)
 		}
@@ -233,7 +243,7 @@ func TestLoadMalformed(t *testing.T) {
 		// A read that ignores the bound, so the reader's own checks are
 		// what refuse.
 		read := func(string, int64) ([]byte, error) { return b, nil }
-		k, err := Load(read, "linkkey.json", testNode, labOnly(f.keys.Dir), NoRegister())
+		k, err := Load(read, "linkkey.json", testNode, linkRef, labOnly(f.keys.Dir), NoRegister())
 		if k != nil || !errors.Is(err, ErrMalformed) {
 			t.Errorf("%s: %v, %v; want ErrMalformed", name, k, err)
 		}
@@ -343,6 +353,22 @@ func TestLoadEntryRefusals(t *testing.T) {
 	}
 }
 
+// TestLoadRef (D6's N5 on #672): the file must hold the reference the
+// configuration names (link_key_ref). Another reference, an empty one and
+// one of another form are each ErrEntry, and no key is opened. Control:
+// Load without the reference check opens the file's key.
+func TestLoadRef(t *testing.T) {
+	f := newFixture(t)
+	path := f.write(t, encode(t, f.file))
+	for _, ref := range []string{"nodekey_sensorlink2", "", "linkkey_sensorlink1", strings.ToUpper(linkRef)} {
+		k, err := Load(readFile, path, testNode, ref,
+			func(nodekey.Provider) (nodekey.Keys, error) { return failKeys{t}, nil }, NoRegister())
+		if k != nil || !errors.Is(err, ErrEntry) {
+			t.Errorf("link_key_ref %q: %v, %v; want ErrEntry", ref, k, err)
+		}
+	}
+}
+
 // failKeys fails the test if a key is opened.
 type failKeys struct{ t testing.TB }
 
@@ -395,7 +421,7 @@ func TestLoadNoKey(t *testing.T) {
 		if err := os.WriteFile(path, c.file, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		k, err := Load(readFile, path, testNode, c.keys, NoRegister())
+		k, err := Load(readFile, path, testNode, linkRef, c.keys, NoRegister())
 		if k != nil || !errors.Is(err, ErrNoKey) {
 			t.Errorf("%s: %v, %v; want ErrNoKey", name, k, err)
 		}
@@ -476,8 +502,10 @@ func copyKey(t testing.TB, keys nodekey.LabFiles, from, to string) {
 
 // TestLoadClash (NK-2): a link key that is also a key of the register is
 // refused, and the register is untouched and still serves its tls-key: the
-// public key of a tls-key entry, of a retired one, or of a trust anchor's
-// certificate, and a reference of the register. With the register set and
+// public key of a tls-key entry (active, retired or pending), or of a trust
+// anchor's certificate, and a reference of the register. A file whose
+// active entry clashes after a retired entry that does not is refused too,
+// since the clash is checked on the active entry. With the register set and
 // not loaded, the key is refused without being opened. Control: a reader
 // with no clash check, which returns the register's key as the link key.
 func TestLoadClash(t *testing.T) {
@@ -538,16 +566,48 @@ func TestLoadClash(t *testing.T) {
 		t.Fatal("no retired version")
 		return nil
 	}()
+	// A retired link key apart from the register, then the active one,
+	// which is the tls-key's key: the clash is the active entry's.
+	afterRetired := func() *File {
+		old := f.file.Entries[0]
+		old.State = nodekey.StateRetired
+		c := *shared
+		c.Entries = []Entry{old, shared.Entries[0]}
+		return &c
+	}()
+	// A pending tls-key, requested and not installed, whose key is held
+	// under the link key's name too.
+	pendingReg := nodekey.NewRegister(testNode)
+	pendingKey := func() *File {
+		if _, err := pendingReg.Request(f.keys, pendingRef, pkix.Name{CommonName: testNode}, admin, now); err != nil {
+			t.Fatal(err)
+		}
+		e := pendingReg.Entries[0]
+		if e.State != nodekey.StatePending {
+			t.Fatalf("the requested entry is %s", e.State)
+		}
+		copyKey(t, f.keys, nodekey.KeyName(pendingRef, e.Version), nodekey.KeyName(linkRef, 4))
+		pub, err := x509.ParsePKIXPublicKey(e.PublicKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := *f.file
+		c.Entries = []Entry{entryFor(t, linkRef, 4, pub)}
+		return &c
+	}()
 	for name, c := range map[string]struct {
 		file *File
 		reg  *nodekey.Register
 	}{
-		"a tls-key's key":         {shared, reg},
-		"a register reference":    {sameRef, reg},
-		"a trust anchor's key":    {f.file, anchored},
-		"a retired tls-key's key": {retiredKey, rotated},
+		"a tls-key's key":                  {shared, reg},
+		"a tls-key's key, after a retired": {afterRetired, reg},
+		"a register reference":             {sameRef, reg},
+		"a trust anchor's key":             {f.file, anchored},
+		"a retired tls-key's key":          {retiredKey, rotated},
+		"a pending tls-key's key":          {pendingKey, pendingReg},
 	} {
-		k, err := f.load(t, encode(t, c.file), FromRegister(c.reg))
+		k, err := Load(readFile, f.write(t, encode(t, c.file)), testNode, c.file.Entries[0].Ref,
+			labOnly(f.keys.Dir), FromRegister(c.reg))
 		if k != nil || !errors.Is(err, ErrClash) {
 			t.Errorf("%s: %v, %v; want ErrClash", name, k, err)
 		}
@@ -560,7 +620,7 @@ func TestLoadClash(t *testing.T) {
 		t.Errorf("the tls-key no longer resolves: %v", err)
 	}
 	for name, rk := range map[string]RegisterKeys{"zero": {}, "nil register": FromRegister(nil)} {
-		k, err := Load(readFile, f.write(t, encode(t, f.file)), testNode,
+		k, err := Load(readFile, f.write(t, encode(t, f.file)), testNode, linkRef,
 			func(nodekey.Provider) (nodekey.Keys, error) { return failKeys{t}, nil }, rk)
 		if k != nil || !errors.Is(err, ErrRegisterNotLoaded) {
 			t.Errorf("%s: %v, %v; want ErrRegisterNotLoaded", name, k, err)
