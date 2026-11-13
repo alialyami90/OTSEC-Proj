@@ -55,7 +55,7 @@ D4, 2026-11-13. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), unde
   - Its costs: a DNP3 decoder that the project keeps, as with (iii); every UDP payload copied into a script event, which Zeek's own documentation of `udp_contents` warns against for volume (`events.bif` for UDP); and content read beyond today's script, which the brief's exclusions rule out unless D1 admits it.
   - It is a new mechanism, so D4 lists it in the options comment, and D1 rules whether it is admitted (D4-99).
 
-**So part (b) needs a change outside the script, or (s).** The options and the fuzz question are proposed in the PR comment for D1 to pick (D4-99). They are summarised here only:
+**So part (b) needs a change outside the script, or (s).** The options and the fuzz question are proposed in comment 6862045681 on #675, for D1 to pick (D4-99). They are summarised here only:
 
 | Option | What it is | Rough size (`inference`) |
 | --- | --- | --- |
