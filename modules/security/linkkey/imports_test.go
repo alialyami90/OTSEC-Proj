@@ -27,10 +27,14 @@ const readerPath = "otsec.local/otsec/modules/security/linkkey"
 var importers = []string{"platform/sensorlink"}
 
 // strays lists each non-test Go file under root, slash-separated from
-// root, that imports the reader from a directory not in importers. It
-// skips what the go command skips (testdata, hidden and _ directories,
-// nested modules) and the owner's PC's tools and reference folders. read
-// is the number of non-test Go files parsed.
+// root, that imports the reader from a directory not in importers. Only a
+// go.mod file, or a name that starts with a dot, closes a directory, as in
+// P4-PC-1's walk (tests/security/uintptr_walk_d6_test.go). The go command
+// leaves testdata, tools, _ and the like out of ./... only: it builds a
+// package there when another imports it by path, so the walk reads them
+// (D6's B1 on #672). An import path element cannot start with a dot. The
+// owner's PC's tools and reference folders each hold a go.mod. read is the
+// number of non-test Go files parsed.
 func strays(t *testing.T, root string) (out []string, read int) {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -44,9 +48,7 @@ func strays(t *testing.T, root string) (out []string, read int) {
 			if rel == "." {
 				return nil
 			}
-			name := d.Name()
-			if name == "testdata" || name == "vendor" || name == "tools" || name == "reference" ||
-				strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+			if strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
 			if fi, err := os.Stat(filepath.Join(p, "go.mod")); err == nil && !fi.IsDir() {
@@ -97,7 +99,10 @@ func TestOnlySensorlinkImports(t *testing.T) {
 
 // TestImportCheckBites: on a tree with one file of each kind, the check
 // finds the product importers outside platform/sensorlink, a package
-// under it included, and passes the tests and platform/sensorlink itself.
+// under it included and packages under tools, reference, testdata and _
+// directories, and passes the tests, platform/sensorlink itself, a hidden
+// directory, and a nested module (the root tools folder of the owner's PC
+// among them).
 func TestImportCheckBites(t *testing.T) {
 	root := t.TempDir()
 	src := "package x\n\nimport _ " + strconv.Quote(readerPath) + "\n"
@@ -107,11 +112,18 @@ func TestImportCheckBites(t *testing.T) {
 		"platform/sensorlink/dialkey/dialkey.go": true,
 		"modules/telemetry/forward/key.go":       true,
 		"cmd/otsec/main.go":                      true,
+		"platform/node/tools/x/x.go":             true,
+		"cmd/otsec/reference/x/x.go":             true,
+		"tests/tools/x/x.go":                     true,
+		"platform/node/testdata/x.go":            true,
+		"platform/node/_x/x.go":                  true,
+		"platform/node/vendor/x/x.go":            true,
 		"platform/sensorlink/dial.go":            false,
 		"platform/node/sensorlink_key_test.go":   false,
 		"tests/security/link_key_d6_test.go":     false,
-		"platform/node/testdata/x.go":            false,
+		"platform/node/.x/x.go":                  false,
 		"platform/experiments/phase0/x/x.go":     false,
+		"tools/gopath/x/x.go":                    false,
 	}
 	for p := range files {
 		full := filepath.Join(root, filepath.FromSlash(p))
@@ -122,8 +134,10 @@ func TestImportCheckBites(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "platform", "experiments", "phase0", "go.mod"), []byte("module x\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for _, m := range []string{"platform/experiments/phase0", "tools"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(m), "go.mod"), []byte("module x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	out, _ := strays(t, root)
 	for p, want := range files {
