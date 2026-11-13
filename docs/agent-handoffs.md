@@ -2040,7 +2040,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - HR-22 and its measured limits (a) to (e);
   - `docs/phase4/D4-engine-linux-eval.md` section 10;
   - D6's pass conditions on #642 and #647, and D1's ruling 6845247619 on #643.
-- Files or modules each role may modify: D4, `modules/telemetry/experiments/engine-linux/`; D6, the GT-PCAP paths. A held-out capture is committed only when its licence allows it. Otherwise it is fetched by pinned hash in the workflow, as D7 decides.
+- Files or modules each role may modify: D4, `modules/telemetry/experiments/engine-linux/`; D6, the GT-PCAP paths, which hold the held-out set's pin file. A held-out capture is committed only when its licence allows it, as D7 decides. Otherwise the workflow fetches it by the pinned hash, and D4 may change `.github/workflows/d4-engine-linux-eval.yml` for that fetch, with D6's review.
 - Expected interfaces: C13 0.2, unchanged.
 - Deliverable:
   - **The signature is frozen by hash before the held-out set can be seen** (D6's B4 on #670). The repository is public, and every agent works on one PC, so a set in a PR is seen. That is a new mechanism, so D4 and D6 agree its form in comments before either PR (D4-99). The two candidates:
