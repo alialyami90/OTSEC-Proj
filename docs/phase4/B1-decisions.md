@@ -1934,9 +1934,23 @@ No new words from the owner. Evidence class: `CI-Linux` (simulated) for the runs
 
 ## D4-95: HR-24 needs a detector change before item 4's gate (the owner, 2026-11-13)
 
-The owner's words, in this session on 2026-11-13, answering D1's question on HR-24 ("(a) accept it for now, or (b) require a detector change before item 4's gate"): "Go with b". Evidence class: `desk`. Nothing is built.
+The owner gave this answer in D1's session on 2026-11-13. D1 had asked whether to "(a) accept it for now, or (b) require a detector change before item 4's gate", and the owner replied "Go with b". Evidence class: `desk`. Nothing is built.
 
-- **The decision.** HR-24 is not accepted as a risk. Item 4's gate does not open while HR-24 is open. It closes only with a detector change that judges tied Telnet, SSH and SNMP sessions, measured on a counted run with a control (the closing condition in HR-24's row, `docs/threat-model.md`). The owner's acceptance is no longer one of the ways HR-24 can close.
-- **Why (D1's recommendation, D4-92).** A tied session skips every base rule (`modules/detection/netdetect/detector.go` l.262 on `main` at `34201bfd`: `r.base && ... o.Node.PlatformSession != nil`), so a session that ties is hidden whole, writes included. Unauthorized engineering access to a relay is what item 4 exists to catch. No mitigation narrows HR-24 today (D1's corrected ruling 6848404829 on #641).
-- **Not changed.** HR-22 and HR-23 stay open, each closing on a measured fix or on the owner's acceptance (D4-94). The approved contracts (D4-92) stand. The change is a detector rule within them; if it needs a contract change, that comes back to D1 first.
-- **Follow-up.** Brief P4-4-HR24 (`docs/agent-handoffs.md`). D3 updates HR-24's row to cite this entry in D3's next change after #654 merges. Item 4's gate report states HR-24's state.
+- **The decision.**
+  - HR-24 is not accepted as a risk.
+  - Item 4's gate does not open while HR-24 is open.
+  - HR-24 closes only with a detector change that judges tied Telnet, SSH and SNMP sessions, measured on a counted run against pass conditions pinned before the run, with a control (brief P4-4-HR24).
+  - This replaces, for HR-24 only, D4-92's "Each closes on a measured fix or on the owner's acceptance" and the same words in HR-24's row and in SL-17. HR-22 and HR-23 keep them.
+  - If no rule meets the pinned conditions, the gate stays closed and D1 brings HR-24 back to the owner with the measurement.
+- **Why (D1's recommendation, D4-92).**
+  - A tied flow skips every base rule. The skip is `modules/detection/netdetect/detector.go` l.262 on `main` at `34201bfd`: `if r.base && (d.base == nil || o.Node.PlatformSession != nil)`.
+  - So a session that ties is hidden whole, writes included. The one exception is `node-address-spoofed`, which is not a base rule and still judges a tied flow from a MAC that is not the node's. On the node's own segments, from the node's MAC, nothing judges it.
+  - Unauthorized engineering access to a relay is what item 4 exists to catch. No mitigation narrows HR-24 today (D1's corrected ruling 6848404829 on #641).
+- **Not changed.**
+  - HR-22 and HR-23 stay open, each closing on a measured fix or on the owner's acceptance (D4-94).
+  - The approved contracts (D4-92) stand. The change is a detector rule within them. If it needs a contract change, that comes back to D1 first.
+- **Follow-up.**
+  - Brief P4-4-HR24, and a bullet in item 4's exit gate (`docs/agent-handoffs.md`).
+  - After #654 merges, D3's next change cites this entry in HR-24's row and in SL-17 (`docs/phase4/D3-sensor-link.md`, the "No mitigation narrows it today" item).
+  - Item 4's gate report states HR-24's state.
+  - When HR-24 closes, the threat model records what an attacker who knows the rule can still hide.

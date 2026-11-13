@@ -1682,6 +1682,7 @@ It holds every criterion that the Stage A brief listed under "What item 4 must s
 - No safety or security objection is open, and the report says what remains `simulated` and which H-rows wait for a lab machine.
 - The engine and its packages are pinned, and D7's inventory covers the sensor.
 - **A flow the engine names nothing for is at least visible** (D4-90, in the words of D1's ruling on #637 and ADR-0009): the `undecoded` signal, with `unknown-pair`, is shown by D6's legs with their controls. The signal and its legs are briefed with the third part's implementation briefs, after P4-4-L6 states how such a flow reaches the node. A flow that was present while the baseline was learnt and was acknowledged raises nothing afterwards (`unknown-pair` only after acknowledgement), and the gate report says so.
+- **HR-24 is closed** (D4-95): a detector change judges tied Telnet, SSH and SNMP sessions, measured on a counted run against pass conditions pinned before it, with its control (brief P4-4-HR24). The owner's acceptance does not close it.
 - **The Modbus/TCP content signature is measured before the gate** (brief P4-4-E2's counted run, against pass conditions D6 set before it ran), and D1 records whether it is adopted. A gate with no counted measurement does not pass this bullet. If the measured signature is not adopted, the gate report says that Modbus on a moved port is not identified, and the high risk stands (HR-22, which D3 writes under P4-4-L6).
 
 ## After D4-88: the last step before the link's contracts are approved, and the owed evidence (issued 2026-11-11, D4-88)
@@ -1806,25 +1807,41 @@ Common rules as in "Phase 4 item 4, second part". Every brief names a scratch fi
 
 ## After D4-95: the detector change HR-24 needs (issued 2026-11-13, D4-95)
 
-Common rules as in "Phase 4 item 4, second part". Every brief names a scratch file unique to the role and task.
+Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role>-hr24-<stage>-*` (for example `d4-hr24-s1-note.md`), and no two roles share a name.
 
-### P4-4-HR24 (D4 with D3; D6 for the cases): judge a tied Telnet, SSH or SNMP session
+### P4-4-HR24 (D4 with D3; D6 for the cases and the measurement): judge a tied Telnet, SSH or SNMP session
 
-- **Objective.** Close HR-24 before item 4's gate (D4-95). A flow tied to a collector run must no longer be hidden whole. The detector must judge it against what that run is expected to look like, and raise an alert when it does not match.
-- **Inputs.** D4-92 and D4-95; HR-24 and AP-35 in `docs/threat-model.md`; SL-17 in `docs/phase4/D3-sensor-link.md`; C13 0.2; the node's design (`docs/phase4/D5-sensor-node.md`); `modules/detection/netdetect/detector.go` (the base-rule skip at l.262 on `main` at `34201bfd`); the collector's approved commands and their sessions (`contracts/authz/credential.go`, the adapter's command records).
+- **Objective.** Close HR-24 before item 4's gate (D4-95). A flow tied to a collector run must no longer be hidden whole. The detector judges it against what that run is expected to look like, and raises an alert when it does not match.
+- **Inputs.**
+  - D4-92 and D4-95.
+  - HR-24 and AP-35 in `docs/threat-model.md`; SL-17 in `docs/phase4/D3-sensor-link.md`; C13 0.2 (`docs/phase4/D4-c13-0.2-proposal.md`); the node's design (`docs/phase4/D5-sensor-node.md`).
+  - `modules/detection/netdetect/detector.go` (the base-rule skip at l.262 on `main` at `34201bfd`) and `own.go`.
+  - What a collector run does on the wire. The expected values come from the collector's own records, never from an attacker's view:
+    - `contracts/adapter` (the approved commands);
+    - `modules/ied/telnet` and `modules/ied/snmpv3`;
+    - the run records C8 keeps.
 - **Stage 1, the design (D4, docs only).** A short design note covering:
-  - what is known in advance about a collector run's session (protocol, endpoint, the approved commands, expected byte counts, packet counts and duration, as far as the sensor's records show them);
-  - which of these the detector can compare without decoding Telnet, SSH or SNMPv3 content;
+  - every route by which a spoofed flow can tie, from HR-24's row and SL-17;
+  - what is known in advance about a collector run's session: protocol, endpoint, the approved commands, and the expected bytes, packets and duration, as far as the sensor's records show them;
+  - which of these the detector can compare from sizes, counts and timing alone;
   - the rule's false-positive risk on the platform's own runs;
-  - what an attacker who knows the rule can still hide.
+  - what an attacker who knows the rule can still hide;
+  - the measurement that would close HR-24: its cases, the control, and the pass conditions.
 
-  D3 reviews it as a security design. D6 reviews it for testability. If the note needs a C13 or C4 change, it comes back to D1 first.
-- **Stage 2, the cases (D6).** GT-PCAP cases written before the implementation, with labels from the bytes:
-  - a spoofed session tied to a run, which must raise an alert;
-  - the platform's own run, which must not;
-  - a control that defeats the rule.
+  D3 reviews the note as a security design, D2 for what the collector's sessions look like on the wire, and D6 for testability. If the note needs a C13 or C4 change, it comes back to D1 first.
+- **Stage 2, the cases and the pass conditions (D6).** Written before the implementation and pinned before the counted run (as P4-4-E2 under D4-90). Labels come from how each case was built, never from an engine or the detector. Each case carries its run record and says how its tie arises. D1's briefs assign the case ids. At least:
+  - for each of Telnet, SSH and SNMPv3: a spoofed session tied to a run (an alert is required), and the platform's own run (no alert is allowed);
+  - a control: a detector with the base-rule skip as on `main` at `34201bfd`, which must fail the spoofed cases, so the measurement is shown able to fail;
+  - a spoofed session shaped to match the run's profile, labelled as a known miss, with its result reported and not counted as a pass.
 
-  D1's briefs assign the case ids.
-- **Stage 3, the implementation (D4).** Issued with the third part's implementation briefs, after D5 closes F1 to F11 (D4-87, D4-88). It needs unit tests, negative tests, and the counted run that HR-24's row names.
-- **Acceptance.** Stage 1: D3 and D6 pass the note. Stage 3: D6 measures it on a counted run with a control, and D1 closes HR-24 in the decision log.
-- **Exclusions.** No decoding of SSH or SNMPv3 at authPriv. No change to the collector's own sessions. No contact with any device.
+  D4 reviews the labels against C13's records, and D3 reviews them against HR-24's routes.
+- **Stage 3, the implementation (D4).** Issued with the third part's implementation briefs, after D5 closes F1 to F11 (D4-87, D4-88). It comes with unit tests, negative tests, and the counted run against stage 2's pinned conditions.
+- **Acceptance.**
+  - Stage 1: D3, D2 and D6 pass the note.
+  - Stage 2: D4 and D3 pass the cases; the conditions are pinned before any counted run.
+  - Stage 3: D6 measures it on a counted run, the control fails as named, and D1 closes HR-24 in the decision log, or brings it back to the owner if the conditions are not met.
+- **Exclusions.**
+  - The rule reads no session content. Telnet carries the relay's password in clear, so nothing the sessions carry is read, stored or forwarded. A rule that needs content comes back to D1 first.
+  - No decoding of SSH or SNMPv3 at authPriv.
+  - No change to the collector's own sessions.
+  - No contact with any device.
