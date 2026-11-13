@@ -1,6 +1,7 @@
 # The long slice legs, apart from ci.yml so that adding the `full-ci`
 # label re-runs only these (the owner, 2026-11-13, D4-97; D6's B1 on
-# #665). Moved from ci.yml unchanged except for the trigger.
+# #665). Moved from ci.yml unchanged except for the trigger. The
+# lines below are ci.yml's own header, kept with its triggers:
 # Project CI (A1). Runs the root Go module's vet and tests on Linux and on
 # windows/amd64, the site node's primary build (ADR-0007), and the Python
 # verification tests (ADR-0003: Python for verification tooling only).
@@ -60,8 +61,9 @@ jobs:
   integration-long:
     # On a push to main always. On a pull request only once D1 adds the
     # `full-ci` label, after the reviewers' last pass, and on every later
-    # push while the label stays. Without it the job shows as skipped,
-    # and D1's merge check refuses a head with any skipped check run
+    # push while the label stays. Without it the job shows as skipped;
+    # D1's merge check counts a skipped run for nothing and needs a
+    # success for each leg on the head
     # (the owner, 2026-11-13, D4-97).
     if: >-
       github.event_name == 'push' ||

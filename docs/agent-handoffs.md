@@ -31,7 +31,7 @@ Drawn from the defects D6's reviews found most often. The implementer runs it an
 4. **Locks:** no lock is held across a store call or any call that can block, and a lock that a `recover` can reach is released with `defer`.
 5. **Clocks:** code that runs on the test clock is tested on it, and no rule reads the wall clock by mistake.
 6. **Alarms and records:** each is raised once per condition, not once per retry, and the last state is always written; no held change is left unwritten.
-7. **Evidence:** each new test shows a named pass, not a skip, in the jobs that run it (both `go` jobs for Go), cited by job URL. The `integration-long` legs' result comes after D1 adds `full-ci`, before the merge. A PR that changes the slice or its harness asks D1 for `full-ci` early.
+7. **Evidence:** each new test shows a named pass, not a skip, in the jobs that run it (both `go` jobs for Go), cited by job URL; for a job that prints no names, such as `python`, its pass and count. The `integration-long` legs' result comes after D1 adds `full-ci`, before the merge; a PR that changes the slice or its harness asks D1 for the label early (CLAUDE.md, "Testing and merging").
 8. **Gates:** owed tests are listed by name, F-027's merge-check greps are shown, and no approved bound changes.
 9. **Claims:** every rate, bound and "never" in the PR body or a note is what the code does, and is tested.
 
