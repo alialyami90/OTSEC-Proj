@@ -1849,3 +1849,47 @@ Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role
   - No decoding of SSH or SNMPv3 at authPriv.
   - No change to the collector's own sessions.
   - No contact with any device.
+
+## The third part of item 4: implementation (issued 2026-11-13, D4-92, D4-95)
+
+Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role>-<brief>-*`, and no two roles share a name. The approved contracts (D4-92) are the interfaces. Any change to them comes back to D1 first. The F-027 gate stays until this first brief closes: no `network_sensor` section outside the tests, no release, no caller of `ServeSensor` outside the tests, and no caller of `sensorlink.Link.Serve` other than `ServeSensor`.
+
+### P4-4-F27 (D5; D3 for F11's register): close the couplings F1 to F11 on `main`
+
+- **Objective.** A sensor never stops SER collection, Syslog receive, forwarding or the node's start (R1.8, P5; F-027 in `docs/verification.md`). Each coupling F1 to F11 is closed as `docs/phase4/D5-sensor-node.md` §1.9 names it, and shown closed by a test whose control fails.
+- **Inputs.**
+  - F-027;
+  - `docs/phase4/D5-sensor-node.md`: §1.0 (the table of F1 to F11), §1.9 items 1 to 11 (what closes each, and the tests), §1.10 (the bounds) and §1.14 (the limits);
+  - C13 0.2 (`docs/phase4/D4-c13-0.2-proposal.md`) and C5;
+  - D4-87, D4-88 and D4-92.
+- **May modify.**
+  - D5's paths: `platform/` (including the new package `platform/node/sensortest`, §1.9 item 8) and `cmd/otsec/`.
+  - F11: the remedy D1 adopted on #631 is the link key in a file apart from the register. If it needs a change in `modules/security/nodekey/`, D3 makes that change in its own PR, and D5's PR follows it.
+  - Nothing else. A change another role's path needs comes back to D1.
+- **Deliverables.**
+  - Small PRs, one per group, in this order:
+    1. F2, F5, F6, F7, F9 and F10: the ones that need only the configuration section;
+    2. F1, F3 and F4: the ones that need records to arrive, fed by the tests;
+    3. F8, as a rule on the audit consumer, and F11.
+  - Each PR names the couplings it closes, with each one's test and control, and shows the control failing: run it with the control applied, and give the failing output in the PR.
+  - §1.9 item 8's in-process tests, including SL-T13's legs (d) and (e).
+  - §1.9 item 8's rig legs (a), (b), (c), (f), (g) and (h) need a real sensor and link. They are owed to the sensor's implementation brief, not this one. Each PR says so.
+  - D5 updates §1.0's status column and F-027's acceptance cell (by D6) when the last group merges.
+- **Acceptance.**
+  - D6, which tries to reopen each coupling, and D3 for the trust boundaries (§5.6).
+  - CI is green on every job, on each head.
+  - The two `git grep` checks of F-027 still print what F-027 says, at each merge.
+  - D6 closes F-027 in `docs/verification.md` when all eleven are closed.
+- **Exclusions.**
+  - No dialer, no enrolment and no sensor.
+  - No caller of `ServeSensor` outside the tests, and no `network_sensor` section outside the tests.
+  - No value in §1.10 changes without D1.
+  - The owner's PC runs tests by name only (HANDOFF).
+- **Risks.**
+  - `platform/node`'s Windows run is near its 720 s warning (D4-44), so new tests go in `sensortest`.
+  - A fix in the store or the scheduler touches SER collection itself, so the slice's regression legs must stay green.
+
+### Next in the third part (not yet issued)
+
+- **P4-4-HR24 stage 1** (D4), when D4's pin move (#657's follow-up) is done.
+- **The sensor's implementation briefs:** the dialer and enrolment (D5), the sensor agent and capture (D4), and the rig legs (D6). Each is issued after P4-4-F27 closes (F-027's gate: closing them comes before any dialer) and D1 has the owner's answers on the sensor's host (#640).
