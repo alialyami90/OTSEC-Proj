@@ -38,13 +38,14 @@ type fairLock struct {
 	// checks counts the checks Lock makes of whether it may take the
 	// lock, and signalled is checks at the last signal. tried and woken
 	// are this package's test seams, nil in the node: tried runs, under
-	// mu, at each of Lock's checks; woken runs in a scheduler call woken
+	// mu, at each of Lock's checks, with whether the check takes the
+	// lock; woken runs in a scheduler call woken
 	// from its wait, in place of its take of mu, and returns with mu held.
 	// With them a test orders the call's check after the first check Lock
 	// makes after the last signal, so which of the two goes first is not
 	// left to the Go scheduler.
 	checks, signalled uint64
-	tried             func()
+	tried             func(took bool)
 	woken             func()
 }
 
@@ -69,7 +70,15 @@ func (f *fairLock) waitCh() chan struct{} {
 // while the lock is held or a scheduler call waits for it.
 func (f *fairLock) Lock() {
 	f.mu.Lock()
-	for f.note(); f.held || f.waiting > 0; f.note() {
+	for {
+		f.checks++
+		took := !f.held && f.waiting == 0
+		if f.tried != nil {
+			f.tried(took)
+		}
+		if took {
+			break
+		}
 		w := f.waitCh()
 		f.mu.Unlock()
 		<-w
@@ -77,15 +86,6 @@ func (f *fairLock) Lock() {
 	}
 	f.held = true
 	f.mu.Unlock()
-}
-
-// note counts one of Lock's checks and runs the tried seam. The caller
-// holds f.mu.
-func (f *fairLock) note() {
-	f.checks++
-	if f.tried != nil {
-		f.tried()
-	}
 }
 
 // lockSched is a scheduler call's take: it goes before the read loop, and

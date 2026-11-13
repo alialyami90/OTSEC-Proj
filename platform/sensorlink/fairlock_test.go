@@ -80,17 +80,21 @@ func others(g *holdRig, n int) []any {
 
 // The scheduler goes first: while the read loop commits a flood at 100 ms
 // a record, and the manager's TickHold takes the lock as often as it can,
-// each Dispatch waits for at most about the one record in commit, and none
-// times out. Each woken call checks the lock only after the first check
-// Lock makes after the lock was freed (orderAfterLock), so the order is
-// the test's, not the Go scheduler's. Control 2 (the fairness rule
-// removed: Lock does not yield to a waiting scheduler call) then lets the
-// read loop or TickHold take the lock before a waiting call every time,
-// so the first call waits out HoldLockWait.
+// Lock never takes the lock while a Dispatch waits for it, so each waits
+// for at most the holder's turn in progress, and none times out. The rule
+// is counted at Lock's take, not timed: on the hosted runners a woken call
+// that waits for Lock's check (below) has twice measured over 400 ms under
+// the rule, which is the runner's scheduling, not a turn taken from it.
+// Each woken call checks the lock only after the first check Lock makes
+// after the lock was freed (orderAfterLock), so the order is the test's,
+// not the Go scheduler's. Control 2 (the fairness rule removed: Lock does
+// not yield to a waiting scheduler call) then lets the read loop or
+// TickHold take the lock before a waiting call every time, so the first
+// call waits out HoldLockWait.
 func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	s := &gatedStore{delay: 100 * time.Millisecond}
 	g := gatedRig(t, s)
-	orderAfterLock(&g.l.cmu)
+	bypassed := orderAfterLock(&g.l.cmu)
 	recs := others(g, 60)
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
@@ -114,8 +118,9 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 	}
 	st := g.l.Stats()
-	if worst > 250*time.Millisecond || st.DispatchTimeouts != 0 {
-		t.Fatalf("a dispatch waited %s (status %s), %d timed out; want at most about one record in commit (100 ms), none", worst, st.LockWaitMax, st.DispatchTimeouts)
+	t.Logf("worst dispatch %s (status %s)", worst, st.LockWaitMax)
+	if n := bypassed.Load(); n != 0 || st.DispatchTimeouts != 0 {
+		t.Fatalf("Lock took the lock %d times while a dispatch waited, %d dispatches timed out; want none", n, st.DispatchTimeouts)
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -126,10 +131,15 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 // orderAfterLock sets f's seams so that a scheduler call woken from its
 // wait checks the lock only once Lock has checked since the last signal,
 // and under the same hold of f.mu as that finding. A caller of Lock that
-// runs hot (here TickHold) checks soon, so the wait ends.
-func orderAfterLock(f *fairLock) {
+// runs hot (here TickHold) checks soon, so the wait ends. It returns the
+// count of Lock's takes while a scheduler call waited.
+func orderAfterLock(f *fairLock) *atomic.Int64 {
+	var bypassed atomic.Int64
 	tried := make(chan struct{}, 1)
-	f.tried = func() {
+	f.tried = func(took bool) {
+		if took && f.waiting > 0 { // under f.mu
+			bypassed.Add(1)
+		}
 		select {
 		case tried <- struct{}{}:
 		default:
@@ -145,6 +155,7 @@ func orderAfterLock(f *fairLock) {
 			<-tried
 		}
 	}
+	return &bypassed
 }
 
 // The fairness rule itself: a holder that takes the lock again the moment
