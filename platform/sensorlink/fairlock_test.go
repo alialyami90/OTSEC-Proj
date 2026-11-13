@@ -24,6 +24,8 @@ type gatedStore struct {
 	entered  chan struct{} // closed at the first append that waits
 	once     sync.Once
 	headFail atomic.Bool
+	// headFailAfter makes the head fail from the first batch on.
+	headFailAfter atomic.Bool
 }
 
 func (s *gatedStore) wait() {
@@ -41,7 +43,11 @@ func (s *gatedStore) Append(ctx context.Context, rec c5.Record) (c5.Receipt, err
 
 func (s *gatedStore) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
 	s.wait()
-	return s.netStore.AppendBatch(ctx, recs)
+	rcs, err := s.netStore.AppendBatch(ctx, recs)
+	if s.headFailAfter.Load() {
+		s.headFail.Store(true)
+	}
+	return rcs, err
 }
 
 func (s *gatedStore) LastCommitted(ctx context.Context) (uint64, error) {
@@ -316,11 +322,14 @@ func TestPanicUnderLinkMuReleased(t *testing.T) {
 	}
 }
 
-// D6's note 1 on #663: a Result whose stream head can't be read after the
-// release, as while the node's network database is swapped out for a
-// Resume, returns an error and no after_seq, so no session is handed on
-// with after_seq 0. Control: the head's error dropped, as before, which
-// returns after_seq 0 and no error.
+// D6's note 1 on #663, and the fallback of D1's ruling on #676: a Result
+// whose stream head can't be read before its release, as while the node's
+// network database is swapped out for a Resume, returns the head's error
+// and begins nothing: nothing is committed or saved as releasing, the run
+// stays held, head_unread counts it, and its deadline then commits its
+// flow untied, for the base rules. Control: the head's error dropped, as
+// before, which saves a releasing record with head 0 and commits the flow
+// tied with no session handed on.
 func TestResultHeadUnknownNoAfterSeq(t *testing.T) {
 	s := &gatedStore{}
 	g := gatedRig(t, s)
@@ -331,4 +340,100 @@ func TestResultHeadUnknownNoAfterSeq(t *testing.T) {
 	if err == nil || errors.Is(err, ErrHoldTimeout) {
 		t.Fatalf("result with no head: after_seq %d, %v; want the head's error", rel.AfterSeq, err)
 	}
+	if c := g.committed(); len(c) != 0 || g.l.hold.runs["run-1"] == nil || g.l.Stats().Hold.HeadUnread != 1 {
+		t.Fatalf("after a Result with no head: committed %+v, still held %v, %+v", c, g.l.hold.runs["run-1"] != nil, g.l.Stats().Hold)
+	}
+	s.headFail.Store(false)
+	g.wall = g.wall.Add(HoldRunLimit + time.Hour)
+	g.l.TickHold(bg)
+	want(t, g.committed(), tied{seq: 1})
+}
+
+// D3's B2 and D6's B1 on #676, as D1 ruled: the after_seq is the largest
+// seq of the batch's receipts, so a head that can't be read after the
+// batch no longer matters. The Result succeeds with after_seq 1, and the
+// flow committed tied to it is handed on with its session. Control: the
+// head read again after the batch, as at 7f9a79a7, which returns its error
+// with the flow committed tied and no session handed on.
+func TestResultAfterSeqFromReceipts(t *testing.T) {
+	s := &gatedStore{}
+	g := gatedRig(t, s)
+	g.dispatch("run-1")
+	g.send(g.obs("start", 40001, time.Second))
+	s.headFailAfter.Store(true)
+	rel, err := g.l.Result(bg, "run-1", session09(inv1, 40001, 2*time.Second))
+	if err != nil || rel.AfterSeq != 1 {
+		t.Fatalf("result with the head failing after the batch: after_seq %d, %v; want 1", rel.AfterSeq, err)
+	}
+	want(t, g.committed(), tied{seq: 1, invocation: inv1, tie: TieConnection})
+}
+
+// D3's B3 on #676: a recovered panic in a release's save, before its
+// batch is in the store, rolls the staged re-point back and clears the
+// hold-wide staged state, so the open flow's later records tie to the
+// invocation whose session was handed on (inv1), even after another run's
+// release. D3's probe, with that later release added. Controls: the
+// rollback left to a save that returns an error, as at 7f9a79a7; and the
+// staged state not cleared, which the next release applies.
+func TestRepointSavePanicRolledBack(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall = g.wall.Add(time.Minute)
+	g.dispatch("req-2")
+	save := g.l.hold.cfg.Save
+	g.l.hold.cfg.Save = func(ctx context.Context, rec RunRecord) error {
+		if rec.Run.RequestID == "req-2" && rec.State != HoldHolding {
+			panic("sensorlink test: a fault in the release's save")
+		}
+		return save(ctx, rec)
+	}
+	if _, err := g.l.Result(bg, "req-2", session09(inv2, 40001, time.Minute)); !errors.Is(err, ErrHoldTimeout) {
+		t.Fatalf("result with a panic in the save: %v", err)
+	}
+	g.l.hold.cfg.Save = save
+	g.dispatch("req-3")
+	if _, err := g.l.Result(bg, "req-3", Session{InvocationID: "33333333-3333-4333-8333-333333333333"}); err != nil {
+		t.Fatal(err)
+	}
+	g.send(g.obs("function", 40001, 2*time.Minute))
+	c := g.committed()
+	if last := c[len(c)-1]; last.invocation != inv1 {
+		t.Fatalf("the open flow's later record ties to %q, want %s, whose session was handed on: %+v", last.invocation, inv1, c)
+	}
+}
+
+// D3's N1 on #676, as D1 ruled: a recovered panic in the save after the
+// batch, whose records are in the store, finishes the release as a failed
+// save does. The Result returns the receipts' after_seq, the run leaves
+// the hold, and its deadline commits nothing again: seq 1 is committed
+// once, tied. The panic is counted. Control: the rollback in every case
+// (the receipts' branch removed), under which the Result times out with
+// the flow committed tied, and the deadline commits it a second time,
+// untied.
+func TestPanicAfterBatchFinished(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("run-1")
+	g.send(g.obs("start", 40001, time.Second))
+	save := g.l.hold.cfg.Save
+	g.l.hold.cfg.Save = func(ctx context.Context, rec RunRecord) error {
+		if rec.State == HoldReleased || rec.State == HoldWaiting {
+			panic("sensorlink test: a fault in the save after the batch")
+		}
+		return save(ctx, rec)
+	}
+	rel, err := g.l.Result(bg, "run-1", session09(inv1, 40001, 2*time.Second))
+	g.l.hold.cfg.Save = save
+	if err != nil || rel.AfterSeq != 1 {
+		t.Fatalf("result with a panic after the batch: after_seq %d, %v; want 1", rel.AfterSeq, err)
+	}
+	if st := g.l.Stats(); g.l.hold.runs["run-1"] != nil || st.SchedPanics != 1 || st.ResultTimeouts != 0 {
+		t.Fatalf("still held %v, %d panics, %d timeouts", g.l.hold.runs["run-1"] != nil, st.SchedPanics, st.ResultTimeouts)
+	}
+	g.wall = g.wall.Add(HoldRunLimit + time.Hour)
+	g.l.TickHold(bg)
+	want(t, g.committed(), tied{seq: 1, invocation: inv1, tie: TieConnection})
 }

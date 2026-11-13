@@ -423,8 +423,10 @@ func (l *Link) takeBudget(unresolved bool, n int64, dst string) bool {
 // commitBatch commits a release's records in one batch, in order, so a
 // restart can tell whether it committed (RecoverHold). A record the budget
 // refuses is dropped and counted; a batch the store refuses drops and
-// counts each. The caller holds cmu.
-func (l *Link) commitBatch(ctx context.Context, rel []Release) {
+// counts each. As soon as the batch returns, taken gets the largest seq
+// of its receipts, when any record committed: past that point its records
+// are in the store, whatever happens next (release). The caller holds cmu.
+func (l *Link) commitBatch(ctx context.Context, rel []Release, taken func(last uint64)) {
 	var recs []c5.Record
 	var held []HeldRecord
 	var dsts []string
@@ -452,7 +454,14 @@ func (l *Link) commitBatch(ctx context.Context, rel []Release) {
 	if len(recs) == 0 {
 		return
 	}
-	_, err := l.opt.Store.AppendBatch(ctx, recs)
+	rcs, err := l.opt.Store.AppendBatch(ctx, recs)
+	if err == nil && len(rcs) > 0 {
+		var last uint64
+		for _, rc := range rcs {
+			last = max(last, uint64(rc.Key().Seq))
+		}
+		taken(last)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for i := range recs {

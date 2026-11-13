@@ -149,15 +149,24 @@ func (l *Link) schedCall(count *uint64, f func() error) (err error) {
 		if p := recover(); p != nil {
 			l.mu.Lock()
 			*count++
-			l.stats.SchedPanics++
-			l.stats.LastSchedPanic = capDetail(fmt.Sprintf("%v\n%s", p, debug.Stack()))
 			l.mu.Unlock()
+			l.notePanic(p)
 			err = fmt.Errorf("%w: a panic in the call was recovered", ErrHoldTimeout)
 		}
 	}()
 	defer l.cmu.Unlock()
 	defer l.syncHold()
 	return f()
+}
+
+// notePanic counts a scheduler call's recovered panic and keeps its text:
+// one taken as a timeout (schedCall), and one after a release's receipts,
+// which the release finishes (result).
+func (l *Link) notePanic(p any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.stats.SchedPanics++
+	l.stats.LastSchedPanic = capDetail(fmt.Sprintf("%v\n%s", p, debug.Stack()))
 }
 
 // noteWait records a scheduler call's wait for the lock, and a timeout.

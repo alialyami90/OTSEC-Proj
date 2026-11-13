@@ -223,6 +223,10 @@ type HoldStats struct {
 	OpenSuperseded     uint64 `json:"open_superseded"` // a start on an open key
 	OpenExpired        uint64 `json:"open_expired"`
 	CheckpointFailures uint64 `json:"checkpoint_failures"`
+	// HeadUnread counts releases not begun because the stream's head
+	// could not be read: the run stays as it was, and a deadline or the
+	// next TickHold tries again (D4's condition (i) on #676).
+	HeadUnread uint64 `json:"head_unread"`
 }
 
 // holdRun is a run in memory.
@@ -248,6 +252,18 @@ type hold struct {
 	repointed bool
 	last      *RunRecord // the newest record saved, which carries the open table
 	stats     HoldStats
+	// phase is the release in progress, for result's deferred clean-up.
+	phase *releasePhase
+}
+
+// releasePhase is how far a release has gone, for result's deferred
+// clean-up after a recovered panic (D3's B3 and N1, D1's ruling on #676).
+type releasePhase struct {
+	prev   []OpenFlow // the open table before the staged changes
+	staged bool       // the open table holds the staged changes
+	taken  bool       // the batch's receipts are taken: its records are in the store
+	after  uint64     // the receipts' largest seq, or the head before the batch
+	finish func()     // the end state, as when the record after the batch is not saved
 }
 
 func newHold(cfg HoldConfig) (*hold, error) {
@@ -505,10 +521,16 @@ type Released struct {
 // arrival order, leaving any failed dial still to end waiting (part (c)).
 // A second result for a run, or one for a run the hold doesn't know, does
 // nothing. It is a scheduler call, as Dispatch is: past HoldLockWait, or on
-// a recovered panic, it returns ErrHoldTimeout and the run's flows stay
-// held until its deadline releases them untied. It returns an error, and
-// no after_seq, when the stream's head after the release can't be read, so
-// no session is handed on with an after_seq of 0 (D6's note 1 on #663).
+// a recovered panic before the batch's records are in the store, it
+// returns ErrHoldTimeout, the staged changes are rolled back, and the
+// run's flows stay held until its deadline releases them untied. A panic
+// after the receipts finishes the release, as when the record after the
+// batch is not saved, and returns the receipts' after_seq, so the session
+// is handed on (D1's ruling on #676). The after_seq is the largest seq of
+// the batch's receipts, or the head read before the batch when nothing
+// committed; when that head can't be read, it returns the error before
+// anything is applied, and the run stays held (D6's note 1 on #663, D3's
+// B2 on #676).
 func (l *Link) Result(ctx context.Context, requestID string, s Session) (out Released, err error) {
 	err = l.schedCall(&l.stats.ResultTimeouts, func() error {
 		out, err = l.result(ctx, requestID, s)
@@ -517,7 +539,30 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (out Rel
 	return out, err
 }
 
-func (l *Link) result(ctx context.Context, requestID string, s Session) (Released, error) {
+func (l *Link) result(ctx context.Context, requestID string, s Session) (out Released, err error) {
+	// The phased clean-up (D1's ruling on #676). It always clears the
+	// hold-wide staged state, which the next release, perhaps another
+	// run's, would otherwise apply. Before the receipts it rolls back the
+	// open table and lets the panic reach schedCall; after them it
+	// finishes the release and returns its after_seq.
+	l.hold.phase = nil
+	defer func() {
+		h, p := l.hold, recover()
+		ph := h.phase
+		h.phase = nil
+		switch {
+		case p != nil && ph != nil && ph.taken:
+			ph.finish()
+			l.notePanic(p)
+			out, err, p = Released{AfterSeq: ph.after, OpenFlow: h.repointed}, nil, nil
+		case p != nil && ph != nil && ph.staged:
+			h.open = ph.prev
+		}
+		h.pending, h.pendingTied, h.repoint = nil, 0, nil
+		if p != nil {
+			panic(p)
+		}
+	}()
 	r := l.hold.runs[requestID]
 	if r == nil || r.rec.State != HoldHolding {
 		head, err := l.head(ctx)
@@ -526,7 +571,6 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (Release
 	h, g, now := l.hold, l.hold.grace(), l.hold.now()
 	rec := cloneRec(r.rec)
 	rec.Session = &s
-	var out Released
 	if s.Connected && s.Local.IsValid() {
 		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && now.Before(h.expires(h.open[i], now)) {
 			// Staged: it takes effect only with the release's record below
@@ -608,12 +652,14 @@ func (l *Link) TickHold(ctx context.Context) {
 				r.rec.Run.Deadline, rec.Run.Deadline = lim, lim
 			}
 			if !now.Before(rec.Run.Deadline) {
-				h.stats.DeadlineReleases++
-				_, _ = l.release(ctx, r, rec, h.untied(rec.Flows), nil)
+				if _, err := l.release(ctx, r, rec, h.untied(rec.Flows), nil); err == nil {
+					h.stats.DeadlineReleases++ // a head not read begins nothing, tried at the next tick
+				}
 			}
 		case HoldWaiting:
 			var rel []Release
 			var remaining []HeldFlow
+			due := uint64(0)
 			for i, f := range rec.Flows {
 				if lim := now.Add(HoldDialLimit + time.Duration(f.FlowIdle)*time.Second + g); f.Wait.After(lim) {
 					r.rec.Flows[i].Wait, f.Wait = lim, lim
@@ -622,11 +668,13 @@ func (l *Link) TickHold(ctx context.Context) {
 					remaining = append(remaining, f)
 					continue
 				}
-				h.stats.DeadlineReleases++
+				due++
 				rel = append(rel, h.untied([]HeldFlow{f})...)
 			}
 			if len(rel) > 0 {
-				_, _ = l.release(ctx, r, rec, rel, remaining)
+				if _, err := l.release(ctx, r, rec, rel, remaining); err == nil {
+					h.stats.DeadlineReleases += due
+				}
 			}
 		}
 	}
@@ -696,17 +744,27 @@ func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Releas
 // release commits rel and keeps remaining, in rec's run: first the record
 // saying what it releases (state releasing), then the batch, then the
 // record after it. A release whose record can't be saved commits untied
-// (D4-72). It returns the stream's head after the batch, or the error of a
-// head that can't be read then.
+// (D4-72). It returns the after_seq: the largest seq of the batch's
+// receipts, taken as soon as the batch returns, or the head read before
+// the batch when nothing committed. While cmu is held nothing else commits
+// to the stream, so the head before is exact then. A head that can't be
+// read before begins nothing: no releasing record is saved without the
+// head RecoverHold compares (D4's condition (i), D1's ruling on #676).
 func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Release, remaining []HeldFlow) (uint64, error) {
 	h := l.hold
-	head, _ := l.head(ctx)
+	head, err := l.head(ctx)
+	if err != nil {
+		h.stats.HeadUnread++
+		return 0, err
+	}
+	ph := &releasePhase{prev: slices.Clone(h.open), after: head}
+	h.phase = ph
 	rec.Flows, rec.Releasing, rec.Head = remaining, rel, head
 	rec.State = HoldReleasing
 	// The staged table changes (the tied flows still open, and a result's
 	// re-point) take effect only with the first record saved below: the
 	// releasing record if there is a batch, else the final one.
-	prev, evicted := slices.Clone(h.open), uint64(0)
+	evicted := uint64(0)
 	if o := h.repoint; o != nil {
 		if i := h.openIndex(o.Key); i >= 0 {
 			h.open = slices.Clone(h.open)
@@ -716,42 +774,56 @@ func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Rel
 	for _, o := range h.pending {
 		evicted += h.addOpen(o)
 	}
+	ph.staged = true
 	applied := true
 	rec.OpenFlow = h.repoint != nil
+	// final is the record after the batch, and settle the end state in
+	// memory, as built from it.
+	final := func() RunRecord {
+		f := rec
+		f.Releasing, f.Head, f.AfterSeq = nil, 0, ph.after
+		f.State = HoldReleased
+		if len(remaining) > 0 {
+			f.State = HoldWaiting
+		}
+		f.OpenFlow = applied && h.repoint != nil
+		return f
+	}
+	settle := func(f RunRecord) {
+		if applied {
+			h.stats.OpenEvicted += evicted
+			h.stats.Tied += h.pendingTied
+		}
+		f.OpenFlow = applied && h.repoint != nil
+		h.repointed = f.OpenFlow
+		h.pending, h.pendingTied, h.repoint = nil, 0, nil
+		if f.State == HoldReleased {
+			delete(h.runs, f.Run.RequestID)
+		} else {
+			r.rec = f
+		}
+	}
+	// After the receipts, a recovered panic ends the release as a failed
+	// save of the record after the batch does (result).
+	ph.finish = func() { settle(final()) }
 	if len(rel) > 0 {
 		if err := h.save(ctx, rec); err != nil {
-			h.open, applied = prev, false
+			h.open, applied = ph.prev, false
 			for i := range rel {
 				rel[i].Tie, rel[i].Asset = nil, ""
 			}
 		}
-		l.commitBatch(ctx, rel)
+		l.commitBatch(ctx, rel, func(last uint64) { ph.after, ph.taken = last, true })
 	}
-	after, headErr := l.head(ctx)
-	rec.Releasing, rec.Head, rec.AfterSeq = nil, 0, after
-	rec.State = HoldReleased
-	if len(remaining) > 0 {
-		rec.State = HoldWaiting
-	}
-	rec.OpenFlow = applied && h.repoint != nil
+	f := final()
 	// Counted on failure; a restart finds the releasing record and checks
 	// the batch.
-	if err := h.save(ctx, rec); err != nil && len(rel) == 0 {
-		h.open, applied = prev, false
+	if err := h.save(ctx, f); err != nil && len(rel) == 0 {
+		h.open, applied = ph.prev, false
 	}
-	if applied {
-		h.stats.OpenEvicted += evicted
-		h.stats.Tied += h.pendingTied
-	}
-	rec.OpenFlow = applied && h.repoint != nil
-	h.repointed = rec.OpenFlow
-	h.pending, h.pendingTied, h.repoint = nil, 0, nil
-	if rec.State == HoldReleased {
-		delete(h.runs, rec.Run.RequestID)
-	} else {
-		r.rec = rec
-	}
-	return after, headErr
+	settle(f)
+	h.phase = nil
+	return ph.after, nil
 }
 
 // RecoverHold finishes a release a restart interrupted: a run saved as
@@ -770,10 +842,10 @@ func (l *Link) RecoverHold(ctx context.Context) error {
 			return err
 		}
 		rec := cloneRec(r.rec)
+		after := head // the receipts' rule, as in release, so no 0 is saved (D4 on #676)
 		if head == rec.Head {
-			l.commitBatch(ctx, rec.Releasing)
+			l.commitBatch(ctx, rec.Releasing, func(last uint64) { after = last })
 		}
-		after, _ := l.head(ctx)
 		rec.Releasing, rec.Head, rec.AfterSeq = nil, 0, after
 		rec.State = HoldReleased
 		if len(rec.Flows) > 0 {
