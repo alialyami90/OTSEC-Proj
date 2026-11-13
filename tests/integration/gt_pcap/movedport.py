@@ -5,9 +5,15 @@ capture, as the PRP pairs are (plan section 2C). From one Ethernet capture
 this writes `<stem>-moved-port.pcap`, in which every TCP segment to or from
 port OLD is to or from port NEW instead, and nothing else differs:
 
-- only the two port octets change, and the TCP checksum is adjusted by the
-  same difference (RFC 1624), so a checksum that was right stays right and
-  one that was wrong in the source stays wrong in the same way;
+- only the two port octets and the TCP checksum change, and tshark's reading
+  of the checksum is the source's (`reading`). The checksum is adjusted by
+  the ports' difference (RFC 1624), so one that was right stays right and
+  one that was wrong stays wrong by the same error. Where that would change
+  tshark's reading, the source's checksum is kept: a partial one, the
+  pseudo-header's sum that a sender with checksum offload leaves for its
+  card to finish, holds no port; and a wrong one whose adjustment lands on
+  that sum would read as partial. A segment for which neither keeps the
+  reading is refused;
 - frame order, timestamps, addresses, sequence numbers and payload are the
   source's;
 - a frame that is not IPv4 TCP, or uses neither port, is copied unchanged.
@@ -50,6 +56,26 @@ def adjust(checksum, old, new):
     return ~_fold((~checksum & 0xFFFF) + (~old & 0xFFFF) + new) & 0xFFFF
 
 
+def _sum(b):
+    b += b"\0" * (len(b) % 2)
+    return _fold(sum(struct.unpack(f"!{len(b) // 2}H", b)))
+
+
+def reading(data, off, t):
+    """tshark 4.2's reading of the TCP checksum of the IPv4 packet at `off`,
+    whose TCP header is at `t` (Wireshark v4.2.2, epan/dissectors/
+    packet-tcp.c lines 8369 to 8411): a checksum that verifies is good,
+    except 0xFFFF (RFC 1624's negative zero), which it reads as bad; one that
+    does not verify is good if it equals the pseudo-header's sum (partial,
+    from checksum offload), else bad."""
+    end = off + struct.unpack("!H", data[off + 2:off + 4])[0]
+    pseudo = _sum(data[off + 12:off + 20] + struct.pack("!HH", 6, end - t))
+    csum = struct.unpack("!H", data[t + 16:t + 18])[0]
+    if _fold(pseudo + _sum(data[t:end])) == 0xFFFF:
+        return "bad: 0xffff" if csum == 0xFFFF else "good"
+    return "good: partial" if csum == pseudo else "bad"
+
+
 def move(data, old=OLD, new=NEW):
     """The frame with its TCP port `old` rewritten to `new`, or the frame
     itself if it is not an IPv4 TCP segment on `old`."""
@@ -71,13 +97,18 @@ def move(data, old=OLD, new=NEW):
     if old not in (sport, dport):
         return data
     out = bytearray(data)
-    csum = struct.unpack("!H", data[t + 16:t + 18])[0]
+    kept = data[t + 16:t + 18]
+    csum = struct.unpack("!H", kept)[0]
     for at, port in ((t, sport), (t + 2, dport)):
         if port == old:
             struct.pack_into("!H", out, at, new)
             csum = adjust(csum, old, new)
-    struct.pack_into("!H", out, t + 16, csum)
-    return bytes(out)
+    was = reading(data, off, t)
+    for c in (struct.pack("!H", csum), kept):
+        out[t + 16:t + 18] = c
+        if reading(out, off, t) == was:
+            return bytes(out)
+    raise ValueError(f"no TCP checksum on port {new} keeps tshark's reading of it ({was})")
 
 
 def derive(frames, old=OLD, new=NEW):

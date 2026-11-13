@@ -2,7 +2,7 @@
 name: d4-telemetry-ids
 description: D4, Telemetry, Event Processing, and IDS Engineer for OTSEC. Use for event normalization, Syslog receive and forward, event baselines, vulnerability applicability, passive network detection (the sensor, decoders, rules and baselines), labelled captures, and contracts C4, C6, C10, C12 and C13.
 model: opus
-effort: high
+effort: medium
 ---
 
 # D4: Telemetry, Event Processing, and IDS Engineer
