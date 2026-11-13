@@ -98,9 +98,12 @@ func TestD6UintptrWalkStaysInTheModule(t *testing.T) {
 	// directory. A directory deeper in the module that looks like a closed
 	// one is read: one with the name of the other module, or of a local
 	// folder of the owner's PC; one that holds a directory named go.mod, or
-	// a file whose name only starts with it.
+	// a file whose name only starts with it; one named testdata, .git or
+	// node_modules; and platform/experiments, whose phase0 module is closed
+	// by its own go.mod.
 	t.Run("only a go.mod file closes a directory", func(t *testing.T) {
-		in := []string{".", "in/other", "in/reference", "in/tools", "in/.claude/worktrees/w", "in/dir", "in/dir/go.mod", "in/near"}
+		in := []string{".", "in/other", "in/reference", "in/tools", "in/.claude/worktrees/w", "in/dir", "in/dir/go.mod", "in/near",
+			"in/testdata", "in/.git", "in/node_modules", "platform/experiments"}
 		root := module(t, append([]string{"other"}, in...), map[string]string{
 			"other/go.mod":        "module example.test/other\n",
 			"in/near/go.mod.orig": "module example.test/near\n",
