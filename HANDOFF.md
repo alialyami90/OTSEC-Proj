@@ -53,10 +53,12 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
      D1 approves each. The stage-2 risks are in D1's merge comment on #664.
   5. **Build summaries (D4-97):** D4 for C13 0.2, D5 for `D5-sensor-node.md`, D3 for `D3-sensor-link.md`.
   6. **D1's own records change:**
-     - rule on whether HR-23's fix part (b) needs a change outside the approved engine's script, and on ADR-0009's third turning condition (D6's note on #666);
-     - the follow-up list in D1's merge comment on #655;
+     - rule on whether HR-23's fix part (b) needs a change outside the approved engine's script, and on ADR-0009's third turning condition (D6's note, in D1's merge comment on #666, 6854399648);
+     - the follow-up list in D1's merge comment on #655, which predates D4-97: D1 takes or drops each item there and carries none further;
      - D6 updates points 3 and 4 of F-027's gate for D4-96.
-  7. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
+  7. **The approved contracts in code** (C13 0.2, C7 0.11, C8 0.13, C4 0.4, with D6's contract tests): the first of the later briefs of the third part, after P4-4-F27. Item 3's C8 sentence folds into it.
+  8. **D4's harness:** `table.py`'s `dnp3.log` path filters `NOT_REQUESTS` (D4's reading on #657).
+- **The sensor's own brief** also waits for the owner's answers on the sensor's host (#640, "Waiting on the owner" item 1).
 - **F-027's gate stands (D4-96):** no `network_sensor` section outside the tests, no release, and no product wiring of any sensor path.
 - **CI under D4-97:** add `full-ci` after the last review, and merge only on the merge check in CLAUDE.md, "Testing and merging".
 
@@ -72,7 +74,8 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 ## Waiting on the owner
 
 0. **Item 4 has three open high risks (D4-92, D4-94, D4-95); two of them wait on the owner.** HR-23 is wider since the counted run 43419437949: on a DNP3-over-UDP flow the relay starts, nothing after the master's confirm is parsed, a write included (`docs/threat-model.md`). D1 brings a recommendation with its fix. HR-22 (Modbus/TCP on a moved port not identified) and HR-23 (on a DNP3 flow the relay starts, the wrong end taken as the server, so a master's write can be missed) each close on a fix measured on a counted run, or on the owner's acceptance; D1 decides when. **HR-24 stays open, but no longer waits on the owner:** the owner requires a detector change before item 4's gate (D4-95, 2026-11-13; brief P4-4-HR24), and acceptance does not close it.
-0a. **Effort:** whether D3 goes back to `high` for security reviews (D4-93). 0b. **Later, when HR-24 stage 2 needs it:** a packet-dropping driver on the owner's PC, to measure Windows' `BytesRetrans` (D1 on #664).
+0a. **Effort (D1's open question):** whether D3 goes back to `high` for security reviews. The owner's last choice is D4-93.
+0b. **Later, when HR-24 stage 2 needs it:** a packet-dropping driver on the owner's PC, to measure Windows' `BytesRetrans` (D1 on #664).
 1. **The sensor's host under option (b)** (D4-85): the hardware and the operating system of the Linux machine at each site, and who ships its image. D1's recommendation, choice by choice for O-1 to O-12, is `docs/phase4/D1-sensor-host-recommendation.md`. The choice of option (b) itself is made.
 2. **The sites' networks:** which protocols run on them, whether a site can give a SPAN port or a TAP, and whether the station network is PRP (D4-66).
 3. **R6.7's insecure list:** should it add IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports, and raw TCP serial tunnels (D4-68)?
