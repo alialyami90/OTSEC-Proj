@@ -259,6 +259,63 @@ func TestSchedulerCallPanicRecovered(t *testing.T) {
 	g.dispatch("run-2")
 }
 
+// D3's B1 on #676: a panic while l.mu is held, in commitBatch's first
+// section, neither hangs the call nor leaves l.mu held. A Result returns
+// within the bound with the recovered panic taken as a timeout, and a
+// TickHold's panic reaches its caller (the node's managerStep, which
+// recovers it); Stats does not block after either. The panic is injected
+// as D3's probe does: a held record that decodes with no node object, so
+// commitBatch counts a refusal, into a nil map. Control: commitBatch's
+// plain unlock, under which syncHold's lock of l.mu in the deferred calls
+// blocks, so neither returns within 5 s.
+func TestPanicUnderLinkMuReleased(t *testing.T) {
+	for _, name := range []string{"result", "tickhold"} {
+		t.Run(name, func(t *testing.T) {
+			g := newHoldRig(t)
+			g.dispatch("run-1")
+			g.send(g.obs("start", 40001, time.Second))
+			g.l.hold.runs["run-1"].rec.Flows[0].Records[0].Observation = []byte("{}")
+			g.l.mu.Lock()
+			refused := g.l.stats.Refused
+			g.l.stats.Refused = nil
+			g.l.mu.Unlock()
+			done := make(chan any, 1)
+			go func() {
+				if name == "result" {
+					_, err := g.l.Result(bg, "run-1", session09(inv1, 40001, 2*time.Second))
+					done <- err
+					return
+				}
+				defer func() { done <- recover() }()
+				g.wall = g.wall.Add(time.Hour)
+				g.l.TickHold(bg)
+			}()
+			var got any
+			select {
+			case got = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the call did not return within 5 s after a panic under l.mu")
+			}
+			if err, _ := got.(error); name == "result" && !errors.Is(err, ErrHoldTimeout) {
+				t.Fatalf("result: %v; want the recovered panic as ErrHoldTimeout", got)
+			}
+			if name == "tickhold" && got == nil {
+				t.Fatal("TickHold returned; want its panic to reach the caller")
+			}
+			stats := make(chan Stats, 1)
+			go func() { stats <- g.l.Stats() }()
+			select {
+			case <-stats:
+			case <-time.After(5 * time.Second):
+				t.Fatal("Stats blocked: l.mu is still held")
+			}
+			g.l.mu.Lock()
+			g.l.stats.Refused = refused
+			g.l.mu.Unlock()
+		})
+	}
+}
+
 // D6's note 1 on #663: a Result whose stream head can't be read after the
 // release, as while the node's network database is swapped out for a
 // Resume, returns an error and no after_seq, so no session is handed on

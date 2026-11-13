@@ -291,8 +291,8 @@ func (l *Link) takeSeq(run string, n uint64) (ok, newRun bool) {
 
 func (l *Link) refuse(reason string) {
 	l.mu.Lock()
+	defer l.mu.Unlock() // commitOne's path: a recovered panic never leaves l.mu held
 	l.stats.Refused[reason]++
-	l.mu.Unlock()
 }
 
 // drop counts a dropped observation under its reason and its destination
@@ -390,14 +390,9 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 		l.refuse(RefusedStored)
 		return
 	}
-	l.mu.Lock()
-	if unresolved && !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
-		l.drop(DropUnresolvedBudget, dst)
-		l.mu.Unlock()
+	if !l.takeBudget(unresolved, rec.Bytes(), dst) {
 		return
 	}
-	l.mu.Unlock()
-
 	_, err = l.opt.Store.Append(ctx, rec)
 
 	l.mu.Lock()
@@ -412,6 +407,19 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 	l.committed(hr)
 }
 
+// takeBudget takes an unresolved record's bytes from the budget, or drops
+// and counts it. It unlocks l.mu with defer, so a recovered panic never
+// leaves it held (D3's B1 on #676).
+func (l *Link) takeBudget(unresolved bool, n int64, dst string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if unresolved && !l.budget.take(n, l.opt.Monotonic()) {
+		l.drop(DropUnresolvedBudget, dst)
+		return false
+	}
+	return true
+}
+
 // commitBatch commits a release's records in one batch, in order, so a
 // restart can tell whether it committed (RecoverHold). A record the budget
 // refuses is dropped and counted; a batch the store refuses drops and
@@ -421,24 +429,26 @@ func (l *Link) commitBatch(ctx context.Context, rel []Release) {
 	var held []HeldRecord
 	var dsts []string
 	var bytes []int64 // the budget each unresolved record took
-	l.mu.Lock()
-	for _, r := range rel {
-		rec, dst, unresolved, err := l.record(r.Record, r.Tie)
-		if err != nil {
-			l.stats.Refused[RefusedStored]++
-			continue
-		}
-		var took int64
-		if unresolved {
-			if !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
-				l.drop(DropUnresolvedBudget, dst)
+	func() {
+		l.mu.Lock()
+		defer l.mu.Unlock() // a recovered panic never leaves l.mu held (D3's B1 on #676)
+		for _, r := range rel {
+			rec, dst, unresolved, err := l.record(r.Record, r.Tie)
+			if err != nil {
+				l.stats.Refused[RefusedStored]++
 				continue
 			}
-			took = rec.Bytes()
+			var took int64
+			if unresolved {
+				if !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
+					l.drop(DropUnresolvedBudget, dst)
+					continue
+				}
+				took = rec.Bytes()
+			}
+			recs, held, dsts, bytes = append(recs, rec), append(held, r.Record), append(dsts, dst), append(bytes, took)
 		}
-		recs, held, dsts, bytes = append(recs, rec), append(held, r.Record), append(dsts, dst), append(bytes, took)
-	}
-	l.mu.Unlock()
+	}()
 	if len(recs) == 0 {
 		return
 	}
