@@ -116,6 +116,14 @@ jobs:
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
         run: go test -count=1 -run 'TestRsyslog' -v ./modules/telemetry/forward
+      # F-027's sensor tests again, with -v, so that both go jobs' logs show
+      # each one's --- PASS or --- FAIL (D1 on #663, brief P4-4-F27).
+      - name: sensor store set tests (-v)
+        if: '!cancelled()'
+        shell: bash
+        run: |
+          go test -count=1 -v ./platform/node/sensortest/...
+          go test -count=1 -v -run 'TestHoldRecordUnreadableNodeStarts$' ./platform/node
       - if: runner.os == 'Windows'
         shell: bash
         run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
