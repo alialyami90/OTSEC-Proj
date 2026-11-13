@@ -2045,6 +2045,7 @@ Those stay with the owner, as listed below.
   - D3's note and ADR-0009 follow these rows.
 - **R6.7's insecure list** is to gain IEC 104, MMS and GOOSE, C37.118, EtherNet/IP, Fast Operate inside Telnet, SNMPv3 noAuthNoPriv, AMT's redirection ports and raw TCP serial tunnels (D4-68's proposal).
   - C13's `insecure.reason` set is closed, so this needs a C13 change (D4) and V-M6's list (D6) before it is built.
+  - The additions are **not in item 4's gate**. They join V-M6 after it. Item 4's brief keeps its protocol set, and its hold on IEC 61850 and IEC 104 decoders until the owner confirms they run is unchanged.
   - Until then, `docs/requirements.md` records the additions as decided and not contracted.
 - **From D4-65:**
   - the reserve fails (drain-only, as D4-65 states) on a volume that cannot hold real space (compressed or copy-on-write);
@@ -2062,7 +2063,7 @@ Those stay with the owner, as listed below.
 - **Follow-up:**
   - D3 amends the HR-22 and HR-23 rows and its note.
   - D4 proposes the C13 change for R6.7.
-  - D6 adds the list to V-M6.
+  - D6 adds the list to V-M6 after item 4's gate.
   - D5 takes D4-65's items.
   - D7 inventories the packet-dropping tool.
   - D4 and D7 choose the operating system.
