@@ -932,7 +932,10 @@ def held_tally(hs):
     failed = [h for h in hs if h.get("state") == "fail"]
     return ("fail" if st["fail"] else "unknown" if st["unknown"] else "pass",
             f"{st['pass']} pass, {st['fail']} fail, {st['unknown']} unknown, {st['listed']} listed, of {len(hs)}; fail: "
-            + (", ".join(f"{h['cap']} {h['lab']['src']}:{h['lab']['sport']}" for h in failed) or "none"))
+            + (", ".join(f"{h['cap']} {h['lab']['src']}:{h['lab']['sport']}" for h in failed) or "none")
+            + "; judged on the protocol row only, roles not recoverable off 502, and in no count: "
+            + (", ".join(f"{h['cap']} {h['lab']['src']}:{h['lab']['sport']}" for h in hs
+                         if h.get("no_roles") and h.get("state") not in (None, "listed")) or "none"))
 
 
 def held_count_gate(v):

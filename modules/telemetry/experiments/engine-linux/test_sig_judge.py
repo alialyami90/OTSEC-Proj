@@ -47,6 +47,15 @@ def test_tally_keeps_listed_out_of_pass():
     assert detail.startswith("1 pass, 0 fail, 0 unknown, 2 listed, of 3")
 
 
+def test_tally_names_flows_without_roles():
+    # D6's N10: a server-first flow is judged on its protocol row, not listed; the detail names it.
+    f = dict(flow("pass"), no_roles=True)
+    detail = table.held_tally([flow("pass"), f])[1]
+    assert detail.startswith("2 pass, 0 fail, 0 unknown, 0 listed, of 2")
+    assert detail.endswith("in no count: c 192.0.2.1:1")
+    assert table.held_tally([flow("pass")])[1].endswith("in no count: none")
+
+
 def test_tally_unknown_beats_pass_and_fail_beats_unknown():
     assert table.held_tally([flow("pass"), flow("unknown")])[0] == "unknown"
     assert table.held_tally([flow("fail"), flow("unknown")])[0] == "fail"
