@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,6 +61,17 @@ type target struct {
 	unreachable bool
 	held        map[c5.StreamID]string
 
+	// The second session (F10; D5-sensor-node.md section 1.9 item 1): the
+	// target's streams that live in the sensor store set, apart from f, so
+	// a sensor database that is not open ends only this session's attempt.
+	// sf is nil on a node without the network_sensor section. Check judges
+	// its reachability on its own status: sopen and sunreachable are its
+	// open and unreachable.
+	sf           *forward.Forwarder
+	sstreams     []c5.StreamID
+	sopen        time.Time
+	sunreachable bool
+
 	// The client certificate of a relp-tls target (HR-13, D4-11). creds are
 	// the references as loaded at start, and are never read again. tlsCfg
 	// is the dial configuration, set once the certificate's period is
@@ -94,6 +106,10 @@ var errHeldBack = errors.New("node: the target is held back: its client certific
 // The forwarders read each stream through a view that looks the open
 // database up on every call, because Tick can replace a database's handle
 // when it resumes one.
+// A target whose consumer streams include any that live in the sensor
+// store set gets a second forwarder for those streams only (F10): its main
+// session keeps every other stream, the health and audit streams among
+// them, and both use the target's name on disjoint streams.
 func NewForwarding(rt *Runtime) (*Forwarding, error) {
 	fw := &Forwarding{rt: rt}
 	consumers, err := rt.cfg.Consumers()
@@ -103,17 +119,25 @@ func NewForwarding(rt *Runtime) (*Forwarding, error) {
 	for _, t := range rt.cfg.ForwardTargets() {
 		tg := &target{t: t, held: map[c5.StreamID]string{}, since: rt.opt.Now(), ready: make(chan struct{})}
 		cfg := forward.Config{Target: t, HealthStream: HealthStream, Health: healthSink{rt}}
+		scfg := forward.Config{Target: t, HealthStream: HealthStream, HealthCursors: liveStore{rt, HealthStream}, Health: healthSink{rt}}
 		for _, c := range consumers {
 			if string(c.ID) != t.Name {
 				continue
 			}
 			// Index is used only by a best-effort target, to start a new
 			// cursor at its replay window (A4 #94).
-			cfg.Streams = append(cfg.Streams, forward.Stream{ID: c.Stream, Audit: c.Stream == AuditStream,
-				Outbox: liveStore{rt, c.Stream}, Cursors: liveStore{rt, c.Stream}, Index: liveStore{rt, c.Stream}})
+			s := forward.Stream{ID: c.Stream, Audit: c.Stream == AuditStream,
+				Outbox: liveStore{rt, c.Stream}, Cursors: liveStore{rt, c.Stream}, Index: liveStore{rt, c.Stream}}
+			if d := rt.dbFor(c.Stream); d != nil && d.sensor {
+				scfg.Streams = append(scfg.Streams, s)
+				tg.sstreams = append(tg.sstreams, c.Stream)
+				continue
+			}
+			cfg.Streams = append(cfg.Streams, s)
 			tg.streams = append(tg.streams, c.Stream)
 		}
 		sort.Slice(tg.streams, func(i, j int) bool { return tg.streams[i] < tg.streams[j] })
+		sort.Slice(tg.sstreams, func(i, j int) bool { return tg.sstreams[i] < tg.sstreams[j] })
 		switch t.Transport {
 		case syslog.TransportRELPTLS:
 			if tg.creds, err = rt.cfg.loadTarget(t); err != nil {
@@ -150,6 +174,12 @@ func NewForwarding(rt *Runtime) (*Forwarding, error) {
 		}
 		if tg.f, err = forward.New(cfg); err != nil {
 			return nil, fmt.Errorf("target %s: %w", t.Name, err)
+		}
+		if len(scfg.Streams) > 0 {
+			scfg.Dial = cfg.Dial
+			if tg.sf, err = forward.New(scfg); err != nil {
+				return nil, fmt.Errorf("target %s, sensor session: %w", t.Name, err)
+			}
 		}
 		fw.targets = append(fw.targets, tg)
 		fw.checkCert(tg)
@@ -220,22 +250,29 @@ func (fw *Forwarding) checkCert(tg *target) {
 		end, tg.notAfter.UTC().Format(time.RFC3339), tg.t.TLS.ClientCredentialRef))
 }
 
-// Run runs every forwarder until ctx ends.
+// Run runs every forwarder until ctx ends: each target's main session, and
+// its sensor session when it has one.
 func (fw *Forwarding) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, tg := range fw.targets {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// A held-back target runs no forwarder: no connection is made
-			// until its certificate's period is valid (D4-11 item 10).
-			select {
-			case <-ctx.Done():
-				return
-			case <-tg.ready:
+		for _, f := range []*forward.Forwarder{tg.f, tg.sf} {
+			if f == nil {
+				continue
 			}
-			tg.f.Run(ctx)
-		}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// A held-back target runs no forwarder: no connection is
+				// made until its certificate's period is valid (D4-11 item
+				// 10).
+				select {
+				case <-ctx.Done():
+					return
+				case <-tg.ready:
+				}
+				f.Run(ctx)
+			}()
+		}
 	}
 	wg.Wait()
 }
@@ -245,12 +282,27 @@ func (fw *Forwarding) Run(ctx context.Context) {
 // The node calls it before every Tick.
 func (fw *Forwarding) Check(ctx context.Context) {
 	for _, tg := range fw.targets {
-		fw.check(ctx, tg, tg.f.Status())
+		var sst *forward.Status
+		if tg.sf != nil {
+			s := tg.sf.Status()
+			sst = &s
+		}
+		fw.checkSessions(ctx, tg, tg.f.Status(), sst)
 	}
 }
 
-// check is Check for one target and its forwarder's status.
+// check is Check for one target with no sensor session.
 func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) {
+	fw.checkSessions(ctx, tg, st, nil)
+}
+
+// checkSessions is Check for one target, its main session's status st, and its
+// sensor session's status sst, nil when it has none. The target's status
+// shows both sessions' streams; the rest of it is the main session's. Each
+// session's reachability is judged on its own status, so a sensor session
+// that cannot read its database never reads as the target's SER forwarding
+// down, and its alarm and health event name it (D6's N2 on #662).
+func (fw *Forwarding) checkSessions(ctx context.Context, tg *target, st forward.Status, sst *forward.Status) {
 	now := fw.rt.opt.Now()
 	fw.checkCert(tg)
 	ts := TargetStatus{Class: string(tg.t.Class), LastConfirmed: st.LastConfirmed.UTC(), Confirmed: st.Confirmed,
@@ -272,8 +324,30 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 	if st.ReportErr != nil {
 		ts.ReportErr = st.ReportErr.Error()
 	}
-	waiting := false
-	for _, id := range tg.streams {
+	waiting := fw.streams(ctx, tg, tg.streams, st, ts.Streams)
+	var swaiting bool
+	if sst != nil {
+		if !sst.Open.IsZero() {
+			tg.sopen = now
+		}
+		swaiting = fw.streams(ctx, tg, tg.sstreams, *sst, ts.Streams)
+	}
+	if fw.rt.opt.Status.SetTarget(tg.t.Name, ts) {
+		// Written on a change, so health's counts are at most one check
+		// behind, not one tick (A6 on #118).
+		fw.rt.opt.Status.Write(string(fw.rt.cfg.NodeID))
+	}
+	fw.reach(ctx, tg, false, st, waiting, tg.open, &tg.unreachable)
+	if sst != nil {
+		fw.reach(ctx, tg, true, *sst, swaiting, tg.sopen, &tg.sunreachable)
+	}
+}
+
+// streams copies one session's streams into out, raises AlarmForwardHeld
+// for a stream newly held, and reports whether any of them has events the
+// target has not confirmed.
+func (fw *Forwarding) streams(ctx context.Context, tg *target, ids []c5.StreamID, st forward.Status, out map[string]TargetStreamState) (waiting bool) {
+	for _, id := range ids {
 		ss := st.Streams[id]
 		state := TargetStreamState{Cursor: uint64(ss.Cursor), Confirmed: uint64(ss.Confirmed), Blocked: ss.Blocked}
 		if db := fw.rt.Store(id); db != nil {
@@ -287,7 +361,7 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 				waiting = waiting || (last > ss.Confirmed && ss.Blocked == "")
 			}
 		}
-		ts.Streams[string(id)] = state
+		out[string(id)] = state
 		if ss.Blocked == "" {
 			delete(tg.held, id)
 		} else if tg.held[id] != ss.Blocked {
@@ -295,24 +369,26 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 			fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardHeld, fmt.Sprintf("stream %s held: %s", id, ss.Blocked))
 		}
 	}
-	if fw.rt.opt.Status.SetTarget(tg.t.Name, ts) {
-		// Written on a change, so health's counts are at most one check
-		// behind, not one tick (A6 on #118).
-		fw.rt.opt.Status.Write(string(fw.rt.cfg.NodeID))
-	}
+	return waiting
+}
 
-	// A required target is down when it has events waiting and has
-	// confirmed nothing for UnreachableAfter, or when no session has been
-	// open for that long, even with nothing waiting (A4 #94: Status.Open).
+// reach raises AlarmForwardUnreachable and its health event once when one
+// session of a required target is down: it has events waiting and has
+// confirmed nothing for UnreachableAfter, or no session has been open for
+// that long, even with nothing waiting (A4 #94: Status.Open). The sensor
+// session's alarm detail starts with SensorSessionPrefix and its streams,
+// and its health event carries session "sensor" and the streams.
+func (fw *Forwarding) reach(ctx context.Context, tg *target, sensor bool, st forward.Status, waiting bool, open time.Time, unreachable *bool) {
+	now := fw.rt.opt.Now()
 	confirmed := later(st.LastConfirmed, tg.since)
-	opened := later(tg.open, tg.since)
+	opened := later(open, tg.since)
 	required := tg.t.Class == syslog.ClassRequired
 	stalled := required && waiting && now.Sub(confirmed) >= UnreachableAfter
 	closed := required && st.Open.IsZero() && now.Sub(opened) >= UnreachableAfter
 	down := stalled || closed
 	switch {
-	case down && !tg.unreachable:
-		tg.unreachable = true
+	case down && !*unreachable:
+		*unreachable = true
 		var detail string
 		if stalled {
 			detail = fmt.Sprintf("events waiting and nothing confirmed for %s", now.Sub(confirmed).Round(time.Second))
@@ -322,11 +398,32 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 		if st.LastErr != nil {
 			detail += "; last session: " + st.LastErr.Error()
 		}
+		details := map[string]string{"target": tg.t.Name}
+		if sensor {
+			streams := streamList(tg.sstreams)
+			detail = SensorSessionPrefix + " (" + streams + "): " + detail
+			details["session"], details["streams"] = "sensor", streams
+		}
+		details["reason"] = detail
 		fw.rt.opt.Status.RaiseTarget(tg.t.Name, AlarmForwardUnreachable, detail)
-		fw.rt.health(ctx, event.HealthForwardUnreachable, map[string]string{"target": tg.t.Name, "reason": detail})
+		fw.rt.health(ctx, event.HealthForwardUnreachable, details)
 	case !down:
-		tg.unreachable = false
+		*unreachable = false
 	}
+}
+
+// SensorSessionPrefix starts the detail of the sensor session's
+// AlarmForwardUnreachable, so it never reads as the target's SER, Syslog,
+// audit or health forwarding down.
+const SensorSessionPrefix = "the sensor session"
+
+// streamList is ids joined by commas.
+func streamList(ids []c5.StreamID) string {
+	s := make([]string, len(ids))
+	for i, id := range ids {
+		s[i] = string(id)
+	}
+	return strings.Join(s, ",")
 }
 
 func later(a, b time.Time) time.Time {

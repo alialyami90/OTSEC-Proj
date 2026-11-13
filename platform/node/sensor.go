@@ -257,7 +257,8 @@ const AlarmSensorIntakeNotStarted = "sensor-intake-not-started"
 
 // startIntake starts the intake when the section is set and it has not
 // started. It does not start while the observation stream's database is
-// not open or accepts no events, since nothing could commit, and raises
+// not open or accepts no events, since C5 says no new events are taken in
+// such a mode (the store itself would commit them), and raises
 // AlarmSensorIntakeNotStarted when it fails. Only the sensor manager's
 // step calls it.
 func (r *Runtime) startIntake(ctx context.Context) {

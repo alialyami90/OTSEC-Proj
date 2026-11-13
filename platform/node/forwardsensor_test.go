@@ -1,0 +1,307 @@
+package node
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"otsec.local/otsec/contracts/event"
+	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/contracts/syslog"
+	"otsec.local/otsec/modules/telemetry/forward"
+	"otsec.local/otsec/modules/telemetry/forward/relptest"
+	"otsec.local/otsec/platform/node/nodeconfigtest"
+	"otsec.local/otsec/platform/store"
+)
+
+// plainTarget is a lab-only, best-effort plain RELP target at port. It
+// needs no TLS files, so a run on a PC that cannot lock tls_dir (lockTLS)
+// still builds its forwarder.
+func plainTarget(name string, port int) map[string]any {
+	return map[string]any{
+		"schema": "otsec.syslog/0.2", "name": name, "host": "127.0.0.1", "port": port,
+		"transport": "relp", "format": "rfc5424", "framing": "relp", "class": "best-effort",
+		"max_message_octets": 8192, "facility": 16, "relp_window": 64, "replay_seconds": 3600,
+		"acknowledgement": map[string]any{"by": "admin:lab-admin", "at": "2026-10-24T09:00:00Z",
+			"reason": "Loopback test collector only (ADR-0005)", "scope": "lab-only"},
+	}
+}
+
+// sensorForwardConfig is a node with the scheduler's relay, a sensor
+// section when sensor is set, and a plain RELP target at each port.
+func sensorForwardConfig(t *testing.T, sensor bool, ports ...int) (*Config, string) {
+	t.Helper()
+	return schedConfig(t, func(nc *nodeconfigtest.Config) {
+		if sensor {
+			sensorQuotas(nc)
+			// A forwarding target confirms the alert stream, so the section
+			// carries no alert_retention_days.
+			nc.NetworkSensor = sensorSection()
+			delete(nc.NetworkSensor, "alert_retention_days")
+		}
+		for i, p := range ports {
+			nc.Targets = append(nc.Targets, plainTarget("lab-"+string(rune('a'+i)), p))
+		}
+	})
+}
+
+// F10 (D5-sensor-node.md section 1.9 item 1; D1's ruling on #662): every
+// target's consumer streams are split into its main session and its sensor
+// session. The two sets are disjoint, and together they are the target's
+// consumer set. The sensor session holds exactly the streams in the sensor
+// store set, and the main session the health stream. A node without the
+// network_sensor section gets no second session. Control: a stream sent to
+// both sessions, or every stream to the main session.
+func TestForwardSessionsSplit(t *testing.T) {
+	for _, sensor := range []bool{true, false} {
+		c, dir := sensorForwardConfig(t, sensor, 9, 10)
+		r, _, _ := start(t, c, dir)
+		fw, err := NewForwarding(r)
+		if err != nil {
+			r.Close()
+			t.Fatal(err)
+		}
+		consumers, err := c.Consumers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(fw.targets) != 2 {
+			t.Fatalf("sensor %v: %d targets", sensor, len(fw.targets))
+		}
+		for _, tg := range fw.targets {
+			var want []c5.StreamID
+			for _, cs := range consumers {
+				if string(cs.ID) == tg.t.Name {
+					want = append(want, cs.Stream)
+				}
+			}
+			for _, id := range tg.sstreams {
+				if slices.Contains(tg.streams, id) {
+					t.Errorf("sensor %v, target %s: %s is in both sessions", sensor, tg.t.Name, id)
+				}
+				if d := r.dbFor(id); d == nil || !d.sensor {
+					t.Errorf("sensor %v, target %s: the sensor session carries %s, which is not in the sensor store set", sensor, tg.t.Name, id)
+				}
+			}
+			for _, id := range tg.streams {
+				if d := r.dbFor(id); d != nil && d.sensor {
+					t.Errorf("sensor %v, target %s: the main session carries %s, which is in the sensor store set", sensor, tg.t.Name, id)
+				}
+			}
+			got := slices.Concat(tg.streams, tg.sstreams)
+			slices.Sort(got)
+			slices.Sort(want)
+			if !slices.Equal(got, want) {
+				t.Errorf("sensor %v, target %s: the sessions carry %v, the consumer set is %v", sensor, tg.t.Name, got, want)
+			}
+			if !slices.Contains(tg.streams, HealthStream) {
+				t.Errorf("sensor %v, target %s: the main session does not carry %s", sensor, tg.t.Name, HealthStream)
+			}
+			switch {
+			case sensor && (tg.sf == nil || !slices.Contains(tg.sstreams, NetAlertStream(sensorID))):
+				t.Errorf("target %s: no sensor session carrying %s (%v)", tg.t.Name, NetAlertStream(sensorID), tg.sstreams)
+			case !sensor && (tg.sf != nil || len(tg.sstreams) != 0):
+				t.Errorf("target %s: a sensor session without the network_sensor section (%v)", tg.t.Name, tg.sstreams)
+			}
+		}
+		r.Close()
+	}
+}
+
+// F5's forwarded-SER leg (D1's ruling 6852845352; D6's conditions on #663):
+// while the network database is not open, or is swapped out while its
+// Resume is held, a scheduled run's SER events reach the target and are
+// confirmed, and the sensor session's attempts fail on the unreadable
+// stream. Control: one session for every stream, as on main, whose
+// attempts all fail, so nothing is confirmed.
+func TestSensorStoreNotOpenForwardingGoesOn(t *testing.T) {
+	neverOpen := SensorSeams{Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
+		rep := c5.RunStartup(ctx, env, p)
+		if db, ok := store.AsDB(rep.Store); ok {
+			db.Close()
+		}
+		return rep
+	}}
+	for _, leg := range []string{"not-open", "resume-held"} {
+		t.Run(leg, func(t *testing.T) {
+			srv, err := relptest.Start(nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer srv.Close()
+			c, dir := sensorForwardConfig(t, true, srv.Addr().Port)
+			seams := neverOpen
+			if leg == "resume-held" {
+				var in chan struct{}
+				var release func()
+				seams, in, release = heldResume()
+				r, _ := startSeams(t, c, dir, seams)
+				t.Cleanup(func() { r.Close() })
+				t.Cleanup(release)
+				go r.Tick(bg)
+				select {
+				case <-in:
+				case <-time.After(10 * time.Second):
+					t.Fatal("the network database's Resume was not reached")
+				}
+				forwardsSER(t, r)
+				return
+			}
+			r, _ := startSeams(t, c, dir, seams)
+			defer r.Close()
+			if r.Store(NetAlertStream(sensorID)) != nil {
+				t.Fatal("the network database is open")
+			}
+			forwardsSER(t, r)
+		})
+	}
+}
+
+// forwardsSER stores a scheduled run's SER rows, runs the node's
+// forwarding, and waits until the target has confirmed every SER event and
+// the sensor session has failed an attempt on its stream.
+func forwardsSER(t *testing.T, r *Runtime) {
+	t.Helper()
+	runSent(t, r)
+	ser := SERStream(relayID)
+	last, err := r.Store(ser).LastCommitted(bg, ser)
+	if err != nil || last == 0 {
+		t.Fatalf("SER stream: last %d, %v", last, err)
+	}
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); fw.Run(ctx) }()
+	defer func() { cancel(); wg.Wait() }()
+	tg := fw.targets[0]
+	for deadline := time.Now().Add(15 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		confirmed := tg.f.Status().Streams[ser].Confirmed >= last
+		sensorFailed := tg.sf != nil && tg.sf.Status().LastErr != nil
+		if confirmed && sensorFailed {
+			break
+		}
+		if time.Now().After(deadline) {
+			var serr error
+			if tg.sf != nil {
+				serr = tg.sf.Status().LastErr
+			}
+			t.Fatalf("after 15 s: SER confirmed %v (of %d), sensor session's last error %v; main session %+v", confirmed, last, serr, tg.f.Status())
+		}
+	}
+	if err := tg.sf.Status().LastErr; !strings.Contains(err.Error(), "not open") {
+		t.Fatalf("the sensor session's attempt failed on %v, not on its database not open", err)
+	}
+}
+
+// D6's N2 on #662: Check judges the sensor session's reachability on its
+// own status. With the main session open and caught up, a sensor session
+// that has had no session open for UnreachableAfter raises one
+// forward-unreachable whose detail names the sensor session and its
+// streams, and one forward.unreachable health event with session "sensor";
+// the main session raises nothing. Then the main session closes too, and
+// its own alarm names no sensor session. Controls: Check ignoring the
+// sensor session's status, and the sensor session's alarm not named.
+func TestSensorSessionUnreachableNamed(t *testing.T) {
+	var mu sync.Mutex
+	now := time.Date(2026, 10, 25, 6, 0, 0, 0, time.UTC)
+	clock := func() time.Time { mu.Lock(); defer mu.Unlock(); return now }
+	advance := func(d time.Duration) { mu.Lock(); now = now.Add(d); mu.Unlock() }
+	c, _ := sensorForwardConfig(t, true, 9) // the forwarders are never run
+	st := NewStatus("", nil, clock)
+	r, err := Start(bg, c, RuntimeOptions{Status: st, Now: clock, Group: c5.GroupOptions{MaxEvents: 10, MaxWait: 5 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	waitSensor(t, r)
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	// forward-unreachable is judged for required targets only, which need
+	// relp-tls and locked TLS files (lockTLS); the judgment reads only the
+	// class, so this plain target is taken as required.
+	req := *tg.t
+	req.Class = syslog.ClassRequired
+	tg.t = &req
+	caughtUp := func(open time.Time, ids []c5.StreamID) forward.Status {
+		fs := forward.Status{Open: open, Streams: map[c5.StreamID]forward.StreamStatus{}}
+		for _, id := range ids {
+			if db := r.Store(id); db != nil {
+				last, _ := db.LastCommitted(bg, id)
+				fs.Streams[id] = forward.StreamStatus{Cursor: last, Confirmed: last}
+			}
+		}
+		return fs
+	}
+	unreachable := func() (out []StatusAlarm) {
+		for _, a := range st.Snapshot("site-a-node1").Alarms {
+			if a.Code == AlarmForwardUnreachable && a.Target == tg.t.Name {
+				out = append(out, a)
+			}
+		}
+		return out
+	}
+	sensorDown := caughtUp(time.Time{}, tg.sstreams)
+	sensorDown.LastErr = errNotOpenForTest
+	fw.checkSessions(bg, tg, caughtUp(clock(), tg.streams), &sensorDown)
+	advance(UnreachableAfter + time.Second)
+	fw.checkSessions(bg, tg, caughtUp(clock(), tg.streams), &sensorDown)
+	fw.checkSessions(bg, tg, caughtUp(clock(), tg.streams), &sensorDown)
+	got := unreachable()
+	if len(got) != 1 {
+		t.Fatalf("%d forward-unreachable alarms with the sensor session down and the main session open: %+v", len(got), got)
+	}
+	streams := string(NetAlertStream(sensorID))
+	if d := got[0].Detail; !strings.HasPrefix(d, SensorSessionPrefix) || !strings.Contains(d, streams) {
+		t.Fatalf("the sensor session's alarm does not name it and its streams: %q", d)
+	}
+	ev := forwardUnreachableEvents(t, r)
+	if len(ev) != 1 || ev[0]["session"] != "sensor" || ev[0]["streams"] != streams || ev[0]["target"] != tg.t.Name {
+		t.Fatalf("forward.unreachable events %v", ev)
+	}
+
+	// The main session closes: its alarm names no sensor session.
+	fw.checkSessions(bg, tg, caughtUp(time.Time{}, tg.streams), &sensorDown)
+	advance(UnreachableAfter + time.Second)
+	fw.checkSessions(bg, tg, caughtUp(time.Time{}, tg.streams), &sensorDown)
+	got = unreachable()
+	if len(got) != 2 || strings.Contains(got[1].Detail, SensorSessionPrefix) {
+		t.Fatalf("after the main session closed: %+v", got)
+	}
+	ev = forwardUnreachableEvents(t, r)
+	if len(ev) != 2 || ev[1]["session"] != "" {
+		t.Fatalf("forward.unreachable events after the main session closed: %v", ev)
+	}
+}
+
+var errNotOpenForTest = errors.New("node: the database holding network-alert is not open")
+
+// forwardUnreachableEvents are the details of the forward.unreachable
+// health events, in order.
+func forwardUnreachableEvents(t *testing.T, r *Runtime) (out []map[string]string) {
+	t.Helper()
+	got, err := r.Store(HealthStream).Read(bg, HealthStream, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got {
+		e, err := event.Decode(s.Event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e.Health.Type == event.HealthForwardUnreachable {
+			out = append(out, e.Health.Details)
+		}
+	}
+	return out
+}

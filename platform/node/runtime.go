@@ -219,7 +219,9 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 		Alarms: func(a c5.Alarm) {
 			if r.sensorStoreClosed(dbID) {
 				// Raised by a sensor database's startup or Resume, on the
-				// manager's goroutine: once for each stretch (D6's B4).
+				// manager's goroutine, or by a commit on a handle taken
+				// before a swap, on the committer's: once for each stretch
+				// (D6's B4 and C2).
 				r.sensorStartupAlarm(dbID, a)
 				return
 			}

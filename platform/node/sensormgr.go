@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -89,9 +90,12 @@ type sensorManager struct {
 	steps atomic.Uint64
 	// notOpen: AlarmSensorStoreNotOpen is raised for the database. raised
 	// are the startup alarm codes raised for it in this stretch, so a retry
-	// raises each at most once until the database opens (D6's B4).
-	notOpen map[c5.DatabaseID]bool
-	raised  map[c5.DatabaseID]map[c5.AlarmCode]bool
+	// raises each at most once until the database opens (D6's B4). raisedMu
+	// guards raised: a store's Alarms callback reaches it on the goroutine
+	// that commits, beside the manager's (D6's C2 on #663).
+	notOpen  map[c5.DatabaseID]bool
+	raisedMu sync.Mutex
+	raised   map[c5.DatabaseID]map[c5.AlarmCode]bool
 	// modes is each database's mode-change cap.
 	modes map[c5.DatabaseID]*modeCap
 	// intakeDown: AlarmSensorIntakeNotStarted is raised (sensor.go).
@@ -282,7 +286,7 @@ func (r *Runtime) stepSensorDB(ctx context.Context, d *database, starts *startTi
 		r.opt.Status.Alarm(d.spec.ID, c5.Alarm{Code: AlarmSensorStoreNotOpen, At: r.opt.Now(), Detail: detail})
 	case open:
 		m.notOpen[d.spec.ID] = false
-		delete(m.raised, d.spec.ID)
+		m.forgetRaised(d.spec.ID)
 	}
 	if mc, changed := c5.ModeChangeOf(prev, d.report, r.opt.Now()); changed {
 		r.sensorModeChanged(ctx, d, mc)
@@ -305,9 +309,12 @@ func (r *Runtime) sensorStoreClosed(id c5.DatabaseID) bool {
 // sensorStartupAlarm raises a sensor database's startup or Resume alarm,
 // at most once for each code until the database opens, so a database the
 // manager retries at every tick never pushes another alarm out of status
-// (MaxStatusAlarms; D6's B4). Only the manager's goroutine calls it.
+// (MaxStatusAlarms; D6's B4). The manager's goroutine calls it, and so does
+// a store's Alarms callback, on whichever goroutine commits.
 func (r *Runtime) sensorStartupAlarm(id c5.DatabaseID, a c5.Alarm) {
 	m := r.smgr
+	m.raisedMu.Lock()
+	defer m.raisedMu.Unlock()
 	if m.raised[id] == nil {
 		m.raised[id] = map[c5.AlarmCode]bool{}
 	}
@@ -316,6 +323,13 @@ func (r *Runtime) sensorStartupAlarm(id c5.DatabaseID, a c5.Alarm) {
 	}
 	m.raised[id][a.Code] = true
 	r.opt.Status.Alarm(id, a)
+}
+
+// forgetRaised ends database id's stretch of startup alarms, once it opens.
+func (m *sensorManager) forgetRaised(id c5.DatabaseID) {
+	m.raisedMu.Lock()
+	delete(m.raised, id)
+	m.raisedMu.Unlock()
 }
 
 // sensorModeChanged records a sensor database's mode change, at most once

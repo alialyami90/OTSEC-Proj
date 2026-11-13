@@ -271,3 +271,41 @@ func TestRunAfterSensorFailed(t *testing.T) {
 		t.Fatalf("%d sensor-failed alarms", n)
 	}
 }
+
+// D6's C2 on #663: a store's Alarms callback calls sensorStartupAlarm on
+// the goroutine that commits, while the manager's step ends a stretch
+// (forgetRaised) on its own. Both run here at once, many times, and the
+// alarm is raised and recorded for its stretch. Control: no lock around
+// m.raised, where the runtime stops the process with a concurrent map
+// read and write, which recover does not catch.
+func TestSensorStartupAlarmConcurrent(t *testing.T) {
+	c, dir := holdConfig(t)
+	r, st := startSeams(t, c, dir, SensorSeams{})
+	defer r.Close()
+	var wg sync.WaitGroup
+	const n = 20000
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range n {
+			r.sensorStartupAlarm(NetworkDB, c5.Alarm{Code: c5.AlarmQuotaWarning, At: time.Now(), Detail: "node test: a commit's quota warning"})
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range n {
+			r.smgr.forgetRaised(NetworkDB)
+		}
+	}()
+	wg.Wait()
+	if countAlarms(st, string(c5.AlarmQuotaWarning)) == 0 {
+		t.Fatal("no quota warning raised")
+	}
+	r.sensorStartupAlarm(NetworkDB, c5.Alarm{Code: c5.AlarmQuotaWarning, At: time.Now(), Detail: "node test: after the race"})
+	r.smgr.raisedMu.Lock()
+	raised := r.smgr.raised[NetworkDB][c5.AlarmQuotaWarning]
+	r.smgr.raisedMu.Unlock()
+	if !raised {
+		t.Fatal("the stretch's alarm is not recorded as raised")
+	}
+}

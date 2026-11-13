@@ -453,3 +453,30 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 	default:
 	}
 }
+
+// D6's C1 on #663: the sensor-unreachable timer counts from the node's
+// start, however late the intake starts (D4-73; D1's ruling 6852845352).
+// The network database fails its first open, so the intake starts at a
+// tick 40 s after the node's start. 60 s after the start, and 20 s after
+// the intake's, with no heartbeat, the alarm stands. Control: the origin
+// moved to the intake's start (D6's probe and its mutant X1).
+func TestSensorUnreachableFromNodeStart(t *testing.T) {
+	g := newRig(t)
+	var opens atomic.Int32
+	r, st := g.start(node.SensorSeams{Startup: failFirstRead(&opens)})
+	defer r.Close()
+	if err := r.ServeSensor(bg, bytes.NewReader(nil)); err == nil {
+		t.Fatal("the intake started at the first step")
+	}
+	g.advance(40 * time.Second)
+	r.Tick(bg)
+	eventually(t, "the intake started at the tick", func() bool { return r.ServeSensor(bg, bytes.NewReader(nil)) == nil })
+	if n := alarms(st, node.AlarmSensorUnreachable); n != 0 {
+		t.Fatalf("40 s after the start: %d sensor-unreachable alarms", n)
+	}
+	g.advance(20 * time.Second)
+	r.Tick(bg)
+	if n := alarms(st, node.AlarmSensorUnreachable); n != 1 {
+		t.Fatalf("60 s after the start, 20 s after the intake's: %d sensor-unreachable alarms", n)
+	}
+}
