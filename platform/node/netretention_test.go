@@ -58,6 +58,7 @@ func (g *retentionRig) start() (*Runtime, *Status) {
 	if err != nil {
 		g.t.Fatal(err)
 	}
+	waitSensor(g.t, r)
 	return r, st
 }
 
@@ -192,6 +193,7 @@ func TestNetRetentionOffWithTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
+	waitSensor(t, r)
 	r.Tick(bg)
 	for _, rec := range auditRecords(t, r) {
 		if rec.Action == audit.ActionStoreRetentionMoved {

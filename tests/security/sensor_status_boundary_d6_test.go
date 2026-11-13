@@ -54,6 +54,7 @@ func TestD6SensorTextNeverReachesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
+	waitFirstStep(t, r)
 
 	flow := func(seq int, sensor string) *netobs.Observation {
 		p := func(v int) *int { return &v }

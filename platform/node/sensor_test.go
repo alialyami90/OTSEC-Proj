@@ -147,7 +147,7 @@ func TestSensorDropCounts(t *testing.T) {
 	// The minute has refilled the budget by a record or so, so four more
 	// flows drop at least two.
 	serve(flows(4)...)
-	want := r.sensor.link.Stats().Dropped[sensorlink.DropUnresolvedBudget] // all since this start, with nothing restored
+	want := r.sensor.Load().link.Stats().Dropped[sensorlink.DropUnresolvedBudget] // all since this start, with nothing restored
 	if want < 7 {
 		t.Fatalf("only %d dropped in all", want)
 	}
@@ -602,7 +602,7 @@ func TestSensorUnreachableFromHeartbeat(t *testing.T) {
 	// moves the clock (D1 on #590, go on windows-latest at 0f8fdaf8).
 	accepted := func(n uint64) {
 		t.Helper()
-		for deadline := time.Now().Add(10 * time.Second); r.sensor.link.Stats().Heartbeats < n; {
+		for deadline := time.Now().Add(10 * time.Second); r.sensor.Load().link.Stats().Heartbeats < n; {
 			if time.Now().After(deadline) {
 				t.Fatalf("heartbeat %d not accepted", n)
 			}

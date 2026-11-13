@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/audit"
@@ -40,6 +42,9 @@ type RuntimeOptions struct {
 	// alert stream's retention consumer reads it, and a test sets it to
 	// drive it apart from Now (D5-c5-0.9.md section 3).
 	Mono func() time.Duration
+	// SensorSeams are a test's way into the sensor store set
+	// (sensormgr.go); a node leaves them zero.
+	SensorSeams SensorSeams
 }
 
 // Runtime is a started node: every database through C5 startup, a Log per
@@ -50,6 +55,14 @@ type Runtime struct {
 	layout   c5.Layout
 	opt      RuntimeOptions
 	dbs      []*database
+	// sdbs is the sensor store set, apart from dbs: the sensor manager
+	// opens, resumes, prunes and closes it, and smu guards its handles
+	// (sensormgr.go; D5-sensor-node.md section 1.9 item 1).
+	sdbs []*database
+	smu  sync.Mutex
+	smgr *sensorManager
+	// consumers are the layout's consumers, kept for the manager's opens.
+	consumers []c5.Consumer
 	// commands is the node's verified copy of the command register, used
 	// only to build C9 snapshots (register.go). Nil when there is no copy or
 	// it was refused at start (AlarmRegisterRefused).
@@ -80,9 +93,16 @@ type Runtime struct {
 	// consumer's Record: a test's way to make a record fail.
 	retentionRecord func(context.Context, audit.Retention) error
 	// sensor is the sensor's intake, nil without the network_sensor
-	// section (sensor.go).
-	sensor *sensorIntake
-	intake intakeRecords // the intake hold's records (netintake.go)
+	// section and until the intake starts (sensor.go). The sensor manager
+	// may start it while the scheduler reads it.
+	sensor atomic.Pointer[sensorIntake]
+	// sensorFailed: the sensor's work panicked and is stopped until a
+	// restart (sensormgr.go).
+	sensorFailed atomic.Bool
+	// startMono is the monotonic time of the node's start, the origin of
+	// the sensor-unreachable timer however late the intake starts (D4-73).
+	startMono time.Duration
+	intake    intakeRecords // the intake hold's records (netintake.go)
 	// detector is the detector consumer, nil until it starts
 	// (netdetector.go). Only Start, Tick and Close touch it.
 	detector *netDetector
@@ -105,6 +125,10 @@ type database struct {
 	report c5.Report
 	db     *store.DB
 	log    *c5.Log
+	// sensor: the database is in the sensor store set, under smu.
+	// out: the manager has it swapped out for a Resume, so the accessor
+	// reports it not open.
+	sensor, out bool
 }
 
 // Start runs C5 startup recovery on every database of cfg's layout, the
@@ -142,11 +166,19 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	if consumers, err = eventBaselineConsumers(cfg, consumers); err != nil {
 		return nil, err
 	}
-	r := &Runtime{cfg: cfg, layout: layout, opt: opt, starts: starts}
-	specs := append([]c5.Database{}, layout.Databases...)
+	r := &Runtime{cfg: cfg, layout: layout, opt: opt, starts: starts, consumers: consumers, startMono: opt.Mono()}
+	var specs []c5.Database
+	for _, spec := range layout.Databases {
+		if isSensorDB(spec.ID) {
+			r.sdbs = append(r.sdbs, &database{spec: spec, sensor: true})
+			continue
+		}
+		specs = append(specs, spec)
+	}
+	r.newSensorManager()
 	sort.SliceStable(specs, func(i, j int) bool { return specs[i].ID == AuditDB && specs[j].ID != AuditDB })
 	for _, spec := range specs {
-		d, err := r.startDB(ctx, spec, consumers)
+		d, err := r.startDB(ctx, spec, consumers, starts)
 		if err != nil {
 			r.Close()
 			return nil, err
@@ -169,22 +201,33 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 	r.reconcileHolds(ctx)
 	r.advanceHolds(ctx)
 	starts.add("holds", from)
-	r.tickRetention(ctx)
-	if err := r.startSensor(ctx); err != nil {
-		r.Close()
-		return nil, fmt.Errorf("node: the sensor's intake: %w", err)
-	}
-	r.tickSensor(ctx, false)
+	// The sensor store set opens, and the intake starts, on the sensor
+	// manager's goroutine after Start returns, so a sensor database's
+	// startup never holds the start or collection, and nothing in it fails
+	// the start (F2, F7). The alert stream's retention consumer and the
+	// sensor's status start at the first tick after it (SensorFirstStep).
+	r.startSensorManager()
 	from = time.Now()
 	opt.Status.Write(string(cfg.NodeID))
 	starts.add("status", from)
 	return r, nil
 }
 
-func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer) (*database, error) {
+func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.Consumer, starts *startTimes) (*database, error) {
 	dbID := spec.ID
 	opt := store.Options{Dir: r.cfg.Store.Dir, Node: r.cfg.NodeID, Database: spec, Now: r.opt.Now, Documents: ConfigDocuments, BusyTimeout: r.opt.BusyTimeout,
-		Alarms:   func(a c5.Alarm) { r.opt.Status.Alarm(dbID, a); r.storeAlarm(dbID, a) },
+		Alarms: func(a c5.Alarm) {
+			if r.sensorStoreClosed(dbID) {
+				// Raised by a sensor database's startup or Resume, on the
+				// manager's goroutine, or by a commit on a handle taken
+				// before a swap, on the committer's: once for each stretch
+				// (D6's B4 and C2).
+				r.sensorStartupAlarm(dbID, a)
+				return
+			}
+			r.opt.Status.Alarm(dbID, a)
+			r.storeAlarm(dbID, a)
+		},
 		WallMark: dbID == NetworkDB} // its alerts are passed by commit time (D1 in D4-71)
 	env, err := store.NewEnv(opt)
 	if err != nil {
@@ -217,24 +260,42 @@ func (r *Runtime) startDB(ctx context.Context, spec c5.Database, consumers []c5.
 		PruneTarget:            0.8,
 		Now:                    r.opt.Now,
 	}}
+	for _, s := range r.sdbs {
+		d.sensor = d.sensor || s.spec.ID == dbID
+	}
 	sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
 	defer cancel()
-	timed := &timedEnv{StartupEnv: env, env: env, t: r.starts}
+	timed := &timedEnv{StartupEnv: env, env: env, t: starts}
 	from := time.Now()
-	d.report = c5.RunStartup(sctx, timed, d.policy)
-	r.starts.d["store-startup"] += time.Since(from) - timed.spent
+	d.report = r.runStartup(sctx, timed, d)
+	starts.d["store-startup"] += time.Since(from) - timed.spent
 	from = time.Now()
 	if err := r.adopt(d); err != nil {
+		release(d.report)
 		return nil, err
 	}
-	r.starts.add("store-adopt", from)
+	starts.add("store-adopt", from)
 	return d, nil
+}
+
+// release closes a report's store and releases its lock.
+func release(rep c5.Report) {
+	if db, ok := store.AsDB(rep.Store); ok {
+		db.Close()
+	}
+	if rep.Unlock != nil {
+		rep.Unlock()
+	}
 }
 
 // adopt takes a startup or Resume report: alarms to status, the mode, and
 // a Log over the store when it is open.
 func (r *Runtime) adopt(d *database) error {
 	for _, a := range d.report.Alarms {
+		if d.sensor {
+			r.sensorStartupAlarm(d.spec.ID, a)
+			continue
+		}
 		r.opt.Status.Alarm(d.spec.ID, a)
 	}
 	r.opt.Status.SetMode(d.spec.ID, d.report.Mode)
@@ -267,6 +328,11 @@ func (r *Runtime) adopt(d *database) error {
 
 func (r *Runtime) find(id c5.DatabaseID) *database {
 	for _, d := range r.dbs {
+		if d.spec.ID == id {
+			return d
+		}
+	}
+	for _, d := range r.sdbs {
 		if d.spec.ID == id {
 			return d
 		}
@@ -351,7 +417,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 			// state lock, and Tick is its only writer.
 			r.state.Unlock()
 			sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
-			next = c5.Resume(sctx, d.env, d.policy, prev)
+			next = r.resume(sctx, d, prev)
 			cancel()
 			if next.OpenBusy() {
 				// Busy again: the alarm the first failure raised still
@@ -361,7 +427,7 @@ func (r *Runtime) Tick(ctx context.Context) {
 			r.state.Lock()
 		case prev.Mode == c5.ModeBlocked || prev.Mode == c5.ModeDrainOnly:
 			sctx, cancel := context.WithTimeout(ctx, StartupDeadline)
-			next = c5.Resume(sctx, d.env, d.policy, prev)
+			next = r.resume(sctx, d, prev)
 			cancel()
 		default:
 			r.state.Unlock()
@@ -405,13 +471,15 @@ func (r *Runtime) Tick(ctx context.Context) {
 	}
 	r.tickRetention(ctx)
 	r.tickSensor(ctx, false)
+	r.kickSensorManager()
 	r.Prune(ctx)
 	r.opt.Status.Write(string(r.cfg.NodeID))
 }
 
 // Collecting reports whether collectors may run: every database must
 // accept events (C5 Mode.AcceptsEvents). Each credentialed run still needs
-// its own audit receipt (AuditBeforeAct, D1-11).
+// its own audit receipt (AuditBeforeAct, D1-11). The sensor store set is
+// not counted.
 func (r *Runtime) Collecting() bool {
 	r.state.RLock()
 	defer r.state.RUnlock()
@@ -437,10 +505,20 @@ func (r *Runtime) Store(stream c5.StreamID) *store.DB {
 	return db
 }
 
-// view reads a database's store, Log and mode under the state lock.
+// view reads a database's store, Log and mode under the state lock, or a
+// sensor database's under smu, which is never held across a store call: a
+// sensor database the manager has swapped out reads as not open.
 func (r *Runtime) view(d *database) (*store.DB, *c5.Log, c5.Mode) {
 	if d == nil {
 		return nil, nil, ""
+	}
+	if d.sensor {
+		r.smu.Lock()
+		defer r.smu.Unlock()
+		if d.out {
+			return nil, nil, d.report.Mode
+		}
+		return d.db, d.log, d.report.Mode
 	}
 	r.state.RLock()
 	defer r.state.RUnlock()
@@ -448,7 +526,7 @@ func (r *Runtime) view(d *database) (*store.DB, *c5.Log, c5.Mode) {
 }
 
 func (r *Runtime) dbFor(stream c5.StreamID) *database {
-	for _, d := range r.dbs {
+	for _, d := range append(slices.Clip(r.dbs), r.sdbs...) {
 		for _, s := range d.spec.Streams {
 			if s.ID == stream {
 				return d
@@ -464,13 +542,15 @@ func (r *Runtime) Mode(id c5.DatabaseID) c5.Mode {
 	return m
 }
 
-// Close records service.stop, closes every database and releases the
-// locks.
+// Close records service.stop, stops the sensor manager, closes every
+// database and releases the locks. A sensor database the manager is still
+// in a call on after SensorStopTimeout is left to the process's exit.
 func (r *Runtime) Close() error {
 	if len(r.dbs) > 0 {
 		r.tickSensor(context.Background(), true)
 		r.audit(context.Background(), audit.ActionServiceStop, audit.OutcomeInfo, "", "otsec node stopping")
 	}
+	r.closeSensorStores()
 	r.state.Lock()
 	defer r.state.Unlock()
 	var errs []error
@@ -553,16 +633,19 @@ func (r *Runtime) audit(ctx context.Context, action audit.Action, outcome audit.
 	if d != nil {
 		// One read lock covers the check and the keeping, so a record is
 		// either kept before Tick takes the kept queue or committed after
-		// the kept records (D3-6).
-		r.state.RLock()
-		log = d.log
-		if mode := d.report.Mode; log == nil || !mode.AcceptsEvents() {
-			why = fmt.Sprintf("%s not recorded: audit database %s", action, mode)
-			if log == nil && d.report.OpenBusy() {
-				why += "; " + r.deferAudit(action, outcome, reason, detail)
+		// the kept records (D3-6). It is released by defer, so a panic the
+		// sensor manager recovers never leaves it held (D3 on #663).
+		func() {
+			r.state.RLock()
+			defer r.state.RUnlock()
+			log = d.log
+			if mode := d.report.Mode; log == nil || !mode.AcceptsEvents() {
+				why = fmt.Sprintf("%s not recorded: audit database %s", action, mode)
+				if log == nil && d.report.OpenBusy() {
+					why += "; " + r.deferAudit(action, outcome, reason, detail)
+				}
 			}
-		}
-		r.state.RUnlock()
+		}()
 	} else {
 		why = fmt.Sprintf("%s not recorded: no audit database", action)
 	}
@@ -679,7 +762,7 @@ var (
 func (r *Runtime) sampleCommits() {
 	now := r.opt.Now()
 	raised := false
-	for _, d := range r.dbs {
+	for _, d := range append(slices.Clip(r.dbs), r.sdbs...) {
 		db, _, _ := r.view(d)
 		if db == nil {
 			continue

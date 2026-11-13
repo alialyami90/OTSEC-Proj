@@ -21,7 +21,9 @@ import (
 // without it, a class could fill at runtime and stay full after every
 // event was forwarded, since startup prunes only by total usage).
 //
-// Tick calls it, and cannotKeep before it holds a run.
+// Tick calls it, and cannotKeep before it holds a run. It covers
+// Runtime.dbs only: the sensor manager prunes the sensor store set on its
+// own goroutine, so a run never waits on a sensor database's prune (F6).
 func (r *Runtime) Prune(ctx context.Context) {
 	r.pruneMu.Lock()
 	defer r.pruneMu.Unlock()
@@ -69,17 +71,33 @@ func (r *Runtime) pruneDB(ctx context.Context, d *database) error {
 			}
 		}
 	}
+	if f := r.opt.SensorSeams.Prune; f != nil && isSensorDB(d.spec.ID) {
+		if err := f(ctx, d.spec.ID); err != nil {
+			return err
+		}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		r.state.RLock()
-		db, mode := d.db, d.report.Mode
+		// A sensor database is pruned only on the manager's goroutine,
+		// which alone swaps or closes its handle, so no lock is held over
+		// its pass (D5-sensor-node.md section 1.9 item 1).
+		var db *store.DB
+		var mode c5.Mode
+		if d.sensor {
+			db, _, mode = r.view(d)
+		} else {
+			r.state.RLock()
+			db, mode = d.db, d.report.Mode
+		}
 		more, err := false, error(nil)
 		if db != nil && (mode == c5.ModeCollecting || mode == c5.ModeDrainOnly) {
 			more, err = r.prunePass(ctx, d, db)
 		}
-		r.state.RUnlock()
+		if !d.sensor {
+			r.state.RUnlock()
+		}
 		if err != nil || !more {
 			return err
 		}
