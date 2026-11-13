@@ -51,15 +51,29 @@ Run these from the repository root. The root Go module is `otsec.local/otsec`. `
 
 ## Testing and merging
 
-- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs twenty-four jobs on every pull request: Go on Linux and Windows, pytest, `integration`, and twenty `integration-long` legs. `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
-- **A PR merges when its reviewers accept it and every job in both workflows is green on its head.** Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). A reviewer's verdict names a head, and the merge is at that head.
-- A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips both workflows and merges on review. A push to `main` with only such changes skips `ci.yml` too.
+- **GitHub Actions is the main test path.** `.github/workflows/ci.yml` runs Go on Linux and Windows, pytest and `integration` on every push to a pull request. `.github/workflows/ci-long.yml` holds the twenty `integration-long` legs. They run on every push to `main`, and on a pull request only after D1 adds the `full-ci` label, which D1 does after the reviewers' last pass, or earlier when the PR changes the slice, its harness or `sensor_rig` (D4-97). `.github/workflows/govulncheck.yml` adds one job, which checks the module for reachable known vulnerabilities on Linux and Windows targets. It runs on the same pull requests, and weekly on `main`.
+- **A PR merges when its reviewers accept it and its head passes D1's merge check below, the `integration-long` legs included** (run under `full-ci`; D4-97). **D1's merge check, on the head being merged:** read its check runs (`gh api repos/alialyami90/OTSEC-Proj/commits/<sha>/check-runs --paginate`). Every run has completed, and none has failed, been cancelled or timed out, or needs action. A skipped run counts for nothing. Each expected name has at least one `success`: `ci.yml`'s two `go` jobs, `python` and `integration`; `ci-long.yml`'s twenty `integration-long` legs; `govulncheck`'s job; and `a6-gt-pcap`'s jobs when the PR touches GT-PCAP. `gh pr checks` alone is not the check (D6's B1 and B2 on #665). Only D1 merges. A PR that D1 wrote merges on D6's acceptance, and D1 merges it (D4-85). A reviewer's verdict names a head, and the merge is at that head.
+- A PR that changes only Markdown or other document files (`.pdf`, `.doc`, `.docx`, `.pptx`, `.xlsx`), other than files under a `testdata` directory, skips CI and merges on review. A push to `main` with only such changes skips `ci.yml` too.
 - A PR that touches GT-PCAP (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) or `.github/workflows/a6-gt-pcap.yml` also needs `a6-gt-pcap` green.
 - **The owner's PC is the second Windows run**, and the fallback when GitHub Actions is unavailable. The owner resumed ordinary local test runs on it on 2026-11-11 (D4-83). A run that creates Windows services happens only in the owner's own elevated session. Never register the PC as a GitHub self-hosted runner. The limits on what may be installed and run there are in `HANDOFF.md`.
 
 ## The owner's rules
 
 Where one of these differs from the brief below, the rule here wins.
+
+### Working rules (the owner, 2026-11-13, D4-97; for work started after D4-97 merged)
+
+- **A non-blocking review note is fixed in the same PR before it merges, or dropped.** It is not carried to a follow-up brief, unless D1 records it as a risk: a threat-model row or an open item in the decision log. The reviewer's note says which it asks for.
+- **One source for each decision:** the decision log. HANDOFF, this file, the role files and the briefs carry one line and the D-number, never a restatement.
+- **Cite code and documents by function, section or heading.** A line number is used only together with the commit SHA it was read at.
+- **Cheap checks run first.**
+  - D1 fills the brief template in `docs/agent-handoffs.md` for every brief.
+  - `records-auditor` reads every records PR before D6 does.
+  - Every implementer runs the self-check list in `docs/agent-handoffs.md` before asking for review.
+- **Agent context.** A new task for a role starts a fresh agent with its brief. An agent is resumed only to continue the same task.
+- **Reports to D1** are at most 15 lines: the verdict or result, the link, and the blocking findings. The detail is on GitHub.
+- **A re-review** reads only the diff since the last reviewed head, and the reviewer's own findings.
+- **Build summaries.** Each design document over 500 lines gets a build summary of at most 150 lines, written by its owner. An agent reads the summary first, and in the full document only the sections its task needs. The full document stays the record, and the summary cites its sections.
 
 ### Scope: every OT device class, SEL first
 

@@ -8,16 +8,32 @@ D1 issues a brief before assigning significant work.
 
 ```
 ### Task <ID>: <short title>
-- Objective and rationale:
-- Owner:
-- Required inputs and dependencies:
-- Files or modules the role may modify:
-- Expected interfaces:
-- Deliverable:
-- Acceptance tests:
+- Objective and rationale: (the requirement, by its number)
+- Owner, and the reviewers (CLAUDE.md §5.6):
+- Required inputs and dependencies: (files by section, build summaries first)
+- Files or modules each role may modify: (every path the work needs has a named owner)
+- Expected interfaces: (the approved contract and version)
+- Deliverable: (PRs in order; no intermediate main may weaken a guarantee)
+- Acceptance tests: (each with its control; evidence as the self-check list's item 7)
+- Owed: (any test this brief cannot run, by name, and the brief that owes it)
 - Explicit exclusions:
 - Uncertainty or safety risks:
+- Scratch files: <role>-<brief>-*
 ```
+
+### Self-check before asking for review (D4-97)
+
+Drawn from the defects D6's reviews found most often. The implementer runs it and says in the PR which items apply. Items 4, 5 and 8 are written for Go code and the sensor's work; elsewhere, their equivalent applies.
+
+1. Every new rule has a test, and a control (a named mutation) shown failing, with its diff, the command, where it ran, its evidence class and its output.
+2. **Boundaries:** an off-by-one mutant on every comparison of a count, a sequence number or a time is killed by a test.
+3. **Failure paths:** every read, load or open that can fail has a test in which it fails, and no failed read is taken as success.
+4. **Locks:** no lock is held across a store call or any call that can block, and a lock that a `recover` can reach is released with `defer`.
+5. **Clocks:** code that runs on the test clock is tested on it, and no rule reads the wall clock by mistake.
+6. **Alarms and records:** each is raised once per condition, not once per retry, and the last state is always written; no held change is left unwritten.
+7. **Evidence:** each new test shows a named pass, not a skip, in the jobs that run it (both `go` jobs for Go), cited by job URL; for a job that prints no names, such as `python`, its pass and count. The `integration-long` legs' result comes after D1 adds `full-ci`, before the merge; a PR that changes the slice, its harness or `sensor_rig` asks D1 for the label early (CLAUDE.md, "Testing and merging").
+8. **Gates:** owed tests are listed by name, F-027's merge-check greps are shown, and no approved bound changes.
+9. **Claims:** every rate, bound and "never" in the PR body or a note is what the code does, and is tested.
 
 The review pairs are in CLAUDE.md section 5.6.
 

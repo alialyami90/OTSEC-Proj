@@ -1989,3 +1989,23 @@ No new words from the owner. Evidence class: `desk`. Source: D6's B1 on #660 at 
   - Brief P4-4-F27, rewritten (`docs/agent-handoffs.md`).
   - D6 updates point 3 of F-027's gate.
   - D5 aligns the opening of §1.9 in its note.
+
+## D4-97: working rules for productivity (the owner, 2026-11-13)
+
+The owner's words, in D1's session on 2026-11-13. D1 had proposed six changes and recommended the first five. The owner replied: "Implement everything except 6." The sixth (several D4 and D5 instances) is not adopted. Evidence class: `desk`.
+
+- **CI.** The twenty `integration-long` legs move to `ci-long.yml`. They run on every push to `main`, and on a pull request only after D1 adds the `full-ci` label, after the reviewers' last pass. Every other job runs on every push, as before. D1's merge check reads the head's check runs by name, not `gh pr checks` (D6's B1 on #665). The merge rule is unchanged in substance: every job, the long legs included, is green on the merged head.
+- **Non-blocking notes:** fixed in the same PR or dropped, never carried to a follow-up brief, unless D1 records them as a risk.
+- **One source for each decision:** the decision log. Other files carry one line and the D-number. Code and documents are cited by function, section or heading. A line number is used only with the commit SHA it was read at.
+- **Cheap checks first:**
+  - the brief template, amended, for every brief;
+  - `records-auditor` before D6 on records PRs;
+  - the self-check list (`docs/agent-handoffs.md`) before any review.
+- **Build summaries:** at most 150 lines, for each design document over 500 lines, written by its owner. They are briefed when each owner is free: D4 for C13 0.2, D5 for `D5-sensor-node.md`, D3 for `D3-sensor-link.md`.
+- **Usage** (the owner, in the same session: "Do 1-3 and 5. Don't Do 4.", answering D1's five proposals to reduce usage):
+  - a new task for a role starts a fresh agent, and an agent is resumed only to continue the same task;
+  - reports to D1 are at most 15 lines;
+  - a re-review reads only the diff since the last reviewed head;
+  - the build summaries above.
+  - Not adopted: smaller models for `records-auditor` and `ci-triage`.
+- **The rules are in CLAUDE.md**, "Working rules". They apply to work started after this PR merges. PRs open now finish under their own rounds.
