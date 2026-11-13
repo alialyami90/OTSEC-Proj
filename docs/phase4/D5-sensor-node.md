@@ -27,10 +27,20 @@ D5 found four ways, D6 five more, D5 a tenth on the second read, and D3 an eleve
 | F10 | D5, second read | `platform/node/forwarding.go` `NewForwarding`, `liveStore.db`; `modules/telemetry/forward/forward.go` (the send loop over `cfg.Streams`, and `peek`) | Each target has one forwarder session over every stream, the sensor's alert stream among them. `liveStore` returns an error when a stream's database is not open, `peek` returns it, and the send loop returns it, which ends that target's session for **every** stream. So a sensor database that is not open stops that target's forwarding of SER and Syslog events too (D6's item 2 on `4d03075a` reached the same path through `Forwarding.Check`) |
 | F11 | D3, on #631 (ruling 1 on #631 (comment 6804993239)); confirmed by D6 and D5 | `modules/security/nodekey/register.go` (`Parse`, `Validate`: one bad entry refuses the whole register); `platform/node` `NewForwarding` and `NewListening`, which resolve the register at the node's start | **A property of this design's first text, not of `main`:** §1.1 as merged put the link key in the node key register as a kind of its own. One faulty link-key entry, or a rollback to a build that does not know that kind, would then refuse the whole register, and with it every target's and listener's key, and so the node's start. `main` has no link key. Closed by the link key's own file (§1.1, §1.9 item 11) |
 
-**What has closed (brief P4-4-F27).** Each closing names its PR, its test and its control; D6 alone records it in F-027.
+**What has closed (brief P4-4-F27, D4-96).** Each closing names its PR, its test and its control. D6 alone records a closing in F-027. All of it is `desk` and in process, with no sensor, link or device. The F-027 gate stays until every owed test has passed (D4-96).
 
-- **F2, closed by group 1a (`desk`).** `Start` no longer returns the intake's error: `tickSensor` starts the intake (`startIntake`, `sensor.go`), raises `sensor-intake-not-started` once while it is down, and tries again at each tick. The intake is published (`Runtime.sensor`, now an atomic pointer the scheduler reads) only after `Link.RecoverHold` succeeds, and `loadIntake` reads the series afresh at each try. Test: `TestHoldRecordUnreadableNodeStarts` (`platform/node/sensorstart_test.go`). Control: `main`'s `Start`, which returns `startSensor`'s error.
-- **F5, F6, F7 and F9:** group 1b, not yet closed. **F10:** out of group 1; it needs a change in `modules/telemetry/forward/` (D1, on #660). **F1, F3, F4, F8 and F11:** groups 2 and 3.
+- **Built in deliverable (2), the sensor manager PR. It does not merge before D4's forwarder change, and it merges with F10's wiring (D4-96):**
+  - **F2:** `Start` no longer fails on the intake's start. The manager starts the intake after the store set (`startIntake`, `sensor.go`), and only while the observation stream's database is open. It raises `sensor-intake-not-started` once for each stretch and tries again at each tick. The intake is published (`Runtime.sensor`, an atomic pointer the scheduler reads) only after `Link.RecoverHold`, `repairIntake` and `pruneIntake`, and `loadIntake` reads the series afresh at each try.
+    - Tests: `TestHoldRecordUnreadableNodeStarts` (`platform/node`) and `TestIntakeStartRetried` (`sensortest`).
+    - Controls: `main`'s `Start`, and the intake tried at the start only.
+  - **F5, F6 and F7:** the sensor store set and its manager (`sensormgr.go`; item 1).
+    - Tests: `TestSensorDrainOnlyDoesNotStallSyslog`, `TestCannotKeepPrunesEvidenceOnly` and `TestSensorStoreFailsOpenNodeStarts`.
+    - Controls: the sensor databases back in `Runtime.dbs`, as on `main`; for F5 also the manager's lock held across `Resume`.
+  - **F9, the hourly cap:** test `TestSensorModeChangeCapped`; control, the cap removed. The health event under the ceiling comes with F1.
+  - **Item 10:** test `TestCloseWithStuckSensorResume`; control, an unbounded wait.
+  - **Item 9's `recover` in the manager:** test `TestSensorManagerPanicContained`; control, no `recover`.
+- **F10:** its wiring goes in the manager PR once D4's change to `modules/telemetry/forward/` has merged. It is not written yet.
+- **Not yet closed:** F1, F3 and F4 (deliverable (3)), F8 (owed in full by the dialer-and-enrolment brief), and F11 (deliverable (4)). §1.9 lists the owed tests.
 
 Also read for this note (`desk`): `Runtime.Collecting` iterates every database, but no product code calls it, so it reaches nothing. And no file under `platform/node`, `platform/sensorlink` or `cmd/otsec` calls `recover`, so a panic in the sensor's work, today inside `Tick`, ends the node (D6; §1.9 item 9).
 
@@ -369,7 +379,12 @@ Once the collector's acceptance is folded:
 
 ## 1.9 A sensor never stops SER or Syslog collection or the node's start (brief item 8)
 
-Each finding of §1.0, and what closes it. **D1's ruling on #628 (comment 6803782160): every row below is closed, with its test, in the first brief of the third part, before any dialer or other caller of `ServeSensor` or `sensorlink.Link.Serve` merges, and before any release.**
+Each finding of §1.0, and what closes it. **D4-96 replaces D1's ruling on #628 (comment 6803782160) here.**
+
+- Brief P4-4-F27 closes each coupling on `main`'s code, with the tests that can run there, each with its control.
+- Every other test below is owed by the brief that builds its machinery: the contracts in code, the C13 0.2 intake, the dialer and enrolment, or the sensor and its rig. The owed tests are release blockers.
+- F-027's gate holds until every owed test has passed. Until then there is no `network_sensor` section outside the tests, no release, and no product wiring of any path to or from a sensor.
+- The brief's table (`docs/agent-handoffs.md`, P4-4-F27) says which test is owed, and by which brief. §1.0 says what has closed.
 
 ### 1. The sensor store set (ruling 8; F5, F6, F7, F9, F10)
 
@@ -390,13 +405,36 @@ So:
 - **Disk space.** The volume rule (`deploy/README.md`) counts the sensor set as it counts every database: each class's quota times `DiskBytesPerQuotaByte`, with each database's two reserves (D6).
 - **Mode changes (F9):** a sensor database's `store.mode_change` audit record and its health event are written at most once an hour for each database, the rest counted and carried in the next record's detail; the health event is under the ceiling.
 
-**Code changed:** `runtime.go` (`Start`, `startDB`, `Tick`, `Log`, `Store`, `Close`), `prune.go`, `layout.go` (`Layout` returns the sensor set apart), and a new `platform/node/sensormgr.go`. **Tests**, each with a control: `TestSensorDrainOnlyDoesNotStallSyslog` (a sensor database held drain-only with a slow-prune seam while Syslog arrives, a run is due and a target forwards SER events: Syslog commits, the run is sent within 2 s, SER events reach the target, and `Tick` returns; controls: `main`'s `Tick`, and the manager's lock held across `Resume`); `TestSensorStoreNotOpenForwardingGoesOn` (a sensor database not open while SER events forward: they reach the target; control: one session for every stream, `main`'s `NewForwarding`); `TestCannotKeepPrunesEvidenceOnly` (adapter-evidence near its limit and a network class over target, with a slow prune seam; control: `main`'s `Prune`); `TestSensorStoreFailsOpenNodeStarts` (a network database whose first read fails: the node starts and stores a run; control: `main`'s `startDB`); `TestSensorModeChangeCapped` (control: uncapped).
+**Built (P4-4-F27 deliverable (2); `desk`). What differs from the text above:**
+
+- **The first open.** It is made in `Start`, by the manager's first step on `Start`'s goroutine. Every later open, resume and prune runs on the manager's own goroutine, which `Tick` wakes.
+  - The first open fails nothing.
+  - It is not deferred past `Start`, because the intake's start, D6's tests in `tests/security` and the sensor-unreachable timer all read the sensor from the moment `Start` returns.
+  - So a slow sensor database recovery still delays the start, bounded by `StartupDeadline`, as every database's does.
+- **References.** The accessor takes no reference, and the manager closes a handle only at `Close`, after it has stopped. A reader that took a handle before a swap may still use it during a `Resume` from drain-only, which keeps the same open store, as on `main`.
+- **Where the split is made.** `Layout` is unchanged, and `Start` splits the sensor set from it (`isSensorDB`).
+- **The seams.** `RuntimeOptions.SensorSeams` holds `Startup`, `Resume` and `Prune`, keyed by the database's ID, so the same seams apply whichever path reaches the database.
+- **The F6 seam** runs before a sensor database's prune passes, so no network class needs to be over its target.
+- **F5's test checks the entry points that the run path and the Syslog intake append through:** `Log` and `Mode` on the health, audit and listener streams. A full scheduled run and a forwarded SER event are F10's test and the rig's.
+- **F10 is not built here.** It waits for D4's change to `modules/telemetry/forward/` (D4-96).
+- **A finding on `main`, not changed here.** C8's reason-code pattern (`contracts/audit`, `^[a-z][a-z0-9_]{0,47}$`) refuses `drain-only`. So any database's change to drain-only writes no `store.mode_change` audit record, only `store-commit-failed` in status. `TestSensorModeChangeCapped` therefore flaps between `blocked` and `failed`.
+
+**Code changed (as planned):** `runtime.go` (`Start`, `startDB`, `Tick`, `Log`, `Store`, `Close`), `prune.go`, `layout.go` (`Layout` returns the sensor set apart), and a new `platform/node/sensormgr.go`. **Tests**, each with a control: `TestSensorDrainOnlyDoesNotStallSyslog` (a sensor database held drain-only with a slow-prune seam while Syslog arrives, a run is due and a target forwards SER events: Syslog commits, the run is sent within 2 s, SER events reach the target, and `Tick` returns; controls: `main`'s `Tick`, and the manager's lock held across `Resume`); `TestSensorStoreNotOpenForwardingGoesOn` (a sensor database not open while SER events forward: they reach the target; control: one session for every stream, `main`'s `NewForwarding`); `TestCannotKeepPrunesEvidenceOnly` (adapter-evidence near its limit and a network class over target, with a slow prune seam; control: `main`'s `Prune`); `TestSensorStoreFailsOpenNodeStarts` (a network database whose first read fails: the node starts and stores a run; control: `main`'s `startDB`); `TestSensorModeChangeCapped` (control: uncapped).
 
 ### 2. The start (F2)
 
 `startSensor`'s error no longer fails `Start`. The node starts without that sensor's intake, raises `sensor-intake-not-started` and tries again at each manager tick. **Said plainly (D6):** while the intake is not started, `repairIntake` does not run, so a run whose release committed before a crash has no `collection.run` until it does. Shape checks stay load failures (§1.2). Test: `TestHoldRecordUnreadableNodeStarts` (a hold record that cannot be read: the node starts and stores a run; control: `main`'s `Start`).
 
-**Built (P4-4-F27 group 1a; `desk`).** Until the sensor manager of item 1 is built (group 1b), the retry runs in `tickSensor`, on `Tick`'s goroutine, and not on the manager's. The test is in `platform/node`, as this brief's one start test, because it stores a full run through the scheduler's test collector, which only that package's tests have. What it shows: the record made unreadable in the database file (its `state` changed), the node starts, raises the alarm once, refuses the sensor's connection, stores a scheduled run's SER rows, and raises nothing more over two ticks. What it does not show: a retry that succeeds, because the fault it injects lasts (a retry is shown in group 1b, with the manager's seams). A repair the intake makes when a later try succeeds runs while the scheduler may be running, which on `main` it never did; the repair touches only runs whose release committed before the node started.
+**Built (P4-4-F27 deliverable (2); `desk`).**
+
+- **Where the retry runs.** The intake's start and its retry run on the manager's step: at the start, then at each tick. The step opens the store set first, so the intake starts only once the observation stream's database is open.
+- **`TestHoldRecordUnreadableNodeStarts` (`platform/node`).** This is the brief's one start test there, because it stores a full run through the scheduler's test collector, which only that package's tests have.
+  - The fault: the hold record's `state` is changed in the database file.
+  - What it shows: the node starts, raises the alarm once, refuses the sensor, and stores a scheduled run's SER rows.
+  - The fault lasts, so every retry fails.
+- **`TestIntakeStartRetried` (`sensortest`)** shows a retry that succeeds. The network database fails its first read, so the intake does not start. The next tick's step opens the database and starts the intake: `loadIntake`, `Link.RecoverHold` and `repairIntake` run, and the sensor is served.
+  - *Not shown:* a repair that writes a `collection.run` on a retry. No run waits for repair in that test.
+- **A limit.** A repair made on a later try runs while the scheduler may be running, which on `main` it never did. The repair touches only runs whose release committed before the node started, and the intake is published only after it.
 
 ### 3. The detector's drive (ruling 10; F3; D4's note, D6's B4)
 
