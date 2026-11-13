@@ -360,7 +360,7 @@ def match_functions(rows, s):
     return assign(rows, reqs, fits_fn), {id(with_objs[i]): m for i, m in by_obj.items()}
 
 
-def judge_flow(row, s, flow_rows):
+def judge_flow(row, s, flow_rows, svc_rows):
     """Protocol and Service rows (D6's note, section 2, and rule 6).
 
     Protocol: one flow record with the row's transport and both ends, named
@@ -369,12 +369,17 @@ def judge_flow(row, s, flow_rows):
     either orientation passes and the result says which. Two records fail.
     Service: the protocol attributed to the server end the row names, and
     to no end of a labelled flow that the labels do not name as its server
-    (rule 6); flow_rows are the capture's protocol rows.
+    (rule 6); flow_rows are the capture's protocol rows, svc_rows its
+    service rows, which name the servers.
     """
     l4, proto = row["l4"], (row.get("protocol") or "dnp3")
     if row["condition"] == "service":
-        servers = {(r["dst"], r["dport"]) for r in flow_rows if r["l4"] == l4}
-        others = {(r["src"], r["sport"]) for r in flow_rows if r["l4"] == l4} - servers
+        # The servers are the ends the Service rows name, not the Protocol
+        # rows' dst: a Protocol row's dst can be a master on a temporary
+        # port (dnp3-udp-temp-port), and a service named there must fail
+        # (D1 to D4 on #648; D6's note, section 7).
+        servers = {(r["dst"], r["dport"]) for r in svc_rows if r["l4"] == l4}
+        others = {e for r in flow_rows if r["l4"] == l4 for e in ((r["src"], r["sport"]), (r["dst"], r["dport"]))} - servers
         wrong = [f for f in s.flows if f["l4"] == l4 and f["resp"] in others and named(f["names"], proto)]
         if wrong:
             f = wrong[0]
@@ -456,6 +461,7 @@ def judge_capture(rows, s):
     by match_functions (rule 9), group 120 by judge_g120."""
     out = {}
     flow_rows = [r for _, r in rows if r["condition"] == "protocol"]
+    svc_rows = [r for _, r in rows if r["condition"] == "service"]
     fn_rows = [r for _, r in rows if r["condition"] == "function"]
     pos = {id(r): k for k, r in enumerate(fn_rows)}
     fn, ob = match_functions(fn_rows, s)
@@ -463,7 +469,7 @@ def judge_capture(rows, s):
     for n, row in rows:
         c = row["condition"]
         if c in ("protocol", "service"):
-            out[n] = judge_flow(row, s, flow_rows)
+            out[n] = judge_flow(row, s, flow_rows, svc_rows)
         elif c == "function":
             k = pos[id(row)]
             if k not in fn:
