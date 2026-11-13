@@ -257,6 +257,14 @@ sig() {
     echo "S0, zeek-modbus-sig: modbus-sig.sig $(sha256sum < "$here/modbus-sig.sig" | cut -c1-64)"
   } > "$s/hashes.txt"
   { header; python3 -I "$here/table.py" sig "$s" "$root" "$work"; } > "$work/sig.md"
+  # Until labels.tsv is committed, the labels this run wrote go into the
+  # artifact, whole, so that they can be reviewed and committed as written.
+  if [ ! -f "$corpus/labels.tsv" ] && [ -f "$s/labels.tsv" ]; then
+    printf '\n### labels.tsv as this run wrote it (SHA-256 %s), for review and commit\n\n```\n' \
+      "$(sha256sum < "$s/labels.tsv" | cut -c1-64)" >> "$work/sig.md"
+    cat "$s/labels.tsv" >> "$work/sig.md"
+    printf '```\n' >> "$work/sig.md"
+  fi
 }
 
 case $mode in
