@@ -123,7 +123,7 @@ jobs:
         shell: bash
         run: |
           go test -count=1 -v ./platform/node/sensortest/...
-          go test -count=1 -v -run '^(TestHoldRecordUnreadableNodeStarts|TestIntakeRetryRecoversAndRepairs|TestIntakeNotPublishedOnFailedRecovery|TestRunWhileSensorResumeHeld|TestRunAfterSensorFailed|TestForwardSessionsSplit|TestSensorStoreNotOpenForwardingGoesOn|TestSensorSessionUnreachableNamed|TestSensorStartupAlarmConcurrent)$' ./platform/node
+          go test -count=1 -v -run '^(TestHoldRecordUnreadableNodeStarts|TestIntakeRetryRecoversAndRepairs|TestIntakeNotPublishedOnFailedRecovery|TestRunWhileSensorResumeHeld|TestRunAfterSensorFailed|TestForwardSessionsSplit|TestSensorStoreNotOpenForwardingGoesOn|TestSensorSessionUnreachableNamed|TestSensorSessionUnreportedShown|TestSensorStartupAlarmConcurrent)$' ./platform/node
           go test -count=1 -v -run 'TestNewSecondSession|TestSecondSession' ./modules/telemetry/forward
       - if: runner.os == 'Windows'
         shell: bash

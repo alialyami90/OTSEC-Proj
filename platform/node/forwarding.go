@@ -298,7 +298,8 @@ func (fw *Forwarding) check(ctx context.Context, tg *target, st forward.Status) 
 
 // checkSessions is Check for one target, its main session's status st, and its
 // sensor session's status sst, nil when it has none. The target's status
-// shows both sessions' streams; the rest of it is the main session's. Each
+// shows both sessions' streams and both sessions' unreported counts and
+// report errors; the rest of it is the main session's. Each
 // session's reachability is judged on its own status, so a sensor session
 // that cannot read its database never reads as the target's SER forwarding
 // down, and its alarm and health event name it (D6's N2 on #662).
@@ -331,6 +332,16 @@ func (fw *Forwarding) checkSessions(ctx context.Context, tg *target, st forward.
 			tg.sopen = now
 		}
 		swaiting = fw.streams(ctx, tg, tg.sstreams, *sst, ts.Streams)
+		// The sensor session's owed forward.* reports count in the target's
+		// status too, so otsec status shows them (D6's B2 on #663).
+		ts.Unreported += sst.Unreported
+		if sst.ReportErr != nil {
+			serr := SensorSessionPrefix + ": " + sst.ReportErr.Error()
+			if ts.ReportErr != "" {
+				serr = ts.ReportErr + "; " + serr
+			}
+			ts.ReportErr = serr
+		}
 	}
 	if fw.rt.opt.Status.SetTarget(tg.t.Name, ts) {
 		// Written on a change, so health's counts are at most one check

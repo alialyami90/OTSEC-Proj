@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -54,8 +55,11 @@ func sensorForwardConfig(t *testing.T, sensor bool, ports ...int) (*Config, stri
 // session. The two sets are disjoint, and together they are the target's
 // consumer set. The sensor session holds exactly the streams in the sensor
 // store set, and the main session the health stream. A node without the
-// network_sensor section gets no second session. Control: a stream sent to
-// both sessions, or every stream to the main session.
+// network_sensor section gets no second session. What each session carries
+// is read from its forwarder. Controls: a stream sent to both sessions,
+// every stream to the main session, and D6's two mutants: the main
+// forwarder also carrying the alert stream, and the sensor forwarder also
+// carrying SER.
 func TestForwardSessionsSplit(t *testing.T) {
 	for _, sensor := range []bool{true, false} {
 		c, dir := sensorForwardConfig(t, sensor, 9, 10)
@@ -79,31 +83,41 @@ func TestForwardSessionsSplit(t *testing.T) {
 					want = append(want, cs.Stream)
 				}
 			}
-			for _, id := range tg.sstreams {
-				if slices.Contains(tg.streams, id) {
+			// What each forwarder carries, read from the forwarder itself
+			// (D6's B1 on #663), and the lists Check reads it by.
+			main := slices.Sorted(maps.Keys(tg.f.Status().Streams))
+			var sens []c5.StreamID
+			if tg.sf != nil {
+				sens = slices.Sorted(maps.Keys(tg.sf.Status().Streams))
+			}
+			if !slices.Equal(main, tg.streams) || !slices.Equal(sens, tg.sstreams) {
+				t.Errorf("sensor %v, target %s: the forwarders carry %v and %v, Check reads %v and %v", sensor, tg.t.Name, main, sens, tg.streams, tg.sstreams)
+			}
+			for _, id := range sens {
+				if slices.Contains(main, id) {
 					t.Errorf("sensor %v, target %s: %s is in both sessions", sensor, tg.t.Name, id)
 				}
 				if d := r.dbFor(id); d == nil || !d.sensor {
 					t.Errorf("sensor %v, target %s: the sensor session carries %s, which is not in the sensor store set", sensor, tg.t.Name, id)
 				}
 			}
-			for _, id := range tg.streams {
+			for _, id := range main {
 				if d := r.dbFor(id); d != nil && d.sensor {
 					t.Errorf("sensor %v, target %s: the main session carries %s, which is in the sensor store set", sensor, tg.t.Name, id)
 				}
 			}
-			got := slices.Concat(tg.streams, tg.sstreams)
+			got := slices.Concat(main, sens)
 			slices.Sort(got)
 			slices.Sort(want)
 			if !slices.Equal(got, want) {
 				t.Errorf("sensor %v, target %s: the sessions carry %v, the consumer set is %v", sensor, tg.t.Name, got, want)
 			}
-			if !slices.Contains(tg.streams, HealthStream) {
+			if !slices.Contains(main, HealthStream) {
 				t.Errorf("sensor %v, target %s: the main session does not carry %s", sensor, tg.t.Name, HealthStream)
 			}
 			switch {
-			case sensor && (tg.sf == nil || !slices.Contains(tg.sstreams, NetAlertStream(sensorID))):
-				t.Errorf("target %s: no sensor session carrying %s (%v)", tg.t.Name, NetAlertStream(sensorID), tg.sstreams)
+			case sensor && (tg.sf == nil || !slices.Contains(sens, NetAlertStream(sensorID))):
+				t.Errorf("target %s: no sensor session carrying %s (%v)", tg.t.Name, NetAlertStream(sensorID), sens)
 			case !sensor && (tg.sf != nil || len(tg.sstreams) != 0):
 				t.Errorf("target %s: a sensor session without the network_sensor section (%v)", tg.t.Name, tg.sstreams)
 			}
@@ -304,4 +318,31 @@ func forwardUnreachableEvents(t *testing.T, r *Runtime) (out []map[string]string
 		}
 	}
 	return out
+}
+
+// D6's B2 on #663: the target's status counts the forward.* reports both
+// sessions owe and shows both report errors, so the sensor session's owed
+// health events appear in otsec status. Control: the main session's
+// values only.
+func TestSensorSessionUnreportedShown(t *testing.T) {
+	c, dir := sensorForwardConfig(t, true, 9) // the forwarders are never run
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	fw, err := NewForwarding(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := fw.targets[0]
+	sensorErr := SensorSessionPrefix + ": node test: the sensor session's report"
+	sensor := forward.Status{Unreported: 2, ReportErr: errors.New("node test: the sensor session's report")}
+	fw.checkSessions(bg, tg, forward.Status{Unreported: 1, ReportErr: errors.New("node test: the main session's report")}, &sensor)
+	ts := st.Snapshot("site-a-node1").Targets[tg.t.Name]
+	if ts.Unreported != 3 || ts.ReportErr != "node test: the main session's report; "+sensorErr {
+		t.Fatalf("both sessions owing: unreported %d, want 3; report error %q", ts.Unreported, ts.ReportErr)
+	}
+	fw.checkSessions(bg, tg, forward.Status{}, &sensor)
+	ts = st.Snapshot("site-a-node1").Targets[tg.t.Name]
+	if ts.Unreported != 2 || ts.ReportErr != sensorErr {
+		t.Fatalf("only the sensor session owing: unreported %d, want 2; report error %q", ts.Unreported, ts.ReportErr)
+	}
 }
