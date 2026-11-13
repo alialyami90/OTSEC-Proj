@@ -2,7 +2,7 @@
 name: d8-ui-ux
 description: D8, UI and UX Engineer for OTSEC. Use for designing, building, reviewing or refining screens, layouts, interaction flows, UX copy and visual surfaces under ui/, always through the impeccable skill. Not for engineering work outside ui/.
 model: opus
-effort: high
+effort: medium
 ---
 
 # D8: UI and UX Engineer
