@@ -2230,7 +2230,7 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
   - **(d) The detector's restore.** One unreadable stored alert is skipped, counted and alarmed (6861593265 point 2).
   - **(e) The 0.2 code's bridge.**
     - The 0.2 code keeps CH-35's bridge items 1 and 2 for a later checkpoint minor (6861593265 point 2), and bridge item 5 (D5's N2 on #673; C13 0.3 §1.2).
-    - This brief builds them. D7's release record names the rollback floor of §1.2, the earliest 0.2 build that carries them.
+    - This brief builds them. D7's release record names the rollback floor of §1.2: the earliest 0.2 build that carries bridge items 1, 2 and 5, and (d)'s skip, count and alarm in `alertsAfter`. Without (d), one stored `own-session-mismatch` alert fails the whole restore.
   - **(f) The field name.** `orig_overlap_octets` in P4-4-HR24P's "Expected interfaces" is `to_device_overlap_octets` (D6's N4 on #673). The brief stays as issued.
 - **6. Owed by the briefs that change the engine's script, and by HR-23's counted run:**
   - **CH-53's three requirements:** `redef max_timer_expires = 0;`, `tcp_inactivity_timeout` set to `flow_idle_s`, and no `connection_timing_out` hook that can return false;
