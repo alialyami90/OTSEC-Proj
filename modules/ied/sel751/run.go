@@ -133,7 +133,9 @@ var (
 //     register's context reads for the operation (SHO G: DATE_F, before
 //     SER; C3 0.2, D3-2), then the invocation's operation.
 //  6. Close: QUI when the session reached Level 1 and a level prompt makes
-//     it safe, then the TCP close.
+//     it safe; after a prompted reply to QUI, the collector's half-close and
+//     a read to the relay's EOF within QUI's step (C2 0.10); then the
+//     session's counts and the TCP close.
 //
 // Every line goes through telnet.Conn.Send, whose egress check passes it
 // only if it is the line this step means to send, the register permits it
@@ -191,6 +193,9 @@ type session struct {
 	step      time.Duration
 	budget    int64 // max_response_bytes
 	total     int64 // bytes received
+	// stepEnd is when the last await's step ends. After QUI the close phase
+	// ends there (C2 0.10).
+	stepEnd time.Time
 
 	rec      recorder
 	facts    adapter.SessionFacts
@@ -241,7 +246,30 @@ func (s *session) run() adapter.Code {
 		code = adapter.FailedTransportClosed
 	}
 	s.commit()
+	s.telnetFacts()
 	return code
+}
+
+// telnetFacts fills session.telnet (C2 0.10) once the session's last write
+// and read are done, before the deferred close: the transport's counts,
+// whether the close phase ended at the relay's EOF, and the collector's
+// retransmission count, read here and nowhere else.
+func (s *session) telnetFacts() {
+	n := s.conn.Counts()
+	refusals, command := int64(n.Refusals), n.Wire-n.Received
+	// QUI is sent only while the transport is up, so EOF after it is the
+	// close phase's.
+	eof := s.facts.QuitSent && s.conn.AtEOF()
+	t := &adapter.TelnetFacts{Refusals: &refusals, CommandOctetsReceived: &command, ReadToEOF: &eof,
+		RexmitUnknown: adapter.RexmitUnsupported}
+	if s.cfg.Rexmit != nil {
+		octets, unknown := s.cfg.Rexmit(s.nc)
+		t.RexmitUnknown = unknown
+		if unknown == "" {
+			t.RexmitOctets = &octets
+		}
+	}
+	s.facts.Telnet = t
 }
 
 // check refuses, with no traffic, anything that would make the session
@@ -1122,8 +1150,43 @@ func (s *session) quit() bool {
 	}
 	s.facts.QuitSent = true
 	s.budget += closeAllowance
-	_, _ = s.await(time.Time{}, true)
+	_, err := s.await(time.Time{}, true)
+	// The half-close (C2 0.10 §1.3, D4-102 item 5 (a)): only after QUI's
+	// reply ended in a prompt, with no error and the transport up. It sends
+	// a FIN and no octet, and the read after it ends by the end QUI's own
+	// step already had, so the close phase is no longer than one step.
+	if err == nil && !s.dead && s.cfg.HalfClose != nil && s.cfg.HalfClose(s.nc) == nil {
+		s.readToEnd(s.stepEnd)
+	}
 	return true
+}
+
+// readToEnd reads after the half-close into the close phase's one reply, so
+// that every octet the relay sends before its FIN is kept. It writes nothing
+// and acts on no prompt or quiet interval. It ends at the first of EOF, any
+// other error (the negotiation limit and a refusal that cannot be written
+// among them), the response budget, the context, or end. It is not await:
+// await would start a step of its own and return on the prompt QUI's reply
+// already holds (D3's B2 on #671).
+func (s *session) readToEnd(end time.Time) {
+	buf := make([]byte, 4096)
+	for s.ctx.Err() == nil && time.Now().Before(end) && s.total < s.budget {
+		_ = s.conn.SetDeadline(end)
+		n, err := s.conn.Read(buf[:min(int64(len(buf)), s.budget-s.total)])
+		if n > 0 {
+			if len(s.reply) == 0 {
+				s.replyAt = s.now()
+			}
+			s.reply = append(s.reply, buf[:n]...)
+			s.total += int64(n)
+			continue
+		}
+		var ne net.Error
+		if err != nil && !(errors.As(err, &ne) && ne.Timeout()) {
+			s.dead = true
+			return
+		}
+	}
 }
 
 func orOK(c adapter.Code) string {
@@ -1198,6 +1261,7 @@ func (s *session) stepFailed(err error) adapter.Code {
 func (s *session) await(silentBy time.Time, closing bool) (string, error) {
 	start := time.Now()
 	stepEnd := start.Add(s.step)
+	s.stepEnd = stepEnd
 	buf := make([]byte, 4096)
 	for {
 		now := time.Now()
