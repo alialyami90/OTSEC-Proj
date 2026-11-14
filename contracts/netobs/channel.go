@@ -287,6 +287,10 @@ func (h *Heartbeat) checkInterfaces(c *checker) {
 		if !contains(carriers, in.Carrier) {
 			c.fail(CodeForm, f+".carrier", "%q is not up, down or unknown", in.Carrier)
 		}
+		// An absent count decodes as 0; it is refused, not read as 0.
+		if c.keys != nil && !c.keys[f+".packets"] {
+			c.fail(CodeMissing, f+".packets", "required")
+		}
 		if seen[in.Name] || !want[in.Name] {
 			c.fail(CodeConflict, f+".name", "%q: the names are the coverage statement's, each once", in.Name)
 		}
