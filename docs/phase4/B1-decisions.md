@@ -2283,3 +2283,35 @@ The owner wrote "continue" after D4-102. Evidence class: `desk`. Nothing is buil
   - P4-4-CC's first deliverables: D6's fixtures, D2's and D3's C2 0.10, and then D4's bridge part;
   - the rest of D4-102's "Next".
 - **Next decision number:** D4-104.
+
+## D4-104: rulings on P4-4-CC's first PRs, and a collector defect on `main` (D1, 2026-11-15)
+
+Evidence class: `desk` for the rulings. `CI-Linux` and `CI-Windows` for the runs named.
+
+- **1. On #682 (P4-4-CC deliverable 1, the bridge; D1's comment 6883986941):**
+  1. **An unknown `coverage.degraded` value of a later minor.** It is read as degraded only when it is a token that the record does not repeat. That reading comes from 0.1's grammar, not a new rule. CH-35 item 4 reads an unknown *value*, and a string that breaks the token form is not a value in any minor.
+  2. **Open item, recorded under CLAUDE.md's working rule:** a bridge-floor node that re-judges a stored later-minor observation copies its unknown `degraded` value into its own 0.1 alert and checkpoint, and 0.1 validation refuses them.
+     - No approved minor adds a `degraded` value, so nothing reaches this path today.
+     - **Rule:** any later minor that adds a `degraded` value states, before D1 approves it, what a bridge-floor node writes for it.
+  3. **D3's N2 (6884061581), as a risk:** the bridge is safe only while a stored record's schema is the minor the node checked strictly on the channel.
+     - The C13 0.2 intake brief states that invariant and owes its test.
+     - The test's control stores the schema the sensor sent.
+- **2. On #683 (P4-4-CC deliverable 0; D1's comment 6884327190):**
+  - **(a) C8-1's old-reader leg is narrowed.** Each record is valid at 0.12 in every field except the new action and its sensor target, and the 0.12 reader refuses it as "unknown action".
+  - **(b) `docs/phase4/D3-sensor-link.md` §11.2 does not fix:**
+    - the exact placement of `decision_seq` and `payload_sha256`;
+    - the revoked record's `sensor` object, and the field names inside `streams`;
+    - the form of `applied_at` and `count`;
+    - which field carries C8-4's reasons.
+
+    Four of C8-4's six reasons hold hyphens (`peer-key`, `run-regressed`, `run-forked`, `sensor-id`), and so do C8-2's five denial codes `node-key`, `revoked-key`, `forked-key`, `not-after` and `asset-address`. `reason_code`'s pattern (`codePattern` in `contracts/audit/audit.go`) refuses each of them. D3 settles these as the first step of P4-4-CC deliverable 5: options in comments (D4-99), then D1's ruling. P4-4-DO's ruling 6852845352 is one option, not a decision taken in advance.
+  - **(c)** D6's forward check on deliverable 5's branch uses the settled forms.
+- **3. A collector defect on `main`.**
+  - **The failure.** `main`'s push of `83c9f697` failed `TestServeAssetClear` on `go (ubuntu-latest)`, in run 43522548095: "collector.sock is already served".
+  - **The cause, read from the code at `0c9b13f1`.** When `Server.Close` runs before `Server.Serve` (`modules/security/collector/server.go`), `Serve` returns `ErrServerClosed` without closing the listener it was given. The socket stays served, and the next start on the same path is refused.
+  - **The fix** is brief P4-COL-1 (D3), in `docs/agent-handoffs.md`, "After D4-104".
+- **4. #683's Windows failure.**
+  - `TestSensorStartupStuckDoesNotHoldStart` (`platform/node/sensortest`) overran its 2 s bound on `Start` in run 43640098201. #683 does not touch it.
+  - In that run, `platform/node` took 814 s, over its 720 s budget (D4-44).
+  - The cause is `unknown`. The run cannot tell a slow `Start` from one the stuck startup held, which is the property the test pins. The `audit.db` cleanup error in the log proves neither, because the test registers its cleanups after the timed wait, so a failure inside it leaves the runtime open. D1 reran the job. The Windows `platform/node` time brief stays in D4-102's "Next", and D1 will name this test in it when it is issued.
+- **Next decision number:** D4-105.
