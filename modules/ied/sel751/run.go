@@ -1150,13 +1150,21 @@ func (s *session) quit() bool {
 	}
 	s.facts.QuitSent = true
 	s.budget += closeAllowance
+	level, accessLevel := s.level, s.facts.AccessLevel
 	_, err := s.await(time.Time{}, true)
 	// The half-close (C2 0.10 §1.3, D4-102 item 5 (a)): only after QUI's
 	// reply ended in a prompt, with no error and the transport up. It sends
 	// a FIN and no octet, and the read after it ends by the end QUI's own
 	// step already had, so the close phase is no longer than one step.
 	if err == nil && !s.dead && s.cfg.HalfClose != nil && s.cfg.HalfClose(s.nc) == nil {
+		n := len(s.reply)
 		s.readToEnd(s.stepEnd)
+		if len(s.reply) > n {
+			// The prompt await saw is no longer the reply's suffix, so it
+			// counts in neither access_level nor Validate (§1.3 condition
+			// 4). commit notes the extended reply's suffix instead.
+			s.level, s.facts.AccessLevel = level, accessLevel
+		}
 	}
 	return true
 }

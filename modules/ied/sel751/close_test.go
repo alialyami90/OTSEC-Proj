@@ -166,6 +166,7 @@ type closeCase struct {
 	tail      farTail
 	halfClose bool
 	rexmit    func(net.Conn) (int64, string)
+	ctx       context.Context // Run's context; Background when nil
 }
 
 type closeRun struct {
@@ -193,7 +194,11 @@ func runClose(t *testing.T, c closeCase) closeRun {
 		cfg.HalfClose = halfClose(&out.halfCalls)
 	}
 	done := playThen(far, c.steps, c.lastDelay, out.sock.half, &out.quiAt, c.tail)
-	out.res = Run(context.Background(), f.inv, cfg)
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out.res = Run(ctx, f.inv, cfg)
 	out.end = time.Now()
 	if err := <-done; err != nil {
 		t.Errorf("far end: %v", err)
@@ -333,5 +338,110 @@ func TestRexmitWithoutQUI(t *testing.T) {
 	}
 	if got := strings.Join(r.sock.events, ","); !strings.HasSuffix(got, "read,rexmit,close") {
 		t.Errorf("events %s", got)
+	}
+}
+
+// QUI's reply ends in a prompt of a level no earlier prompt showed, here
+// "=>>". When octets follow it after the FIN, that prompt is no longer the
+// reply's suffix, and it counts in neither the adapter's access_level nor
+// Validate (C2 0.10 §1.3 condition 4; D6's B1 on #684). runClose checks
+// that each result passes Validate. The control is the reply with nothing
+// after the FIN: the prompt is the suffix and counts, access_level "2".
+func TestQUIPromptCountsOnlyAsSuffix(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		late  []byte
+		hold  bool
+		level string
+		eof   bool
+	}{
+		{"nothing after the FIN, the relay closes (control)", nil, false, "2", true},
+		{"octets after the FIN, the relay closes", []byte("\r\nX"), false, "1", true},
+		{"octets after the FIN, the relay holds", []byte("\r\nX"), true, "1", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			steps := okSteps(t)
+			steps[len(steps)-1].reply = []byte("\r\n=>>")
+			r := runClose(t, closeCase{steps: steps, step: 300 * time.Millisecond,
+				tail: afterHalf(c.late, c.hold), halfClose: true})
+			tf := telnetOf(t, r.res)
+			if r.halfCalls != 1 || *tf.ReadToEOF != c.eof || r.res.Error != nil {
+				t.Errorf("half-close %d, facts %+v, error %+v", r.halfCalls, tf, r.res.Error)
+			}
+			if got := r.res.Session.AccessLevel; got != c.level {
+				t.Errorf("access_level %q, want %q", got, c.level)
+			}
+		})
+	}
+}
+
+// A relay that closes right after QUI's prompt ends the transport within
+// QUI's await: no half-close is made on a dead session (D6's N1 on #684).
+// The control is TestHalfCloseReadsToEOF's first run, with one half-close.
+func TestNoHalfCloseWhenDead(t *testing.T) {
+	r := runClose(t, closeCase{steps: okSteps(t), halfClose: true,
+		tail: func(net.Conn, <-chan struct{}) error { return nil }})
+	tf := telnetOf(t, r.res)
+	if r.halfCalls != 0 {
+		t.Errorf("%d half-closes on a session whose transport had ended", r.halfCalls)
+	}
+	if !*tf.ReadToEOF || !r.res.Session.QuitSent {
+		t.Errorf("facts %+v, quit_sent %v", tf, r.res.Session.QuitSent)
+	}
+}
+
+// readToEnd ends at EOF and at any other error, not at QUI's step end (D6's
+// N2 on #684): the relay closes after the FIN, or sends a DO whose refusal
+// cannot be written and then holds. Each run returns well before QUI's step
+// ends.
+func TestReadToEndEndsAtEOFOrError(t *testing.T) {
+	const step = 3 * time.Second
+	for _, c := range []struct {
+		name string
+		tail farTail
+		eof  bool
+	}{
+		{"EOF", afterHalf([]byte("\r\nlate\r\n"), false), true},
+		{"error", afterHalf([]byte{0xFF, 0xFD, 0x01}, true), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := runClose(t, closeCase{steps: okSteps(t), step: step, tail: c.tail, halfClose: true})
+			tf := telnetOf(t, r.res)
+			if r.halfCalls != 1 || *tf.ReadToEOF != c.eof {
+				t.Errorf("half-close %d, facts %+v", r.halfCalls, tf)
+			}
+			if took := r.end.Sub(r.quiAt); took > step/3 {
+				t.Errorf("the close phase took %v after QUI, want it to end at the %s, well before the step %v", took, c.name, step)
+			}
+		})
+	}
+}
+
+// readToEnd ends at the context, which carries the pipeline's hard timeout
+// (Pipeline.execute): cancelled during the close phase, with the relay
+// holding, Run returns at once, not at QUI's step end (D6's N2 on #684).
+func TestReadToEndEndsAtContext(t *testing.T) {
+	const step = 3 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var cancelAt time.Time
+	r := runClose(t, closeCase{steps: okSteps(t), step: step, halfClose: true, ctx: ctx,
+		tail: func(c net.Conn, half <-chan struct{}) error {
+			select {
+			case <-half:
+			case <-time.After(5 * time.Second):
+				return errors.New("no half-close")
+			}
+			time.Sleep(100 * time.Millisecond) // readToEnd is waiting by now
+			cancelAt = time.Now()
+			cancel()
+			return readNothing(c)
+		}})
+	tf := telnetOf(t, r.res)
+	if r.halfCalls != 1 || *tf.ReadToEOF {
+		t.Errorf("half-close %d, facts %+v", r.halfCalls, tf)
+	}
+	if took := r.end.Sub(cancelAt); took > 500*time.Millisecond {
+		t.Errorf("Run returned %v after the context ended, want at once (QUI's step is %v)", took, step)
 	}
 }
