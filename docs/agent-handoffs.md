@@ -2293,8 +2293,8 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Expected interfaces: no contract change.
 - Deliverable: one PR.
 - Acceptance tests:
-  - **Unit test:** `Close`, then `Serve(ln)`. `Serve` returns `ErrServerClosed`, and `ln` is closed, shown by a second `Listen` on the same address that succeeds. The control is the closed branch without `ln.Close()`.
-  - **The existing test:** `TestServeAssetClear` passes by name in both `go` jobs. The unit test above is the fix's proof, because the race's failure rate is unknown.
+  - **Unit test:** `Close`, then `Serve(ln)`, with `ln` a real listener: TCP on `127.0.0.1:0`, or a Unix socket under `t.TempDir()`, never all interfaces. `Serve` returns `ErrServerClosed`, and `ln` is closed, shown by a second `Listen` on the same address that succeeds. The control is the closed branch without `ln.Close()`.
+  - **The existing test:** `TestServeAssetClear` passes by name in `go (ubuntu-latest)`. It skips on Windows, and a skip is not a pass. The unit test above is the fix's proof, because the race's failure rate is unknown.
   - **CI:** both `go` jobs are green.
   - **Self-check:** the implementer runs the self-check list in this file.
 - Owed: none.

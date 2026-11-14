@@ -2304,7 +2304,7 @@ Evidence class: `desk` for the rulings. `CI-Linux` and `CI-Windows` for the runs
     - the form of `applied_at` and `count`;
     - which field carries C8-4's reasons.
 
-    Four of C8-4's six reasons hold hyphens (`peer-key`, `run-regressed`, `run-forked`, `sensor-id`), and so do C8-2's denial codes `node-key`, `revoked-key`, `forked-key` and `asset-address`. `reason_code`'s pattern (`codePattern` in `contracts/audit/audit.go`) refuses each of them. D3 settles these as the first step of P4-4-CC deliverable 5: options in comments (D4-99), then D1's ruling. P4-4-DO's ruling 6852845352 is one option, not a decision taken in advance.
+    Four of C8-4's six reasons hold hyphens (`peer-key`, `run-regressed`, `run-forked`, `sensor-id`), and so do C8-2's five denial codes `node-key`, `revoked-key`, `forked-key`, `not-after` and `asset-address`. `reason_code`'s pattern (`codePattern` in `contracts/audit/audit.go`) refuses each of them. D3 settles these as the first step of P4-4-CC deliverable 5: options in comments (D4-99), then D1's ruling. P4-4-DO's ruling 6852845352 is one option, not a decision taken in advance.
   - **(c)** D6's forward check on deliverable 5's branch uses the settled forms.
 - **3. A collector defect on `main`.**
   - **The failure.** `main`'s push of `83c9f697` failed `TestServeAssetClear` on `go (ubuntu-latest)`, in run 43522548095: "collector.sock is already served".
@@ -2313,5 +2313,5 @@ Evidence class: `desk` for the rulings. `CI-Linux` and `CI-Windows` for the runs
 - **4. #683's Windows failure.**
   - `TestSensorStartupStuckDoesNotHoldStart` (`platform/node/sensortest`) overran its 2 s bound on `Start` in run 43640098201. #683 does not touch it.
   - In that run, `platform/node` took 814 s, over its 720 s budget (D4-44).
-  - The cause is `unknown`. D1 reran the job. The Windows `platform/node` time brief stays in D4-102's "Next", and D1 will name this test in it when it is issued.
+  - The cause is `unknown`. The run cannot tell a slow `Start` from one the stuck startup held, which is the property the test pins. The `audit.db` cleanup error in the log proves neither, because the test registers its cleanups after the timed wait, so a failure inside it leaves the runtime open. D1 reran the job. The Windows `platform/node` time brief stays in D4-102's "Next", and D1 will name this test in it when it is issued.
 - **Next decision number:** D4-105.
