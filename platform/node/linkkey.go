@@ -22,7 +22,9 @@ import (
 
 // AlarmSensorLinkKey: the node's link key did not load, so no sensor link
 // is made. The node runs and collects without it, and the manager reads
-// the file again at each step until the key loads. It is raised once for
+// the file again at each step until the key loads, against the register
+// view KeysResolved handed it: a register that loads only later (a
+// RecordNodeKeys retry) is not seen until a restart. It is raised once for
 // each fault, and again only for another (NK-5).
 const AlarmSensorLinkKey = "sensor-link-key"
 
@@ -87,7 +89,7 @@ func (r *Runtime) stepLinkKey() {
 	}
 	if fault != m.linkFault {
 		m.linkFault = fault
-		r.opt.Status.Raise("", AlarmSensorLinkKey, "sensor "+r.sensorID()+": the link key did not load, so no sensor link is made; SER, Syslog and forwarding go on, and the file is read again at each step: "+fault)
+		r.opt.Status.Raise("", AlarmSensorLinkKey, "sensor "+r.sensorID()+": the link key did not load, so no sensor link is made; SER, Syslog and forwarding go on. The file is read again at each step, against the key register as the node loaded it when it resolved its references, so a register that loads only later needs a restart: "+fault)
 	}
 }
 
