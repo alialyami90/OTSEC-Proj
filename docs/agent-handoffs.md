@@ -1946,9 +1946,8 @@ Code for those paths may merge unwired, reached only from tests. Every new entry
 
 ### What follows in the third part
 
-- **Issued:** P4-4-HR24 stage 1 (D4, D4-95), which starts when D4's pin move (#657's follow-up) is done.
+- **Issued:** P4-4-HR24 stage 1 (D4, D4-95), which starts when D4's pin move (#657's follow-up) is done; and the approved contracts in code, P4-4-CC (D4-103).
 - **Not yet issued:**
-  - **The approved contracts in code:** issued as P4-4-CC (D4-103).
   - **The C13 0.2 intake** (D5, with D4): heartbeats, coverage gaps, the cursor and `sensorrun.json`. It carries the owed tests named above.
   - **The dialer and enrolment** (D5, with D3): merged unwired. It carries the owed tests named above. The product wiring comes only in the PR that passes the last owed test (D4-96).
   - **The sensor agent and capture** (D4), and the rig legs (D6).
@@ -2146,11 +2145,11 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - **Decisions:** D4-92, D4-102 items 2, 5 and 6, and D4-103.
   - **When each role starts.** Each role runs one task at a time.
     - D2, D3 (the seams) and D6 (deliverable 0) start at once.
-    - D4 takes this brief before P4-4-HR25.
+    - D4 takes this brief before P4-4-HR25 (D4-103).
     - D5 takes its parts after P4-4-F27 (4)'s second half and P4-4-DO.
     - D3 takes C7 and C8 after the seams.
 - Files or modules each role may modify:
-  - **D4:** `contracts/netobs` and `contracts/event`.
+  - **D4:** `contracts/netobs`, `contracts/event`, and the goldens under `modules/telemetry/` that pin `otsec.event/0.3` (those in `modules/telemetry/normalize/testdata/syslog/` among them).
   - **D5:**
     - `platform/node` and `platform/sensorlink`;
     - `platform/store`, for E4-7's store leg only;
@@ -2160,9 +2159,12 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - **D6:**
     - `tests/contract/`;
     - `tests/integration/`, for C2's tests 7, 8 and 10;
-    - a new `.github/workflows/a6-*.yml`, for C2's test 6 (i).
+    - new `.github/workflows/a6-*.yml` files, for C2's test 6 (i), and for tests 8 and 10, which need a network namespace with nft.
+    - the existing tests under `tests/contract/` that pin a version this brief moves (`c4_v03_d6_test.go` among them), on the same branch as the move.
   - **D7:** `docs/release.md`.
+  - **Each coding role:** its contract's row in `contracts/README.md`'s version table.
   - P4-4-DO also edits `contracts/audit/doc.go`. Whichever PR merges second rebases and keeps both changes.
+  - A test or golden elsewhere that pins a version this brief moves is changed by its path's owner, on the same branch, and the PR names it.
   - Nothing else. A change in another role's path comes back to D1.
 - Expected interfaces:
   - The approved texts above.
@@ -2172,13 +2174,14 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   0. **D6, on the old readers, first.**
      - R-3: a fixture written from the 0.2 text, read by the 0.1 code. It merges before deliverable 2.
      - E4-4: a fixture written from the 0.4 text, read by the 0.3 code. It also merges before deliverable 2.
+     - E4-7's backward leg: a stored 0.4 event of each type, written from the 0.4 text, read by the 0.3 `Decode`. It also merges before deliverable 2.
   1. **The bridge, on the 0.1 code.** One PR: D4's commits, then D5's.
      - **CH-35's items 3 and 4,** in `contracts/netobs` (D4).
      - **CH-35's items 1 and 2,** in `detectorCheckpoints` (D5).
      - **CH-35's item 5,** in `Link.record`'s tie (D5).
      - **D4-102 item 5 (d),** in `alertsAfter` (D5): skip, count and alarm, with `detector_alerts_unreadable` and `network-alert-unreadable` (0.3 §1.2).
      - **D5's note:** item 5 (c)'s expiry text, with its two points, and the four status names of 0.3 §1.1 and §1.2 added to its lists. The code of (c) is owed (below).
-     - **Tests (D5):** R-4, and N-13's leg (2).
+     - **Tests (D5):** R-4; N-13's leg (2); and item 5's own test on this code: a held 0.2 body, tied, keeps `made_utc` and its `node` marks. Its control is a tie that re-encodes with 0.1's type.
   2. **C13 0.2 and C4 0.4 (D4).** One PR, or stacked PRs merged together.
      - **The four channel messages,** with their strict decoding.
      - **The pure checks:** a hello, an `ack`, a `tick`, and a record's place in its run.
@@ -2192,6 +2195,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
        - N-13's legs (1) and (4), run on this code with a 0.3 fixture;
        - E4-6;
        - E4-7's store leg.
+     - **D6, after this merges and before deliverable 3:** N-12's first case, a 0.3 stored `end` written from the 0.3 text and read by the 0.2 decoder.
   3. **C13 0.3.** D4's commits, then D5's.
      - **D4:**
        - CH-51's rule token and its head grammar. The judgement is HR-24's stage 3.
@@ -2205,25 +2209,28 @@ The common rules are those of "The third part of item 4: implementation", F-027'
      - §1 to §5 of the proposal, with the future-version fixtures moved to 0.11 (§5).
      - The half-close, only on the four conditions of D4-102 item 5 (a).
   5. **C7 0.11 and C8 0.13 (D3).** They run beside 1 to 3.
-     - C7-1 to C7-4, C7-6 and C7-7, in `contracts/authz`.
-     - C8-1 to C8-9, in `contracts/audit`, with their schemas and goldens.
-     - No product path accepts, relays or applies the two new kinds (D4-103). C7-5 and the node's writers are owed (below).
+     - C7-1 to C7-3 and C7-7, in `contracts/authz`.
+     - C8-1 to C8-4, C8-6, C8-8 and C8-9, in `contracts/audit`, with their schemas and goldens.
+     - No product path accepts, relays or applies the two new kinds (D4-103).
+     - Owed (below): C7-4 and C8-5, which the node and the agent apply; C7-5, the collector's part; C7-6, whose package only the sensor's program imports; C8-7, a node rule; and the node's writers.
   6. **D7, after 3 and 4 merge.** In `docs/release.md`:
      - CH-35's bridge, as 0.2's rollback floor: deliverable 1's merge commit.
      - 0.3 §1.2's rollback floor: deliverable 2's merge commit, which carries bridge items 1, 2 and 5 and (d).
      - C2 0.10, which rolls back with C13 0.3 and the node build that reads them (C2 0.10 §4).
      - C4 0.4's order: receivers first (C4 0.4 §3).
+     - C8 0.13's reader floor is P4-D7-2's. D7 may deliver both briefs in one PR.
 - Acceptance tests:
   - **D6's contract tests, each with its control.** Each is pushed to its package's branch before that PR merges, as in P4-4-DO.
     - **C13 0.2:** every §15 row whose "Where" names Contract. A leg of such a row that needs the dialer, the node's intake, the detector or the rig is owed (below).
-    - **C13 0.3:** N-1, N-2's legs (1) and (2), N-4, N-5, N-7, N-9's decoder half, and N-12.
-    - **C4 0.4:** E4-1, E4-2, E4-3, E4-5, E4-8, and E4-7's contract leg.
+    - **C13 0.3:** N-1, N-2's legs (1) and (2), N-4, N-5, N-7, N-9's decoder half, and N-12's other cases.
+    - **C4 0.4:** E4-1, E4-2, E4-3, E4-5, E4-8, and E4-7's forward contract leg.
     - **C2 0.10:**
       - tests 1 to 6, with 6 (i) as the `a6-*` job and 6 (ii) in `tests/contract`;
       - tests 7 and 10, and test 8's CI-Linux legs, as integration tests.
-    - **C7 0.11 and C8 0.13:** the contract test of every clause in §11.1 and §11.2, except C7-5's.
+    - **C7 0.11 and C8 0.13:** the contract tests of C7-1 to C7-3, C7-7, C8-1 to C8-4, C8-6, C8-8 and C8-9. Their node and rig legs are owed.
+  - **D6 instances (D4-91).** For each PR, one D6 instance writes the tests and a different one reviews the other roles' commits. The reviewing instance does not review the tests. D1's launch brief names who wrote what.
   - **Goldens.** The 0.9 C2 goldens, the 0.1 C13 records and the 0.3 C4 events still validate.
-  - **The `a6-*` job** is green on deliverable 4's head. D1's merge check for that PR includes it.
+  - **The `a6-*` jobs** are green on deliverable 4's head. D1's merge check for that PR includes them.
   - **F-027's gate.** Each PR shows `git grep` of the callers, outside `_test.go` files, of every new exported function that judges a hello, a `tick`, an `ack` or a record's place. Each grep prints only the definition. Deliverable 5 also shows, by a grep and a test, that no product path accepts, relays or applies `node.sensor_enrol` or `node.sensor_revoke`.
   - **Evidence.** Each implementer runs the self-check list in this file and says in the PR which items apply.
   - **Reviews.** The reviewers above pass each PR at its merged head.
@@ -2234,13 +2241,16 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   | C13 0.2 §15's rig rows, and the rig legs of the other rows | the sensor's brief and D6's rig brief |
   | C13 0.2 §15's node legs, R-5's cursor leg in `Record.Bytes` among them | the C13 0.2 intake brief |
   | C13 0.2 §15's dialer and hello legs, M-6's dialer leg among them | the dialer-and-enrolment brief |
+  | C13 0.2 §15's detector legs: S-7's, T-6 and U-3 | the C13 0.2 intake brief, with D4's detector change |
+  | `TestSchedulerPanicTakenAsTimeout` (T-12) and `TestResultTimeoutKeepsSession`, from P4-4-F27's F4 row | the C13 0.2 intake brief, with D4's detector change for `hold-timeout` |
   | C13 0.3: N-2's leg (3), N-3, N-8's leg (1), N-15, N-16 and N-17 | P4-4-HR24's stage 3 (D4's rule, D5's node legs) |
   | C13 0.3: N-14, N-9's node half, N-18's node legs, and item 5 (c)'s code | the C13 0.2 intake brief |
   | C13 0.3: N-6, N-8's leg (3), N-10, N-11, N-18 and N-19 | the sensor's brief and D6's rig brief |
   | C2 0.10: test 8's Windows leg | the brief that adds WinDivert to D7's inventory (D4-98) |
   | C2 0.10: test 9 | P4-4-HR24's stage 3 |
   | C4 0.4: E4-7's node leg, `TestHeldPoolEventBuiltAtWrite` | the C13 0.2 intake brief |
-  | C7-5, and the node's writers of C8-1 to C8-6 | the dialer-and-enrolment brief |
+  | C7-4's node test, C7-5, C8-5 and C8-7 (SL-T13's legs), and the node's writers of C8-1 to C8-6 | the dialer-and-enrolment brief |
+  | C7-6 with its import test, and C7-4's agent legs (SL-T4) | the sensor's brief |
 
 - Explicit exclusions:
   - no product wiring of any path to or from a sensor (F-027's gate);
