@@ -199,6 +199,9 @@ type SessionFacts struct {
 	// the first segment sent for an SNMPv3 one, on the clock of started_at.
 	LocalAddr   string `json:"local_addr,omitempty"`
 	ConnectedAt string `json:"connected_at,omitempty"`
+	// Telnet (0.10) is the Telnet session's counterpart of SNMP: present on
+	// a connected session that is not SNMPv3, from 0.10 (TelnetFacts).
+	Telnet *TelnetFacts `json:"telnet,omitempty"`
 }
 
 // SNMPFacts are what an SNMPv3 session established (0.7). With them, the
@@ -490,6 +493,7 @@ func (r Result) Validate() error {
 	}
 	c.session(r, code)
 	c.connection(r)
+	c.telnet(r)
 	c.identity(r, code)
 	for i, o := range r.Observations {
 		if !asset.ValidAttributeName(o.Name) || o.Value == "" {

@@ -29,6 +29,8 @@ SCHEMA_0_3 = "otsec.adapter/0.3"  # results that need a 0.3 code (A6 on #118)
 SCHEMA_0_4 = "otsec.adapter/0.4"  # results that need a 0.4 probe outcome (A6, V-S12)
 SCHEMA_0_5 = "otsec.adapter/0.5"  # results that need a 0.5 code or field (P3-A2)
 SCHEMA_0_9 = "otsec.adapter/0.9"  # results that carry the session's connection (D4-68)
+SCHEMA_0_10 = "otsec.adapter/0.10"  # results that carry session.telnet (D4-102)
+SCHEMA_NEXT = "otsec.adapter/0.11"  # a later minor than the package's own, read forward
 LOCAL_ADDR = "192.0.2.10:49152"   # the collector's end, from RFC 5737's documentation range
 INV = "6f1c2b9e-3d4a-4c1e-9b7a-2f0e8d5c1a30"   # invented
 ASSET = "2b7d4e10-8c3f-4a5b-9e21-7c4f0d6a8b13"  # the C1 relay example
@@ -609,7 +611,7 @@ def results():
     s = Session()
     s.connect()
     s.connection()
-    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_10", schema="otsec.adapter/0.10")
+    out["failed.unknown"] = s.result("failed", "failed.some_code_from_0_11", schema=SCHEMA_NEXT)
 
     # A setting missing from SHO P 1 raises its warning (A3).
     # As ok in every other respect: records, the serial check and the
@@ -638,6 +640,22 @@ def results():
         o["read"] = {"operation": "sel.ser.read_all" if o["name"] == "serial_number" else "sel.id"}
     r["session"].update(local_addr=LOCAL_ADDR, connected_at=ts(0))
     out["ok-0.9"] = r
+
+    # 0.10 (D4-102): the ok session at 0.10 carries session.telnet, the
+    # Telnet session's counts. The counts are invented: two refusals, and
+    # nine command octets received (the two offers they answer and one
+    # three-octet WONT).
+    def at010(name, **telnet):
+        r = copy.deepcopy(out["ok-0.9"])
+        r["schema"] = SCHEMA_0_10
+        t = {"refusals": 2, "command_octets_received": 9, "read_to_eof": False}
+        t.update(telnet)
+        r["session"]["telnet"] = t
+        out[name] = r
+    at010("ok-0.10", rexmit_octets=0)
+    at010("ok-0.10-read-to-eof", read_to_eof=True, rexmit_octets=0)
+    for token in ("in-flight", "call-failed", "unsupported"):
+        at010("ok-0.10-rexmit-" + token, rexmit_unknown=token)
     return out
 
 
