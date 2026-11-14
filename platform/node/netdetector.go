@@ -64,10 +64,13 @@ const (
 	AlarmAlertNotStored = "network-alert-not-stored"
 	// AlarmAlertUnreadable: a restore skipped stored alerts after the
 	// checkpoint's last_alert_seq that it could not read, so it does not
-	// hold them back, and a replay that raises one again stores it twice
-	// (C13 0.3 section 1.2). Raised at that restore, in status and the OS
-	// log only, with no health event; a restore that skips none raises
-	// nothing. The alerts stay in the store.
+	// hold them back (C13 0.3 section 1.2). A replay that raises one again
+	// stores it a second time, and since the hold matches alerts by
+	// position, it may store the alerts after it a second time too, each
+	// counted under mismatches with AlarmDetectorMismatch raised (D4's N1
+	// on #682). Raised once, at the start whose restore skipped them, in
+	// status and the OS log only, with no health event; a restore that
+	// skips none raises nothing. The alerts stay in the store.
 	AlarmAlertUnreadable = "network-alert-unreadable"
 )
 
@@ -264,17 +267,15 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 			nd.saved = c.Through
 		}
 	}
+	var skipped int64
 	if seqs, doc, err := r.detectorCheckpoints(ctx); err != nil {
 		return err
 	} else if doc != nil {
 		// Every stored checkpoint goes once a newer one is stored, the
 		// one that didn't restore too.
 		nd.ckpts = seqs
-		committed, skipped, err := r.alertsAfter(ctx, doc)
-		if skipped > 0 {
-			nd.st.AlertsUnreadable = skipped
-			r.opt.Status.Raise("", AlarmAlertUnreadable, fmt.Sprintf("the restore skipped %d stored alerts it could not read, so it does not hold them back and a replay that raises one again stores it twice; they stay in the store", skipped))
-		}
+		var committed []netdetect.Committed
+		committed, skipped, err = r.alertsAfter(ctx, doc)
 		if err == nil {
 			nd.d, err = netdetect.RestoreDetector(nd.cfg, doc, committed, head)
 		}
@@ -311,6 +312,13 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 	nd.st.EndpointsNotTracked = nd.d.EndpointsNotTracked()
 	if n := nd.st.EndpointsNotTracked; n > 0 {
 		r.opt.Status.Raise("", AlarmEndpointsNotTracked, fmt.Sprintf("%d enrolled run endpoint addresses past %d are not tracked, so before acknowledgement their sessions are never judged", n, netobs.MaxDetectorEndpoints))
+	}
+	// After the last step that can fail, so a start tried again after a
+	// failed store read raises it once, at the start that succeeds (D6's
+	// N4 on #682).
+	if skipped > 0 {
+		nd.st.AlertsUnreadable = skipped
+		r.opt.Status.Raise("", AlarmAlertUnreadable, fmt.Sprintf("the restore skipped %d stored alerts it could not read, so it does not hold them back; a replay that raises one again stores it a second time and may store the alerts after it a second time too, each counted under mismatches; they stay in the store", skipped))
 	}
 	r.detector = nd
 	return nil
