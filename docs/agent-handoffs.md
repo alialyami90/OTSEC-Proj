@@ -1948,7 +1948,7 @@ Code for those paths may merge unwired, reached only from tests. Every new entry
 
 - **Issued:** P4-4-HR24 stage 1 (D4, D4-95), which starts when D4's pin move (#657's follow-up) is done.
 - **Not yet issued:**
-  - **The approved contracts in code:** C13 0.2 (`contracts/netobs`), C7 0.11, C8 0.13 and C4 0.4, and C13 0.3 and C2 0.10 (D4-102 item 5). These come first among the later briefs, with D6's contract tests.
+  - **The approved contracts in code:** issued as P4-4-CC (D4-103).
   - **The C13 0.2 intake** (D5, with D4): heartbeats, coverage gaps, the cursor and `sensorrun.json`. It carries the owed tests named above.
   - **The dialer and enrolment** (D5, with D3): merged unwired. It carries the owed tests named above. The product wiring comes only in the PR that passes the last owed test (D4-96).
   - **The sensor agent and capture** (D4), and the rig legs (D6).
@@ -2117,3 +2117,140 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no device contact (the TCP-after-bad-CRC H-row needs the owner's authorization); no reading of session content.
 - Uncertainty or safety risks: new hand-written C++ in `DNP3.cc`'s buffer code (D3), and a scan that an attacker could use to smuggle frames (D2, D3).
 - Scratch files: `d4-hr25-*`, `d6-hr25-*`
+
+## After D4-102: the approved contracts in code (issued 2026-11-14, D4-103)
+
+The common rules are those of "The third part of item 4: implementation", F-027's gate included. A contract approved as text is coded exactly as approved. If the code shows the text is wrong, the text's owner raises it with D1 before the merge, and the change goes to the same reviewers.
+
+### P4-4-CC (D4, D5, D2, D3, D6 and D7): the approved contracts in code
+- Objective and rationale: code the contracts approved in D4-92 and D4-102, with D6's contract tests, and the node-side work that D4-102 item 5 owes. The later briefs build on these packages: the C13 0.2 intake, the dialer and enrolment, HR-24's stage 3 and the sensor. The contracts are:
+  - C13 0.2 and 0.3 (`contracts/netobs`);
+  - C4 0.4 (`contracts/event`);
+  - C2 0.10 (`contracts/adapter`);
+  - C7 0.11 (`contracts/authz`);
+  - C8 0.13 (`contracts/audit`).
+- Owner, and the reviewers (CLAUDE.md §5.6, shared contracts):
+  - D4 codes `contracts/netobs` and `contracts/event`. D6, D5 and D3 review.
+  - D5 codes the node's parts. D6, D3 and D4 review.
+  - D2 codes C2 0.10 in `contracts/adapter`, `modules/ied/telnet` and `modules/ied/sel751`, and D3 codes the collector's two seams. D6, D4 and D5 review the PR, D3 reviews D2's part, and D2 reviews D3's.
+  - D3 codes C7 0.11 and C8 0.13. D6 and D5 review.
+  - D6 writes the contract tests named below and the `a6-*` job. The role whose code a test checks reviews it, because no D6 instance reviews another's work (D4-91).
+  - D7 writes deliverable 6. D3 and D6 review.
+- Required inputs and dependencies:
+  - **C13 0.2:** `docs/phase4/D4-c13-0.2-proposal.md`, above all §1, §3, §4, §6.1, §11 (CH-35, CH-36), §12 and §15.
+  - **C13 0.3:** `docs/phase4/D4-c13-0.3-proposal.md` §0 to §6, §9, §11 and §12.
+  - **C4 0.4:** `docs/phase4/D4-c4-0.4-proposal.md`.
+  - **C2 0.10:** `docs/phase4/D2-c2-0.10-proposal.md` §1 to §8.
+  - **C7 0.11 and C8 0.13:** `docs/phase4/D3-sensor-link.md` §11.1, §11.2 and §11.5.
+  - **The node:** `docs/phase4/D5-sensor-node.md` §1.10 and §1.15.
+  - **Decisions:** D4-92, D4-102 items 2, 5 and 6, and D4-103.
+  - **When each role starts.** Each role runs one task at a time.
+    - D2, D3 (the seams) and D6 (deliverable 0) start at once.
+    - D4 takes this brief before P4-4-HR25.
+    - D5 takes its parts after P4-4-F27 (4)'s second half and P4-4-DO.
+    - D3 takes C7 and C8 after the seams.
+- Files or modules each role may modify:
+  - **D4:** `contracts/netobs` and `contracts/event`.
+  - **D5:**
+    - `platform/node` and `platform/sensorlink`;
+    - `platform/store`, for E4-7's store leg only;
+    - `docs/phase4/D5-sensor-node.md`, for item 5 (c)'s text and the status lists below.
+  - **D2:** `contracts/adapter` with its `testdata/`, `modules/ied/telnet` and `modules/ied/sel751`.
+  - **D3:** `modules/security/collector` (the two seams only), `contracts/authz` and `contracts/audit`.
+  - **D6:**
+    - `tests/contract/`;
+    - `tests/integration/`, for C2's tests 7, 8 and 10;
+    - a new `.github/workflows/a6-*.yml`, for C2's test 6 (i).
+  - **D7:** `docs/release.md`.
+  - P4-4-DO also edits `contracts/audit/doc.go`. Whichever PR merges second rebases and keeps both changes.
+  - Nothing else. A change in another role's path comes back to D1.
+- Expected interfaces:
+  - The approved texts above.
+  - D4-102 item 5 (f): the overlap count is `to_device_overlap_octets`.
+  - Every CH-52 to CH-55 field is a pointer, or an equivalent that keeps absent, `0` and `false` apart (0.3 §1.1).
+- Deliverable. The C13 and C4 deliverables merge in the order 0 to 3, and no intermediate `main` may weaken a guarantee. Deliverables 4 and 5 run beside them.
+  0. **D6, on the old readers, first.**
+     - R-3: a fixture written from the 0.2 text, read by the 0.1 code. It merges before deliverable 2.
+     - E4-4: a fixture written from the 0.4 text, read by the 0.3 code. It also merges before deliverable 2.
+  1. **The bridge, on the 0.1 code.** One PR: D4's commits, then D5's.
+     - **CH-35's items 3 and 4,** in `contracts/netobs` (D4).
+     - **CH-35's items 1 and 2,** in `detectorCheckpoints` (D5).
+     - **CH-35's item 5,** in `Link.record`'s tie (D5).
+     - **D4-102 item 5 (d),** in `alertsAfter` (D5): skip, count and alarm, with `detector_alerts_unreadable` and `network-alert-unreadable` (0.3 §1.2).
+     - **D5's note:** item 5 (c)'s expiry text, with its two points, and the four status names of 0.3 §1.1 and §1.2 added to its lists. The code of (c) is owed (below).
+     - **Tests (D5):** R-4, and N-13's leg (2).
+  2. **C13 0.2 and C4 0.4 (D4).** One PR, or stacked PRs merged together.
+     - **The four channel messages,** with their strict decoding.
+     - **The pure checks:** a hello, an `ack`, a `tick`, and a record's place in its run.
+     - **Every new field** of 0.2 §1 and §11.
+     - **CH-47:** the alert's three `asset_id` values and its two details.
+     - **`otsec.netcheckpoint/0.2`.**
+     - **C4 0.4:** `Identifier` and `self` at minor 4, with C4-0.4-1 to C4-0.4-3.
+     - **What the 0.2 code keeps:** bridge items 1, 2 and 5 for a later minor, and (d) (D4-102 item 5 (e)).
+     - **The node's C13 0.1 channel stays as it is** (D4-103). The package keeps the reader `main`'s intake uses, and the C13 0.2 intake brief moves the channel.
+     - **D5's commits:**
+       - N-13's legs (1) and (4), run on this code with a 0.3 fixture;
+       - E4-6;
+       - E4-7's store leg.
+  3. **C13 0.3.** D4's commits, then D5's.
+     - **D4:**
+       - CH-51's rule token and its head grammar. The judgement is HR-24's stage 3.
+       - CH-52 to CH-55's fields.
+       - `frame_stage`, and the agent's two counts.
+       - `otsec.netcheckpoint/0.3`, which this code always writes (0.3 §1.2).
+     - **D5:**
+       - the 0.3 node reads a 0.2 checkpoint, with N-13's leg (3);
+       - N-8's leg (2), through `Link.record`.
+  4. **C2 0.10.** One PR: D2's commits, then D3's. It runs beside 1 to 3.
+     - §1 to §5 of the proposal, with the future-version fixtures moved to 0.11 (§5).
+     - The half-close, only on the four conditions of D4-102 item 5 (a).
+  5. **C7 0.11 and C8 0.13 (D3).** They run beside 1 to 3.
+     - C7-1 to C7-4, C7-6 and C7-7, in `contracts/authz`.
+     - C8-1 to C8-9, in `contracts/audit`, with their schemas and goldens.
+     - No product path accepts, relays or applies the two new kinds (D4-103). C7-5 and the node's writers are owed (below).
+  6. **D7, after 3 and 4 merge.** In `docs/release.md`:
+     - CH-35's bridge, as 0.2's rollback floor: deliverable 1's merge commit.
+     - 0.3 §1.2's rollback floor: deliverable 2's merge commit, which carries bridge items 1, 2 and 5 and (d).
+     - C2 0.10, which rolls back with C13 0.3 and the node build that reads them (C2 0.10 §4).
+     - C4 0.4's order: receivers first (C4 0.4 §3).
+- Acceptance tests:
+  - **D6's contract tests, each with its control.** Each is pushed to its package's branch before that PR merges, as in P4-4-DO.
+    - **C13 0.2:** every §15 row whose "Where" names Contract. A leg of such a row that needs the dialer, the node's intake, the detector or the rig is owed (below).
+    - **C13 0.3:** N-1, N-2's legs (1) and (2), N-4, N-5, N-7, N-9's decoder half, and N-12.
+    - **C4 0.4:** E4-1, E4-2, E4-3, E4-5, E4-8, and E4-7's contract leg.
+    - **C2 0.10:**
+      - tests 1 to 6, with 6 (i) as the `a6-*` job and 6 (ii) in `tests/contract`;
+      - tests 7 and 10, and test 8's CI-Linux legs, as integration tests.
+    - **C7 0.11 and C8 0.13:** the contract test of every clause in §11.1 and §11.2, except C7-5's.
+  - **Goldens.** The 0.9 C2 goldens, the 0.1 C13 records and the 0.3 C4 events still validate.
+  - **The `a6-*` job** is green on deliverable 4's head. D1's merge check for that PR includes it.
+  - **F-027's gate.** Each PR shows `git grep` of the callers, outside `_test.go` files, of every new exported function that judges a hello, a `tick`, an `ack` or a record's place. Each grep prints only the definition. Deliverable 5 also shows, by a grep and a test, that no product path accepts, relays or applies `node.sensor_enrol` or `node.sensor_revoke`.
+  - **Evidence.** Each implementer runs the self-check list in this file and says in the PR which items apply.
+  - **Reviews.** The reviewers above pass each PR at its merged head.
+- Owed:
+
+  | Test | Owed by |
+  | --- | --- |
+  | C13 0.2 §15's rig rows, and the rig legs of the other rows | the sensor's brief and D6's rig brief |
+  | C13 0.2 §15's node legs, R-5's cursor leg in `Record.Bytes` among them | the C13 0.2 intake brief |
+  | C13 0.2 §15's dialer and hello legs, M-6's dialer leg among them | the dialer-and-enrolment brief |
+  | C13 0.3: N-2's leg (3), N-3, N-8's leg (1), N-15, N-16 and N-17 | P4-4-HR24's stage 3 (D4's rule, D5's node legs) |
+  | C13 0.3: N-14, N-9's node half, N-18's node legs, and item 5 (c)'s code | the C13 0.2 intake brief |
+  | C13 0.3: N-6, N-8's leg (3), N-10, N-11, N-18 and N-19 | the sensor's brief and D6's rig brief |
+  | C2 0.10: test 8's Windows leg | the brief that adds WinDivert to D7's inventory (D4-98) |
+  | C2 0.10: test 9 | P4-4-HR24's stage 3 |
+  | C4 0.4: E4-7's node leg, `TestHeldPoolEventBuiltAtWrite` | the C13 0.2 intake brief |
+  | C7-5, and the node's writers of C8-1 to C8-6 | the dialer-and-enrolment brief |
+
+- Explicit exclusions:
+  - no product wiring of any path to or from a sensor (F-027's gate);
+  - no detector rule: CH-51's judgement is HR-24's stage 3;
+  - no change to the engine's script (D4-102 item 6);
+  - no value of `docs/phase4/D5-sensor-node.md` §1.10 changes, and C5 does not change;
+  - no device contact. C2 0.10 §9's H-rows wait for the owner's authorization.
+- Uncertainty or safety risks:
+  - **The half-close changes the collector's own device sessions.** It is lifted only on D4-102 item 5 (a)'s conditions, and is shown only against the simulator (`simulated`). C2 0.10 §9's first H-row says how a relay answers it.
+  - **Every event is stamped 0.4 at once** (C4 0.4 §3). A receiver that refuses an unknown minor reports `unsupported version` until it is upgraded.
+  - **C4 0.4 §4's sizes are an estimate** until E4-6 pins them. If E4-6 fails, the bound goes to D1.
+  - **`platform/node`'s Windows run is over its budget** (HANDOFF). D5's new node tests add to it.
+- Scratch files: `d4-cc-*`, `d5-cc-*`, `d2-cc-*`, `d3-cc-*`, `d7-cc-*`, and `d6-cc-<deliverable>-*` for each D6 instance.

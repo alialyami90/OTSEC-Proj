@@ -2268,3 +2268,18 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
   - the Windows `platform/node` time brief;
   - P4-4-HR22S.
 - **Next decision number:** D4-103.
+
+## D4-103: brief P4-4-CC, the approved contracts in code (D1, 2026-11-14)
+
+The owner wrote "continue" after D4-102. Evidence class: `desk`. Nothing is built.
+
+- **1. Issued:** P4-4-CC in `docs/agent-handoffs.md`, "After D4-102". It is the first item of D4-102's "Next", and it carries the work D4-102 item 5 owes.
+- **2. D1's rulings, made in the brief:**
+  1. **The code moves from `main`'s 0.1 in three merges:** the bridge, then 0.2, then 0.3. So the 0.2 build that D4-102 item 5 (e) names exists, and D7 names the merge commits as the floors.
+  2. **The node's C13 0.1 channel stays until the C13 0.2 intake brief.** `contracts/netobs` keeps the reader that `main`'s intake uses, so that no intermediate `main` breaks the intake or its tests. The channel moves to 0.2 in that brief, under CH-36.
+  3. **C7 0.11's two kinds are coded in `contracts/authz`, and no product path accepts, relays or applies them.** F-027's gate bars enrolment, "including through the admin relay" (D4-96). C7-5, the collector's part, is owed by the dialer-and-enrolment brief.
+  4. **D4 takes P4-4-CC before P4-4-HR25.** The contracts are on the path of the intake, the dialer, HR-24's stage 3 and the sensor.
+- **Next:**
+  - P4-4-CC's first deliverables: D6's fixtures, D2's and D3's C2 0.10, and then D4's bridge part;
+  - the rest of D4-102's "Next".
+- **Next decision number:** D4-104.
