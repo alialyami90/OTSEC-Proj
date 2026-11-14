@@ -383,9 +383,9 @@ func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession) (c5.Record, st
 
 // tieBody sets node.platform_session in a held observation's raw JSON and
 // keeps every other field as it was, so a held body of a later minor keeps
-// the fields this build's type does not know, such as C13 0.2's made_utc
-// and the node's marks (CH-35's bridge item 5). Re-encoding it through
-// netobs.Observation would drop them for good.
+// the fields this build's type does not know, such as C13 0.3's counts
+// (CH-35's bridge item 5, kept for a later minor by C13 0.3 section 1.2).
+// Re-encoding it through netobs.Observation would drop them for good.
 func tieBody(body json.RawMessage, tie *netobs.PlatformSession) ([]byte, error) {
 	var top, node map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {

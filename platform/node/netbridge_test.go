@@ -15,11 +15,15 @@ import (
 	"otsec.local/otsec/platform/store"
 )
 
-// CH-35's bridge on the C13 0.1 code (P4-4-CC deliverable 1): the node's
-// reading of what a node of a later minor stored before it was rolled back
-// to this build. Desk only: the later-minor documents and records are this
-// build's own, edited by hand to C13 0.2's text (C13 0.2 section 11); no
-// sensor or 0.2 node wrote them, and no device was contacted.
+// CH-35's bridge (P4-4-CC deliverable 1), kept by the C13 0.2 code for a
+// later minor (C13 0.3 section 1.2; deliverable 2): the node's reading of
+// what a node of a later minor stored before it was rolled back to this
+// build, and of the 0.1 checkpoint it finds at the upgrade. Under the
+// brief's "Later-minor legs move with the minor", the later minor is now
+// 0.3. Desk only: the 0.1 and 0.3 documents and records are this build's
+// own, edited by hand to C13 0.2 section 11's and C13 0.3 section 1.2's
+// text; no sensor, 0.1 node or 0.3 node wrote them, and no device was
+// contacted.
 
 // appendStoredAs commits rec with the node stopped, past this build's
 // configuration document check, as a build of a later minor would have,
@@ -81,7 +85,7 @@ func appendStoredAs(t *testing.T, c *Config, rec c5.Record, info c5.DocumentInfo
 
 // later02 rewrites a JSON object: schema to sch, and each of set's members
 // added or replaced, with a key "a.b" naming member b of object a.
-func later02(t *testing.T, doc []byte, sch string, set map[string]string) []byte {
+func laterMinor(t *testing.T, doc []byte, sch string, set map[string]string) []byte {
 	t.Helper()
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(doc, &top); err != nil {
@@ -132,18 +136,13 @@ func configSchemas(t *testing.T, r *Runtime) []string {
 	return out
 }
 
-// R-4 (C13 0.2 section 15; CH-35's bridge items 1 and 2): the bridge build
-// restores its own 0.1 detector checkpoint with no alarm. Given the 0.2 one
-// a rolled-forward node left, the only detector checkpoint in the store, it
-// raises network-detector-not-restored, starts from the oldest retained
-// observation and raises its alerts again, as CH-35 states, and removes the
-// 0.2 document once its own first checkpoint commits. The next start
-// restores from that one. The control is main's exact match on
-// CheckpointIdentifier, which passes the 0.2 document over: a first start
-// with no alarm, and the document never removed.
-func TestDetectorBridgeLaterCheckpoint(t *testing.T) {
-	c, dir := holdConfig(t)
+// ownCheckpoint runs a node over one spoofed flow, which raises its two
+// alerts, and returns the stored detector checkpoints' seqs and the
+// newest's document, written by this build.
+func ownCheckpoint(t *testing.T, c *Config, dir string) ([]c5.Seq, []byte) {
+	t.Helper()
 	r, _, _ := start(t, c, dir)
+	defer r.Close()
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
 		t.Fatal(err)
 	}
@@ -151,55 +150,148 @@ func TestDetectorBridgeLaterCheckpoint(t *testing.T) {
 	if n := len(committedAlerts(t, r)); n != 2 {
 		t.Fatalf("%d alerts, want 2", n)
 	}
-	r.Close()
-
-	// Its own 0.1 checkpoint restores, with no alarm.
-	r, st, _ := start(t, c, dir)
-	tick(t, r)
-	if d := detectorStatus(t, st); !d.Restored || d.Through != 1 || countAlarms(st, AlarmDetectorNotRestored) != 0 {
-		t.Fatalf("0.1 restore: status %+v, %d alarms", d, countAlarms(st, AlarmDetectorNotRestored))
-	}
 	seqs, doc, err := r.detectorCheckpoints(bg)
 	if err != nil || len(seqs) != 1 {
 		t.Fatalf("checkpoints %v: %v", seqs, err)
 	}
+	return seqs, doc
+}
+
+// storedAlerts counts the records on the alert stream, read or not.
+func storedAlerts(t *testing.T, r *Runtime) int {
+	t.Helper()
+	stream := NetAlertStream(sensorID)
+	got, err := r.Store(stream).Read(bg, stream, 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(got)
+}
+
+// The read of a 0.1 detector checkpoint (C13 0.2 CH-35's table, "Read";
+// P4-4-CC deliverable 2, D5's node leg): a node at this code, given the
+// 0.1 checkpoint a 0.1 node left, the only detector checkpoint in the
+// store, restores from it with no alarm and raises no alert again, and
+// its next checkpoint is otsec.netcheckpoint/0.2, after which the 0.1
+// document is gone. ConfigDocuments still refuses to write a 0.1 document:
+// this build writes 0.2 only. The control is an exact match on the 0.2
+// identifier in detectorDocument, which passes the 0.1 document over: a
+// first start that raises the two alerts again.
+func TestDetectorReads01Checkpoint(t *testing.T) {
+	c, dir := holdConfig(t)
+	seqs, doc := ownCheckpoint(t, c, dir)
+	doc01 := laterMinor(t, doc, netobs.CheckpointIdentifier01, nil)
+	if _, err := netobs.DecodeDetectorCheckpoint(doc01); err != nil {
+		t.Fatalf("the 0.1 document is not read strictly as 0.1: %v", err)
+	}
+	if _, err := ConfigDocuments(doc01, nil); err == nil {
+		t.Fatal("ConfigDocuments accepts a 0.1 detector checkpoint for writing")
+	}
+	v01 := appendStoredAs(t, c, c5.Record{Stream: NetBaselineStream(sensorID), Class: c5.ClassConfiguration, Event: doc01},
+		c5.DocumentInfo{Kind: c5.DocumentWorkingState, Series: c5.SeriesNetCheckpointDetector}, seqs)
+
+	r, st, _ := start(t, c, dir)
+	defer r.Close()
+	tick(t, r)
+	if d := detectorStatus(t, st); !d.Restored || d.Through != 1 || countAlarms(st, AlarmDetectorNotRestored) != 0 {
+		t.Fatalf("0.1 restore: status %+v, %d not-restored alarms", d, countAlarms(st, AlarmDetectorNotRestored))
+	}
+	if n := storedAlerts(t, r); n != 2 {
+		t.Fatalf("%d alerts, want the 2 held back", n)
+	}
+	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(2, frameData(2), ""))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, r)
+	now := detectorCkpts(t, r)
+	if got := configSchemas(t, r); len(now) != 1 || now[0] <= v01 || len(got) != 1 || got[0] != "otsec.netcheckpoint/0.2" {
+		t.Fatalf("checkpoints %v (the 0.1 one %d), schemas %v", now, v01, got)
+	}
+}
+
+// R-4 (C13 0.2 section 15; CH-35's bridge items 1 and 2), moved to 0.3
+// with the minor, and N-13's leg (1) (C13 0.3 sections 1.2 and 12): this
+// build restores its own checkpoint with no alarm. Given the 0.3 one a
+// rolled-forward node left, the only detector checkpoint in the store, and
+// an own-session-mismatch alert that node stored, it raises
+// network-detector-not-restored, starts from the oldest retained
+// observation and raises its alerts again, as CH-35 states, removes the
+// 0.3 document once its own first checkpoint commits, and keeps the 0.3
+// alert. The next start restores from its own. The control is main's exact
+// match on CheckpointIdentifier, which passes the 0.3 document over: a
+// first start with no alarm, and the document never removed.
+func TestDetectorLaterCheckpoint(t *testing.T) {
+	c, dir := holdConfig(t)
+	seqs, doc := ownCheckpoint(t, c, dir)
+
+	// Its own checkpoint restores, with no alarm.
+	r, st, _ := start(t, c, dir)
+	tick(t, r)
+	if d := detectorStatus(t, st); !d.Restored || d.Through != 1 || countAlarms(st, AlarmDetectorNotRestored) != 0 {
+		t.Fatalf("own restore: status %+v, %d alarms", d, countAlarms(st, AlarmDetectorNotRestored))
+	}
+	alerts := NetAlertStream(sensorID)
+	got, err := r.Store(alerts).Read(bg, alerts, 0, 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%d alerts: %v", len(got), err)
+	}
 	r.Close()
 
-	// A 0.2 node's checkpoint: the coverage carries 0.2's config_digest,
-	// and the 0.1 one is gone, as that node's first checkpoint removed it.
-	doc02 := later02(t, doc, "otsec.netcheckpoint/0.2", map[string]string{
-		"coverage.config_digest": `"sha256:` + strings.Repeat("ab", 32) + `"`})
-	if _, err := netobs.DecodeDetectorCheckpoint(doc02); err == nil {
-		t.Fatal("this build reads the 0.2 checkpoint, so the test shows nothing")
+	// A 0.3 node's checkpoint, whose form 0.3 does not change (C13 0.3
+	// section 1.2), and the own-session-mismatch alert it stored; the
+	// older checkpoint is gone, as that node's first checkpoint removed it.
+	doc03 := laterMinor(t, doc, "otsec.netcheckpoint/0.3", nil)
+	if _, err := netobs.DecodeDetectorCheckpoint(doc03); err == nil {
+		t.Fatal("this build reads the 0.3 checkpoint, so the test shows nothing")
 	}
-	v02 := appendStoredAs(t, c, c5.Record{Stream: r.intakeStream(), Class: c5.ClassConfiguration, Event: doc02},
+	v03 := appendStoredAs(t, c, c5.Record{Stream: NetBaselineStream(sensorID), Class: c5.ClassConfiguration, Event: doc03},
 		c5.DocumentInfo{Kind: c5.DocumentWorkingState, Series: c5.SeriesNetCheckpointDetector}, seqs)
+	e, err := event.Decode(got[0].Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ID.Seq = 0
+	e.Health.Details["schema"], e.Health.Details["rule"] = "otsec.netobs/0.3", "own-session-mismatch"
+	if _, err := netobs.AlertFromEvent(e); err == nil {
+		t.Fatal("this build reads the 0.3 alert, so the test shows nothing")
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendStoredAs(t, c, c5.Record{Stream: alerts, Class: c5.ClassNetworkAlert, Event: b}, c5.DocumentInfo{}, nil)
 
 	r, st, _ = start(t, c, dir)
 	tick(t, r)
 	d, now := detectorStatus(t, st), detectorCkpts(t, r)
 	if countAlarms(st, AlarmDetectorNotRestored) != 1 || d.Restored || d.Through != 1 {
-		t.Fatalf("0.2 checkpoint: status %+v, %d not-restored alarms", d, countAlarms(st, AlarmDetectorNotRestored))
+		t.Fatalf("0.3 checkpoint: status %+v, %d not-restored alarms", d, countAlarms(st, AlarmDetectorNotRestored))
 	}
-	if n := len(committedAlerts(t, r)); n != 4 {
-		t.Fatalf("%d alerts after the restart from the oldest retained, want the 2 raised again", n)
+	if n := storedAlerts(t, r); n != 5 {
+		t.Fatalf("%d alerts after the restart from the oldest retained, want the 2, the 0.3 one, and the 2 raised again", n)
 	}
-	if len(now) != 1 || now[0] <= v02 || slices.Contains(configSchemas(t, r), "otsec.netcheckpoint/0.2") {
-		t.Fatalf("checkpoints %v (the 0.2 one %d), schemas %v", now, v02, configSchemas(t, r))
+	if len(now) != 1 || now[0] <= v03 || slices.Contains(configSchemas(t, r), "otsec.netcheckpoint/0.3") {
+		t.Fatalf("checkpoints %v (the 0.3 one %d), schemas %v", now, v03, configSchemas(t, r))
 	}
 	r.Close()
 
 	r, st, _ = start(t, c, dir)
 	defer r.Close()
 	if d := detectorStatus(t, st); !d.Restored || d.Through != 1 || countAlarms(st, AlarmDetectorNotRestored) != 0 {
-		t.Fatalf("after the bridge's own checkpoint: status %+v", d)
+		t.Fatalf("after its own checkpoint: status %+v", d)
+	}
+	if n := eventsContaining(t, c, `"rule":"own-session-mismatch"`); n != 1 {
+		t.Fatalf("%d stored own-session-mismatch alerts, want the 1 kept", n)
 	}
 }
 
-// R-4's record legs (CH-35's bridge items 3 and 4, read by the node): a
-// stored 0.2 alert keyed clock-skew, and one whose coverage.degraded holds
-// a value this build does not know, are read by the restore and not
-// skipped; a stored 0.2 observation with that value is taken by the
+// R-4's record legs (CH-35's bridge items 3 and 4, read by the node). The
+// three asset_id values are 0.2's own now and do not move (the brief's
+// "Later-minor legs move with the minor"): a stored 0.2 alert keyed
+// clock-skew, with its assets, is read by the restore and not skipped. The
+// unknown degraded value moves to 0.3: a stored 0.3 alert whose
+// coverage.degraded holds a value this build does not know is read and not
+// skipped, and a stored 0.3 observation with that value is taken by the
 // detector and not refused. The controls are D4's on contracts/netobs:
 // each value refused at every minor makes the restore skip the alert, or
 // the detector refuse the observation.
@@ -211,17 +303,28 @@ func TestDetectorBridgeLaterRecords(t *testing.T) {
 	}
 	tick(t, r)
 	alerts, obs := NetAlertStream(sensorID), NetObservationStream(sensorID)
-	got, err := r.Store(alerts).Read(bg, alerts, 0, 1)
-	if err != nil || len(got) != 1 {
+	got, err := r.Store(alerts).Read(bg, alerts, 0, 2)
+	if err != nil || len(got) != 2 {
 		t.Fatalf("%d alerts: %v", len(got), err)
 	}
+	var outside []byte // the own-session-outside-record alert, the rule an aggregate key is for
+	for _, st := range got {
+		if strings.Contains(string(st.Event), `"rule":"`+string(netobs.RuleOwnSessionOutsideRecord)+`"`) {
+			outside = st.Event
+		}
+	}
+	if outside == nil {
+		t.Fatal("no own-session-outside-record alert")
+	}
 	var recs []c5.Record
-	for _, set := range []map[string]string{{"asset_id": "clock-skew"}, {"coverage.degraded": "drops-driver prp-late"}} {
-		e, err := event.Decode(got[0].Event)
+	for _, set := range []map[string]string{
+		{"schema": netobs.Identifier02, "asset_id": netobs.AggregateClockSkew, "assets": relayID, "assets_total": "1"},
+		{"schema": "otsec.netobs/0.3", "coverage.degraded": "drops-driver prp-late"}} {
+		e, err := event.Decode(outside)
 		if err != nil {
 			t.Fatal(err)
 		}
-		e.ID.Seq, e.Health.Details["schema"] = 0, "otsec.netobs/0.2"
+		e.ID.Seq = 0
 		for k, v := range set {
 			e.Health.Details[k] = v
 		}
@@ -240,7 +343,7 @@ func TestDetectorBridgeLaterRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.ID.Seq = 0
-	e.Netobs = later02(t, e.Netobs, "otsec.netobs/0.2", map[string]string{"seq": `"2"`,
+	e.Netobs = laterMinor(t, e.Netobs, "otsec.netobs/0.3", map[string]string{"seq": `"2"`,
 		"made_utc": `"2026-11-07T10:00:00.250000Z"`, "coverage.degraded": `["prp-late"]`})
 	b, err := json.Marshal(e)
 	if err != nil {
