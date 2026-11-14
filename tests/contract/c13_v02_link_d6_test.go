@@ -614,6 +614,9 @@ func TestC13v02S9Spans(t *testing.T) {
 	}
 	for _, c := range []tc{
 		{"the held span restated, no rise", []any{a}, "3", "", "", false},
+		// D4's reading of "new or wider" (#687): a span inside a held one
+		// states no new time, so it needs no rise.
+		{"a span inside the held one, no rise", []any{v2Span("2026-11-15T09:00:10Z", "2026-11-15T09:00:50Z")}, "3", "", "", false},
 		{"a new span, no rise above Ds", []any{a, b}, "3", "", netobs.CloseTick, false},
 		{"a new span with a rise", []any{a, b}, "4", "", "", true},
 		{"the span wider at its end, no rise", []any{aWider}, "3", "", netobs.CloseTick, false},
