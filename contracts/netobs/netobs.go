@@ -119,7 +119,13 @@ func Codes(err error) []Code {
 	return out
 }
 
-type checker struct{ errs []error }
+// checker collects a validation's failures. later is set by storedSchema
+// when the record is of a later 0.x minor than this reader's, so the bridge
+// rules of CH-35 (C13 0.2 §11) read it forward.
+type checker struct {
+	errs  []error
+	later bool
+}
 
 func (c *checker) fail(code Code, field, format string, a ...any) {
 	c.errs = append(c.errs, &Error{Code: code, Field: field, Detail: fmt.Sprintf(format, a...)})
@@ -221,7 +227,9 @@ func (c *checker) storedSchema(s string) {
 	got, err := version.Parse(s)
 	if err != nil || !self.Accepts(got) {
 		c.fail(CodeSchema, "schema", "%q is not %s or another 0.x minor of it", s, Identifier)
+		return
 	}
+	c.later = got.Minor > self.Minor
 }
 
 func contains[T comparable](list []T, v T) bool {
