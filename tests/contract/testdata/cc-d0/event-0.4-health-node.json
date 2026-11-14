@@ -1,0 +1,12 @@
+{
+  "schema": "otsec.event/0.4",
+  "id": {"node_id": "d6-node", "stream": "platform/health", "seq": 13},
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {"origin_auth": "platform"},
+  "received": {"utc": "2026-11-14T10:10:01.5Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "health": {
+    "type": "intake.drop-counted",
+    "details": {"listener": "syslog-udp", "stream": "syslog/192.0.2.30", "reason": "rate-limit", "count": "3"}
+  }
+}
