@@ -1062,7 +1062,8 @@ func dxRestamp(t *testing.T, cp []byte, schema string, set func(*netobs.Detector
 // next checkpoint is this code's 0.2 one, the state unchanged. The control
 // is the check before the fix, which compared against the writer's own
 // re-encoding, stamped 0.2: it differs from every 0.1 document, so it
-// refused them all.
+// refused them all. At 0.3 (N-13's leg (3)) the same holds for a 0.2
+// checkpoint, and the next checkpoint is this code's 0.3 one.
 func TestDetectorRestores01Checkpoint(t *testing.T) {
 	base := dxBaseline(t)
 	d := dxDetector(t, base)
@@ -1072,24 +1073,26 @@ func TestDetectorRestores01Checkpoint(t *testing.T) {
 		}
 	}
 	cp := must(d.Checkpoint(0))
-	ordered, sorted := dxRestamp(t, cp, netobs.CheckpointIdentifier01, nil)
 	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base,
 		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}, Exclusions: dxExclusions, Endpoints: dxEndpoints}
-	for name, doc := range map[string][]byte{"ordered": ordered, "sorted": sorted} {
-		r, err := RestoreDetector(cfg, doc, nil, 6)
-		if err != nil {
-			t.Fatalf("%s 0.1: %v", name, err)
-		}
-		again := must(r.Checkpoint(0))
-		if bytesEqual(again, doc) {
-			t.Fatalf("%s 0.1: the writer's re-encoding equals the 0.1 document, so the control shows nothing", name)
-		}
-		if !bytesEqual(again, cp) {
-			t.Fatalf("%s 0.1: the next checkpoint is not the 0.2 one restored from\n got %s\nwant %s", name, again, cp)
+	for _, sch := range []string{netobs.CheckpointIdentifier01, netobs.CheckpointIdentifier02} {
+		ordered, sorted := dxRestamp(t, cp, sch, nil)
+		for name, doc := range map[string][]byte{"ordered": ordered, "sorted": sorted} {
+			r, err := RestoreDetector(cfg, doc, nil, 6)
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, sch, err)
+			}
+			again := must(r.Checkpoint(0))
+			if bytesEqual(again, doc) {
+				t.Fatalf("%s %s: the writer's re-encoding equals the earlier document, so the control shows nothing", name, sch)
+			}
+			if !bytesEqual(again, cp) {
+				t.Fatalf("%s %s: the next checkpoint is not this code's one restored from\n got %s\nwant %s", name, sch, again, cp)
+			}
 		}
 	}
 	if _, err := RestoreDetector(cfg, cp, nil, 6); err != nil {
-		t.Fatalf("0.2 control: %v", err)
+		t.Fatalf("own minor control: %v", err)
 	}
 }
 
@@ -1109,7 +1112,7 @@ func TestDetectorRestoreNotItself(t *testing.T) {
 		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}, Exclusions: dxExclusions, Endpoints: dxEndpoints}
 	bump := func(k *netobs.DetectorCheckpoint) { k.BaselineVersion++ }
 	docs := map[string][]byte{"0.2 trailing space": append(slices.Clone(cp), ' ')}
-	for _, sch := range []string{netobs.CheckpointIdentifier01, netobs.CheckpointIdentifier} {
+	for _, sch := range []string{netobs.CheckpointIdentifier01, netobs.CheckpointIdentifier02, netobs.CheckpointIdentifier} {
 		docs[sch+" ordered"], docs[sch+" sorted"] = dxRestamp(t, cp, sch, bump)
 		ok, _ := dxRestamp(t, cp, sch, nil)
 		if _, err := RestoreDetector(cfg, ok, nil, 1); err != nil {
