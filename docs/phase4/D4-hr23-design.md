@@ -1,6 +1,6 @@
 # D4: HR-23's fix, the design (P4-4-HR23, stage 1)
 
-D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's rulings on them, again for the re-reviews of `9919fd24` and D1's ruling 6866095230, and again for D6's re-review of `52c7592c` under D1's ruling 6866534402, which narrows this PR to option (i). Revised again for D6's re-review of `542a42cf` (6866817721): P1, P2 and N-A. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. This PR is documents only: nothing here is built or run.
+D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's rulings on them, again for the re-reviews of `9919fd24` and D1's ruling 6866095230, and again for D6's re-review of `52c7592c` under D1's ruling 6866534402, which narrows this PR to option (i). Revised again for D6's re-review of `542a42cf` (6866817721): P1, P2 and N-A. Revised again (round 6) for the re-reviews of `be6b8cea` under D1's ruling 6879529451, items 1 to 7. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. This PR is documents only: nothing here is built or run.
 
 - **Evidence class: `desk`.** Every statement below about Zeek's code comes from reading its source, and stage 3's counted run measures it. The earlier results this note cites (section 1 item 5, and section 4.2's Basis column) were measured, `CI-Linux`, `simulated`, and each is named with its run. Every statement about IEEE 1815 is `inference`, because the project holds no text of it (D2 on #675).
 - **What was read.** The release tarball `https://github.com/zeek/zeek/releases/download/v9.0.1/zeek-9.0.1.tar.gz`, fetched over HTTPS on 2026-11-13, SHA-256 `fbee2eb5ee6ebd64ef0db830fbb9fa1d702d58807643c719e8338a59329197f2`. It was unpacked in D4's scratch folder, outside the repository. Its signature file `zeek-9.0.1.tar.gz.asc` has SHA-256 `269e266a0b473b4621448034b98a9f8aafe39f0e53f026ad03bff5312e5bffce`. The tarball matches the pin in `docs/phase4/D4-engine-linux-eval.md` §3 (tag `v9.0.1`): its `DNP3.cc`, `dnp3-protocol.pac`, `dnp3-objects.pac`, `events.bif`, `base/protocols/dnp3/main.zeek` and `dpd.sig` have the SHA-256s that §3 records.
@@ -40,12 +40,23 @@ D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's ruli
   | `src/packet_analysis/protocol/tcp/TCPSessionAdapter.cc` | `4ee34a68a009a54956c35716e8210fc4ab32aac937b252959cea410260c2419c` |
   | `src/analyzer/protocol/pia/PIA.cc` | `2d4284ca1ea772e3c3369d933d8e5eb04bcca82e426302dd256dbad856c29cd8` |
   | `scripts/base/init-bare.zeek` | `05e960679cdc6832276c35f8dc2623bce3fa786555cbf80a4a4f19cd9cc4c675` |
+  | `src/analyzer/protocol/tcp/TCP.cc` | `4543b47c49f40dcb49ee967d1717465c0a70d56abce2a4ed9531ce5557b6e02f` |
+  | `src/analyzer/protocol/tcp/TCP_Reassembler.cc` | `cfc7e077da132118db2e2c52aff7fae2a6ede75fea6f659f383699aea18df84e` |
+  | `src/packet_analysis/protocol/ip/SessionAdapter.cc` | `68d8e8d4d0aa68b8b674fd973a13f596d410f07404f2a9d751c383c7dba5a09d` |
+  | `src/Conn.cc` | `96555ee783b7681a59bdcaa5e92e6f110ea19a2e074eb2e9f583c36cd13ac57d` |
+  | `src/session/Manager.cc` | `bdcf83d5c23d8a4ac61790604add7c305e961762b1f14ff466c632db1b6bfe6f` |
+  | `src/packet_analysis/Manager.cc` | `4bc5f2f3d88bcf7b96320a7908bed153cda591713918790c93a709ecaba64228` |
+  | `src/RunState.cc` | `6da21a5118e567e6710869fe1bd0fd2841a7767d43633c767ab6c46351876984` |
+  | `src/main.cc` | `19435f21163401f66c2025b3c51716bce591c975a71fe96255a01edcd73106da` |
+  | `src/fuzzers/fuzzer-setup.h` | `af5cdcf389df162ade7aa2e35b88ba3baa73754abcc4c2f8cb5d4e526e3ff7c9` |
+  | `tools/binpac/src/pac_flow.cc` | `6bc0b1fc3d4ff2eb34651cd1cb5e396044617a8f718ca315668710623b60c8f9` |
 
 - **Inputs:** HR-23 in `docs/threat-model.md`; D4-98 and D4-100; D4's reading 6852704517 on #657; `docs/phase4/D4-engine-linux-eval.md` §3 and 5.8; D6's E2 note §3 (`docs/phase4/D6-modbus-signature-conditions.md`); the project's script, `modules/telemetry/experiments/engine-linux/probe.zeek`, and its judge, `table.py`; GT-PCAP's `dnp3-udp-temp-port` and `dnp3-udp-unsolicited` labels.
 - **The reviews on #675:** D7 6864785127, D2 6864828995, D3 6864835839 and D6 6864977091. **D1's rulings** are 6864990229, and they replace D1's provisional points 6862064732. **D4's confirmation of ruling 1** is 6865038018.
 - **The re-reviews of `9919fd24`:** D7 6865821469, D2 6865838202, D3 6865838688 and D6 6866085736. **D1's rulings on them** are 6865138996 (ids, paths, HR-25) and 6866095230.
 - **The re-reviews of `52c7592c`:** D7 6866209008, D2 6866220392, D3 6866236602 and D6 6866520537. **D1's rulings** are 6866203475 and 6866534402. The second moves HR-25's resync design to its own brief, P4-4-HR25 (section 5.2).
 - **D6's re-review of `542a42cf`:** 6866817721.
+- **The re-reviews of `be6b8cea`:** D2 6879378145, D7 6879361218, D3 6879466063 and D6 6879522761. **D1's ruling** is 6879529451, items 1 to 7.
 - Section 7 maps each finding to the place where it is answered.
 
 ## 1. How Zeek picks the DNP3 parser by direction
@@ -73,7 +84,7 @@ D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's ruli
    - when `ProcessData` returns false: a lost magic, a bad header or chunk CRC, a missing first chunk, a length error, or the fragment-size limit;
    - when it catches a `binpac::Exception`, which it then rethrows.
 
-   `Analyzer::NextPacket` returns at once while `skip` is set. `skip` is set false only in `Analyzer`'s constructor. So from that datagram on, the analyzer parses nothing on the connection, in either direction. The rethrown exception reaches `Analyzer::NextPacket`'s `catch`, which calls `AnalyzerViolation`, and that raises `analyzer_violation_info`.
+   `Analyzer::NextPacket` returns at once while `skip` is set. `skip` is set false only in `Analyzer`'s constructor. So from that datagram on, the analyzer parses nothing on the connection, in either direction. **On TCP there is one exception:** at the connection's end, `EndpointEOF` and `Done` hand any held data back to binpac whatever `skip` is (section 4.7, item 1). The rethrown exception reaches `Analyzer::NextPacket`'s `catch`, which calls `AnalyzerViolation`, and that raises `analyzer_violation_info`.
    - **`dpd.zeek` removes the service only below 10 KiB.** It ignores a violation once the connection has carried more than `DPD::ignore_violations_after` (`10 * 1024`) octets, counted as `c$orig$size + c$resp$size` (D6's N1 on #675). Above that size, the control already leaves the flow named `dnp3_udp` while parsing nothing. Every case in section 4 is far below that size (`dnp3-udp-unsolicited` is 542 octets), and stage 2 states each case's octet count at its violation. D3 adds this bound to HR-23's row (D1's ruling 9).
 
 ## 2. Part (b): what the script cannot do, and the change D1 chose
@@ -121,7 +132,7 @@ The options were proposed in comment 6862045681 and agreed in comments (D4-99). 
   - The reserved codes, 34 to 128 and 132 to 255: the request parser's `default` arm.
   - SAv5: codes 32 and 33 take the request parser, and 131 the response parser, as Zeek's arms already expect.
 - **Two cases with no usable code:**
-  - A fragment of 0 or 1 application octets has no code. It throws, as both parsers do today.
+  - A fragment of 0 or 1 application octets has no code. Both parsers throw on it today (C0 and C1p). Under C2 its result is `unknown`, because `&length` decides it (section 4.7, item 2).
   - A fragment of 2 or 3 octets with code 129 to 131 throws in the response parser, from either side.
 
   Both are in the malformed set (section 4.3).
@@ -296,7 +307,7 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
   - **Analyzer violations** are judged against an expected result pinned for each input and each configuration by stage 2, not against the control. Under (i), some inputs fail by design where C0 does not, and that is (i)'s correct behaviour.
 - **The set:**
   - 1 to 3 octets;
-  - **a link length of 0 to 4 with a valid header CRC, each treated as a failed header** (D6's N3 on `52c7592c`; D2's N1 on `52c7592c`, as it applies to (i)). There is no length to read such a frame by. By `ProcessData` and `AddToBuffer`, the results are the same under C0, C1p and C2:
+  - **a link length of 0 to 4 with a valid header CRC, each treated as a failed header** (D6's N3 on `52c7592c`; D2's N1 on `52c7592c`, as it applies to (i)). There is no length to read such a frame by. By `ProcessData` and `AddToBuffer`, the weirds, the reporter errors and `skip` are the same under C0, C1p and C2 (D2's N2 on `be6b8cea`). Their `link` rows are not: those are `unknown` for C2 against C1p (section 4.7, item 1). The results:
     - **0:** the weird `dnp3_negative_or_zero_length_link_layer`, raised before any target is computed, then `skip`. No violation;
     - **1 to 3:** a target of 8 to 10 octets, below the 11 already buffered. So `AddToBuffer` raises its invalid-target-length `AnalyzerError`, which sets `skip`. That reporter error is expected by design. No violation;
     - **4:** a target of 11, equal to the buffer. The 11th octet is taken as the transport octet, and `ParseAppLayer` runs with no chunk. With FIR clear: `dnp3_first_application_layer_chunk_missing`, then `skip`. With FIR and FIN: binpac gets only the 8-octet header. Section 5.1's unread generated code decides what happens, so it is `unknown` and the run pins it. With FIR and no FIN: no failure at that frame, and the fragment stays open with no application octet.
@@ -314,6 +325,13 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
   - **DIR disagreeing with the function code's class** (ruling 3; D2's Q3; D3's B2). One is a master's direct operate (code 5) with a control block (g12v1) and DIR clear, on a UDP flow the master starts and on a TCP connection the master opens. C0 is expected to parse its objects. C2 is expected to parse them too, and a selector keyed by DIR would show here as a regression;
   - the master's 2- and 3-octet messages on each side of the flow;
   - **the TCP inputs, on a connection the master opens, restated by code and side** (D6's B1 on `9919fd24`; D3's N5). They are a 129 from the originator with 2, 3, and 4 or more application octets, and codes 0, 13 and 2 (with objects) from the responder. Each is sent with DIR set and with DIR clear. Stage 2 pins the expectations for each configuration. Under C0, the 129 from the originator takes the request parser, and the codes from the responder take the response parser. Under C2, each takes its own code's parser. The 2- and 3-octet 129s throw under C2.
+  - **TCP inputs that leave a header held when the connection ends** (D3's B1 and D6's N1 on `be6b8cea`; D1 6879529451, item 1). Each is on a connection the master opens, on its own 5-tuple. They reach the end-of-connection parse of section 4.7 item 1, which runs outside the analyzer's `binpac::Exception` handlers. The four, which cover both of D6's endings (closed by a TCP FIN, which calls `EndpointEOF`; left open until the capture ends, when `Done` runs):
+    - a fragment with FIR and without the DNP3 FIN bit, then a TCP FIN from that end;
+    - the same fragment with no TCP FIN segment, so that it is still held at the end of the capture, when `Done` runs;
+    - a good header, then a bad chunk CRC, then a TCP FIN from that end. The weird sets `skip`, `ProcessData` returns false, and `DiscardFlowBuffer` does not run, so binpac keeps the header to the end;
+    - a link length of 4 with FIR and without the DNP3 FIN bit, then a TCP FIN from that end.
+
+    Each is judged by the rule above: a crash, or a reporter error that no pin expects, is the finding. **Expected under every configuration: no crash.** For C0 and C1p, D3's reading is that nothing parses at the end, because `NewData(nullptr, nullptr)` on a held, incomplete frame copies nothing and leaves the frame incomplete (`FlowBuffer::MarkOrCopyFrame` and `ready()`, D3 6879466063, N1, `desk`). For C2 it is `unknown`, because the patch rewrites the unit that requests the frame (section 4.7, item 1). Their `link` rows are section 4.7 item 1's.
 
 ### 4.4 What the harness reports
 
@@ -353,6 +371,10 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
 
 - **The targets.** Zeek's generic fuzzer (`generic-analyzer-fuzzer.cc`) has a `dnp3_tcp` target and no `dnp3_udp` target. `dnp3_udp` is added with one line in `src/fuzzers/CMakeLists.txt`: `add_generic_analyzer_fuzz_target(dnp3_udp udp)`. Without `udp`, `generic-analyzer-fuzzer.cc` drives the analyzer by `NextStream`, not `NextPacket` (D6's B3 on `9919fd24`). Each target runs on the patched build (C2's source) and the unpatched build (C1p's source), built with ASan and UBSan.
 - **How the fuzzer drives the analyzer.** It instantiates the analyzer directly, on one fixed synthetic connection, with no signature, no DPD and no role swap. Each chunk's `is_orig` comes from its `FuzzBuffer` flag byte, so both sides can be driven.
+- **Which end-of-connection path the `dnp3_tcp` target reaches** (D1 6879529451, item 1; D4's reading of `generic-analyzer-fuzzer.cc` and `fuzzer-setup.h`, `desk`). It reaches `FlowEOF` through `Done`, and never through `EndpointEOF`. So D6's N1 is right on `Done`, and D3's B1 is right that the fuzzer never calls `EndpointEOF`.
+  - **`Done`:** after `Fuzzer::Process` returns, `LLVMFuzzerTestOneInput` calls `Fuzzer::Cleanup`, which calls `fuzzer_cleanup_one_input` (`fuzzer-setup.h`). That calls `session_mgr->Drain()`, and `Manager::Drain` (`session/Manager.cc`) calls each session's `Done`. `Connection::Done` (`Conn.cc`) calls the adapter's `Done`. `TCPSessionAdapter::Done` calls `SessionAdapter::Done` (`SessionAdapter.cc`), which calls `Analyzer::Done`, and that calls `Done` on each child not yet finished, `DNP3_TCP_Analyzer::Done` among them, which calls `FlowEOF(true)` and `FlowEOF(false)`. So every input whose analyzer is still attached at cleanup reaches the end-of-connection parse.
+  - **That parse runs outside the fuzzer's `catch`.** `Fuzzer::Process` catches `binpac::Exception` only around each `NextChunk`. Nothing in `LLVMFuzzerTestOneInput` or `fuzzer_cleanup_one_input` catches it. So a throw there is not caught inside the target. That it then ends the process as a deadly signal, which "What counts as a report" below counts, rests on the fuzzing engine, which is outside the tarball (`inference`).
+  - **`EndpointEOF`:** only `TCPSessionAdapter::EndpointEOF` calls a child's `EndpointEOF`, and only `TCP_Reassembler::CheckEOF` calls that, on a TCP FIN, close or reset (`TCP_Reassembler.cc`). The fuzzer hands each chunk to `NextStream` directly, with no segment and no reassembler, so `EndpointEOF` is never called.
 - **The CRC fix-up.** `DNP3_Base::CheckCRC` checks every header and every chunk in C++ before binpac sees a byte, and `DNP3.cc` has no fuzzing bypass. So a plain mutator would almost never reach the patched dispatch. The run uses a libFuzzer custom mutator (`LLVMFuzzerCustomMutator`) that recomputes the header and chunk CRCs after each mutation. The code under test stays byte for byte the shipped source.
 - **The settings, pinned before the run:**
   - UBSan with `-fno-sanitize-recover=all`, so that a report stops the run and is counted;
@@ -378,7 +400,8 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
   - algorithmic and memory exhaustion beyond the limits set;
   - reads of uninitialised memory, since no MSan is run;
   - the optimised binary that ships, which is a different build from the sanitizer one. So the result speaks for the source and the patch, not for the shipped bytes;
-  - the script layer above the analyzer.
+  - the script layer above the analyzer;
+  - **the end-of-connection parse by `EndpointEOF`** (D3's B1 on `be6b8cea`). The fuzzer never drives it (above), so it is shown only by section 4.3's TCP inputs that end by a TCP FIN while a header is held. The `Done` path is reached at each input's cleanup, but only on the fuzzer's one synthetic connection, and for the UDP target not at all, since `DNP3_UDP_Analyzer` has no `Done` of its own that calls `FlowEOF`.
 
 ### 4.7 Every expectation that option (i) changes
 
@@ -389,13 +412,17 @@ This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) cha
 `ProcessData`, `ParseAppLayer`, the CRC checks, the 11-octet header stage, `AddToBuffer` and `SetSkip` are C++ in `DNP3.cc`, and are unchanged. The lists below sort every expectation into three: what the code rule changes, what depends on the rewritten generated code, and what does not change.
 
 **What changes by the code rule.** A fragment changes its result only when its code's class disagrees with its side: a code of 129 to 131 from the originator, or any other code from the responder.
-- **The twin rule** (D6's P2.1 on `542a42cf`, in place of per-arm results). Under C2, a fragment gives the result that C1p gives for the same bytes from the side its code belongs to, and `is_orig` is the only difference in the events. Stage 2 pins each changed-path input from that twin. Two examples of what the twin gives, both from `dnp3-protocol.pac`:
+- **The twin rule** (D6's P2.1 on `542a42cf`, in place of per-arm results). Under C2, a fragment gives the binpac result that C1p gives for the same bytes from the side its code belongs to, and `is_orig` is the only difference in binpac's events. Stage 2 pins each changed-path input's binpac result from that twin.
+  - **The twin covers binpac's result only** (D6's N4 (b) on `be6b8cea`). The weirds that `ProcessData`, `AddToBuffer` and `ParseAppLayer` raise, `dnp3_unexpected_flow_direction` among them, and the reporter errors those functions raise, stay those of the input on its own side (section 2.3; "What (i) does not change"). So no weird count and no reporter error is pinned from the twin. Two examples of what the twin gives, both from `dnp3-protocol.pac`:
   - a request code from the responder, with 3 application octets: if its arm is `empty` (codes 0, 13, 14, 15, 19, 23 and 24), it parses. If its arm parses objects (codes 1, 2 and 5, among others), the one octet left is shorter than `Object_Header`'s first two fields (`object_type_field`, 2 octets, and `qualifier_field`, 1 octet), so it throws under C2, as the same bytes do from the originator under C1p;
   - a response code from the originator, with 4 octets or more: its IIN and objects are parsed only as far as the response parser accepts them.
 - **Both directions** (D6's P2.2 on `542a42cf`):
   - where C1p's violation set `skip` and C2's parser does not throw, C2 goes on parsing the flow, so every later row on that flow changes with it;
-  - where C2's parser throws and C1p's did not, C2 stops the flow where C1p went on. Two inputs do this: a code of 129 to 131 with 2 or 3 application octets from the originator (C1p takes the request parser's `default` arm, `unknown: bytestring &restofdata`), and a response from the originator whose objects the response parser rejects.
-  - **So every relay-started flow's C2 `pass` depends on the relay's responses parsing in the response parser.** Under C1p they take the request parser's `default` arm, which accepts any bytes. That holds for section 4.2's C2 column on `dnp3-udp-unsolicited` (the relay's 130), `dnp3-udp-relay-write` and `dnp3-udp-relay-restart` (the relay's first 129), `dnp3-tcp-master-short` (the outstation's 129s), and `dnp3-udp-temp-port`'s second flow (below).
+  - where C2's parser throws and C1p's did not, C2 stops the flow where C1p went on. Three inputs do this (D6's N2 on `be6b8cea`):
+    - a code of 129 to 131 with 2 or 3 application octets from the originator. C1p takes the request parser's `default` arm, `unknown: bytestring &restofdata`;
+    - a response from the originator whose objects the response parser rejects. C1p takes the same `default` arm;
+    - a request code (any but 129 to 131) from the responder, of 4 octets or more, whose objects the request parser rejects. C1p takes the response parser's `default` arm, `Debug_Byte` (`bytestring &restofdata`), which accepts any bytes. C2 throws in `Request_Objects`.
+  - **So every relay-started flow's C2 `pass` depends on two things:** the relay's responses parsing in the response parser, and the master's requests parsing in the request parser. Under C1p both take a `default` arm that accepts any bytes: the relay's responses the request parser's, and the master's requests the response parser's. That holds for section 4.2's C2 column on `dnp3-udp-unsolicited` (the relay's 130), `dnp3-udp-relay-write` and `dnp3-udp-relay-restart` (the relay's first 129), `dnp3-tcp-master-short` (the outstation's 129s), and `dnp3-udp-temp-port`'s second flow (below).
 - **The events.** Under C2, `dnp3_application_request_header` can be raised with `is_orig` false, and `dnp3_application_response_header` with `is_orig` true. The probe's `fc` rows keep the code and `is_orig`, and the judge classes a message by its code (`NOT_REQUESTS`, `table.py`), so its reading does not change. `dnp3.log`'s rows change where these combinations occur (`base/protocols/dnp3/main.zeek`). Those are values in its existing fields, not new fields.
 
 **Where it shows:**
@@ -403,7 +430,8 @@ This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) cha
 - **`dnp3-udp-temp-port`'s second flow** (D6's P2.3 on `542a42cf`). By its labels, the relay starts it: 192.0.2.20:20000 to 192.0.2.14:20000, both ends on 20000, frames 2 and 4. Under C2 its two responses reach the response parser for the first time. Its rows are expected unchanged: section 4.2's C2 `pass` holds if both parse as the responses on `dnp3-udp-req-port` do, where they come from the responder. Its parse path and the probe's `obj` rows change;
 - in section 4.3's malformed set: the 129 to 131 fragments of 2 or 3 octets from the originator, the master's 2- and 3-octet messages on the responder's side, and the TCP inputs restated by code and side;
 - in classes (3b-data) and (3c) of the false-positive set (D6's P2.4 on `542a42cf`). (3b-data) carries a whole fragment with FIN, so binpac parses it, as it parses (3c)'s. Each changes only where its code's class disagrees with its side. So stage 2 states the code and side of each (3b-data) and (3c) item, and pins its result for each;
-- **`dnp3-malformed` and its PRP pair, `dnp3-malformed-prp-a` and `dnp3-malformed-prp-ab`** (`prp-derived.sha256`; D6's P2.5 on `542a42cf`). Section 4.3 reruns both. They are judged per flow, by the rule of the last bullet of "What does not change". In stage 2, D6 labels from the bytes which of their flows hold a fragment whose code disagrees with its side: tshark, with Zeek's sides taken from `conn.log`.
+- **`dnp3-malformed` and its PRP pair, `dnp3-malformed-prp-a` and `dnp3-malformed-prp-ab`** (`prp-derived.sha256`; D6's P2.5 on `542a42cf`). Section 4.3 reruns both. They are judged per flow, by the rule of the last bullet of "What does not change". In stage 2, D6 labels from the bytes which of their flows hold a fragment whose code disagrees with its side: tshark, with Zeek's sides taken from `conn.log`;
+- **every other capture that section 4.3 reruns** (D6's N3 on `be6b8cea`): the GT-PCAP DNP3 cases, the other PRP pairs (`dnp3-digitalbond-part1` and `-part2` among them, `prp-derived.sha256`), the public captures and E2's corpus rows. Stage 2 sorts the DNP3 flows of every rerun capture the same way, by tshark's codes with Zeek's sides from `conn.log`. A flow on which every fragment's code agrees with its side falls under the last bullet of "What does not change". A flow on which any fragment's code disagrees with its side is pinned by the twin rule.
 
 **What depends on the rewritten generated code** (D6's P1 on `542a42cf`). These rows are `unknown` for C2 against C1p, and the run pins them. A difference on one of them is reported, and judged against section 4.3's bounds and its control for each judgement. It is not called a regression by the last sentence of this section.
 1. **Whether a `link` row is written for a header that binpac holds when its fragment then fails or never completes.** At a fragment's first frame, `ProcessData` hands the 8 header octets to `interp->NewData` before three checks: the length-0 weird, `AddToBuffer`'s target check, and any chunk CRC (`DNP3.cc`). When `dnp3_header_block` is raised for that held header depends on generated code that the patch rewrites (section 4.1; section 5.1). The inputs are:
@@ -411,13 +439,23 @@ This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) cha
    - link lengths 0 to 4 (section 4.3);
    - a fragment without FIN, and one over `DNP3::max_application_layer_fragment_size`.
 
-   **On TCP the held header may be parsed again when the connection ends.** `DiscardFlowBuffer` runs only on a `binpac::Exception`, and `DNP3_TCP_Analyzer::EndpointEOF` and `Done` call `FlowEOF`. `DNP3_UDP_Analyzer` defines neither, so on UDP nothing calls `FlowEOF` at the end.
-2. **The unit's frame length.** `DNP3_Request` and `DNP3_Response` carry `&length = 9 + addin_header.len - 5 - 1`. A link length of 4 gives 7, below the 8-octet header, and a length of 6 gives 9. At FIN both hand binpac only the 8-octet header, and they differ only in the length field that `&length` reads. So the value of `&length` decides them, and decides a fragment of 0 or 1 application octets. It also decides every fragment longer than its first frame. The rows are:
+   **On TCP the held header may be parsed again when the connection ends.** `DiscardFlowBuffer` runs only on a `binpac::Exception`, and `DNP3_TCP_Analyzer::EndpointEOF` and `Done` call `FlowEOF`. `DNP3_UDP_Analyzer` defines neither, so on UDP nothing calls `FlowEOF` at the end. Two more facts hold on TCP (D6's N1 and D3's B1 on `be6b8cea`, `desk`):
+   - **Neither call checks `skip`.** `TCPSessionAdapter::EndpointEOF` calls each child's `EndpointEOF` without checking it, and `DNP3_TCP_Analyzer::Done` calls `FlowEOF(true)` and `FlowEOF(false)` after `TCP_ApplicationAnalyzer::Done`, whatever `skip` is. So data held on either side goes back to binpac's parser when the connection ends, even after the analyzer has stopped. A weird that sets `skip` after a good header (a bad chunk CRC, for one) leaves that header held, since `ProcessData` returns false and `DiscardFlowBuffer` does not run. A flow whose `NewData` threw is called again too, with its buffer discarded.
+   - **Neither call is inside a `binpac::Exception` catch.** Zeek catches it only in `Analyzer::NextPacket`, `NextStream` and `NextUndelivered` (`Analyzer.cc`); `DNP3.cc`'s `DeliverStream` and `DeliverPacket` catch it only to discard the flow buffer, set `skip` and rethrow. The generated `NewData` rethrows (`FlowDecl::GenProcessFunc`, `pac_flow.cc`), and the flow's `FlowEOF` marks the buffer's end and calls `NewData(nullptr, nullptr)` (`FlowDecl::GenEOFFunc`). D6 and D4 found no catch on the way up in `Conn.cc`, `session/Manager.cc`, `packet_analysis/Manager.cc`, `RunState.cc` or `main.cc` (whose one `catch` is around setup). The frames in between, the timer and I/O-loop code that call `Done` and deliver segments, were not read. So whether a throw there ends the Zeek process, which would blind every flow at the site, is `unknown`. Section 4.3's TCP inputs that end while a header is held measure it, and a crash there is a finding by section 4.3's rule, not a row of this list.
+
+   Under C0 and C1p, D3's reading is that the end-of-connection call parses nothing on a held, incomplete frame (section 4.3). Under C2 the patch rewrites the unit that requests the frame, so it is `unknown`.
+2. **The unit's frame length.** `DNP3_Request` and `DNP3_Response` carry `&length = 9 + addin_header.len - 5 - 1`. A link length of 4 gives 7, below the 8-octet header, and a length of 6 gives 9. At FIN both hand binpac only the 8-octet header, and they differ only in the length field that `&length` reads. So the value of `&length` decides them, and decides a fragment of 0 or 1 application octets. It also decides every fragment longer than its first frame.
+   - **Every single-frame fragment reaches binpac one octet short of `&length`** (D2's N1 on `be6b8cea`, the shortfall of D2's B2 on `b677547a`). For a link length L, `NewData` gets the 8 header octets and `ParseAppLayer` buffers L − 6 application octets, so binpac gets L + 2, while `&length` is L + 3. So the restructured unit's frame buffering at `FinishBuffer` is on the path of every fragment, not only of the rows below. The check on paper below must therefore cover the frame-buffering path for all fragments.
+   - **The conforming rows stay under "What (i) does not change",** where a difference is a regression: a conforming fragment that stops parsing under C2 is a broken fix.
+
+   The rows of this list are:
    - a link length of 4 with FIR and FIN, a length of 6, and a fragment of 0 or 1 application octets (sections 2.3 and 4.3);
    - every multi-frame fragment, in any case, rerun or capture. Their rows are still expected equal to C1p's, but as this list's `unknown`, not as "does not change".
 
 - **A constraint on the patch.** The patched unit keeps `Header_Block` as its first field, and keeps `&length = 9 + addin_header.len - 5 - 1` as the unit's length for both arms, computed from the same `Header_Block` field. That makes the expectations above likelier. It does not make them `desk`.
-- **A check on paper once both builds exist:** diff the parser that binpac generates from `dnp3.pac` in C1p's build against C2's. Where the diff leaves the header's and the length's code unchanged, the rows above are expected equal. The diff's result is `desk`, and the run still pins them.
+- **A check on paper once both builds exist:** diff the parser that binpac generates from `dnp3.pac` in C1p's build against C2's. Where the diff leaves the header's, the length's and the frame buffering's code unchanged, the rows above are expected equal. The diff's result is `desk`, and the run still pins them.
+  - **Both builds generate the parser with the binpac inside the pinned tarball** (`tools/binpac/`), never with a binpac from the base system (D7's N1 on `be6b8cea`). Otherwise the diff could show a difference in the generator rather than the patch. Zeek 9.0.1's `configure` parses no `--with-binpac`, although its help text mentions one (D7), so the configure line alone does not show which binpac ran.
+  - **The run records the SHA-256 of each build's generated `dnp3_pac.cc` and `dnp3_pac.h` beside the diff,** so that the result can be checked again later.
 
 **What (i) does not change, under any configuration.** C2 is expected to equal C1p on:
 - the magic, header CRC and chunk CRC checks, and their weirds and violations;
@@ -438,7 +476,8 @@ A difference on any of these is a regression, or a difference in the build when 
 - **Not read:**
   - when binpac raises `dnp3_header_block` for a fragment that then fails;
   - the code binpac generates at all, the record-level `&length` included;
-  - whether binpac 9.0.1's generated flow can safely be reused after a `binpac::Exception`. Zeek never reuses it today, because `skip` ends the flow (D3's condition 2 on `9919fd24`).
+  - whether binpac 9.0.1's generated flow can safely be reused after a `binpac::Exception`. **On UDP** Zeek never reuses it today, because `skip` ends the flow (D3's condition 2 on `9919fd24`). **On TCP it does:** `EndpointEOF` and `Done` call `FlowEOF` whatever `skip` is, outside any `binpac::Exception` catch, and that includes a flow whose `NewData` threw, with its buffer discarded (section 4.7, item 1; D3's B1 and D6's N1 on `be6b8cea`);
+  - whether anything above `Done` and `EndpointEOF` catches a throw from that end-of-connection parse (section 4.7, item 1).
 
   A Zeek build makes that code. `dnp3-udp-master-short` and the run show its effect.
 - **HR-25: one failed frame stops the analyzer for the whole flow,** under the control and under (i), whatever key picks the parser (D4 6865038018; D1 6865138996, point 1). `DNP3_UDP_Analyzer::DeliverPacket` and `DNP3_TCP_Analyzer::DeliverStream` set `skip` on a bad header or chunk CRC, a lost magic, a lost first chunk, or a fragment too short for its parser (section 1, item 6). `Reporter::AnalyzerError` sets `skip` itself (`Reporter.cc`). So one bad datagram stops the analyzer, and a later write goes unseen. On UDP it takes no role in the session: any host on the segment can send it with the flow's addresses and ports (D3). D3 writes HR-25's row. Its candidate fix is briefed as P4-4-HR25 (section 5.2).
@@ -560,3 +599,13 @@ These are D1's to record. The note does not close them.
 | D6 P2.4: (3b-data) beside (3c) | blocking for pinning | Section 4.7, "Where it shows" |
 | D6 P2.5: `dnp3-malformed` and its PRP pair | blocking for pinning | Section 4.7, "Where it shows" |
 | D6 N-A: the TCP case's control for attachment and replay | non-blocking | Section 4.1 |
+| **Re-reviews of `be6b8cea`, under D1's ruling 6879529451** | | |
+| D3 B1 and D6 N1: the TCP end-of-connection parse runs outside the analyzer's `binpac::Exception` catch, unmeasured (item 1) | blocking | Section 4.3, the TCP inputs that leave a header held; section 4.7 item 1; section 5.1; section 1 item 6; section 4.6, which end-of-connection path the `dnp3_tcp` target reaches, and what the run leaves unshown; the opening table |
+| D6 N2: the third input of "Both directions"; relay-started flows also depend on the request parser (item 2) | non-blocking | Section 4.7, "Both directions" |
+| D6 N3: the per-flow sort covers every rerun capture (item 3) | non-blocking | Section 4.7, "Where it shows" |
+| D6 N4 (a): section 2.3's fragment of 0 or 1 octets (item 4) | non-blocking | Section 2.3 |
+| D6 N4 (b): the twin rule covers binpac's result only (item 4) | non-blocking | Section 4.7, "The twin rule" |
+| D2 N1: every single-frame fragment reaches binpac one octet short of `&length` (item 5) | non-blocking | Section 4.7 item 2, and the check on paper |
+| D2 N2: lengths 0 to 4 are "the same" only in weirds, reporter errors and `skip` (item 6) | non-blocking | Section 4.3 |
+| D7 N1: the tarball's binpac for both builds; the generated files' SHA-256 (item 7) | non-blocking | Section 4.7, the check on paper |
+| D3 N1: C1p parses nothing at the end on a held, incomplete frame | note | Sections 4.3 and 4.7 item 1, as D3's reading |
