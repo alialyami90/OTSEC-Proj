@@ -45,12 +45,18 @@
 //
 // The refusals are not in the C2 transcript, which holds the NVT data
 // stream. Stats counts them, and A6's simulator records them on the far side.
+//
+// Counts gives C2 0.10's session.telnet its two transport counts: the
+// refusals written, and the octets read from the socket that the decoder did
+// not deliver as data. AtEOF says whether the session ended at the peer's
+// end of stream with the decoder in no error (D4-102).
 package telnet
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"time"
 )
@@ -105,6 +111,7 @@ type Conn struct {
 	verb       byte
 	sbLen      int
 	received   int64
+	wire       int64 // octets read from the socket
 	stats      Stats
 	refused    map[[2]byte]bool // verb and option already answered
 	err        error            // sticky: the session is over
@@ -150,6 +157,7 @@ func (c *Conn) Read(p []byte) (int, error) {
 		}
 		n, err := c.nc.Read(c.readBuf)
 		if n > 0 {
+			c.wire += int64(n)
 			if perr := c.decode(c.readBuf[:n]); perr != nil {
 				c.err = perr
 			}
@@ -374,6 +382,26 @@ func (c *Conn) Stats() Stats { return c.stats }
 
 // Received returns the data bytes returned or pending so far.
 func (c *Conn) Received() int64 { return c.received }
+
+// Counts are the session's counts outside the data stream (C2 0.10).
+type Counts struct {
+	Stats
+	// Received is the data octets the decoder produced (Received).
+	Received int64
+	// Wire is the octets read from the socket. Wire - Received is every
+	// octet received that is not delivered as data: each command's IAC, verb
+	// and option, each subnegotiation whole, the IAC of each escaped 0xFF,
+	// and, after ErrTooLarge or ErrNegotiation, the rest of that read.
+	Wire int64
+}
+
+// Counts returns the session's counts so far.
+func (c *Conn) Counts() Counts { return Counts{Stats: c.stats, Received: c.received, Wire: c.wire} }
+
+// AtEOF reports whether the session ended because the socket returned the
+// peer's end of stream, with the decoder in no error. Any other error, a
+// failed refusal's write included, is sticky and is never EOF.
+func (c *Conn) AtEOF() bool { return c.err == io.EOF }
 
 // Close closes the socket.
 func (c *Conn) Close() error { return c.nc.Close() }
