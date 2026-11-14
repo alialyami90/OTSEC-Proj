@@ -20,9 +20,13 @@ package contract
 //     at 0.12 in every field but the action and its sensor target, is
 //     refused by the 0.12 audit.ParseRecord as an unknown action. §11.2
 //     leaves the records' other fields open (ruling 1 (b)), so none is here.
+//     The three audit-0.13-* files are therefore not valid 0.13 records and
+//     serve only this narrowed leg: deliverable 5's forward check uses the
+//     forms D3 settles (ruling 1 (c)).
 //
 // The brief's "The backward fixtures also hold forward": deliverable 2's
-// branch reads these files with the new code, so they keep their names.
+// branch reads the event-0.4-* files with the new code, so they keep their
+// names.
 // Ground truth: independent (the approved text). The SER row is D6's
 // transcription of SEL-751 Figure 10.16; every other value is constructed.
 // None is device output. Evidence class: desk.
@@ -299,11 +303,14 @@ func TestCCD0E47StoredEvents(t *testing.T) {
 	}
 }
 
+// ccD0LinkRefusedReasons are C8-4's six reasons for sensor.link_refused.
+var ccD0LinkRefusedReasons = []string{"peer-key", "expired", "binding", "run-regressed", "run-forked", "sensor-id"}
+
 func TestCCD0C81OldReaderRefuses(t *testing.T) {
-	for _, c := range []struct{ file, action string }{
-		{"audit-0.13-sensor-enrolled.json", "sensor.enrolled"},
-		{"audit-0.13-sensor-revoked.json", "sensor.revoked"},
-		{"audit-0.13-sensor-link-refused.json", "sensor.link_refused"},
+	for _, c := range []struct{ file, action, outcome string }{
+		{"audit-0.13-sensor-enrolled.json", "sensor.enrolled", "succeeded"},
+		{"audit-0.13-sensor-revoked.json", "sensor.revoked", "succeeded"},
+		{"audit-0.13-sensor-link-refused.json", "sensor.link_refused", "denied"},
 	} {
 		t.Run(c.action, func(t *testing.T) {
 			// A record is one line; its terminator is not part of it.
@@ -311,6 +318,20 @@ func TestCCD0C81OldReaderRefuses(t *testing.T) {
 			m := ccD0Map(t, b)
 			if m["contract"] != "otsec.audit/0.13" || m["action"] != c.action {
 				t.Fatalf("contract %v, action %v", m["contract"], m["action"])
+			}
+			// What §11.2 does fix, which the 0.12 reader never reaches: the
+			// target is the sensor and no asset (C8-1), sensor.enrolled and
+			// sensor.revoked succeed (C8-2, C8-3), and sensor.link_refused is
+			// denied with one of C8-4's six reasons.
+			target, _ := m["target"].(map[string]any)
+			if id, _ := target["sensor_id"].(string); len(target) != 1 || !netobs.ValidUUID(id) {
+				t.Errorf("target %v, want exactly {sensor_id: <lowercase UUID>}", m["target"])
+			}
+			if m["outcome"] != c.outcome {
+				t.Errorf("outcome %v, want %s", m["outcome"], c.outcome)
+			}
+			if reason, _ := m["reason_code"].(string); c.outcome == "denied" && !slices.Contains(ccD0LinkRefusedReasons, reason) {
+				t.Errorf("reason_code %q is not one of C8-4's six", reason)
 			}
 			// No field outside the 0.12 record's.
 			dec := json.NewDecoder(bytes.NewReader(b))
