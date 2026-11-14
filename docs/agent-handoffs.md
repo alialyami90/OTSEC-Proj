@@ -2279,3 +2279,25 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - **C4 0.4 §4's sizes are an estimate** until E4-6 pins them. If E4-6 fails, the bound goes to D1.
   - **`platform/node`'s Windows run is over its budget** (HANDOFF). D5's new node tests add to it.
 - Scratch files: `d4-cc-*`, `d5-cc-*`, `d2-cc-*`, `d3-cc-*`, `d7-cc-*`, and `d6-cc-<deliverable>-*` for each D6 instance.
+
+## After D4-104: a collector defect on `main` (issued 2026-11-15, D4-104)
+
+### P4-COL-1 (D3; D6 and D2 review): `Server.Serve` closes its listener when the server is already closed
+- Objective and rationale: P5 (secure failure behaviour), and a test that fails on `main` (D4-104 item 3). A `Close` before `Serve` leaves the listener open and the socket served.
+- Owner, and the reviewers (CLAUDE.md §5.6): D3 writes it. D6 reviews for the test, and D2 for the collector's callers.
+- Required inputs and dependencies:
+  - D4-104 item 3;
+  - `modules/security/collector/server.go` (`Serve` and `Close`), and `TestServeAssetClear` in `cmd/otsec-collector`;
+  - run 43522548095.
+- Files or modules each role may modify: D3, `modules/security/collector/` only.
+- Expected interfaces: no contract change.
+- Deliverable: one PR.
+- Acceptance tests:
+  - **Unit test:** `Close`, then `Serve(ln)`. `Serve` returns `ErrServerClosed`, and `ln` is closed, shown by a second `Listen` on the same address that succeeds. The control is the closed branch without `ln.Close()`.
+  - **Repeat run:** `TestServeAssetClear` passes `-count=200` on CI-Linux, with its job URL.
+  - **CI:** both `go` jobs are green.
+  - **Self-check:** the implementer runs the self-check list in this file.
+- Owed: none.
+- Explicit exclusions: no other change to the collector's server or wire.
+- Uncertainty or safety risks: none beyond the fix, which only closes a listener the server will never serve.
+- Scratch files: `d3-col1-*`
