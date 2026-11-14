@@ -114,6 +114,49 @@ type Flow struct {
 	Bytes   int64  `json:"bytes"`
 	End     string `json:"end,omitempty"`
 	SynOnly *bool  `json:"syn_only,omitempty"`
+
+	// New in 0.3, on an end only, each a delta since the connection's
+	// previous end. Each is a pointer, so that absent, 0 and false stay
+	// apart through a decode and re-encode, the node's tie path included
+	// (C13 0.3 §1.1): nil is absent, and omitempty leaves out nil only.
+	//
+	// OrigPayload and RespPayload are the payload octets, and OrigPkts and
+	// RespPkts the packets, that the record's ip.src and ip.dst ends sent
+	// (CH-52): required on a 0.3 channel end, TCP or UDP.
+	OrigPayload *int64 `json:"orig_payload,omitempty"`
+	RespPayload *int64 `json:"resp_payload,omitempty"`
+	OrigPkts    *int64 `json:"orig_pkts,omitempty"`
+	RespPkts    *int64 `json:"resp_pkts,omitempty"`
+	// ToDeviceOverlapOctets is the overlap count toward the device, and
+	// Incomplete, present only as true, says that it and PasswordLines
+	// cannot be read as complete (CH-53). TCP only. A 0.3 channel TCP end
+	// carries one or both.
+	ToDeviceOverlapOctets *int64 `json:"to_device_overlap_octets,omitempty"`
+	Incomplete            *bool  `json:"incomplete,omitempty"`
+	// RexmitInconsistent counts the engine's rexmit_inconsistency events,
+	// over both directions (CH-54): required on a 0.3 channel TCP end.
+	RexmitInconsistent *int64 `json:"rexmit_inconsistent,omitempty"`
+	// PasswordLines counts the password lines the client sent, present
+	// only when every credential slot was placed (CH-55). TCP only, never
+	// required, never beside Incomplete.
+	PasswordLines *int64 `json:"password_lines,omitempty"`
+}
+
+// counts03 lists the end's counts new in 0.3 by their field names, the
+// four of CH-52 first.
+func (f *Flow) counts03() []struct {
+	name string
+	v    *int64
+} {
+	return []struct {
+		name string
+		v    *int64
+	}{
+		{"flow.orig_payload", f.OrigPayload}, {"flow.resp_payload", f.RespPayload},
+		{"flow.orig_pkts", f.OrigPkts}, {"flow.resp_pkts", f.RespPkts},
+		{"flow.to_device_overlap_octets", f.ToDeviceOverlapOctets},
+		{"flow.rexmit_inconsistent", f.RexmitInconsistent}, {"flow.password_lines", f.PasswordLines},
+	}
 }
 
 // Service is a server seen on a port. The server is ip.dst.
@@ -428,6 +471,7 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 		if f.Packets < 1 || f.Bytes < f.Packets {
 			c.fail(CodeRange, "flow.packets", "packets %d, bytes %d: at least one frame of at least one byte each", f.Packets, f.Bytes)
 		}
+		f.check03(c, l4)
 	case o.Service != nil:
 		needsIP("service", "tcp", "udp")
 		if o.Service.Basis != "content" && o.Service.Basis != "port" {
@@ -459,6 +503,73 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 		}
 		if o.Undecoded.Packets < 1 {
 			c.fail(CodeRange, "undecoded.packets", "%d: at least one", o.Undecoded.Packets)
+		}
+	}
+}
+
+// check03 applies the placement and range rules of the end's counts new
+// in 0.3 (C13 0.3 §3 to §6). Each is from 0 to 2^63 - 1, the int64's
+// range, so 2^63 fails the decode. None is on a start. The overlap count,
+// incomplete, rexmit_inconsistent and password_lines are on a TCP end
+// only. incomplete is present only as true, and never beside
+// password_lines. On a syn-only end both payload counts are 0. On the 0.3
+// channel an end carries the four counts of CH-52, and a TCP end
+// rexmit_inconsistent and the overlap count, incomplete or both: no TCP
+// end carries neither (CH-53).
+func (f *Flow) check03(c *checker, l4 string) {
+	counts := f.counts03()
+	for _, x := range counts {
+		if x.v == nil {
+			continue
+		}
+		c.new03(x.name, true)
+		if *x.v < 0 {
+			c.fail(CodeRange, x.name, "%d not in [0, 2^63 - 1]", *x.v)
+		}
+	}
+	if f.Incomplete != nil {
+		c.new03("flow.incomplete", true)
+		if !*f.Incomplete {
+			c.fail(CodeForm, "flow.incomplete", "present only as true")
+		}
+	}
+	if f.Phase != "end" {
+		for _, x := range counts {
+			if x.v != nil {
+				c.fail(CodeConflict, x.name, "only on the end phase")
+			}
+		}
+		if f.Incomplete != nil {
+			c.fail(CodeConflict, "flow.incomplete", "only on the end phase")
+		}
+		return
+	}
+	for _, x := range counts[:4] {
+		c.new03(x.name, x.v != nil)
+	}
+	if l4 != "tcp" {
+		for _, x := range counts[4:] {
+			if x.v != nil {
+				c.fail(CodeConflict, x.name, "only on a tcp end")
+			}
+		}
+		if f.Incomplete != nil {
+			c.fail(CodeConflict, "flow.incomplete", "only on a tcp end")
+		}
+		return
+	}
+	c.new03("flow.rexmit_inconsistent", f.RexmitInconsistent != nil)
+	if c.need >= 3 && f.ToDeviceOverlapOctets == nil && f.Incomplete == nil {
+		c.fail(CodeMissing, "flow.to_device_overlap_octets", "a 0.3 channel tcp end carries the overlap count, incomplete, or both")
+	}
+	if f.PasswordLines != nil && f.Incomplete != nil {
+		c.fail(CodeConflict, "flow.password_lines", "never beside incomplete")
+	}
+	if f.SynOnly != nil && *f.SynOnly {
+		for _, x := range counts[:2] {
+			if x.v != nil && *x.v != 0 {
+				c.fail(CodeConflict, x.name, "%d, but a syn-only flow carries no payload", *x.v)
+			}
 		}
 	}
 }

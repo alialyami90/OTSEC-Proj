@@ -112,6 +112,18 @@ type Heartbeat struct {
 	Interfaces  []InterfaceCount `json:"interfaces,omitempty"`
 	Agent       *Agent           `json:"agent,omitempty"`
 	EgressCheck string           `json:"egress_check,omitempty"`
+
+	// FrameStage is new in 0.3 and required in a 0.3 heartbeat (CH-53).
+	// Its count is status only, never in Counters.
+	FrameStage *FrameStage `json:"frame_stage,omitempty"`
+}
+
+// FrameStage is the frame stage's own counts, run totals (CH-53). Every
+// key is required; a pointer is nil only when the key was absent.
+type FrameStage struct {
+	// OverlapTableFull counts the entries refused because the overlap
+	// table held MaxOverlapFlows.
+	OverlapTableFull *uint64 `json:"overlap_table_full"`
 }
 
 // InterfaceCount is one capture interface's frames read since the run
@@ -129,6 +141,24 @@ type Agent struct {
 	TakenAhead        *uint64     `json:"taken_ahead"`
 	SyncLate          *uint64     `json:"sync_late"`
 	EntriesUnreadable *uint64     `json:"entries_unreadable"`
+
+	// New in 0.3 and required in a 0.3 heartbeat (CH-53): the overlap
+	// records refused at MaxOverlapJoinPending, and those that left the
+	// join buffer unjoined. Absent in a 0.2 heartbeat, so omitempty: it
+	// leaves out nil only, never 0.
+	OverlapJoinRefused *uint64 `json:"overlap_join_refused,omitempty"`
+	OverlapUnjoined    *uint64 `json:"overlap_unjoined,omitempty"`
+}
+
+// counts03 lists the agent's counts new in 0.3 by their field names.
+func (a *Agent) counts03() []struct {
+	name string
+	v    *uint64
+} {
+	return []struct {
+		name string
+		v    *uint64
+	}{{"overlap_join_refused", a.OverlapJoinRefused}, {"overlap_unjoined", a.OverlapUnjoined}}
 }
 
 // AgentCloses counts the agent's closes by reason: the closed set
@@ -258,6 +288,13 @@ func (h *Heartbeat) validateChannel(want string) error {
 				c.fail(CodeMissing, "agent."+x.name, "required")
 			}
 		}
+		for _, x := range h.Agent.counts03() {
+			c.new03("agent."+x.name, x.v != nil)
+		}
+	}
+	c.new03("frame_stage", h.FrameStage != nil)
+	if h.FrameStage != nil && h.FrameStage.OverlapTableFull == nil {
+		c.fail(CodeMissing, "frame_stage.overlap_table_full", "required")
 	}
 	return c.err()
 }
@@ -354,6 +391,14 @@ func (h *Heartbeat) Follows(prev *Heartbeat) error {
 		for i := range pa {
 			fall("agent."+pa[i].name, pa[i].v, na[i].v)
 		}
+		pa, na = prev.Agent.counts03(), h.Agent.counts03()
+		for i := range pa {
+			fall("agent."+pa[i].name, pa[i].v, na[i].v)
+		}
+	}
+	// The frame stage's count, new in 0.3 (CH-53).
+	if prev.FrameStage != nil && h.FrameStage != nil {
+		fall("frame_stage.overlap_table_full", prev.FrameStage.OverlapTableFull, h.FrameStage.OverlapTableFull)
 	}
 	return c.err()
 }

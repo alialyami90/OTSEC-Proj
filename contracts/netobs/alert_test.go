@@ -130,7 +130,7 @@ func TestAlertRules(t *testing.T) {
 			t.Errorf("%s: got %v, want %s", tc.name, got, tc.code)
 		}
 	}
-	// The four baseline-free rules run before acknowledgement.
+	// The five baseline-free rules run before acknowledgement.
 	for _, r := range BaselineFree {
 		a := fxAlert()
 		a.Rule, a.Baseline, a.BaselineVersion = r, "", 0
@@ -140,6 +140,9 @@ func TestAlertRules(t *testing.T) {
 		}
 		if r == RuleOwnSessionUnseen {
 			a = fxUnseen()
+		}
+		if r == RuleOwnSessionMismatch {
+			a.Schema, a.Observation = Identifier03, "comparison M3"
 		}
 		if err := a.Validate(); err != nil {
 			t.Errorf("%s with no baseline: %v", r, err)

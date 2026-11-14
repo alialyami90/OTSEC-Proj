@@ -19,11 +19,21 @@ import (
 const Identifier = "otsec.netobs/0.1"
 
 // Identifier02 is C13 0.2's identifier, carried by every message and record
-// of the 0.2 channel (DecodeFromSensor, DecodeFromNode; C13 0.2 §1). The
-// stored readers read 0.1 and 0.2 strictly, and a later 0.x minor forward.
+// of a 0.2 connection (DecodeFromSensorIn, DecodeFromNode; C13 0.2 §1), and
+// by the node's two messages at 0.3 too (NodeHello.Validate). The stored
+// readers read 0.1, 0.2 and 0.3 strictly, and a later 0.x minor forward.
 const Identifier02 = "otsec.netobs/0.2"
 
-var self = version.ID{Name: "netobs", Major: 0, Minor: 2}
+// Identifier03 is C13 0.3's identifier (docs/phase4/D4-c13-0.3-proposal.md,
+// approved in D4-102), the minor a 0.3 sensor offers on the channel. A 0.3
+// node also knows 0.2 on the channel, so that it can drain a 0.2 sensor's
+// buffered runs (C13 0.3 §1.1, CH-36).
+const Identifier03 = "otsec.netobs/0.3"
+
+// channelIdentifiers are the channel minors this code knows (CH-36).
+var channelIdentifiers = []string{Identifier02, Identifier03}
+
+var self = version.ID{Name: "netobs", Major: 0, Minor: 3}
 
 // Bounds (C13 §10).
 const (
@@ -154,16 +164,18 @@ func Codes(err error) []Code {
 
 // checker collects a validation's failures. minor is the record's minor,
 // set by strictSchema and storedSchema, so that a field new in 0.2 is
-// refused in a 0.1 record. later is set by storedSchema when the record is
-// of a later 0.x minor than this reader's, so the bridge rules of CH-35
-// (C13 0.2 §11) read it forward. need02 asks for the fields a 0.2 channel
-// record requires (C13 0.2 §11: optional in the Go type and in a stored
-// record, required on the 0.2 channel).
+// refused in a 0.1 record, and one new in 0.3 in a 0.1 or 0.2 record.
+// later is set by storedSchema when the record is of a later 0.x minor
+// than this reader's, so the bridge rules of CH-35 (C13 0.2 §11) read it
+// forward. need is the channel minor whose required fields a channel
+// record must carry, 0 for a stored record (C13 0.2 §11, C13 0.3 §1.1:
+// optional in the Go type and in a stored record, required on the channel
+// of their minor and later).
 type checker struct {
-	errs   []error
-	minor  int
-	later  bool
-	need02 bool
+	errs  []error
+	minor int
+	later bool
+	need  int
 }
 
 func (c *checker) fail(code Code, field, format string, a ...any) {
@@ -257,12 +269,23 @@ func (c *checker) addr(field, s string) (netip.Addr, bool) {
 // §1; C13 0.2 CH-36).
 func (c *checker) strictSchema(s, want string) {
 	c.minor = 1
-	if want == Identifier02 {
-		c.minor, c.need02 = 2, true
+	if v, err := version.Parse(want); err == nil && v.Minor >= 2 {
+		c.minor, c.need = v.Minor, v.Minor
 	}
 	if s != want {
 		c.fail(CodeSchema, "schema", "%q is not %s", s, want)
 	}
+}
+
+// channelSchema checks a sensor message's schema: one of the channel
+// minors this code knows, read strictly at that minor (CH-36).
+func (c *checker) channelSchema(s string) {
+	if contains(channelIdentifiers, s) {
+		c.strictSchema(s, s)
+		return
+	}
+	c.strictSchema(Identifier03, Identifier03)
+	c.fail(CodeSchema, "schema", "%q is not a channel minor this code knows, %v", s, channelIdentifiers)
 }
 
 // storedSchema checks a stored record's schema: any 0.x minor, because a
@@ -281,11 +304,21 @@ func (c *checker) storedSchema(s string) {
 // minor below 0.2 it must be absent, so a 0.1 record stays as strict as
 // the 0.1 reader was. In a 0.2 channel record it must be present.
 func (c *checker) new02(field string, present bool) {
+	c.newAt(2, field, present)
+}
+
+// new03 checks a field that C13 0.3 adds (C13 0.3 §1.1), as new02 does for
+// 0.2: refused below 0.3, required on the 0.3 channel.
+func (c *checker) new03(field string, present bool) {
+	c.newAt(3, field, present)
+}
+
+func (c *checker) newAt(minor int, field string, present bool) {
 	switch {
-	case present && c.minor < 2:
-		c.fail(CodeDecode, field, "new in %s; not in a 0.%d record", Identifier02, c.minor)
-	case !present && c.need02:
-		c.fail(CodeMissing, field, "required in a %s channel record", Identifier02)
+	case present && c.minor < minor:
+		c.fail(CodeDecode, field, "new in otsec.netobs/0.%d; not in a 0.%d record", minor, c.minor)
+	case !present && c.need >= minor:
+		c.fail(CodeMissing, field, "required in an otsec.netobs/0.%d channel record", c.need)
 	}
 }
 

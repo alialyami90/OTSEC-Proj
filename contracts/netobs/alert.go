@@ -37,22 +37,30 @@ const (
 	RuleOwnSessionUnseen        Rule = "own-session-unseen"
 	RuleUnresolvedAddress       Rule = "unresolved-address"
 	RuleSAFailed                Rule = "sa-failed"
+	// RuleOwnSessionMismatch is new in 0.3 (CH-51): a tied flow whose
+	// counts exceed its run's profile, or could not be judged. An alert of
+	// a minor below 0.3 with it is refused, as a 0.2 reader refuses it.
+	RuleOwnSessionMismatch Rule = "own-session-mismatch"
 )
 
 // Rules lists every Rule.
 var Rules = []Rule{RuleUnknownPair, RuleNewService, RuleNewFunction, RuleUnauthorizedWrite,
-	RuleOwnSessionOutsideRecord, RuleNodeAddressSpoofed, RuleOwnSessionUnseen, RuleUnresolvedAddress, RuleSAFailed}
+	RuleOwnSessionOutsideRecord, RuleNodeAddressSpoofed, RuleOwnSessionUnseen, RuleUnresolvedAddress, RuleSAFailed,
+	RuleOwnSessionMismatch}
 
 // BaselineFree are the rules that run before any baseline is acknowledged
-// (D4-68 ruling 10). The other five judge against the acknowledged
+// (D4-68 ruling 10; CH-51). The other five judge against the acknowledged
 // baseline.
-var BaselineFree = []Rule{RuleOwnSessionOutsideRecord, RuleNodeAddressSpoofed, RuleOwnSessionUnseen, RuleSAFailed}
+var BaselineFree = []Rule{RuleOwnSessionOutsideRecord, RuleNodeAddressSpoofed, RuleOwnSessionUnseen, RuleSAFailed,
+	RuleOwnSessionMismatch}
 
 // ruleParams are the parameters each rule's alert shows, in order.
+// own-session-mismatch shows none (CH-51, D1's ruling 5).
 var ruleParams = map[Rule][]string{
 	RuleUnknownPair: nil, RuleNewService: nil, RuleNewFunction: nil, RuleUnauthorizedWrite: nil,
 	RuleOwnSessionOutsideRecord: {"tie_grace_s"}, RuleNodeAddressSpoofed: nil,
 	RuleOwnSessionUnseen: {"tie_grace_s"}, RuleUnresolvedAddress: nil, RuleSAFailed: nil,
+	RuleOwnSessionMismatch: nil,
 }
 
 // RuleParams returns the parameters rule r's alert shows, in order.
@@ -147,8 +155,14 @@ func (a *Alert) Validate() error {
 	c := &checker{}
 	c.storedSchema(a.Schema)
 	want, ok := ruleParams[a.Rule]
+	if ok && a.Rule == RuleOwnSessionMismatch && c.minor < 3 {
+		ok = false
+	}
 	if !ok {
-		c.fail(CodeForm, "rule", "%q is not a rule", a.Rule)
+		c.fail(CodeForm, "rule", "%q is not a rule of a 0.%d alert", a.Rule, c.minor)
+	}
+	if ok && a.Rule == RuleOwnSessionMismatch && !validMismatchObservation(a.Observation) {
+		c.fail(CodeForm, "observation", "%q does not match own-session-mismatch's head grammar (CH-51)", a.Observation)
 	}
 	aggregate := c.minor >= 2 && contains(AggregateKeys, a.AssetID)
 	if a.AssetID != AssetUnresolved && !ValidUUID(a.AssetID) && !aggregate {
@@ -275,6 +289,59 @@ func (a *Alert) checkAggregate(c *checker, aggregate bool) {
 	if a.AssetsTotal < int64(n) {
 		c.fail(CodeConflict, "assets_total", "%d, below the %d assets listed", a.AssetsTotal, n)
 	}
+}
+
+// The head grammar of an own-session-mismatch alert's observation (CH-51):
+//
+//	observation := head [ ": " free-text ]
+//	head        := part ( " " part )*
+//	part        := comparisons | unjudged | reasons | "no-profile"
+//
+// with at least one part, the parts in mismatchParts' order, each at most
+// once, and each part but no-profile followed by at least one of its items,
+// each at most once and in the item list's order.
+type mismatchPart struct {
+	word  string
+	items []string
+}
+
+var mismatchParts = []mismatchPart{
+	{"comparison", []string{"M1", "M2", "M3", "M4", "M5", "M6a", "M6b"}},
+	{"unjudged", []string{"M2:incomplete", "M3:incomplete", "M5:incomplete", "M6a:incomplete", "M6b:incomplete", "M6b:no-profile"}},
+	{"reason", []string{"prp-table-full", "prp-mismatched"}},
+	{"no-profile", nil},
+}
+
+// validMismatchObservation reports whether the whole of s matches CH-51's
+// production: the head, then the string's end or ": " and free text. The
+// head holds no ": ", so it ends at the first one.
+func validMismatchObservation(s string) bool {
+	head, _, _ := strings.Cut(s, ": ")
+	words := strings.Split(head, " ")
+	part := -1
+	for i := 0; i < len(words); {
+		p := slices.IndexFunc(mismatchParts, func(x mismatchPart) bool { return x.word == words[i] })
+		if p <= part {
+			return false // an unknown word, or a part out of order or repeated
+		}
+		part = p
+		i++
+		item, n := -1, 0
+		for ; i < len(words) && mismatchParts[p].items != nil; i++ {
+			j := slices.Index(mismatchParts[p].items, words[i])
+			if j < 0 {
+				break // the next part's word, or an unknown word
+			}
+			if j <= item {
+				return false // an item out of order or repeated
+			}
+			item, n = j, n+1
+		}
+		if mismatchParts[p].items != nil && n == 0 {
+			return false // a part with no item
+		}
+	}
+	return part >= 0
 }
 
 // Health is the alert as a C4 health event body: type HealthAlert, Related

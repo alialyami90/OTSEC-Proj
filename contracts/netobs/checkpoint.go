@@ -13,25 +13,34 @@ import (
 
 // CheckpointIdentifier is the schema of both network checkpoints, the
 // learner's and the detector's, its first field (C13 §8): what this code
-// writes. C13 0.2 moves it to 0.2 (C13 0.2 §1, CH-35).
-const CheckpointIdentifier = "otsec.netcheckpoint/0.2"
+// writes. C13 0.3 moves it to 0.3, and 0.3 code always writes 0.3, never
+// 0.2, so that one identifier is never written by two binaries (C13 0.3
+// §1.2). Its form does not change.
+const CheckpointIdentifier = "otsec.netcheckpoint/0.3"
 
-// CheckpointIdentifier01 is the schema a 0.1 node wrote. The decoders read
-// a 0.1 checkpoint strictly: its coverage statements carry no field new in
-// C13 0.2 (CH-35's table, "Read").
-const CheckpointIdentifier01 = "otsec.netcheckpoint/0.1"
+// CheckpointIdentifier02 and CheckpointIdentifier01 are the schemas a 0.2
+// and a 0.1 node wrote. The decoders read each strictly, as a checkpoint
+// holding C13 records of its own minor: a 0.1 checkpoint's coverage
+// carries no field new in 0.2 (CH-35's table, "Read"), and a 0.2
+// checkpoint's windows no rule new in 0.3 (C13 0.3 §1.2).
+const (
+	CheckpointIdentifier02 = "otsec.netcheckpoint/0.2"
+	CheckpointIdentifier01 = "otsec.netcheckpoint/0.1"
+)
 
 // checkpointChecker starts a checkpoint's validation: the schema one of the
-// two, and the checker's minor that of the C13 records the checkpoint
-// holds, so a 0.1 checkpoint's coverage refuses 0.2's fields.
+// three, and the checker's minor that of the C13 records the checkpoint
+// holds.
 func checkpointChecker(schema string) *checker {
-	c := &checker{minor: 2}
+	c := &checker{minor: 3}
 	switch schema {
 	case CheckpointIdentifier:
+	case CheckpointIdentifier02:
+		c.minor = 2
 	case CheckpointIdentifier01:
 		c.minor = 1
 	default:
-		c.fail(CodeSchema, "schema", "%q is not %s or %s", schema, CheckpointIdentifier, CheckpointIdentifier01)
+		c.fail(CodeSchema, "schema", "%q is not %s, %s or %s", schema, CheckpointIdentifier, CheckpointIdentifier02, CheckpointIdentifier01)
 	}
 	return c
 }
@@ -395,9 +404,7 @@ func (k *DetectorCheckpoint) Validate() error {
 		}
 		a := w.Alert(k, params)
 		// The window is judged as an alert of the checkpoint's minor.
-		if c.minor >= 2 {
-			a.Schema = Identifier02
-		}
+		a.Schema = fmt.Sprintf("otsec.netobs/0.%d", c.minor)
 		if w.Rule != RuleOwnSessionUnseen {
 			a.Capture = fmt.Sprintf("%064x", 0)
 		}
