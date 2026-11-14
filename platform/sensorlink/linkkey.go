@@ -41,7 +41,7 @@ type LinkKey struct {
 func ReadLinkKey(read func(path string, max int64) ([]byte, error), path, nodeID, ref string,
 	keys func(nodekey.Provider) (nodekey.Keys, error), reg RegisterView) *LinkKey {
 	rk := linkkey.NoRegister()
-	if false && reg.Set {
+	if reg.Set {
 		rk = linkkey.RegisterKeys{}
 		if reg.Loaded {
 			rk = linkkey.FromRegister(&nodekey.Register{Entries: reg.Entries})

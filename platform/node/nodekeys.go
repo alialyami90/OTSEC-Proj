@@ -87,6 +87,9 @@ func (c *Config) nodeKeys() (*keyStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("key_register: %w", err)
 	}
+	if b, err := readProtected(filepath.Join(filepath.Dir(c.KeyRegister), LinkKeyFileName), 1<<16); err != nil || !json.Valid(b) {
+		return nil, fmt.Errorf("key_register: the link key file beside it: %v", err)
+	}
 	ks := &keyStore{reg: reg}
 	if c.LabTLSFiles {
 		ks.lab = c.TLSDir
