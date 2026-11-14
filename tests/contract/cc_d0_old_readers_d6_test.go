@@ -15,6 +15,11 @@ package contract
 //     diff.<counter>").
 //   - E4-7's backward leg (the same document, §3 and §5): a stored 0.4 SER,
 //     Syslog, node health and network-observation event is read by Decode.
+//   - C8-1's old-reader leg (docs/phase4/D3-sensor-link.md §11.2), narrowed
+//     by D1's ruling 1 (a) on #683: a 0.13 record of each new action, valid
+//     at 0.12 in every field but the action and its sensor target, is
+//     refused by the 0.12 audit.ParseRecord as an unknown action. §11.2
+//     leaves the records' other fields open (ruling 1 (b)), so none is here.
 //
 // The brief's "The backward fixtures also hold forward": deliverable 2's
 // branch reads these files with the new code, so they keep their names.
@@ -23,7 +28,9 @@ package contract
 // None is device output. Evidence class: desk.
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -33,6 +40,7 @@ import (
 	"strings"
 	"testing"
 
+	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
 )
@@ -286,6 +294,33 @@ func TestCCD0E47StoredEvents(t *testing.T) {
 			m["schema"] = "otsec.event/0.3"
 			if _, err := event.Decode(ccD0JSON(t, m)); err != nil {
 				t.Errorf("stamped 0.3: %v", err)
+			}
+		})
+	}
+}
+
+func TestCCD0C81OldReaderRefuses(t *testing.T) {
+	for _, c := range []struct{ file, action string }{
+		{"audit-0.13-sensor-enrolled.json", "sensor.enrolled"},
+		{"audit-0.13-sensor-revoked.json", "sensor.revoked"},
+		{"audit-0.13-sensor-link-refused.json", "sensor.link_refused"},
+	} {
+		t.Run(c.action, func(t *testing.T) {
+			// A record is one line; its terminator is not part of it.
+			b := bytes.TrimRight(ccD0File(t, c.file), "\r\n")
+			m := ccD0Map(t, b)
+			if m["contract"] != "otsec.audit/0.13" || m["action"] != c.action {
+				t.Fatalf("contract %v, action %v", m["contract"], m["action"])
+			}
+			// No field outside the 0.12 record's.
+			dec := json.NewDecoder(bytes.NewReader(b))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&audit.Record{}); err != nil {
+				t.Errorf("a field outside the 0.12 record: %v", err)
+			}
+			_, err := audit.ParseRecord(b)
+			if !errors.Is(err, audit.ErrRecordRejected) || !strings.Contains(fmt.Sprint(err), fmt.Sprintf("unknown action %q", c.action)) {
+				t.Errorf("the 0.12 reader: %v, want it refused as an unknown action", err)
 			}
 		})
 	}
