@@ -183,11 +183,6 @@ func Start(ctx context.Context, cfg *Config, opt RuntimeOptions) (*Runtime, erro
 		specs = append(specs, spec)
 	}
 	r.newSensorManager()
-	if s := cfg.NetworkSensor; s != nil {
-		if k := sensorlink.ReadLinkKey(readProtected, cfg.linkKeyPath(), string(cfg.NodeID), s.LinkKeyRef, (&keyStore{lab: cfg.TLSDir}).provider, sensorlink.RegisterView{}); k.Err() != nil {
-			return nil, k.Err()
-		}
-	}
 	sort.SliceStable(specs, func(i, j int) bool { return specs[i].ID == AuditDB && specs[j].ID != AuditDB })
 	for _, spec := range specs {
 		d, err := r.startDB(ctx, spec, consumers, starts)
