@@ -63,8 +63,6 @@ func RunFrom(ctx context.Context, cfg *Config, oslog func(string), pre PreStart)
 	keysLeft := rt.RecordNodeKeys(ctx)
 	rt.CheckNodeKeys()
 	rt.RecordLabTLSFiles(ctx)
-	// The sensor manager may now read the link key (linkkey.go, NK-5).
-	rt.KeysResolved()
 	starts.add("node-keys", from)
 	from = time.Now()
 	sched, err := NewScheduler(ctx, rt, collectorclient.New(CollectorEndpoint(cfg)))
