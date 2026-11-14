@@ -352,7 +352,13 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 	if w.Rule == RuleOwnSessionUnseen {
 		total = 0 // it names a session record, no traffic
 	}
-	return Alert{Schema: Identifier, Rule: w.Rule, AssetID: w.AssetID, Baseline: k.Baseline, BaselineVersion: k.BaselineVersion,
+	// An alert carries its observation's coverage, so one whose coverage
+	// has a field new in 0.2 is a 0.2 alert.
+	schema := Identifier
+	if w.Coverage.ConfigDigest != "" || w.Coverage.Settings.PRPWindowMS != 0 {
+		schema = Identifier02
+	}
+	return Alert{Schema: schema, Rule: w.Rule, AssetID: w.AssetID, Baseline: k.Baseline, BaselineVersion: k.BaselineVersion,
 		KeyText: w.KeyText, Params: params, BaselineValue: w.BaselineValue, Observation: w.Observation, Clock: ClockCapture,
 		AtUTC: w.AtUTC, WindowStartUTC: w.WindowStartUTC, Hits: w.Hits, Sources: int64(len(w.Sources)),
 		Related: related, RelatedTotal: total, Cites: w.Cites, Coverage: w.Coverage}
@@ -404,9 +410,17 @@ func (k *DetectorCheckpoint) validate(keys map[string]bool) error {
 			}
 		}
 		// The window's coverage is judged inside its alert, from the Go
-		// value; a 0.2 key in it is refused here, by its presence.
-		c.new02(f+".coverage.config_digest", w.Coverage.ConfigDigest != "")
-		c.new02(f+".coverage.settings.prp_window_ms", w.Coverage.Settings.PRPWindowMS != 0)
+		// value, where an empty or zero 0.2 field reads as absent. So a 0.2
+		// key in it is judged here, by its presence: refused in a 0.1
+		// checkpoint, and its value checked in a later one, as the
+		// top-level coverage's is.
+		cv := &w.Coverage
+		if c.new02(f+".coverage.config_digest", cv.ConfigDigest != "") && !baselineHashForm.MatchString(cv.ConfigDigest) {
+			c.fail(CodeForm, f+".coverage.config_digest", "%q is not sha256:<hex>", cv.ConfigDigest)
+		}
+		if ms := cv.Settings.PRPWindowMS; c.new02(f+".coverage.settings.prp_window_ms", ms != 0) && (ms < MinPRPWindowMS || ms > MaxPRPWindowMS) {
+			c.fail(CodeRange, f+".coverage.settings.prp_window_ms", "%d not in [%d, %d]", ms, MinPRPWindowMS, MaxPRPWindowMS)
+		}
 		var params []Param
 		for _, name := range ruleParams[w.Rule] {
 			params = append(params, Param{Name: name, Value: "1"}) // the values are the detector's

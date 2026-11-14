@@ -38,7 +38,11 @@ func TestDecodeFromNodeCloseReason(t *testing.T) {
 			delete(tk, "seq")
 		}), CloseType},
 		{"ack, Type beside type", encodeWith(t, fxAck(), func(m map[string]any) { m["Type"] = TypeAck }), CloseType},
-		{"a duplicate type", dupKey(t, mustJSON(t, fxAck()), "type", TypeAck), CloseType},
+		// N1 (a) on #687: a type repeated with the same value is the
+		// frame's type, and the duplicate fails its strict decode.
+		{"ack, a duplicate type", dupKey(t, mustJSON(t, fxAck()), "type", TypeAck), CloseAck},
+		{"node-hello, a duplicate type", dupKey(t, mustJSON(t, fxNodeHello()), "type", TypeNodeHello), CloseNodeHello},
+		{"two types", dupKey(t, mustJSON(t, fxAck()), "type", TypeNodeHello), CloseType},
 		{"type not a string", encodeWith(t, fxAck(), func(m map[string]any) { m["type"] = 1 }), CloseType},
 		{"no type", encodeWith(t, fxAck(), func(m map[string]any) { delete(m, "type") }), CloseType},
 		{"data after the object", append(mustJSON(t, fxAck()), []byte(" {}")...), CloseType},
@@ -65,7 +69,10 @@ func TestDecodeFromSensorDuplicateKey(t *testing.T) {
 		{"tick, a duplicate schema", TypeTick, dupKey(t, mustJSON(t, fxTick()), "schema", Identifier02)},
 		{"tick, Type beside type", TypeTick, encodeWith(t, fxTick(), func(m map[string]any) { m["Type"] = TypeTick })},
 		{"heartbeat", TypeHeartbeat, dupKey(t, mustJSON(t, fxHeartbeat02()), "run_id", fxRun)},
-		{"a duplicate type", "", dupKey(t, mustJSON(t, fxTick()), "type", TypeTick)},
+		// N1 (a) on #687: the same type twice reports it; two types none.
+		{"tick, a duplicate type", TypeTick, dupKey(t, mustJSON(t, fxTick()), "type", TypeTick)},
+		{"sensor-hello, a duplicate type", TypeSensorHello, dupKey(t, mustJSON(t, fxSensorHello()), "type", TypeSensorHello)},
+		{"two types", "", dupKey(t, mustJSON(t, fxTick()), "type", TypeHeartbeat)},
 		{"not an object", "", []byte(`["tick"]`)},
 	} {
 		m, err := DecodeFromSensor(tc.b)

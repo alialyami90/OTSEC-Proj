@@ -337,7 +337,7 @@ func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 	// The type is read first, alone, so that a frame of a known type that
 	// fails its strict decode, a duplicate key included, still reports its
 	// type: a sensor-hello or tick then closes (CH-8, CH-10).
-	typ, _, err := frameType(b)
+	typ, keys, err := frameType(b)
 	if err != nil {
 		return &FromSensor{}, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 	}
@@ -366,7 +366,12 @@ func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 	switch typ {
 	case TypeSensorHello:
 		m.Hello = &SensorHello{}
-		return m, decode(m.Hello, m.Hello.Validate)
+		return m, decode(m.Hello, func() error {
+			if isNull(keys["prior"]) {
+				return &Error{Code: CodeForm, Field: "prior", Detail: "null is not what came before the run"}
+			}
+			return m.Hello.Validate()
+		})
 	case TypeTick:
 		m.Tick = &Tick{}
 		return m, decode(m.Tick, m.Tick.Validate)
@@ -380,10 +385,12 @@ func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 }
 
 // frameType reads a frame's top level alone: one JSON object, and nothing
-// after it, whose key "type", spelled exactly, appears once with a string
-// value. It returns that value and the object's keys, each once; a
-// repeated key other than "type" is left to the strict decode, which
-// refuses it. Any other frame has no type that can be read.
+// after it, whose key "type", spelled exactly, has a string value, the
+// same at each appearance. It returns that value and the object's keys,
+// each once; a repeated key, "type" included, is left to the strict
+// decode, which refuses it under the frame's type (CH-5, CH-8, CH-10).
+// Any other frame, "type" with two values included, has no type that can
+// be read.
 func frameType(b []byte) (string, map[string]json.RawMessage, error) {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
@@ -404,9 +411,14 @@ func frameType(b []byte) (string, map[string]json.RawMessage, error) {
 		keys[key] = raw
 		if key == "type" {
 			types++
-			if err := json.Unmarshal(raw, &typ); err != nil || raw[0] != '"' {
+			var v string
+			if err := json.Unmarshal(raw, &v); err != nil || raw[0] != '"' {
 				return "", nil, fmt.Errorf("type is not a string")
 			}
+			if types > 1 && v != typ {
+				return "", nil, fmt.Errorf("type is %q and %q", typ, v)
+			}
+			typ = v
 		}
 	}
 	if _, err := dec.Token(); err != nil {
@@ -415,11 +427,14 @@ func frameType(b []byte) (string, map[string]json.RawMessage, error) {
 	if _, err := dec.Token(); err != io.EOF {
 		return "", nil, fmt.Errorf("data after the first value")
 	}
-	if types != 1 {
-		return "", nil, fmt.Errorf("%d keys type, not one", types)
+	if types == 0 {
+		return "", nil, fmt.Errorf("no key type")
 	}
 	return typ, keys, nil
 }
+
+// isNull reports whether a key's raw value is JSON null.
+func isNull(raw json.RawMessage) bool { return string(raw) == "null" }
 
 // nodeFields are the fields CH-6 and CH-9 list for each node message, and
 // for node-hello's taken.
@@ -494,6 +509,12 @@ func DecodeFromNode(b []byte) (*FromNode, error) {
 	if err := strictjson.Decode(b, v); err != nil {
 		m.Close = typ
 		return m, &Error{Code: CodeDecode, Field: "message", Detail: err.Error()}
+	}
+	// A key present with null decodes as absent; it is refused, not read
+	// as the object it lacks.
+	if typ == TypeNodeHello && isNull(keys["taken"]) {
+		m.Close = typ
+		return m, &Error{Code: CodeForm, Field: "taken", Detail: "null is not the node's saved position"}
 	}
 	if err := v.Validate(); err != nil {
 		m.Close = typ
