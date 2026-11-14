@@ -261,11 +261,12 @@ var (
 // reads: every rule of C13 that holds on one record, including the frame
 // bytes against their hashes and the redactions applied. It refuses a
 // record with Node set, and any field new in 0.2.
-func (o *Observation) Validate() error { return o.validateChannel(Identifier) }
+func (o *Observation) Validate() error { return o.validateChannel(Identifier, nil) }
 
-// validateChannel checks a channel observation of the minor want.
-func (o *Observation) validateChannel(want string) error {
-	c := &checker{}
+// validateChannel checks a channel observation of the minor want; keys are
+// the decoded document's key paths, nil for a Go value.
+func (o *Observation) validateChannel(want string, keys map[string]bool) error {
+	c := &checker{keys: keys}
 	c.strictSchema(o.Schema, want)
 	o.check(c)
 	if o.Node != nil {
@@ -277,8 +278,12 @@ func (o *Observation) validateChannel(want string) error {
 
 // ValidateStored checks a stored observation: Frames absent, Node set and
 // consistent with the body. A later 0.x minor is read forward.
-func (o *Observation) ValidateStored() error {
-	c := &checker{}
+func (o *Observation) ValidateStored() error { return o.validateStored(nil) }
+
+// validateStored is ValidateStored; keys are the decoded document's key
+// paths, nil for a Go value.
+func (o *Observation) validateStored(keys map[string]bool) error {
+	c := &checker{keys: keys}
 	c.storedSchema(o.Schema)
 	o.check(c)
 	if len(o.Frames) > 0 {
@@ -306,8 +311,7 @@ func (o *Observation) check(c *checker) {
 	}
 	// No order is checked between made_utc and the capture times: the
 	// sensor's clock may step (CH-21).
-	c.new02("made_utc", o.MadeUTC != "")
-	if o.MadeUTC != "" {
+	if c.new02("made_utc", o.MadeUTC != "") {
 		c.utc("made_utc", o.MadeUTC)
 	}
 	if o.ResolutionNS < 1 || o.ResolutionNS > 1e9 {
@@ -722,7 +726,7 @@ func DecodeStored(b []byte) (*Observation, error) {
 			return nil, &Error{Code: CodeDecode, Field: "netobs", Detail: err.Error()}
 		}
 	}
-	return &o, o.ValidateStored()
+	return &o, o.validateStored(keyPaths(b))
 }
 
 // ObservationFromEvent reads the stored observation of a C4

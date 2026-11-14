@@ -1,7 +1,10 @@
 package netobs
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"time"
 
@@ -314,16 +317,22 @@ func DecodeFromSensor(b []byte) (*FromSensor, error) {
 	if len(b) > MaxChannelFrame {
 		return &FromSensor{}, &Error{Code: CodeRange, Field: "record", Detail: fmt.Sprintf("%d bytes, above %d", len(b), MaxChannelFrame)}
 	}
-	var head struct {
-		Schema string `json:"schema"`
-		Type   string `json:"type"`
-	}
-	if err := strictjson.Forward(b, &head); err != nil {
+	// The type is read first, alone, so that a frame of a known type that
+	// fails its strict decode, a duplicate key included, still reports its
+	// type: a sensor-hello or tick then closes (CH-8, CH-10).
+	typ, _, err := frameType(b)
+	if err != nil {
 		return &FromSensor{}, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 	}
-	m := &FromSensor{Type: head.Type}
-	if !contains(SensorTypes, head.Type) {
-		return m, &Error{Code: CodeType, Field: "type", Detail: fmt.Sprintf("%q: the channel carries only %v from a sensor", head.Type, SensorTypes)}
+	m := &FromSensor{Type: typ}
+	if !contains(SensorTypes, typ) {
+		return m, &Error{Code: CodeType, Field: "type", Detail: fmt.Sprintf("%q: the channel carries only %v from a sensor", typ, SensorTypes)}
+	}
+	var head struct {
+		Schema string `json:"schema"`
+	}
+	if err := strictjson.Forward(b, &head); err != nil {
+		return m, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 	}
 	if head.Schema != Identifier02 {
 		return m, &Error{Code: CodeSchema, Field: "schema", Detail: fmt.Sprintf("%q is not %s", head.Schema, Identifier02)}
@@ -334,7 +343,7 @@ func DecodeFromSensor(b []byte) (*FromSensor, error) {
 		}
 		return validate()
 	}
-	switch head.Type {
+	switch typ {
 	case TypeSensorHello:
 		m.Hello = &SensorHello{}
 		return m, decode(m.Hello, m.Hello.Validate)
@@ -343,11 +352,81 @@ func DecodeFromSensor(b []byte) (*FromSensor, error) {
 		return m, decode(m.Tick, m.Tick.Validate)
 	case TypeHeartbeat:
 		m.Heartbeat = &Heartbeat{}
-		return m, decode(m.Heartbeat, func() error { return m.Heartbeat.validateChannel(Identifier02) })
+		return m, decode(m.Heartbeat, func() error { return m.Heartbeat.validateChannel(Identifier02, keyPaths(b)) })
 	default:
 		m.Observation = &Observation{}
-		return m, decode(m.Observation, func() error { return m.Observation.validateChannel(Identifier02) })
+		return m, decode(m.Observation, func() error { return m.Observation.validateChannel(Identifier02, keyPaths(b)) })
 	}
+}
+
+// frameType reads a frame's top level alone: one JSON object, and nothing
+// after it, whose key "type", spelled exactly, appears once with a string
+// value. It returns that value and the object's keys, each once; a
+// repeated key other than "type" is left to the strict decode, which
+// refuses it. Any other frame has no type that can be read.
+func frameType(b []byte) (string, map[string]json.RawMessage, error) {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return "", nil, fmt.Errorf("not a JSON object")
+	}
+	keys := map[string]json.RawMessage{}
+	typ, types := "", 0
+	for dec.More() {
+		k, err := dec.Token()
+		if err != nil {
+			return "", nil, err
+		}
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return "", nil, err
+		}
+		key := k.(string)
+		keys[key] = raw
+		if key == "type" {
+			types++
+			if err := json.Unmarshal(raw, &typ); err != nil || raw[0] != '"' {
+				return "", nil, fmt.Errorf("type is not a string")
+			}
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return "", nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return "", nil, fmt.Errorf("data after the first value")
+	}
+	if types != 1 {
+		return "", nil, fmt.Errorf("%d keys type, not one", types)
+	}
+	return typ, keys, nil
+}
+
+// nodeFields are the fields CH-6 and CH-9 list for each node message, and
+// for node-hello's taken.
+var nodeFields = map[string][]string{
+	TypeNodeHello: {"schema", "type", "sensor_id", "generation", "taken"},
+	TypeAck:       {"schema", "type", "run_counter", "run_id", "seq"},
+	"taken":       {"run_counter", "run_id", "seq"},
+}
+
+// unlisted returns a key of a node message, or of its taken object, that
+// CH-6 or CH-9 does not list, a key that differs from a field only in case
+// included; "" when every key is listed.
+func unlisted(typ string, keys map[string]json.RawMessage) string {
+	for k := range keys {
+		if !contains(nodeFields[typ], k) {
+			return k
+		}
+	}
+	var taken map[string]json.RawMessage
+	if raw, ok := keys["taken"]; ok && typ == TypeNodeHello && json.Unmarshal(raw, &taken) == nil {
+		for k := range taken {
+			if !contains(nodeFields["taken"], k) {
+				return "taken." + k
+			}
+		}
+	}
+	return ""
 }
 
 // FromNode is one frame the agent reads from the node: at most one of the
@@ -368,16 +447,13 @@ func DecodeFromNode(b []byte) (*FromNode, error) {
 	if len(b) > MaxNodeMessage {
 		return &FromNode{Close: CloseFrameTooLarge}, &Error{Code: CodeRange, Field: "message", Detail: fmt.Sprintf("%d bytes, above %d", len(b), MaxNodeMessage)}
 	}
-	var head struct {
-		Schema string `json:"schema"`
-		Type   string `json:"type"`
-	}
-	if err := strictjson.Forward(b, &head); err != nil {
+	typ, keys, err := frameType(b)
+	if err != nil {
 		return &FromNode{Close: CloseType}, &Error{Code: CodeDecode, Field: "message", Detail: err.Error()}
 	}
-	m := &FromNode{Type: head.Type}
+	m := &FromNode{Type: typ}
 	var v interface{ Validate() error }
-	switch head.Type {
+	switch typ {
 	case TypeNodeHello:
 		m.Hello = &NodeHello{}
 		v = m.Hello
@@ -386,21 +462,21 @@ func DecodeFromNode(b []byte) (*FromNode, error) {
 		v = m.Ack
 	default:
 		m.Close = CloseType
-		return m, &Error{Code: CodeType, Field: "type", Detail: fmt.Sprintf("%q: the node sends only %v", head.Type, NodeTypes)}
+		return m, &Error{Code: CodeType, Field: "type", Detail: fmt.Sprintf("%q: the node sends only %v", typ, NodeTypes)}
 	}
-	// Forward reads the document as Decode does, but passes a key that is
-	// not a field: so a frame Forward reads and Decode refuses carries a
-	// field not listed, which closes as type (CH-5).
-	if err := strictjson.Forward(b, v); err != nil {
-		m.Close = head.Type
-		return m, &Error{Code: CodeDecode, Field: "message", Detail: err.Error()}
+	// A field not listed, in any case, closes as type; any other failure of
+	// the strict decode, a duplicate key included, closes as the frame's
+	// type (CH-5).
+	if k := unlisted(typ, keys); k != "" {
+		m.Close = CloseType
+		return m, &Error{Code: CodeDecode, Field: "message", Detail: fmt.Sprintf("key %q is not a field of %s", k, typ)}
 	}
 	if err := strictjson.Decode(b, v); err != nil {
-		m.Close = CloseType
+		m.Close = typ
 		return m, &Error{Code: CodeDecode, Field: "message", Detail: err.Error()}
 	}
 	if err := v.Validate(); err != nil {
-		m.Close = head.Type
+		m.Close = typ
 		return m, err
 	}
 	return m, nil

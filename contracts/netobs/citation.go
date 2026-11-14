@@ -259,12 +259,10 @@ func (cv *Coverage) check(c *checker, field string) {
 		c.fail(CodeRange, field+".settings.flow_idle_s", "%d not in [%d, %d]", s.FlowIdleS, MinFlowIdleS, MaxFlowIdleS)
 	}
 	c.utc(field+".since_utc", cv.SinceUTC)
-	c.new02(field+".config_digest", cv.ConfigDigest != "")
-	if cv.ConfigDigest != "" && !baselineHashForm.MatchString(cv.ConfigDigest) {
+	if c.new02(field+".config_digest", cv.ConfigDigest != "") && !baselineHashForm.MatchString(cv.ConfigDigest) {
 		c.fail(CodeForm, field+".config_digest", "%q is not sha256:<hex>", cv.ConfigDigest)
 	}
-	c.new02(field+".settings.prp_window_ms", s.PRPWindowMS != 0)
-	if s.PRPWindowMS != 0 && (s.PRPWindowMS < MinPRPWindowMS || s.PRPWindowMS > MaxPRPWindowMS) {
+	if c.new02(field+".settings.prp_window_ms", s.PRPWindowMS != 0) && (s.PRPWindowMS < MinPRPWindowMS || s.PRPWindowMS > MaxPRPWindowMS) {
 		c.fail(CodeRange, field+".settings.prp_window_ms", "%d not in [%d, %d]", s.PRPWindowMS, MinPRPWindowMS, MaxPRPWindowMS)
 	}
 }
