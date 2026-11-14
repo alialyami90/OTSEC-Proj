@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,12 +19,12 @@ import (
 // CH-35's bridge (P4-4-CC deliverable 1), kept by the C13 0.2 code for a
 // later minor (C13 0.3 section 1.2; deliverable 2): the node's reading of
 // what a node of a later minor stored before it was rolled back to this
-// build, and of the 0.1 checkpoint it finds at the upgrade. Under the
-// brief's "Later-minor legs move with the minor", the later minor is now
-// 0.3. Desk only: the 0.1 and 0.3 documents and records are this build's
-// own, edited by hand to C13 0.2 section 11's and C13 0.3 section 1.2's
-// text; no sensor, 0.1 node or 0.3 node wrote them, and no device was
-// contacted.
+// build, and of the 0.1 and 0.2 checkpoints it finds at the upgrade. Under
+// the brief's "Later-minor legs move with the minor", the later minor is
+// now 0.4, since this build is 0.3 (deliverable 3). Desk only: the 0.1,
+// 0.2 and 0.4 documents and records are this build's own, edited by hand
+// to C13 0.2 section 11's and C13 0.3 section 1.2's text; no sensor, and
+// no node of another minor, wrote them, and no device was contacted.
 
 // appendStoredAs commits rec with the node stopped, past this build's
 // configuration document check, as a build of a later minor would have,
@@ -32,6 +33,14 @@ import (
 // returns rec's seq.
 func appendStoredAs(t *testing.T, c *Config, rec c5.Record, info c5.DocumentInfo, remove []c5.Seq) c5.Seq {
 	t.Helper()
+	return appendStoredAll(t, c, []c5.Record{rec}, info, remove)[0]
+}
+
+// appendStoredAll is appendStoredAs for recs, all of one stream, committed
+// in batches of 100, and returns their seqs.
+func appendStoredAll(t *testing.T, c *Config, recs []c5.Record, info c5.DocumentInfo, remove []c5.Seq) []c5.Seq {
+	t.Helper()
+	rec := recs[0]
 	layout, err := c.Layout()
 	if err != nil {
 		t.Fatal(err)
@@ -71,16 +80,22 @@ func appendStoredAs(t *testing.T, c *Config, rec c5.Record, info c5.DocumentInfo
 	if err != nil {
 		t.Fatal(err)
 	}
-	rcs, err := log.AppendBatch(bg, []c5.Record{rec})
-	if err != nil {
-		t.Fatal(err)
+	var seqs []c5.Seq
+	for b := range slices.Chunk(recs, 100) {
+		rcs, err := log.AppendBatch(bg, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rc := range rcs {
+			seqs = append(seqs, rc.Key().Seq)
+		}
 	}
 	if len(remove) > 0 {
 		if _, err := db.RemoveConfig(bg, rec.Stream, info.Series, remove); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return rcs[0].Key().Seq
+	return seqs
 }
 
 // later02 rewrites a JSON object: schema to sch, and each of set's members
@@ -383,6 +398,12 @@ func TestDetectorBridgeLaterRecords(t *testing.T) {
 // of another build would leave it.
 func corruptEvent(t *testing.T, c *Config, stream c5.StreamID, seq c5.Seq, old, new string) {
 	t.Helper()
+	corruptEvents(t, c, stream, seq, seq, old, new)
+}
+
+// corruptEvents is corruptEvent for each seq from seq to last.
+func corruptEvents(t *testing.T, c *Config, stream c5.StreamID, seq, last c5.Seq, old, new string) {
+	t.Helper()
 	var n int64
 	paths, _ := filepath.Glob(filepath.Join(c.Store.Dir, "*.db"))
 	for _, p := range paths {
@@ -390,15 +411,15 @@ func corruptEvent(t *testing.T, c *Config, stream c5.StreamID, seq c5.Seq, old, 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if res, err := db.Exec(`UPDATE events SET event = CAST(replace(CAST(event AS TEXT), ?, ?) AS BLOB) WHERE stream = ? AND seq = ?`,
-			old, new, string(stream), int64(seq)); err == nil {
+		if res, err := db.Exec(`UPDATE events SET event = CAST(replace(CAST(event AS TEXT), ?, ?) AS BLOB) WHERE stream = ? AND seq BETWEEN ? AND ?`,
+			old, new, string(stream), int64(seq), int64(last)); err == nil {
 			k, _ := res.RowsAffected()
 			n += k
 		}
 		db.Close()
 	}
-	if n != 1 {
-		t.Fatalf("%d events of %s:%d rewritten", n, stream, seq)
+	if n != int64(last-seq+1) {
+		t.Fatalf("%d events of %s:%d to %d rewritten", n, stream, seq, last)
 	}
 }
 
@@ -452,6 +473,14 @@ func TestDetectorAlertUnreadableSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	h := healthHead(t, r)
+	r.Close()
+	// The control for the health events: a restore that skips none, and
+	// the health events its stop and start commit (D6's N3 on #682).
+	r, _, _ = start(t, c, dir)
+	tick(t, r)
+	clean := healthTypesAfter(t, r, h)
+	h = healthHead(t, r)
 	r.Close()
 	var bad []c5.Seq
 	for range 2 {
@@ -489,6 +518,9 @@ func TestDetectorAlertUnreadableSkipped(t *testing.T) {
 	if n := eventsContaining(t, c, AlarmAlertUnreadable); n != 0 {
 		t.Fatalf("%d stored events name %s; it writes no health event", n, AlarmAlertUnreadable)
 	}
+	if got := healthTypesAfter(t, r, h); !slices.Equal(got, clean) {
+		t.Fatalf("the stop and the start with the skip committed health events %q, the ones without it %q", got, clean)
+	}
 
 	// A checkpoint past the two, then a restore that skips none.
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(2, frameData(2), ""))); err != nil {
@@ -501,5 +533,82 @@ func TestDetectorAlertUnreadableSkipped(t *testing.T) {
 	tick(t, r)
 	if d := detectorStatus(t, st); !d.Restored || d.AlertsUnreadable != 0 || countAlarms(st, AlarmAlertUnreadable) != 0 {
 		t.Fatalf("the next restore: status %+v, %d alarms", d, countAlarms(st, AlarmAlertUnreadable))
+	}
+}
+
+// healthHead is the last seq on the health stream.
+func healthHead(t *testing.T, r *Runtime) c5.Seq {
+	t.Helper()
+	h, err := r.Store(HealthStream).LastCommitted(bg, HealthStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// healthTypesAfter are the types of the health events committed after
+// seq, of any type, sorted.
+func healthTypesAfter(t *testing.T, r *Runtime, seq c5.Seq) []string {
+	t.Helper()
+	got, err := r.Store(HealthStream).Read(bg, HealthStream, seq, 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, st := range got {
+		e, err := event.Decode(st.Event)
+		if err != nil || e.Health == nil {
+			t.Fatalf("health record %d: %v", st.Key.Seq, err)
+		}
+		out = append(out, e.Health.Type)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// N-13's leg (2) at its bounds (D6's N1 and N2 on #682): exactly one
+// unreadable alert after last_alert_seq is counted and alarmed, and 257,
+// more than a read page (detectorReadPage), are all read past and each
+// counted once, with the restore ending. The controls are the mutants
+// skipped > 1, which hides the one, and after set only for an alert that
+// reads, which reads the first page again and never ends the start.
+func TestDetectorAlertUnreadableBounds(t *testing.T) {
+	for _, n := range []int{1, detectorReadPage + 1} {
+		t.Run(strconv.Itoa(n), func(t *testing.T) {
+			c, dir := holdConfig(t)
+			r, _, _ := start(t, c, dir)
+			if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""))); err != nil {
+				t.Fatal(err)
+			}
+			tick(t, r)
+			alerts := NetAlertStream(sensorID)
+			got, err := r.Store(alerts).Read(bg, alerts, 0, 1)
+			if err != nil || len(got) != 1 {
+				t.Fatalf("%d alerts: %v", len(got), err)
+			}
+			e, err := event.Decode(got[0].Event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.ID.Seq = 0
+			b, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.Close()
+			recs := make([]c5.Record, n)
+			for i := range recs {
+				recs[i] = c5.Record{Stream: alerts, Class: c5.ClassNetworkAlert, Event: b}
+			}
+			seqs := appendStoredAll(t, c, recs, c5.DocumentInfo{}, nil)
+			corruptEvents(t, c, alerts, seqs[0], seqs[n-1], `"type":"`+netobs.HealthAlert+`"`, `"type":"netobs.alerx"`)
+
+			r, st, _ := start(t, c, dir)
+			defer r.Close()
+			tick(t, r)
+			if d := detectorStatus(t, st); !d.Restored || d.AlertsUnreadable != int64(n) || countAlarms(st, AlarmAlertUnreadable) != 1 {
+				t.Fatalf("status %+v, %d unreadable alarms", d, countAlarms(st, AlarmAlertUnreadable))
+			}
+		})
 	}
 }
