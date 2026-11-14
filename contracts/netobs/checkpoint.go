@@ -360,8 +360,13 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 
 // Validate checks the checkpoint: its schema, half and sensor, the baseline
 // named or not, the clock, and every window as the alert it would give.
-func (k *DetectorCheckpoint) Validate() error {
+func (k *DetectorCheckpoint) Validate() error { return k.validate(nil) }
+
+// validate is Validate; keys are the decoded document's key paths, nil for
+// a Go value.
+func (k *DetectorCheckpoint) validate(keys map[string]bool) error {
 	c := checkpointChecker(k.Schema)
+	c.keys = keys
 	if k.Half != HalfDetector {
 		c.fail(CodeForm, "half", "%q is not %s", k.Half, HalfDetector)
 	}
@@ -398,6 +403,10 @@ func (k *DetectorCheckpoint) Validate() error {
 				c.fail(CodeOrder, f, "windows sorted by rule and asset, one per key")
 			}
 		}
+		// The window's coverage is judged inside its alert, from the Go
+		// value; a 0.2 key in it is refused here, by its presence.
+		c.new02(f+".coverage.config_digest", w.Coverage.ConfigDigest != "")
+		c.new02(f+".coverage.settings.prp_window_ms", w.Coverage.Settings.PRPWindowMS != 0)
 		var params []Param
 		for _, name := range ruleParams[w.Rule] {
 			params = append(params, Param{Name: name, Value: "1"}) // the values are the detector's
@@ -579,5 +588,5 @@ func DecodeDetectorCheckpoint(b []byte) (*DetectorCheckpoint, error) {
 	if err := strictjson.Decode(b, &k); err != nil {
 		return nil, &Error{Code: CodeDecode, Field: "checkpoint", Detail: err.Error()}
 	}
-	return &k, k.Validate()
+	return &k, k.validate(keyPaths(b))
 }

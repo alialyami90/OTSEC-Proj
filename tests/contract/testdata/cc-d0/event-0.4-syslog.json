@@ -1,0 +1,40 @@
+{
+  "schema": "otsec.event/0.4",
+  "id": {"node_id": "d6-node", "stream": "syslog/192.0.2.30", "seq": 5},
+  "origin": "device",
+  "kind": "syslog",
+  "source": {
+    "asset": {"id": "1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7a8b", "binding": {"method": "sender-address", "confidence": "configured"}},
+    "sender": {"address": "192.0.2.30"},
+    "origin_auth": "none",
+    "evidence_class": "simulated"
+  },
+  "collection": {
+    "method": "syslog-receive",
+    "parser": {"name": "rfc5424", "version": "1"},
+    "parse_status": "ok"
+  },
+  "received": {"utc": "2026-11-14T10:00:00.200125Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "device_time": {
+    "native": "2026-11-14T10:00:00.123Z",
+    "native_encoding": "text",
+    "format": "rfc5424",
+    "wall_clock": "2026-11-14T10:00:00.123",
+    "offset": "+00:00",
+    "offset_basis": "on-wire",
+    "utc": "2026-11-14T10:00:00.123Z",
+    "resolution_ns": 1000000
+  },
+  "native": {
+    "bytes": "PDEzND4xIDIwMjYtMTEtMTRUMTA6MDA6MDAuMTIzWiBkNi10ZXN0LWRldmljZSBkNnRlc3QgLSAtIC0gRDYgY29uc3RydWN0ZWQgbWVzc2FnZSBmb3IgdGhlIFA0LTQtQ0MgZml4dHVyZXM=",
+    "record_sha256": "d6cdb54f6141739a33160339cd8859fa09ece428fa2c042fcac2fd998c3aa7fe",
+    "record_length": 107,
+    "evidence": {
+      "sha256": "d6cdb54f6141739a33160339cd8859fa09ece428fa2c042fcac2fd998c3aa7fe",
+      "length": 107,
+      "ref": "sha256:d6cdb54f6141739a33160339cd8859fa09ece428fa2c042fcac2fd998c3aa7fe"
+    },
+    "span": {"offset": 0, "length": 107}
+  },
+  "normalized": {"subject": "d6test", "subject_type": "message", "value": "D6 constructed message for the P4-4-CC fixtures", "category": "unmapped"}
+}

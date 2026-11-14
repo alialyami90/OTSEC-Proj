@@ -1,6 +1,7 @@
 package netobs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -170,12 +171,14 @@ func Codes(err error) []Code {
 // forward. need is the channel minor whose required fields a channel
 // record must carry, 0 for a stored record (C13 0.2 §11, C13 0.3 §1.1:
 // optional in the Go type and in a stored record, required on the channel
-// of their minor and later).
+// of their minor and later). keys holds a decoded document's key paths
+// (keyPaths), nil when a Go value is validated.
 type checker struct {
 	errs  []error
 	minor int
 	later bool
 	need  int
+	keys  map[string]bool
 }
 
 func (c *checker) fail(code Code, field, format string, a ...any) {
@@ -302,24 +305,72 @@ func (c *checker) storedSchema(s string) {
 
 // new02 checks a field that C13 0.2 adds (C13 0.2 §11). In a record of a
 // minor below 0.2 it must be absent, so a 0.1 record stays as strict as
-// the 0.1 reader was. In a 0.2 channel record it must be present.
-func (c *checker) new02(field string, present bool) {
-	c.newAt(2, field, present)
+// the 0.1 reader was (D4-103 ruling 2). In a 0.2 channel record it must be
+// present.
+func (c *checker) new02(field string, set bool) bool {
+	return c.newAt(2, field, set)
 }
 
 // new03 checks a field that C13 0.3 adds (C13 0.3 §1.1), as new02 does for
 // 0.2: refused below 0.3, required on the 0.3 channel.
-func (c *checker) new03(field string, present bool) {
-	c.newAt(3, field, present)
+func (c *checker) new03(field string, set bool) bool {
+	return c.newAt(3, field, set)
 }
 
-func (c *checker) newAt(minor int, field string, present bool) {
+// newAt checks a field new in the given minor. The field is present when
+// set holds (its Go value is not the zero value) or when its key is in the
+// decoded document, whatever its value ("", 0, false, null). newAt reports
+// whether the field's value is to be checked: present, and not already
+// refused as new.
+func (c *checker) newAt(minor int, field string, set bool) bool {
+	present := set || c.keys[field]
 	switch {
 	case present && c.minor < minor:
 		c.fail(CodeDecode, field, "new in otsec.netobs/0.%d; not in a 0.%d record", minor, c.minor)
+		return false
 	case !present && c.need >= minor:
 		c.fail(CodeMissing, field, "required in an otsec.netobs/0.%d channel record", c.need)
 	}
+	return present
+}
+
+// null refuses a key whose value was null: its pointer field is nil while
+// its key is in the document. Such a key is never read as absent.
+func (c *checker) null(field string, isNil bool) {
+	if isNil && c.keys[field] {
+		c.fail(CodeForm, field, "null is not a value")
+	}
+}
+
+// keyPaths lists every key of a JSON document by its path in the checker's
+// field form ("coverage.settings.prp_window_ms", "windows[0].coverage").
+// It is called only on a document strictjson has read, so no key repeats.
+func keyPaths(b []byte) map[string]bool {
+	var doc any
+	if json.Unmarshal(b, &doc) != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, e := range x {
+				p := k
+				if path != "" {
+					p = path + "." + k
+				}
+				out[p] = true
+				walk(p, e)
+			}
+		case []any:
+			for i, e := range x {
+				walk(fmt.Sprintf("%s[%d]", path, i), e)
+			}
+		}
+	}
+	walk("", doc)
+	return out
 }
 
 // decimal parses a C13 0.2 number written "decimal from 1" (from1) or

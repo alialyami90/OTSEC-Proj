@@ -37,7 +37,7 @@ func TestWorstStored02Fits(t *testing.T) {
 			}
 			o.Coverage.Decodes = o.Coverage.Decodes[:len(o.Coverage.Decodes)-1]
 		}
-		if err := o.validateChannel(Identifier02); err != nil {
+		if err := o.validateChannel(Identifier02, nil); err != nil {
 			t.Fatalf("%s: %v", o.Kind, err)
 		}
 		s := worstStored(o)

@@ -80,13 +80,13 @@ func DecodeChannel(b []byte) (*ChannelRecord, error) {
 		if err := strictjson.Decode(b, &o); err != nil {
 			return nil, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 		}
-		return &ChannelRecord{Observation: &o}, o.Validate()
+		return &ChannelRecord{Observation: &o}, o.validateChannel(Identifier, keyPaths(b))
 	case TypeHeartbeat:
 		var h Heartbeat
 		if err := strictjson.Decode(b, &h); err != nil {
 			return nil, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 		}
-		return &ChannelRecord{Heartbeat: &h}, h.Validate()
+		return &ChannelRecord{Heartbeat: &h}, h.validateChannel(Identifier, keyPaths(b))
 	}
 	return nil, &Error{Code: CodeType, Field: "type", Detail: fmt.Sprintf("%q: the channel carries only %s and %s", head.Type, TypeHeartbeat, TypeObservation)}
 }
@@ -247,11 +247,12 @@ var carriers = []string{"up", "down", "unknown"}
 // Validate checks a heartbeat of the 0.1 channel, the one main's intake
 // reads: every rule of C13 that holds on one heartbeat. It refuses any
 // field new in 0.2.
-func (h *Heartbeat) Validate() error { return h.validateChannel(Identifier) }
+func (h *Heartbeat) Validate() error { return h.validateChannel(Identifier, nil) }
 
-// validateChannel checks a heartbeat of the minor want.
-func (h *Heartbeat) validateChannel(want string) error {
-	c := &checker{}
+// validateChannel checks a heartbeat of the minor want; keys are the
+// decoded document's key paths, nil for a Go value.
+func (h *Heartbeat) validateChannel(want string, keys map[string]bool) error {
+	c := &checker{keys: keys}
 	c.strictSchema(h.Schema, want)
 	if h.Type != TypeHeartbeat {
 		c.fail(CodeType, "type", "%q is not %s", h.Type, TypeHeartbeat)
@@ -267,21 +268,25 @@ func (h *Heartbeat) validateChannel(want string) error {
 	if !contains([]string{"ok", "bound", "unknown"}, h.InterfaceCheck) {
 		c.fail(CodeForm, "interface_check", "%q is not ok, bound or unknown", h.InterfaceCheck)
 	}
+	// A key present with null decodes as absent; it is refused, not read
+	// as the count or object it lacks.
 	for _, x := range h.Counters.counts02() {
-		c.new02("counters."+x.name, x.v != nil)
+		if c.new02("counters."+x.name, x.v != nil) && x.v == nil {
+			c.fail(CodeForm, "counters."+x.name, "null is not a count")
+		}
 	}
 	// egress_check is optional at 0.2 (CH-27), so it is only refused at 0.1.
-	if h.EgressCheck != "" {
-		c.new02("egress_check", true)
-		if h.EgressCheck != "ok" && h.EgressCheck != "absent" {
+	if h.EgressCheck != "" || c.keys["egress_check"] {
+		if c.new02("egress_check", true) && h.EgressCheck != "ok" && h.EgressCheck != "absent" {
 			c.fail(CodeForm, "egress_check", "%q is not ok or absent", h.EgressCheck)
 		}
 	}
-	c.new02("interfaces", h.Interfaces != nil)
-	if h.Interfaces != nil {
+	if c.new02("interfaces", h.Interfaces != nil) {
 		h.checkInterfaces(c)
 	}
-	c.new02("agent", h.Agent != nil)
+	if c.new02("agent", h.Agent != nil) && h.Agent == nil {
+		c.fail(CodeForm, "agent", "null is not the agent's counts")
+	}
 	if h.Agent != nil {
 		for _, x := range h.Agent.counts() {
 			if x.v == nil {
@@ -289,10 +294,14 @@ func (h *Heartbeat) validateChannel(want string) error {
 			}
 		}
 		for _, x := range h.Agent.counts03() {
-			c.new03("agent."+x.name, x.v != nil)
+			if c.new03("agent."+x.name, x.v != nil) {
+				c.null("agent."+x.name, x.v == nil)
+			}
 		}
 	}
-	c.new03("frame_stage", h.FrameStage != nil)
+	if c.new03("frame_stage", h.FrameStage != nil) {
+		c.null("frame_stage", h.FrameStage == nil)
+	}
 	if h.FrameStage != nil && h.FrameStage.OverlapTableFull == nil {
 		c.fail(CodeMissing, "frame_stage.overlap_table_full", "required")
 	}
