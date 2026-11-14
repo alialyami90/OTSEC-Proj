@@ -24,7 +24,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-14, later (D4-102).** No agent is running. The next steps are D4-102's "Next". The checkpoints below are superseded and kept for their history.
+**CHECKPOINT (D1), 2026-11-14, later (D4-102, D4-103).** The next steps are D4-102's "Next". D4-103 issues the first of them, brief P4-4-CC. The checkpoints below are superseded and kept for their history.
 
 **Earlier checkpoint (D1), 2026-11-14, work paused at the owner's word (D4-101), superseded by the latest checkpoint above.** No agent was running.
 - **Merged this session:** #670, #671 (C2 0.10, a proposal, not yet approved), #674, #678, #676 (P4-4-F27 (3)) and #672 (P4-4-F27 (4), the link-key reader).
