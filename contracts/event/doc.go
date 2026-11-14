@@ -1,4 +1,4 @@
-// Package event is contract C4, otsec.event/0.3: the event every module
+// Package event is contract C4, otsec.event/0.4: the event every module
 // produces and the timestamp model every other contract imports.
 //
 // # What it covers
@@ -103,4 +103,13 @@
 //     resolves. C4 checks only that netobs is one object within its bound;
 //     the node checks the body against C13 at intake. A 0.2 reader keeps the
 //     kind and ignores the field.
+//   - 0.4 (D4, approved in D4-92, docs/phase4/D4-c4-0.4-proposal.md): what
+//     C13 0.2 requires of sensor.counters and nothing else. From 0.4 it also
+//     takes diff.<name> for SensorCounters04 (C4-0.4-1); carries
+//     capture_loss exactly when diff.drops_driver, diff.drops_holder or
+//     diff.frames_overlong is above 0, naming those that are, in that order
+//     (C4-0.4-2); and always carries diff.packets, so that a 0.3 reader,
+//     which needs one of its own counters, reads every 0.4 event
+//     (C4-0.4-3). Identifier is one constant, so every event this code
+//     stamps says 0.4; no rule of any other event type changes.
 package event

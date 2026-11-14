@@ -12,7 +12,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every event's schema field.
-const Identifier = "otsec.event/0.3"
+const Identifier = "otsec.event/0.4"
 
 // NodeID names a platform node: a lowercase DNS label, defined in
 // contracts/node (A1 decision D1-1) so that C1 and C4 share one definition.
@@ -479,6 +479,19 @@ const (
 // their totals (D4-72).
 var SensorCounters = []string{"packets", "bytes", "drops_driver", "drops_decoder", "drops_channel", "decoder_errors",
 	"sessions_unparsed", "table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed"}
+
+// SensorCounters04 are the counters 0.4 adds to sensor.counters, C13 0.2's
+// new heartbeat counters (C4-0.4-1). An event stamped 0.3 refuses them.
+var SensorCounters04 = []string{"drops_holder", "frames_overlong", "frames_outgoing",
+	"prp_mismatched", "prp_table_full", "prp_tag_differs", "prp_wrong_lan", "engine_lines_refused"}
+
+// CaptureLossCounters are the counters whose rise is a capture loss, in the
+// order the capture_loss detail lists them (C4-0.4-2).
+var CaptureLossCounters = []string{"drops_driver", "drops_holder", "frames_overlong"}
+
+// DetailCaptureLoss is the sensor.counters detail that names the capture
+// losses, present exactly when one of CaptureLossCounters rose (since 0.4).
+const DetailCaptureLoss = "capture_loss"
 
 // SensorReported is the reported_by detail of a sensor.counters event: the
 // counts are the sensor's own report, not the node's measurement.
