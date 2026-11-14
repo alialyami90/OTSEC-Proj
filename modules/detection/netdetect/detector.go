@@ -463,10 +463,16 @@ func (d *Detector) settle() {
 // While a restore still has committed alerts waiting, the checkpoint names
 // the seq before the first of them, so a second restore reads them again.
 func (d *Detector) Checkpoint(lastAlertSeq uint64) ([]byte, error) {
+	return d.checkpoint(netobs.CheckpointIdentifier, lastAlertSeq)
+}
+
+// checkpoint encodes the detector's state stamped schema: the writer's
+// identifier, or a restored checkpoint's own for its round trip.
+func (d *Detector) checkpoint(schema string, lastAlertSeq uint64) ([]byte, error) {
 	if len(d.pending) > 0 {
 		lastAlertSeq = d.pending[0].Seq - 1
 	}
-	k := netobs.DetectorCheckpoint{Schema: netobs.CheckpointIdentifier, Half: netobs.HalfDetector, SensorID: d.sensor,
+	k := netobs.DetectorCheckpoint{Schema: schema, Half: netobs.HalfDetector, SensorID: d.sensor,
 		NodeID: d.node, Stream: d.stream, Baseline: d.hash, BaselineVersion: d.version, Through: d.through, LastAlertSeq: lastAlertSeq, ClockUTC: d.clockUTC,
 		Windows: []netobs.DetectorWindow{}, Coverage: d.cov, SessionThrough: d.sessionThrough, Sessions: d.sessions,
 		Tied: d.tied, Taken: d.taken, Degraded: d.degraded, DegradedOpen: d.degradedOpen}
@@ -528,7 +534,19 @@ func RestoreDetector(cfg DetectorConfig, checkpoint []byte, committed []Committe
 		a, _ := parseAddr(e.IP)
 		d.seen[a] = &e
 	}
-	if again, err := d.Checkpoint(k.LastAlertSeq); err != nil || !bytes.Equal(again, checkpoint) {
+	// The round trip is at the checkpoint's own minor: the restored state,
+	// stamped with the document's schema, must encode as this code's
+	// document, byte for byte, and as an earlier minor's decoded content,
+	// which another writer encoded. So a 0.1 checkpoint restores (CH-35,
+	// "Read"), and one whose state this detector would not write back, such
+	// as unsorted or duplicate windows or endpoints, is still refused.
+	want := checkpoint
+	if k.Schema != netobs.CheckpointIdentifier {
+		if want, err = k.Encode(); err != nil {
+			return nil, err
+		}
+	}
+	if again, err := d.checkpoint(k.Schema, k.LastAlertSeq); err != nil || !bytes.Equal(again, want) {
 		return nil, errors.New("netdetect: the checkpoint does not restore to itself")
 	}
 	// An endpoint no longer enrolled is no longer recorded.

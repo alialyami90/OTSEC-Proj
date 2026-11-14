@@ -359,8 +359,7 @@ func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession) (c5.Record, st
 	}
 	nd := st.Node
 	if tie != nil {
-		nd.PlatformSession = tie
-		b, err := json.Marshal(&st)
+		b, err := tieBody(body, tie)
 		if err != nil || len(b) > event.MaxNetobsBytes {
 			return c5.Record{}, "", false, fmt.Errorf("sensorlink: the tied record does not fit: %v", err)
 		}
@@ -380,6 +379,30 @@ func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession) (c5.Record, st
 	}
 	rec := c5.Record{Stream: l.cfg.Stream, Class: c5.ClassNetworkObservation, Event: eb, Capture: hr.Capture}
 	return rec, nd.DstAsset, nd.SrcAsset == netobs.AssetUnresolved && nd.DstAsset == netobs.AssetUnresolved, nil
+}
+
+// tieBody sets node.platform_session in a held observation's raw JSON and
+// keeps every other field as it was, so a held body of a later minor keeps
+// the fields this build's type does not know, such as C13 0.3's counts
+// (CH-35's bridge item 5, kept for a later minor by C13 0.3 section 1.2).
+// Re-encoding it through netobs.Observation would drop them for good.
+func tieBody(body json.RawMessage, tie *netobs.PlatformSession) ([]byte, error) {
+	var top, node map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(top["node"], &node); err != nil {
+		return nil, err
+	}
+	ps, err := json.Marshal(tie)
+	if err != nil {
+		return nil, err
+	}
+	node["platform_session"] = ps
+	if top["node"], err = json.Marshal(node); err != nil {
+		return nil, err
+	}
+	return json.Marshal(top)
 }
 
 // commitOne commits one record with tie, if any, or drops and counts it.
