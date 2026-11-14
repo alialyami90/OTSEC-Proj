@@ -2283,7 +2283,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 ## After D4-104: a collector defect on `main` (issued 2026-11-15, D4-104)
 
 ### P4-COL-1 (D3; D6 and D2 review): `Server.Serve` closes its listener when the server is already closed
-- Objective and rationale: P5 (secure failure behaviour), and a test that fails on `main` (D4-104 item 3). A `Close` before `Serve` leaves the listener open and the socket served.
+- Objective and rationale: P5 (secure failure behaviour), and the defect and failing test of D4-104 item 3.
 - Owner, and the reviewers (CLAUDE.md §5.6): D3 writes it. D6 reviews for the test, and D2 for the collector's callers.
 - Required inputs and dependencies:
   - D4-104 item 3;
@@ -2294,7 +2294,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Deliverable: one PR.
 - Acceptance tests:
   - **Unit test:** `Close`, then `Serve(ln)`. `Serve` returns `ErrServerClosed`, and `ln` is closed, shown by a second `Listen` on the same address that succeeds. The control is the closed branch without `ln.Close()`.
-  - **Repeat run:** `TestServeAssetClear` passes `-count=200` on CI-Linux, with its job URL.
+  - **The existing test:** `TestServeAssetClear` passes by name in both `go` jobs. The unit test above is the fix's proof, because the race's failure rate is unknown.
   - **CI:** both `go` jobs are green.
   - **Self-check:** the implementer runs the self-check list in this file.
 - Owed: none.

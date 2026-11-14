@@ -2299,12 +2299,12 @@ Evidence class: `desk` for the rulings. `CI-Linux` and `CI-Windows` for the runs
 - **2. On #683 (P4-4-CC deliverable 0; D1's comment 6884327190):**
   - **(a) C8-1's old-reader leg is narrowed.** Each record is valid at 0.12 in every field except the new action and its sensor target, and the 0.12 reader refuses it as "unknown action".
   - **(b) `docs/phase4/D3-sensor-link.md` §11.2 does not fix:**
-    - where `decision_seq` and `payload_sha256` sit;
-    - what the `sensor` and `streams` objects hold;
+    - the exact placement of `decision_seq` and `payload_sha256`;
+    - the revoked record's `sensor` object, and the field names inside `streams`;
     - the form of `applied_at` and `count`;
     - which field carries C8-4's reasons.
 
-    Three of those reasons hold hyphens (`run-regressed`, `run-forked`, `sensor-id`), which `reason_code`'s pattern refuses. D3 settles these as the first step of P4-4-CC deliverable 5: options in comments (D4-99), then D1's ruling. P4-4-DO's ruling 6852845352 is one option, not a decision taken in advance.
+    Four of C8-4's six reasons hold hyphens (`peer-key`, `run-regressed`, `run-forked`, `sensor-id`), and so do C8-2's denial codes `node-key`, `revoked-key`, `forked-key` and `asset-address`. `reason_code`'s pattern (`codePattern` in `contracts/audit/audit.go`) refuses each of them. D3 settles these as the first step of P4-4-CC deliverable 5: options in comments (D4-99), then D1's ruling. P4-4-DO's ruling 6852845352 is one option, not a decision taken in advance.
   - **(c)** D6's forward check on deliverable 5's branch uses the settled forms.
 - **3. A collector defect on `main`.**
   - **The failure.** `main`'s push of `83c9f697` failed `TestServeAssetClear` on `go (ubuntu-latest)`, in run 43522548095: "collector.sock is already served".
