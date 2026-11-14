@@ -1864,7 +1864,7 @@ Common rules as in "Phase 4 item 4, second part". Scratch files are named `<role
 - **Exclusions.**
   - This change's rule reads no session content. Telnet carries the relay's password in clear, so the rule reads, stores and forwards nothing the sessions carry, beyond what C13 already carries. A rule that needs content comes back to D1 first.
   - No decoding of SSH or SNMPv3 at authPriv.
-  - No change to the collector's own sessions.
+  - No change to the collector's own sessions, except the half-close lifted on conditions (D4-102 item 5 (a)).
   - No contact with any device.
 
 ## The third part of item 4: implementation (issued 2026-11-13, D4-92, D4-95, D4-96)
@@ -1948,7 +1948,7 @@ Code for those paths may merge unwired, reached only from tests. Every new entry
 
 - **Issued:** P4-4-HR24 stage 1 (D4, D4-95), which starts when D4's pin move (#657's follow-up) is done.
 - **Not yet issued:**
-  - **The approved contracts in code:** C13 0.2 (`contracts/netobs`), C7 0.11, C8 0.13 and C4 0.4. These come first among the later briefs, with D6's contract tests.
+  - **The approved contracts in code:** C13 0.2 (`contracts/netobs`), C7 0.11, C8 0.13 and C4 0.4, and C13 0.3 and C2 0.10 (D4-102 item 5). These come first among the later briefs, with D6's contract tests.
   - **The C13 0.2 intake** (D5, with D4): heartbeats, coverage gaps, the cursor and `sensorrun.json`. It carries the owed tests named above.
   - **The dialer and enrolment** (D5, with D3): merged unwired. It carries the owed tests named above. The product wiring comes only in the PR that passes the last owed test (D4-96).
   - **The sensor agent and capture** (D4), and the rig legs (D6).

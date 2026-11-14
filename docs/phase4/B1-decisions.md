@@ -2187,13 +2187,17 @@ The owner wrote on 2026-11-14: "merge all PRs then find a safe checkpoint and pa
 The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every PR in this entry changes Markdown only.
 
 - **1. Merged:**
-  - #675 as `ee7566a6`: HR-23's fix design, option (i), the parser chosen by function code. D2, D3 and D7 confirmed it at `48a66afe`. D6 accepted it at `b5b75ddb`, the only reviewer of the two later commits, each a text correction to §1 item 2. D6 can now pin stage 2.
-  - #677 as `2fb4ffc3`: SL-3, SL-T25 (a) to (u), and the HR-22, HR-23 and HR-25 rows. D6, D4 and D5 accepted it at `a4bd71cd`.
-  - #673 as `28e0f850`: C13 0.3.
+  - **#675 as `ee7566a6`:** HR-23's fix design, option (i), the parser chosen by function code.
+    - D2, D3 and D7 confirmed it at `48a66afe`.
+    - D6 accepted it at `688d3393` and at `b5b75ddb`, and was the only reviewer of those two commits. `688d3393` answers D2's note on §4.7, "Both directions", and the third port arrangement in §1 item 2 and §4.1 (D1's 6879752967 item 4). `b5b75ddb` corrects one clause of §1 item 2.
+    - D6 can now pin stage 2.
+  - **#677 as `2fb4ffc3`:** SL-3, SL-T25 (a) to (u), and the HR-22, HR-23 and HR-25 rows. D6, D4 and D5 accepted it at `a4bd71cd`.
+  - **#673 as `28e0f850`:** C13 0.3.
     - D6 and D5 accepted it at `058659e0`.
-    - D3 and D2 confirmed it at `7e4bc67b`. The one later change is D5's node rule, which does not touch their parts.
+    - D2 confirmed CH-57's DNP3 half at `7e4bc67b`.
+    - D3 confirmed it at `7e4bc67b`, so D3 read the node's expiry trigger in its earlier form. D6 checked the narrowed trigger for an attacker's lever at `058659e0` (6881620090).
 - **2. Approved:**
-  - **C2 0.10:** `docs/phase4/D2-c2-0.10-proposal.md`, merged in #671 at `44bdd478`, where D4, D6 and D3 passed it.
+  - **C2 0.10:** `docs/phase4/D2-c2-0.10-proposal.md`, merged in #671 at `44bdd478`. D4, D6 and D3 passed it.
   - **C13 0.3:** `docs/phase4/D4-c13-0.3-proposal.md`, with CH-51 to CH-57, N-1 to N-19 and the names it introduces.
     - Its CH-57 amends C13 0.2's W-7: through a quiet spell, an `end: idle` and every completion at `sa_reply_timeout_ms` are written at the first frame after the bound, which is stated in frame time.
     - That is a change to an approved bound. D3, D5, D6 and D2 judged it, with D2 on the DNP3 half.
@@ -2202,19 +2206,38 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
   - The proposals' status lines are not edited. This entry is the record of the approval, as D4-92 was for C13 0.2.
 - **3. D1's rulings, by comment:**
   - on #673: 6861593265, 6879608207, 6879970464, 6880306231, 6880955572, 6881410545, 6881536103 and 6881596681;
-  - on #677: 6879343731, 6879752967, 6879936534, 6880061674, 6880413017, 6880637197, 6880789325 and 6880955980;
-  - on #675: 6879529451.
+  - on #677: 6862286925, 6862389485, 6879343731, 6879752967, 6879936534, 6880061674, 6880413017, 6880637197, 6880789325 and 6880955980;
+  - on #675: 6879529451;
+  - on #671: 6861454974, 6862737844 and 6863811450.
+
+  6862286925 and 6862389485 give D5 one sentence for `docs/phase4/D5-sensor-node.md` §1.5 item 5, in P4-4-DO's PR. The sentence is D6's N2 on #654: the two refusals in (4) count under `skew_prestart_windows` whenever either refuses. SL-17, and C13 0.3's CH-41 correction (i), already carry it.
 - **4. D1's two errors, both caught before a merge by the role writing the text:**
   - **The (b1) ruling.** It had the agent emit its own `end` on a monotonic clock. That would have lost the engine's counts, and could miss on a split cut. D4 found it (6880774895), and D1 withdrew it for (b3) (6880789325).
-  - **Item 2 of 6881410545.** It expired the hold's open table on the sensor's capture clock, against SL-17's first constraint (D4-92). D4 found it (6881463710), and D1 took the arrival-order rule (6881536103). D6 then showed that "any later record" fails when several flows fall due in one spell, and D1 took "a later flow `start`" (6881596681).
+  - **Item 2 of 6881410545.**
+    - It took D6's option (a) in 6881392461, which expired the hold's open table on the sensor's capture clock. D5's B6 had named the constraint that rule breaks, SL-17's first constraint (D4-92), and neither D6's option nor D1's ruling checked it.
+    - D4 found it (6881463710), and D1 took the arrival-order rule (6881536103).
+    - D6 then showed that "any later record" fails when several flows fall due in one spell. D1 took "a later flow `start`" (6881596681).
 - **5. Owed by the brief "The approved contracts in code".** It is not issued yet. When it is, it covers C13 0.3 and C2 0.10, beside the C13 0.2, C7 0.11, C8 0.13 and C4 0.4 that `docs/agent-handoffs.md` names for it:
-  - **D5:** the hold's open-table expiry by CH-57 item 2, which is the wall-time bound and then a later flow `start` of the same run. `docs/phase4/D5-sensor-node.md` states it, with D5's two points: the arriving record is matched before the expiry check (6881561307), and an entry past its bound at a restart waits for the next record (6881618219).
-  - **The detector's restore:** one unreadable stored alert is skipped, counted and alarmed (6861593265 point 2).
-  - **The rollback floor of C13 0.3 §1.2:** D7's release record names it.
-  - **The field name:** `orig_overlap_octets` in P4-4-HR24P's "Expected interfaces" is `to_device_overlap_octets` (D6's N4 on #673). The brief stays as issued.
-- **6. Owed by the brief that changes the engine's script, and by HR-23's counted run:**
-  - the script requirements of CH-53: `redef max_timer_expires = 0;`, `tcp_inactivity_timeout` set to `flow_idle_s`, and no `connection_timing_out` hook that can return false;
-  - the counted run checks the timer cap's assumption, because HR-24's closing rests on it as measured (D3's N6 on #673).
+  - **(a) The collector's half-close.** P4-4-HR24's exclusion "No change to the collector's own sessions" is lifted for the half-close only (C2 0.10 §1.3 item 7, §6 item 1; D1's 6863811450), on the device-safety conditions of D1's 6861454974:
+    - the collector half-closes only after it has read QUI's reply;
+    - it sends no octet;
+    - it reads to EOF within the step's existing timeout, with no new bound;
+    - if the relay does not close, the result is `read_to_eof: false`, and the run is otherwise unchanged.
+  - **(b) C2 0.10's test 6,** both legs (i) and (ii) (D1's 6862737844), with leg (i)'s D6-owned `a6-*` job.
+  - **(c) The node's open-table expiry,** by CH-57's "The node's open table expires only after a later flow `start`". D5 writes it in `docs/phase4/D5-sensor-node.md`, with two points:
+    - the arriving record is matched before the expiry check (D5's 6881561307);
+    - an entry past its bound at a restart waits for the next flow `start` taken after the restart (6881618219).
+  - **(d) The detector's restore.** One unreadable stored alert is skipped, counted and alarmed (6861593265 point 2).
+  - **(e) The 0.2 code's bridge.**
+    - The 0.2 code keeps CH-35's bridge items 1 and 2 for a later checkpoint minor (6861593265 point 2), and bridge item 5 (D5's N2 on #673; C13 0.3 §1.2).
+    - This brief builds them. D7's release record names the rollback floor of §1.2, the earliest 0.2 build that carries them.
+  - **(f) The field name.** `orig_overlap_octets` in P4-4-HR24P's "Expected interfaces" is `to_device_overlap_octets` (D6's N4 on #673). The brief stays as issued.
+- **6. Owed by the briefs that change the engine's script, and by HR-23's counted run:**
+  - **CH-53's three requirements:** `redef max_timer_expires = 0;`, `tcp_inactivity_timeout` set to `flow_idle_s`, and no `connection_timing_out` hook that can return false;
+  - **CH-57's two requirements,** for the brief that writes the script's DNP3 part:
+    - the DNP3 timeout runs as an engine timer on network time;
+    - an `idle` cut neither discards nor completes a pending DNP3 request (D2's note 3 on #673). This one prevents a miss.
+  - **The timer cap's assumption,** which the counted run checks, because HR-24's closing rests on it as measured (D3's N6 on #673).
 - **7. P4-4-HR25 is widened.**
   - Its cases cover each of the four routes in HR-25's "When it closes" (#677).
   - HR-25 does not close on the owner's acceptance (6879752967 item 5).
@@ -2224,10 +2247,16 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
   1. After a code-6 operate to an outstation without SA, `unauthorized-write` is delayed through a quiet spell. D4 evaluates raising it at the request in the next C13 minor (6881410545 item 5).
   2. D4-101 item 7's open items stand.
 - **9. Item 4's gate report states these limits** (CLAUDE.md §9):
-  - a node rolled back to 0.2 leaves its own sessions unjudged while the rollback lasts (C13 0.3 §1.2);
-  - the W-7 latency through a quiet spell (CH-57);
-  - the code-6 latency, until item 8.1 closes;
-  - a SYN flood can fill the overlap table, and own runs refused then alert (CH-53).
+  - **C13 0.3 §1.1** (D1's ruling 6 in 6861593265):
+    - flows stored below 0.3 are judged by the base rules only;
+    - a tied flow among them stays hidden, as HR-24 states;
+    - nothing in 0.3 bounds how long a 0.2 sensor runs behind a 0.3 node.
+  - **C13 0.3 §1.2:** a node rolled back to 0.2 judges no tied flow by CH-51, so HR-24 is again "hidden whole" while the rollback lasts.
+  - **CH-57:** the latency of W-7 through a quiet spell.
+  - **The code-6 latency,** until item 8.1 closes.
+  - **CH-53:** a SYN flood can fill the overlap table, and own runs refused then alert.
+  - **Conditional, CH-54** (6861593265 point 1): stage 2's own-run cells measure the noise from `rexmit_inconsistent` over both directions. If it is not zero, the gate report names it.
+  - **Conditional, from #675** (D1's 6866203475 point 2): if P4-4-HR25's fix is built before the C13 minor that carries its per-flow failure count, the node sees nothing of a partial blinding, and the gate report states it.
 - **10. For the owner:** unchanged from D4-101 item 8.
 - **Next:**
   - the brief "The approved contracts in code";
