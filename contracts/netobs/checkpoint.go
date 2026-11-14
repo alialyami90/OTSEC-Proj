@@ -12,8 +12,29 @@ import (
 )
 
 // CheckpointIdentifier is the schema of both network checkpoints, the
-// learner's and the detector's, its first field (C13 §8).
-const CheckpointIdentifier = "otsec.netcheckpoint/0.1"
+// learner's and the detector's, its first field (C13 §8): what this code
+// writes. C13 0.2 moves it to 0.2 (C13 0.2 §1, CH-35).
+const CheckpointIdentifier = "otsec.netcheckpoint/0.2"
+
+// CheckpointIdentifier01 is the schema a 0.1 node wrote. The decoders read
+// a 0.1 checkpoint strictly: its coverage statements carry no field new in
+// C13 0.2 (CH-35's table, "Read").
+const CheckpointIdentifier01 = "otsec.netcheckpoint/0.1"
+
+// checkpointChecker starts a checkpoint's validation: the schema one of the
+// two, and the checker's minor that of the C13 records the checkpoint
+// holds, so a 0.1 checkpoint's coverage refuses 0.2's fields.
+func checkpointChecker(schema string) *checker {
+	c := &checker{minor: 2}
+	switch schema {
+	case CheckpointIdentifier:
+	case CheckpointIdentifier01:
+		c.minor = 1
+	default:
+		c.fail(CodeSchema, "schema", "%q is not %s or %s", schema, CheckpointIdentifier, CheckpointIdentifier01)
+	}
+	return c
+}
 
 // The checkpoint halves. Each is its own C5 series (C13 §8): the learner's
 // in netcheckpoint.learner, the detector's in netcheckpoint.detector.
@@ -119,10 +140,7 @@ type LearnerCheckpoint struct {
 // Validate checks the checkpoint: its schema and half, its sensor, and a
 // draft that is a canonical baseline of the same sensor with no writers.
 func (k *LearnerCheckpoint) Validate() error {
-	c := &checker{}
-	if k.Schema != CheckpointIdentifier {
-		c.fail(CodeSchema, "schema", "%q is not %s", k.Schema, CheckpointIdentifier)
-	}
+	c := checkpointChecker(k.Schema)
 	if k.Half != HalfLearner {
 		c.fail(CodeForm, "half", "%q is not %s", k.Half, HalfLearner)
 	}
@@ -334,10 +352,7 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 // Validate checks the checkpoint: its schema, half and sensor, the baseline
 // named or not, the clock, and every window as the alert it would give.
 func (k *DetectorCheckpoint) Validate() error {
-	c := &checker{}
-	if k.Schema != CheckpointIdentifier {
-		c.fail(CodeSchema, "schema", "%q is not %s", k.Schema, CheckpointIdentifier)
-	}
+	c := checkpointChecker(k.Schema)
 	if k.Half != HalfDetector {
 		c.fail(CodeForm, "half", "%q is not %s", k.Half, HalfDetector)
 	}
@@ -379,6 +394,10 @@ func (k *DetectorCheckpoint) Validate() error {
 			params = append(params, Param{Name: name, Value: "1"}) // the values are the detector's
 		}
 		a := w.Alert(k, params)
+		// The window is judged as an alert of the checkpoint's minor.
+		if c.minor >= 2 {
+			a.Schema = Identifier02
+		}
 		if w.Rule != RuleOwnSessionUnseen {
 			a.Capture = fmt.Sprintf("%064x", 0)
 		}

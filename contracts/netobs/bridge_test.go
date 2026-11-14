@@ -6,35 +6,49 @@ import (
 	"testing"
 )
 
-// later02 is the identifier of the next minor, C13 0.2.
-const later02 = "otsec.netobs/0.2"
+// later02 is C13 0.2, now this reader's own minor: a later minor on the 0.1
+// channel. later03 is the next minor, a later one for the stored readers;
+// the bridge's degraded leg moved to it with the minor (P4-4-CC).
+const (
+	later02 = Identifier02
+	later03 = "otsec.netobs/0.3"
+)
 
 // refusedAt reports whether err refuses field with code.
 func refusedAt(err error, code Code, field string) bool {
 	return slices.Contains(Codes(err), code) && strings.Contains(err.Error(), field)
 }
 
-// TestBridgeAggregateKeys is CH-35 item 3: a stored alert of a later minor
-// whose asset_id is one of C13 0.2's three aggregate keys is read; at 0.1
-// the same alert is still refused.
+// TestBridgeAggregateKeys is CH-35 item 3, now 0.2's own (CH-47): a stored
+// alert of 0.2, or of a later minor, whose asset_id is one of the three
+// aggregate keys is read; at 0.1 the same alert is still refused.
 func TestBridgeAggregateKeys(t *testing.T) {
-	for _, key := range []string{"clock-skew", "sensor-records-late", "hold-timeout"} {
+	for _, key := range AggregateKeys {
+		for _, schema := range []string{later02, later03} {
+			a := fxUnseen()
+			a.Schema, a.AssetID, a.Assets, a.AssetsTotal = schema, key, []string{fxAsset}, 1
+			h, err := a.Health()
+			if err != nil {
+				t.Fatalf("%s at %s: %v", key, schema, err)
+			}
+			back, err := AlertFromHealth(h)
+			if err != nil {
+				t.Errorf("%s at %s, read from its health body: %v", key, schema, err)
+			} else if back.AssetID != key || !slices.Equal(back.Assets, a.Assets) || back.AssetsTotal != 1 {
+				t.Errorf("%s at %s read back as %q %q %d", key, schema, back.AssetID, back.Assets, back.AssetsTotal)
+			}
+		}
 		a := fxUnseen()
-		a.Schema, a.AssetID = later02, key
+		a.AssetID = key
 		h, err := a.Health()
-		if err != nil {
-			t.Fatalf("%s at 0.2: %v", key, err)
+		if err == nil {
+			t.Errorf("%s at 0.1: encoded", key)
 		}
-		h.Details["assets"] = fxAsset
-		h.Details["assets_total"] = "1"
-		back, err := AlertFromHealth(h)
-		if err != nil {
-			t.Errorf("%s at 0.2, read from its health body: %v", key, err)
-		} else if back.AssetID != key {
-			t.Errorf("%s at 0.2 read back as %q", key, back.AssetID)
-		}
+		a.Schema = later02
+		a.Assets, a.AssetsTotal = []string{fxAsset}, 1
+		h, _ = a.Health()
 
-		a.Schema = Identifier
+		a.Schema, a.Assets, a.AssetsTotal = Identifier, nil, 0
 		if err := a.Validate(); !refusedAt(err, CodeForm, "asset_id") {
 			t.Errorf("%s at 0.1: got %v, want a form refusal of asset_id", key, err)
 		}
@@ -61,31 +75,33 @@ func TestBridgeUnknownDegraded(t *testing.T) {
 	degraded := []string{"drops-driver", added}
 
 	o := fxStored()
-	o.Schema, o.Coverage.Degraded = later02, degraded
+	o.Schema, o.Coverage.Degraded = later03, degraded
 	got, err := DecodeStored(mustJSON(t, o))
 	if err != nil {
-		t.Fatalf("stored observation at 0.2: %v", err)
+		t.Fatalf("stored observation at 0.3: %v", err)
 	}
 	if !slices.Equal(got.Coverage.Degraded, degraded) {
-		t.Errorf("stored observation at 0.2 read degraded as %q, want %q", got.Coverage.Degraded, degraded)
+		t.Errorf("stored observation at 0.3 read degraded as %q, want %q", got.Coverage.Degraded, degraded)
 	}
 
-	o.Schema = Identifier
-	if _, err := DecodeStored(mustJSON(t, o)); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
-		t.Errorf("stored observation at 0.1: got %v", err)
+	for _, schema := range []string{Identifier, later02} {
+		o.Schema = schema
+		if _, err := DecodeStored(mustJSON(t, o)); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
+			t.Errorf("stored observation at %s: got %v", schema, err)
+		}
 	}
 
 	a := fxAlert()
-	a.Schema, a.Coverage.Degraded = later02, degraded
+	a.Schema, a.Coverage.Degraded = later03, degraded
 	h, err := a.Health()
 	if err != nil {
-		t.Fatalf("alert at 0.2: %v", err)
+		t.Fatalf("alert at 0.3: %v", err)
 	}
 	back, err := AlertFromHealth(h)
 	if err != nil {
-		t.Errorf("alert at 0.2, read from its health body: %v", err)
+		t.Errorf("alert at 0.3, read from its health body: %v", err)
 	} else if !slices.Equal(back.Coverage.Degraded, degraded) {
-		t.Errorf("alert at 0.2 read degraded as %q", back.Coverage.Degraded)
+		t.Errorf("alert at 0.3 read degraded as %q", back.Coverage.Degraded)
 	}
 	h.Details["schema"] = Identifier
 	if _, err := AlertFromHealth(h); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
@@ -116,9 +132,9 @@ func TestBridgeUnknownDegraded(t *testing.T) {
 		{"repeated", []string{added, added}, CodeOrder, "coverage.degraded"},
 	} {
 		o := fxStored()
-		o.Schema, o.Coverage.Degraded = later02, tc.degraded
+		o.Schema, o.Coverage.Degraded = later03, tc.degraded
 		if _, err := DecodeStored(mustJSON(t, o)); !refusedAt(err, tc.code, tc.field) {
-			t.Errorf("%s at 0.2: got %v, want %s at %s", tc.name, err, tc.code, tc.field)
+			t.Errorf("%s at 0.3: got %v, want %s at %s", tc.name, err, tc.code, tc.field)
 		}
 	}
 }

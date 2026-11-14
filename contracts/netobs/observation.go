@@ -58,6 +58,10 @@ type Observation struct {
 	Protocol     string   `json:"protocol"`
 	Citation     Citation `json:"citation"`
 	Coverage     Coverage `json:"coverage"`
+	// MadeUTC is the sensor's clock when the agent numbered the record and
+	// wrote it to its buffer (new in 0.2, CH-21): required in a 0.2
+	// channel record, optional in a stored record of 0.2 or later.
+	MadeUTC string `json:"made_utc,omitempty"`
 
 	Flow      *Flow      `json:"flow,omitempty"`
 	Service   *Service   `json:"service,omitempty"`
@@ -206,6 +210,15 @@ type Node struct {
 	FunctionClass   string           `json:"function_class,omitempty"`
 	FunctionTable   string           `json:"function_table,omitempty"`
 	DNP3NoSA        *bool            `json:"dnp3_no_sa,omitempty"`
+	// The node's marks, new in 0.2, each absent in a 0.1 record (C13 0.2
+	// §11): Late, a record later than late_bound_s (CH-23); Backlog, a
+	// backlog record committed untied (CH-39); Skewed, committed while no
+	// tie was made for skew (CH-41); Lost, the declared losses' unjudged
+	// windows, at most MaxLostSpans (CH-40).
+	Late    bool   `json:"late,omitempty"`
+	Backlog bool   `json:"backlog,omitempty"`
+	Skewed  bool   `json:"skewed,omitempty"`
+	Lost    []Span `json:"lost,omitempty"`
 }
 
 // PlatformSession ties an observation to one of the node's own sessions.
@@ -244,12 +257,16 @@ var (
 	engineIDForm  = regexp.MustCompile(`^(?:[0-9a-f]{2}){5,32}$`)
 )
 
-// Validate checks a channel observation: every rule of C13 that holds on
-// one record, including the frame bytes against their hashes and the
-// redactions applied. It refuses a record with Node set.
-func (o *Observation) Validate() error {
+// Validate checks an observation of the 0.1 channel, the one main's intake
+// reads: every rule of C13 that holds on one record, including the frame
+// bytes against their hashes and the redactions applied. It refuses a
+// record with Node set, and any field new in 0.2.
+func (o *Observation) Validate() error { return o.validateChannel(Identifier) }
+
+// validateChannel checks a channel observation of the minor want.
+func (o *Observation) validateChannel(want string) error {
 	c := &checker{}
-	c.strictSchema(o.Schema)
+	c.strictSchema(o.Schema, want)
 	o.check(c)
 	if o.Node != nil {
 		c.fail(CodeConflict, "node", "a sensor's record never carries node")
@@ -286,6 +303,12 @@ func (o *Observation) check(c *checker) {
 	last, ok2 := c.utc("last_utc", o.LastUTC)
 	if ok1 && ok2 && last.Before(first) {
 		c.fail(CodeOrder, "last_utc", "before first_utc")
+	}
+	// No order is checked between made_utc and the capture times: the
+	// sensor's clock may step (CH-21).
+	c.new02("made_utc", o.MadeUTC != "")
+	if o.MadeUTC != "" {
+		c.utc("made_utc", o.MadeUTC)
 	}
 	if o.ResolutionNS < 1 || o.ResolutionNS > 1e9 {
 		c.fail(CodeRange, "resolution_ns", "%d not in [1, 1e9]", o.ResolutionNS)
@@ -675,6 +698,11 @@ func (o *Observation) checkNode(c *checker) {
 	case want != (n.DNP3NoSA != nil):
 		c.fail(CodeConflict, "node.dnp3_no_sa", "set exactly on a DNP3 %v function with sa none", NoSAClasses)
 	}
+	c.new02("node.late", n.Late)
+	c.new02("node.backlog", n.Backlog)
+	c.new02("node.skewed", n.Skewed)
+	c.new02("node.lost", n.Lost != nil)
+	c.spans("node.lost", n.Lost)
 }
 
 // DecodeStored reads a stored observation, a C4 event's netobs, and
