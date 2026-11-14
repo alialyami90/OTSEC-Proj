@@ -2109,7 +2109,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   2. D6's cases (the `dnp3-resync-*` ids, each naming its transport) and pass conditions, pinned before any counted run.
   3. The build and its counted run, as one patch on top of HR-23's option (i).
 - Acceptance tests:
-  - the cases pass on the counted run, with the control as on `main`, C1p, and the option (i) build as controls;
+  - the cases pass on the counted run, with the control as on `main`, C1p, and the option (i) build as controls; they cover each of the four routes in HR-25's "When it closes" (D4-102 item 7);
   - the fuzz terms of D1's 6864990229 are met, with the resync paths in the coverage condition;
   - no E-D4-03 row regresses;
   - each implementer runs the self-check list in this file and says in the PR which items apply.
