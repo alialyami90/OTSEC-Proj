@@ -2187,7 +2187,7 @@ The owner wrote on 2026-11-14: "merge all PRs then find a safe checkpoint and pa
 The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every PR in this entry changes Markdown only.
 
 - **1. Merged:**
-  - #675 as `ee7566a6`: HR-23's fix design, option (i), the parser chosen by function code. D6 accepted it at `b5b75ddb`, and D2, D3 and D7 confirmed it. D6 can now pin stage 2.
+  - #675 as `ee7566a6`: HR-23's fix design, option (i), the parser chosen by function code. D2, D3 and D7 confirmed it at `48a66afe`. D6 accepted it at `b5b75ddb`, the only reviewer of the two later commits, each a text correction to §1 item 2. D6 can now pin stage 2.
   - #677 as `2fb4ffc3`: SL-3, SL-T25 (a) to (u), and the HR-22, HR-23 and HR-25 rows. D6, D4 and D5 accepted it at `a4bd71cd`.
   - #673 as `28e0f850`: C13 0.3.
     - D6 and D5 accepted it at `058659e0`.
@@ -2197,8 +2197,9 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
   - **C13 0.3:** `docs/phase4/D4-c13-0.3-proposal.md`, with CH-51 to CH-57, N-1 to N-19 and the names it introduces.
     - Its CH-57 amends C13 0.2's W-7: through a quiet spell, an `end: idle` and every completion at `sa_reply_timeout_ms` are written at the first frame after the bound, which is stated in frame time.
     - That is a change to an approved bound. D3, D5, D6 and D2 judged it, with D2 on the DNP3 half.
-  - **SL-3 and SL-T25:** `docs/phase4/D3-sensor-link.md`. SL-17 is unchanged.
+  - **SL-3 and SL-T25:** `docs/phase4/D3-sensor-link.md`. SL-17's constraints are unchanged. #677 changed only its counting text.
   - The code and D6's contract tests come with the brief "The approved contracts in code" (item 5).
+  - The proposals' status lines are not edited. This entry is the record of the approval, as D4-92 was for C13 0.2.
 - **3. D1's rulings, by comment:**
   - on #673: 6861593265, 6879608207, 6879970464, 6880306231, 6880955572, 6881410545, 6881536103 and 6881596681;
   - on #677: 6879343731, 6879752967, 6879936534, 6880061674, 6880413017, 6880637197, 6880789325 and 6880955980;
@@ -2206,8 +2207,8 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
 - **4. D1's two errors, both caught before a merge by the role writing the text:**
   - **The (b1) ruling.** It had the agent emit its own `end` on a monotonic clock. That would have lost the engine's counts, and could miss on a split cut. D4 found it (6880774895), and D1 withdrew it for (b3) (6880789325).
   - **Item 2 of 6881410545.** It expired the hold's open table on the sensor's capture clock, against SL-17's first constraint (D4-92). D4 found it (6881463710), and D1 took the arrival-order rule (6881536103). D6 then showed that "any later record" fails when several flows fall due in one spell, and D1 took "a later flow `start`" (6881596681).
-- **5. Owed by the brief "The approved contracts in code"** (C13 0.2 to 0.3, C2 0.10, C7 0.11, C8 0.13, C4 0.4):
-  - **D5:** the hold's open-table expiry by CH-57 item 2, which is the wall-time bound and then a later flow `start` of the same run. `docs/phase4/D5-sensor-node.md` states it, with the two points of D5's 6881618219.
+- **5. Owed by the brief "The approved contracts in code".** It is not issued yet. When it is, it covers C13 0.3 and C2 0.10, beside the C13 0.2, C7 0.11, C8 0.13 and C4 0.4 that `docs/agent-handoffs.md` names for it:
+  - **D5:** the hold's open-table expiry by CH-57 item 2, which is the wall-time bound and then a later flow `start` of the same run. `docs/phase4/D5-sensor-node.md` states it, with D5's two points: the arriving record is matched before the expiry check (6881561307), and an entry past its bound at a restart waits for the next record (6881618219).
   - **The detector's restore:** one unreadable stored alert is skipped, counted and alarmed (6861593265 point 2).
   - **The rollback floor of C13 0.3 §1.2:** D7's release record names it.
   - **The field name:** `orig_overlap_octets` in P4-4-HR24P's "Expected interfaces" is `to_device_overlap_octets` (D6's N4 on #673). The brief stays as issued.
@@ -2216,7 +2217,8 @@ The owner wrote "continue" after D4-101's pause. Evidence class: `desk`. Every P
   - the counted run checks the timer cap's assumption, because HR-24's closing rests on it as measured (D3's N6 on #673).
 - **7. P4-4-HR25 is widened.**
   - Its cases cover each of the four routes in HR-25's "When it closes" (#677).
-  - HR-25 does not close on the owner's acceptance (6880413017 item 5).
+  - HR-25 does not close on the owner's acceptance (6879752967 item 5).
+  - Its "Expected interfaces" is C13 0.3.
   - Its start condition is met: #675 has merged.
 - **8. Open items, recorded under CLAUDE.md's working rule:**
   1. After a code-6 operate to an outstation without SA, `unauthorized-write` is delayed through a quiet spell. D4 evaluates raising it at the request in the next C13 minor (6881410545 item 5).

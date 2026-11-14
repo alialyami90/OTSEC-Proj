@@ -2103,7 +2103,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Files or modules each role may modify:
   - D4: a new `docs/phase4/D4-hr25-design.md`, and later `modules/telemetry/experiments/engine-linux/zeek-patch/`;
   - D6: the GT-PCAP paths.
-- Expected interfaces: C13 0.2. Carrying the per-flow failure count to the node is a C13 minor that goes with the `undecoded` brief (D4-90), and D1 approves it.
+- Expected interfaces: C13 0.3 (D4-102). Carrying the per-flow failure count to the node is a C13 minor that goes with the `undecoded` brief (D4-90), and D1 approves it.
 - Deliverable:
   1. The design note, with its options agreed in comments first (D4-99).
   2. D6's cases (the `dnp3-resync-*` ids, each naming its transport) and pass conditions, pinned before any counted run.
