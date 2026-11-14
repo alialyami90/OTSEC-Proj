@@ -64,8 +64,11 @@ func (r *Runtime) KeysResolved() {
 // step calls it, after the node's start has returned (NK-5).
 func (r *Runtime) stepLinkKey() {
 	m, reg := r.smgr, r.linkReg.Load()
-	if m.linkKey != nil || reg == nil {
+	if m.linkKey != nil {
 		return
+	}
+	if reg == nil {
+		reg = &sensorlink.RegisterView{}
 	}
 	path, fault := r.cfg.linkKeyPath(), ""
 	var k *sensorlink.LinkKey
@@ -85,7 +88,7 @@ func (r *Runtime) stepLinkKey() {
 		m.linkKey, m.linkFault = k, ""
 		return
 	}
-	if true {
+	if fault != m.linkFault {
 		m.linkFault = fault
 		r.opt.Status.Raise("", AlarmSensorLinkKey, "sensor "+r.sensorID()+": the link key did not load, so no sensor link is made; SER, Syslog and forwarding go on, and the file is read again at each step: "+fault)
 	}
