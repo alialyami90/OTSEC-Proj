@@ -399,9 +399,10 @@ type Counts struct {
 func (c *Conn) Counts() Counts { return Counts{Stats: c.stats, Received: c.received, Wire: c.wire} }
 
 // AtEOF reports whether the session ended because the socket returned the
-// peer's end of stream, with the decoder in no error. Any other error, a
+// peer's end of stream, with the decoder in no error and no decoded data
+// still pending, so every data octet has been returned. Any other error, a
 // failed refusal's write included, is sticky and is never EOF.
-func (c *Conn) AtEOF() bool { return c.err == io.EOF }
+func (c *Conn) AtEOF() bool { return c.err == io.EOF && len(c.pending) == 0 }
 
 // Close closes the socket.
 func (c *Conn) Close() error { return c.nc.Close() }

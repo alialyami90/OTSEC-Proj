@@ -83,3 +83,39 @@ func TestAtEOF(t *testing.T) {
 		t.Errorf("refusal unwritten: counts %+v", n)
 	}
 }
+
+// eofWithData returns its octets together with io.EOF in one Read, as a
+// net.Conn may (io.Reader allows it; a *net.TCPConn does not do it).
+type eofWithData struct {
+	fakeConn
+	b []byte
+}
+
+func (e *eofWithData) Read(p []byte) (int, error) {
+	n := copy(p, e.b)
+	e.b = e.b[n:]
+	return n, io.EOF
+}
+
+// AtEOF is false while decoded data is still pending, so read_to_eof is
+// never true with octets missing from the transcript (D4's N1 on #684). The
+// control is the same session once the pending data is read.
+func TestAtEOFNotWithDataPending(t *testing.T) {
+	c, err := New(&eofWithData{b: []byte("=>")}, Config{MaxReceived: 1 << 20, MaxCommands: 64, Egress: allow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 1)
+	if n, err := c.Read(buf); n != 1 || err != nil {
+		t.Fatalf("first read: %d, %v", n, err)
+	}
+	if c.AtEOF() {
+		t.Error("AtEOF true with one decoded octet still pending")
+	}
+	if n, err := c.Read(buf); n != 1 || err != nil {
+		t.Fatalf("second read: %d, %v", n, err)
+	}
+	if _, err := c.Read(buf); !errors.Is(err, io.EOF) || !c.AtEOF() {
+		t.Errorf("control, nothing pending: error %v, AtEOF %v", err, c.AtEOF())
+	}
+}
