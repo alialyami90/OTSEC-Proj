@@ -428,6 +428,7 @@ func DecodeResult(b []byte) (Result, error) {
 			return Result{}, fmt.Errorf("adapter: result: %w", err)
 		}
 	}
+	markEmptyToken(b, &r)
 	return r, r.Validate()
 }
 

@@ -91,6 +91,13 @@ func TestTelnetRules(t *testing.T) {
 		{"both", ok10, set("rexmit_unknown", "in-flight"), "exactly one of rexmit_octets and rexmit_unknown"},
 		{"neither", ok10, drop("rexmit_octets"), "exactly one of rexmit_octets and rexmit_unknown"},
 		{"count null beside a token", "results/valid/ok-0.10-rexmit-in-flight.json", set("rexmit_octets", nil), ""},
+		// "" is present, not absent: only null is absent (D6 on #684).
+		{"empty token beside a count", ok10, set("rexmit_unknown", ""), "rexmit_unknown is empty; only null is absent"},
+		{"empty token beside a count at 0.11", ok10, schema("otsec.adapter/0.11", set("rexmit_unknown", "")),
+			"rexmit_unknown is empty; only null is absent"},
+		{"empty token alone", ok10, func(_, s map[string]any) { telnetOf(s)["rexmit_unknown"] = ""; delete(telnetOf(s), "rexmit_octets") },
+			"rexmit_unknown is empty; only null is absent"},
+		{"null token beside a count", ok10, set("rexmit_unknown", nil), ""},
 		{"count null alone", ok10, set("rexmit_octets", nil), "exactly one of rexmit_octets and rexmit_unknown"},
 		{"negative count", ok10, set("rexmit_octets", -1), "rexmit_octets -1 is outside"},
 		{"count 2^53", ok10, set("rexmit_octets", int64(1)<<53), "rexmit_octets 9007199254740992 is outside"},

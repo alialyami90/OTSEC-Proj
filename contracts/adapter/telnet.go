@@ -1,6 +1,9 @@
 package adapter
 
-import "regexp"
+import (
+	"encoding/json"
+	"regexp"
+)
 
 // TelnetFacts are a connected Telnet session's counts (0.10, D4-102,
 // docs/phase4/D2-c2-0.10-proposal.md §1). Every field is a number or a flag,
@@ -25,6 +28,31 @@ type TelnetFacts struct {
 	// form in a later one, which a reader takes as unknown. Every value
 	// fails closed at the node.
 	RexmitUnknown string `json:"rexmit_unknown,omitempty"`
+
+	// emptyToken: the decoded JSON carried "rexmit_unknown": "", which is
+	// present (only null is absent, §2 rule 5) though the string field
+	// cannot say so. DecodeResult sets it; a writer cannot.
+	emptyToken bool
+}
+
+// markEmptyToken sets emptyToken on r's session.telnet when b carries
+// "rexmit_unknown": "" there. b has already decoded into r, so an error here
+// cannot happen and is ignored.
+func markEmptyToken(b []byte, r *Result) {
+	if r.Session.Telnet == nil {
+		return
+	}
+	var probe struct {
+		Session struct {
+			Telnet struct {
+				RexmitUnknown *string `json:"rexmit_unknown"`
+			} `json:"telnet"`
+		} `json:"session"`
+	}
+	if json.Unmarshal(b, &probe) == nil {
+		u := probe.Session.Telnet.RexmitUnknown
+		r.Session.Telnet.emptyToken = u != nil && *u == ""
+	}
 }
 
 // The rexmit_unknown tokens (0.10).
@@ -91,6 +119,8 @@ func (c *check) telnet(r Result) {
 		c.fail("session.telnet: read_to_eof needs quit_sent")
 	}
 	switch {
+	case t.emptyToken:
+		c.fail("session.telnet.rexmit_unknown is empty; only null is absent")
 	case (t.RexmitOctets == nil) == (t.RexmitUnknown == ""):
 		c.fail("session.telnet carries exactly one of rexmit_octets and rexmit_unknown")
 	case t.RexmitOctets != nil:
