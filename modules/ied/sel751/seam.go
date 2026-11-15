@@ -88,6 +88,24 @@ type Config struct {
 	// before connecting (D2-16, H-13), so a reported TIDLE is always a
 	// direct path's.
 	TIDLE func(time.Duration)
+	// HalfClose and Rexmit are the collector's two seams for C2 0.10
+	// (D4-102; docs/phase4/D2-c2-0.10-proposal.md §1.3, §3). Each is given
+	// the connection Dial returned, and neither sends a payload octet.
+	//
+	// HalfClose shuts the socket's write side, which sends a FIN and no data.
+	// Run calls it at most once: after QUI, and only when QUI's reply ended
+	// in a prompt with no error and the transport still up. Run then reads,
+	// writing nothing and acting on no prompt, until EOF, an error, the
+	// response budget, the negotiation limit, or QUI's send plus one step
+	// timeout, whichever comes first. Nil, or an error, means no half-close
+	// and no such read: the close is as before 0.10.
+	HalfClose func(net.Conn) error
+	// Rexmit reads the payload octets the socket retransmitted, or why it
+	// could not (adapter.RexmitUnknowns). Run calls it once on every
+	// connected path, after the session's last write or read and before the
+	// socket is closed, and copies the answer into session.telnet. Nil gives
+	// adapter.RexmitUnsupported.
+	Rexmit func(net.Conn) (octets int64, unknown string)
 
 	hooks *hooks // tests only
 }

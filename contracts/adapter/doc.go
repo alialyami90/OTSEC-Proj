@@ -1,4 +1,4 @@
-// Package adapter is contract C2, otsec.adapter/0.9: how the collector is
+// Package adapter is contract C2, otsec.adapter/0.10: how the collector is
 // asked to do one approved thing to one device, and how it reports exactly
 // what happened.
 //
@@ -191,6 +191,17 @@
 //     differs from the request's, checked before any of its bindings is
 //     kept. From 0.9 every result's times, of any minor, have at most nine
 //     fractional digits (D4-61). Earlier results read unchanged otherwise.
+//   - 0.10 (D4-102, docs/phase4/D2-c2-0.10-proposal.md, approved by D1):
+//     session.telnet (TelnetFacts), a connected Telnet session's counts for
+//     HR-24's own-session profile. refusals, command_octets_received and
+//     read_to_eof are required, the counts from 0 to 2^53 - 1, with
+//     command_octets_received at least 3 x refusals and read_to_eof true
+//     only with quit_sent. Exactly one of rexmit_octets and rexmit_unknown,
+//     a closed token at this minor (RexmitUnknowns) and any token of the
+//     same form in a later one, which a reader takes as unknown. A connected
+//     session that is not SNMPv3 carries session.telnet in a result of 0.10
+//     up to this package's minor; a later minor is not held to that, and an
+//     earlier one cannot carry it. Earlier results read unchanged.
 //
 // # For the consumers of a result
 //
