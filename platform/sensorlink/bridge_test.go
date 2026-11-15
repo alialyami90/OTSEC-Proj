@@ -96,9 +96,11 @@ func TestHoldTieKeepsLaterMinor(t *testing.T) {
 
 // N-8's leg (2) (C13 0.3 sections 1.1 and 12; D5's B4): absent, 0 and true
 // stay distinct through Link.record's tie path for the fields of CH-52 to
-// CH-55. Two held 0.3 TCP ends are tied by a session's result: one with
-// all seven counts at 0, password_lines (CH-55) among them, and one with
-// none of them and incomplete true. Each stored end keeps those fields
+// CH-55. Three held 0.3 TCP ends, leg (1)'s three records, are tied by a
+// session's result: one with all seven counts at 0, password_lines (CH-55)
+// among them; one with none of them and incomplete true; and one with a
+// partial overlap count beside incomplete true, the other five counts at 0
+// and password_lines absent (CH-53, CH-55). Each stored end keeps those fields
 // exactly as held, and the stored record read by the node's reader
 // (ObservationFromEvent, the detector's) encodes back to the same fields,
 // so the Go type keeps an absent count absent, a 0 count 0, and incomplete
@@ -109,17 +111,25 @@ func TestHoldTieKeepsLaterMinor(t *testing.T) {
 // contracts/netobs's Flow (orig_payload): absent then reads, and encodes,
 // as 0. Since CH-35's bridge item 5, Link.record patches the raw body and
 // does not re-encode it, so the control fails at the reader's half; the
-// tie's own re-encode control is TestHoldTieKeepsLaterMinor's.
+// tie's own re-encode control is TestHoldTieKeepsLaterMinor's. The third
+// case's control is the overlap count refused beside incomplete, as
+// password_lines is, in contracts/netobs's Flow.check03: it fails that case
+// alone.
 func TestHoldTieKeepsAbsentZeroApart(t *testing.T) {
 	counts := []string{"orig_payload", "resp_payload", "orig_pkts", "resp_pkts", "to_device_overlap_octets", "rexmit_inconsistent", "password_lines"}
 	zero, absent := map[string]string{}, map[string]string{"incomplete": "true"}
+	partial := map[string]string{"incomplete": "true"}
 	for _, k := range counts {
 		zero[k] = "0"
+		if k != "password_lines" {
+			partial[k] = "0"
+		}
 	}
+	partial["to_device_overlap_octets"] = "7"
 	for _, c := range []struct {
 		name string
 		set  map[string]string
-	}{{"zero", zero}, {"absent", absent}} {
+	}{{"zero", zero}, {"absent", absent}, {"count-and-incomplete", partial}} {
 		t.Run(c.name, func(t *testing.T) {
 			g := newHoldRig(t)
 			g.dispatch("req-1")
