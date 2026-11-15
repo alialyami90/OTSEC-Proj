@@ -1,4 +1,4 @@
-// Package audit is contract C8, otsec.audit/0.12: the audit record every module
+// Package audit is contract C8, otsec.audit/0.13: the audit record every module
 // writes for security-relevant actions, and the per-node hash chain that makes
 // removal or alteration of a record detectable.
 //
@@ -452,6 +452,47 @@
 // starts after seq 1 accepts as given what came before it. The chain can't
 // prove the retention's monotonic bound: bound is the node's own word, and
 // the evidence for it is the node's test with the clock stepped forward.
+//
+// # Sensor enrolment, revocation and refused links (0.13)
+//
+// docs/phase4/D3-sensor-link.md §11.2, C8-1 to C8-9 (D4-92), in sensor.go,
+// in the forms D1 ruled on #683 (comment 6894226253). This package reads
+// 0.13 in full (ReaderID); writers stamp as before, and readers go first:
+// a 0.12 reader refuses each new action as unknown, so a rollback below the
+// 0.13 reader after a node wrote one stops its scheduler's fold, and SER
+// collection with it (C8-1). The three actions are written by the node
+// (actor type node), and name the sensor (Target.SensorID) and nothing
+// else. Each carries one Sensor object with exactly its own fields:
+//
+//   - sensor.enrolled, succeeded or denied with one of C8-2's seven codes,
+//     is written before the node applies an enrolment. It names the
+//     collector's acceptance (decision_seq, payload_sha256), the signed
+//     body's fields, and what it replaces: previous_generation with
+//     previous_spki, previous_state unknown, or neither.
+//   - sensor.revoked, always succeeded, is written after the link that used
+//     the pin is closed, and may be written late. It names the decision,
+//     the body's fields, applied_at (at most microseconds, never after the
+//     record's time as instants), streams (each record stream's last C5 seq
+//     from the ended link, or {} when no link was ended; the netbaseline
+//     stream is left out, since baseline_digest names the acknowledgement a
+//     revocation voids), and baseline_digest when there is one.
+//   - sensor.link_refused, denied with one of C8-4's six codes, names the
+//     generation and count, at least 1: the refusals that C8-5's cap held
+//     back since the last record of that sensor, generation and reason, in
+//     this node run, so a lower bound after a node start.
+//
+// C8-2's and C8-4's codes are written with hyphens in the note and in C13;
+// reason_code carries them in underscore form (EnrolDeniedReasons,
+// LinkRefusedReasons), and its pattern is unchanged. C8-6: the node's
+// allowed, verified collector.request of a node.sensor_enrol or
+// node.sensor_revoke names the sensor as its target and carries a sensor
+// object with the verified body's generation and sensor_spki, and for a
+// revocation its reason and suspect_from; the info and denied records, and
+// every other kind, name no sensor. JSON null is refused as the sensor
+// object or the value of any of its keys. VerifySensorFrom checks C8-8's
+// chain rules in a verifier of its own, and NetworkAckInForce is C8-9's
+// reader's rule. A sensor link that opens or closes is not an audit record
+// (C8-7).
 //
 // # What it leaves out
 //

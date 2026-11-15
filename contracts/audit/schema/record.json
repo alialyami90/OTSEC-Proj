@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.audit/0.12/record",
+  "$id": "otsec.audit/0.13/record",
   "title": "Audit record (C8). Chained per node: prev_hash is the SHA-256 of the previous record's stored bytes. Readers ignore unknown fields (not strict), except fields named like secrets, which make the record invalid.",
   "type": "object",
   "required": [
@@ -175,7 +175,10 @@
         "advisory.set_installed",
         "advisory.set_refused",
         "store.retention_moved",
-        "config.learner_retired"
+        "config.learner_retired",
+        "sensor.enrolled",
+        "sensor.revoked",
+        "sensor.link_refused"
       ]
     },
     "outcome": {
@@ -228,7 +231,7 @@
         "sensor_id": {
           "type": "string",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "description": "0.12: a C13 sensor ID (lowercase UUID), on the network records only, which name no asset"
+          "description": "0.12: a C13 sensor ID (lowercase UUID), on the network records, which name no asset; 0.13: also on the sensor records and C8-6's collector.request"
         }
       },
       "if": {
@@ -557,6 +560,113 @@
             }
           },
           "description": "Sorted by key_id; each key's kinds sorted (C7)"
+        }
+      }
+    },
+    "sensor": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "0.13: the sensor object, on sensor.enrolled, sensor.revoked, sensor.link_refused and C8-6's collector.request only, each with exactly its own keys (contracts/audit/sensor.go). No key is null.",
+      "properties": {
+        "decision_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The collector's first acceptance (collector_seq, or the repeat's repeat_of)"
+        },
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "That acceptance's verified.payload_sha256"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$",
+          "description": "C7's generation: a decimal from 1, canonical, at most 2^64-1"
+        },
+        "sensor_spki": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "sensor_address": {
+          "type": "string",
+          "description": "C7: an IP literal and a port, 192.0.2.10:8443 or [2001:db8::10]:8443"
+        },
+        "node_spki": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "node_address": {
+          "type": "string",
+          "description": "C7: an IP literal, no port"
+        },
+        "not_after": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "reason": {
+          "enum": [
+            "new",
+            "renew",
+            "rekey",
+            "replace",
+            "compromised",
+            "lost",
+            "retired"
+          ],
+          "description": "The enrolment's reason on sensor.enrolled and node.sensor_enrol, the revocation's on sensor.revoked and node.sensor_revoke"
+        },
+        "suspect_from": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+        },
+        "previous_generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$",
+          "description": "C7's generation: a decimal from 1, canonical, at most 2^64-1"
+        },
+        "previous_spki": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "previous_state": {
+          "const": "unknown"
+        },
+        "applied_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+          "description": "When the node marked the pin revoked; never after time.utc, compared as instants"
+        },
+        "streams": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Each value is the node's C5 seq of that stream (LastCommitted), not C13's seq; both, or {} when no link was ended. netbaseline/<id> is left out: baseline_digest names the voided acknowledgement",
+          "properties": {
+            "observation_through_seq": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "alert_through_seq": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "dependentRequired": {
+            "observation_through_seq": [
+              "alert_through_seq"
+            ],
+            "alert_through_seq": [
+              "observation_through_seq"
+            ]
+          }
+        },
+        "baseline_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "This refusal and those C8-5's cap held back since the key's last record, in this node run; a lower bound after a node start"
         }
       }
     }
@@ -3162,6 +3272,630 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "anyOf": [
+          {
+            "properties": {
+              "action": {
+                "enum": [
+                  "sensor.enrolled",
+                  "sensor.revoked",
+                  "sensor.link_refused"
+                ]
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "required": [
+              "sensor"
+            ]
+          },
+          {
+            "properties": {
+              "claimed": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "node.sensor_enrol",
+                      "node.sensor_revoke"
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [
+              "claimed"
+            ]
+          },
+          {
+            "properties": {
+              "verified": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "node.sensor_enrol",
+                      "node.sensor_revoke"
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [
+              "verified"
+            ]
+          }
+        ]
+      },
+      "then": {
+        "properties": {
+          "contract": {
+            "pattern": "^otsec\\.audit/0\\.(1[3-9]|[2-9][0-9]|[1-9][0-9]{2,3})$"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "sensor"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "enum": [
+              "sensor.enrolled",
+              "sensor.revoked",
+              "sensor.link_refused",
+              "collector.request"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "sensor.enrolled"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "sensor",
+          "target"
+        ],
+        "properties": {
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "asset_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "transport"
+                  ]
+                },
+                {
+                  "required": [
+                    "downstream_security"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_ref"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_version"
+                  ]
+                },
+                {
+                  "required": [
+                    "family"
+                  ]
+                }
+              ]
+            }
+          },
+          "sensor": {
+            "required": [
+              "decision_seq",
+              "payload_sha256",
+              "generation",
+              "sensor_spki",
+              "sensor_address",
+              "node_spki",
+              "node_address",
+              "not_after",
+              "reason"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "succeeded",
+              "denied"
+            ]
+          },
+          "reason_code": {
+            "enum": [
+              "node_key",
+              "generation",
+              "revoked_key",
+              "forked_key",
+              "reason",
+              "not_after",
+              "asset_address"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "sensor": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "suspect_from"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "applied_at"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "streams"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "baseline_digest"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "count"
+                      ]
+                    }
+                  ]
+                },
+                "dependentRequired": {
+                  "previous_generation": [
+                    "previous_spki"
+                  ],
+                  "previous_spki": [
+                    "previous_generation"
+                  ]
+                },
+                "if": {
+                  "required": [
+                    "previous_state"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "previous_generation"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "previous_spki"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "outcome": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "outcome"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "reason_code"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "sensor.revoked"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "sensor",
+          "target"
+        ],
+        "properties": {
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "asset_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "transport"
+                  ]
+                },
+                {
+                  "required": [
+                    "downstream_security"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_ref"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_version"
+                  ]
+                },
+                {
+                  "required": [
+                    "family"
+                  ]
+                }
+              ]
+            }
+          },
+          "sensor": {
+            "required": [
+              "decision_seq",
+              "payload_sha256",
+              "generation",
+              "sensor_spki",
+              "reason",
+              "applied_at",
+              "streams"
+            ]
+          },
+          "outcome": {
+            "const": "succeeded"
+          }
+        },
+        "not": {
+          "required": [
+            "reason_code"
+          ]
+        },
+        "allOf": [
+          {
+            "properties": {
+              "sensor": {
+                "properties": {
+                  "reason": {
+                    "enum": [
+                      "compromised",
+                      "lost",
+                      "retired"
+                    ]
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "sensor_address"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_spki"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "node_address"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "not_after"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "previous_generation"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "previous_spki"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "previous_state"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "count"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "sensor.link_refused"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "sensor",
+          "target"
+        ],
+        "properties": {
+          "actor": {
+            "properties": {
+              "type": {
+                "const": "node"
+              }
+            }
+          },
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "asset_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "transport"
+                  ]
+                },
+                {
+                  "required": [
+                    "downstream_security"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_ref"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_version"
+                  ]
+                },
+                {
+                  "required": [
+                    "family"
+                  ]
+                }
+              ]
+            }
+          },
+          "sensor": {
+            "required": [
+              "generation",
+              "count"
+            ]
+          },
+          "outcome": {
+            "const": "denied"
+          },
+          "reason_code": {
+            "enum": [
+              "peer_key",
+              "expired",
+              "binding",
+              "run_regressed",
+              "run_forked",
+              "sensor_id"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "sensor": {
+                "maxProperties": 2
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "collector.request"
+          },
+          "outcome": {
+            "const": "allowed"
+          },
+          "verified": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "node.sensor_enrol",
+                  "node.sensor_revoke"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "action",
+          "outcome",
+          "verified"
+        ]
+      },
+      "then": {
+        "required": [
+          "target",
+          "sensor"
+        ],
+        "properties": {
+          "target": {
+            "required": [
+              "sensor_id"
+            ],
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "asset_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "transport"
+                  ]
+                },
+                {
+                  "required": [
+                    "downstream_security"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_ref"
+                  ]
+                },
+                {
+                  "required": [
+                    "credential_version"
+                  ]
+                },
+                {
+                  "required": [
+                    "family"
+                  ]
+                }
+              ]
+            }
+          },
+          "sensor": {
+            "required": [
+              "generation",
+              "sensor_spki"
+            ]
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "action": {
+              "const": "collector.request"
+            }
+          },
+          "required": [
+            "action"
+          ]
+        },
+        "then": {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "sensor"
+                ]
+              },
+              {
+                "properties": {
+                  "target": {
+                    "required": [
+                      "sensor_id"
+                    ]
+                  }
+                },
+                "required": [
+                  "target"
+                ]
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -3206,9 +3940,11 @@
             "node.seq_reset_ack",
             "node.change_approval",
             "node.baseline_ack",
-            "node.network_baseline_ack"
+            "node.network_baseline_ack",
+            "node.sensor_enrol",
+            "node.sensor_revoke"
           ],
-          "description": "0.5: the request's C7 kind. On claimed, what the payload says; on verified, what the collector verified"
+          "description": "0.5: the request's C7 kind. On claimed, what the payload says; on verified, what the collector verified. The sensor kinds from 0.13."
         },
         "keys_digest": {
           "type": "string",

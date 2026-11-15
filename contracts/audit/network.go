@@ -108,8 +108,10 @@ func (r *Record) validateNetwork(minor int) error {
 	if minor < networkSince && (sensor || r.Retention != nil || r.AdminKeys != nil) {
 		return fmt.Errorf("audit: sensor_id, retention and admin_keys are new in 0.%d, so a 0.%d record cannot carry them", networkSince, minor)
 	}
-	if sensor && !r.networkRecord() {
-		return fmt.Errorf("audit: sensor_id belongs on the network records, not %s", r.Action)
+	// 0.13: the sensor records and C8-6's collector.request name a sensor
+	// too, under validateSensor's rules.
+	if sensor && !r.networkRecord() && !sensorActions[r.Action] && r.Action != ActionCollectorRequest {
+		return fmt.Errorf("audit: sensor_id belongs on the network and sensor records, not %s", r.Action)
 	}
 	if (r.Action == ActionStoreRetentionMoved) != (r.Retention != nil) {
 		return fmt.Errorf("audit: retention is on %s only, and required there", ActionStoreRetentionMoved)

@@ -121,3 +121,29 @@ These records are stamped 0.12, which this package reads, while writers still st
 | `invalid/config-learner-retired-acknowledged-without-digest.json` | An acknowledged retirement that names no baseline. |
 
 The chain rules are in `TestNetworkChainVerifies`, `TestNetworkChainBreaks` and `TestNetworkChainFromView`.
+
+## 0.13: sensor enrolment, revocation and refused links
+
+These records are stamped 0.13, which this package reads (`docs/phase4/D3-sensor-link.md` §11.2; the forms are D1's ruling 6894226253 on #683). The sensor is C7's test sensor. `sensor_spki` is C7's test sensor pin (SHA-256 of `otsec test sensor key`) or a fixed string (`sha256:2b2b…`), and `node_spki` C7's test node pin (SHA-256 of `otsec test node link key`); no key has any of them. `payload_sha256` is the 0.4 test value, and `keys_digest` the 0.12 one. The addresses are documentation addresses (RFC 5737).
+
+| File | What it shows |
+| --- | --- |
+| `valid/collector-request-sensor-enrol.json`, `valid/collector-request-sensor-revoke.json` | C8-6: the accepted, verified request of each kind names the sensor as its target, with the verified body's `generation` and `sensor_spki`, and for a revocation its `reason` and `suspect_from`. |
+| `valid/sensor-enrolled.json` | A first enrolment (`new`, generation 1), succeeded. |
+| `valid/sensor-enrolled-rekey.json` | A `rekey` to generation 2, with `previous_generation` and `previous_spki`. |
+| `valid/sensor-enrolled-state-unknown.json` | A `replace` made while the node's sensor state was unknown: `previous_state` `unknown`. |
+| `valid/sensor-enrolled-denied.json` | A denied enrolment, `asset_address`: it still carries the request's fields. |
+| `valid/sensor-revoked.json` | A revocation that ended a link: both `through_seq` values, `suspect_from`, and the network acknowledgement it voids. |
+| `valid/sensor-revoked-no-link.json`, `valid/sensor-revoked-streams-empty.json` | `streams` `{}` (no link was ended) and both values 0 (a link was ended, and both streams were empty): two different records (St1). |
+| `valid/sensor-link-refused.json` | A refused link, `run_regressed`, with `count` 3. |
+| `invalid/sensor-enrolled-stamped-0.12.json` | A 0.13 action stamped 0.12. |
+| `invalid/sensor-enrolled-asset-target.json` | A sensor record that also names an asset. |
+| `invalid/sensor-enrolled-hyphen-code.json`, `invalid/sensor-link-refused-hyphen-code.json` | A code in its hyphen form: `reason_code` carries the underscore form (F1). |
+| `invalid/sensor-revoked-denied.json` | A revocation that is not `succeeded` (C8-3). |
+| `invalid/sensor-revoked-one-stream.json` | `streams` with one of its two values. |
+| `invalid/sensor-revoked-streams-null.json` | `null` for a `through_seq`, which a decoder would read as absent (St1-b). |
+| `invalid/sensor-revoked-applied-after-time.json` | `applied_at` after the record's time as an instant, though before it as a string. The schema can't compare them, so this one passes the schema and fails `Validate`. |
+| `invalid/sensor-link-refused-count-zero.json` | `count` 0. |
+| `invalid/collector-request-sensor-enrol-without-target.json` | An accepted `node.sensor_enrol` that names no sensor target. |
+
+The chain rules (C8-8) are in `TestSensorChainValid`, `TestVerifySensorFromBreaks`, `TestVerifySensorFromCut` and `TestVerifySensorFromRepeat`, and C8-9 in `TestNetworkAckInForce`.

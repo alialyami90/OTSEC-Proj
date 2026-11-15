@@ -39,7 +39,8 @@ func testAdminKeys() []AdminKey {
 }
 
 func allAdminKinds() []RequestKind {
-	return append(append([]RequestKind{}, DefaultAdminKinds...), KindNodeChangeApproval, KindNodeBaselineAck, KindNodeNetworkBaselineAck)
+	return append(append([]RequestKind{}, DefaultAdminKinds...), KindNodeChangeApproval, KindNodeBaselineAck, KindNodeNetworkBaselineAck,
+		KindNodeSensorEnrol, KindNodeSensorRevoke)
 }
 
 // installBody is the 0.1 golden's body, the one an admin signs from 0.4.
@@ -84,6 +85,10 @@ func adminPayload(t *testing.T, kind RequestKind) AdminRequest {
 	case KindNodeNetworkBaselineAck:
 		p.NodeNetworkBaselineAck = &NodeNetworkBaselineAckBody{SensorID: testSensorID, DraftDigest: testDraftDigest,
 			BaselineDigest: testBaselineDigest}
+	case KindNodeSensorEnrol:
+		p.NodeSensorEnrol = testEnrolBody()
+	case KindNodeSensorRevoke:
+		p.NodeSensorRevoke = testRevokeBody()
 	}
 	return p
 }
