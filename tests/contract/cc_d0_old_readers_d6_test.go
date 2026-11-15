@@ -15,14 +15,21 @@ package contract
 //     diff.<counter>").
 //   - E4-7's backward leg (the same document, §3 and §5): a stored 0.4 SER,
 //     Syslog, node health and network-observation event is read by Decode.
-//   - C8-1's old-reader leg (docs/phase4/D3-sensor-link.md §11.2), narrowed
-//     by D1's ruling 1 (a) on #683: a 0.13 record of each new action, valid
-//     at 0.12 in every field but the action and its sensor target, is
-//     refused by the 0.12 audit.ParseRecord as an unknown action. §11.2
-//     leaves the records' other fields open (ruling 1 (b)), so none is here.
-//     The three audit-0.13-* files are therefore not valid 0.13 records and
-//     serve only this narrowed leg: deliverable 5's forward check uses the
-//     forms D3 settles (ruling 1 (c)).
+//   - C8-1's old-reader leg (docs/phase4/D3-sensor-link.md §11.2), with the
+//     narrowing of D4-104 item 2 (a) lifted by D1's ruling 6894226253 on
+//     #683 (D4-107): the ten audit-0.13-* files are full 0.13 records in the
+//     ruled forms (S1, St1, T1, K1, F1), one view of a node's chain from seq
+//     20. They hold each new action, a denied enrolment, a revocation with
+//     streams {} and one with both keys at 0, and C8-6's allowed and info
+//     collector.request of each new kind (D6's 6894220276, §0). A 0.12
+//     reader refuses every one: each sensor.* record as an unknown action,
+//     and each collector.request on the kind it names. That leg ran on main
+//     at 8e96c821 (this file and the fixtures on main's code; desk, Go
+//     1.27.3 windows/amd64), and it runs again on any build whose ReaderID
+//     is 0.12. From P4-4-CC deliverable 5 the reader is 0.13, and the test
+//     asserts what it does: each record is read, and the same bytes stamped
+//     0.12 are refused (C8-1). The forward check of the whole view is
+//     cc_d5_forward_d6_test.go's.
 //
 // The brief's "The backward fixtures also hold forward": deliverable 2's
 // branch reads the event-0.4-* files with the new code, so they keep their
@@ -315,45 +322,93 @@ func TestCCD0E47StoredEvents(t *testing.T) {
 	}
 }
 
-// ccD0LinkRefusedReasons are C8-4's six reasons for sensor.link_refused.
-var ccD0LinkRefusedReasons = []string{"peer-key", "expired", "binding", "run-regressed", "run-forked", "sensor-id"}
+// ccD0LinkRefusedReasons are C8-4's six reasons for sensor.link_refused, and
+// ccD0EnrolDeniedReasons C8-2's seven for a denied sensor.enrolled, each in
+// the underscore form reason_code carries (F1, D1's ruling 6894226253 on
+// #683).
+var (
+	ccD0LinkRefusedReasons = []string{"peer_key", "expired", "binding", "run_regressed", "run_forked", "sensor_id"}
+	ccD0EnrolDeniedReasons = []string{"node_key", "generation", "revoked_key", "forked_key", "reason", "not_after", "asset_address"}
+)
+
+// ccD0Audit013 are the 0.13 records, in chain order from seq 20. kind is the
+// admin kind a collector.request names in claimed (info) or verified
+// (allowed).
+var ccD0Audit013 = []struct{ file, action, outcome, kind string }{
+	{"audit-0.13-collector-request-sensor-enrol-info.json", "collector.request", "info", "node.sensor_enrol"},
+	{"audit-0.13-collector-request-sensor-enrol.json", "collector.request", "allowed", "node.sensor_enrol"},
+	{"audit-0.13-sensor-enrolled.json", "sensor.enrolled", "succeeded", ""},
+	{"audit-0.13-sensor-link-refused.json", "sensor.link_refused", "denied", ""},
+	{"audit-0.13-collector-request-sensor-revoke-info.json", "collector.request", "info", "node.sensor_revoke"},
+	{"audit-0.13-collector-request-sensor-revoke.json", "collector.request", "allowed", "node.sensor_revoke"},
+	{"audit-0.13-sensor-revoked.json", "sensor.revoked", "succeeded", ""},
+	{"audit-0.13-sensor-revoked-no-link.json", "sensor.revoked", "succeeded", ""},
+	{"audit-0.13-sensor-revoked-streams-zero.json", "sensor.revoked", "succeeded", ""},
+	{"audit-0.13-sensor-enrolled-denied.json", "sensor.enrolled", "denied", ""},
+}
 
 func TestCCD0C81OldReaderRefuses(t *testing.T) {
-	for _, c := range []struct{ file, action, outcome string }{
-		{"audit-0.13-sensor-enrolled.json", "sensor.enrolled", "succeeded"},
-		{"audit-0.13-sensor-revoked.json", "sensor.revoked", "succeeded"},
-		{"audit-0.13-sensor-link-refused.json", "sensor.link_refused", "denied"},
-	} {
-		t.Run(c.action, func(t *testing.T) {
+	for _, c := range ccD0Audit013 {
+		t.Run(c.file, func(t *testing.T) {
 			// A record is one line; its terminator is not part of it.
 			b := bytes.TrimRight(ccD0File(t, c.file), "\r\n")
 			m := ccD0Map(t, b)
-			if m["contract"] != "otsec.audit/0.13" || m["action"] != c.action {
-				t.Fatalf("contract %v, action %v", m["contract"], m["action"])
+			if m["contract"] != "otsec.audit/0.13" || m["action"] != c.action || m["outcome"] != c.outcome {
+				t.Fatalf("contract %v, action %v, outcome %v", m["contract"], m["action"], m["outcome"])
 			}
-			// What §11.2 does fix, which the 0.12 reader never reaches: the
-			// target is the sensor and no asset (C8-1), sensor.enrolled and
-			// sensor.revoked succeed (C8-2, C8-3), and sensor.link_refused is
-			// denied with one of C8-4's six reasons.
+			// What the ruled forms fix, read without either reader. A sensor
+			// record is the node's, names the sensor and nothing else (C8-1),
+			// and carries one sensor object (S1); a denied one carries one of
+			// its action's codes (F1). C8-6's allowed record names the sensor
+			// too, and its info record names no target.
 			target, _ := m["target"].(map[string]any)
-			if id, _ := target["sensor_id"].(string); len(target) != 1 || !netobs.ValidUUID(id) {
-				t.Errorf("target %v, want exactly {sensor_id: <lowercase UUID>}", m["target"])
+			id, _ := target["sensor_id"].(string)
+			_, sensor := m["sensor"].(map[string]any)
+			named := len(target) == 1 && netobs.ValidUUID(id)
+			if c.kind == "" {
+				if actor, _ := m["actor"].(map[string]any); actor["type"] != "node" || !named || !sensor {
+					t.Errorf("actor %v, target %v, sensor %v: want the node, exactly {sensor_id}, and a sensor object", m["actor"], m["target"], m["sensor"])
+				}
+			} else if want := c.outcome == "allowed"; named != want || sensor != want || (!want && m["target"] != nil) {
+				t.Errorf("target %v, sensor %v: want both, only on the allowed record", m["target"], m["sensor"])
 			}
-			if m["outcome"] != c.outcome {
-				t.Errorf("outcome %v, want %s", m["outcome"], c.outcome)
+			reason, _ := m["reason_code"].(string)
+			switch c.action {
+			case "sensor.link_refused":
+				if !slices.Contains(ccD0LinkRefusedReasons, reason) {
+					t.Errorf("reason_code %q is not one of C8-4's six", reason)
+				}
+			case "sensor.enrolled":
+				if (c.outcome == "denied") != slices.Contains(ccD0EnrolDeniedReasons, reason) {
+					t.Errorf("%s with reason_code %q", c.outcome, reason)
+				}
 			}
-			if reason, _ := m["reason_code"].(string); c.outcome == "denied" && !slices.Contains(ccD0LinkRefusedReasons, reason) {
-				t.Errorf("reason_code %q is not one of C8-4's six", reason)
-			}
-			// No field outside the 0.12 record's.
-			dec := json.NewDecoder(bytes.NewReader(b))
-			dec.DisallowUnknownFields()
-			if err := dec.Decode(&audit.Record{}); err != nil {
-				t.Errorf("a field outside the 0.12 record: %v", err)
-			}
+
 			_, err := audit.ParseRecord(b)
-			if !errors.Is(err, audit.ErrRecordRejected) || !strings.Contains(fmt.Sprint(err), fmt.Sprintf("unknown action %q", c.action)) {
-				t.Errorf("the 0.12 reader: %v, want it refused as an unknown action", err)
+			if audit.ReaderID == "otsec.audit/0.12" {
+				// The 0.12 reader: main before deliverable 5.
+				want := fmt.Sprintf("unknown action %q", c.action)
+				if c.kind != "" {
+					want = fmt.Sprintf("%q is not a kind an administrator signs", c.kind)
+				}
+				if !errors.Is(err, audit.ErrRecordRejected) || !strings.Contains(fmt.Sprint(err), want) {
+					t.Errorf("the 0.12 reader: %v, want it refused: %s", err, want)
+				}
+				return
+			}
+			// The 0.13 reader reads it, and refuses the same bytes stamped
+			// 0.12, which cannot carry the action or the kind (C8-1).
+			if err != nil {
+				t.Fatalf("the %s reader: %v", audit.ReaderID, err)
+			}
+			at12 := bytes.Replace(b, []byte(`"contract":"otsec.audit/0.13"`), []byte(`"contract":"otsec.audit/0.12"`), 1)
+			name := c.action
+			if c.kind != "" {
+				name = c.kind
+			}
+			_, err = audit.ParseRecord(at12)
+			if !errors.Is(err, audit.ErrRecordRejected) || !strings.Contains(fmt.Sprint(err), name+" is new in 0.13") {
+				t.Errorf("stamped 0.12: %v, want it refused, naming %s as new in 0.13", err, name)
 			}
 		})
 	}
