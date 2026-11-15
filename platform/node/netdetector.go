@@ -15,6 +15,7 @@ import (
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/contracts/version"
 	"otsec.local/otsec/modules/detection/netdetect"
 	"otsec.local/otsec/platform/sensorlink"
 )
@@ -61,6 +62,16 @@ const (
 	// each tick, and until it commits the detector reads nothing more and
 	// is not checkpointed. Raised once until an alert commits (D1 on B3).
 	AlarmAlertNotStored = "network-alert-not-stored"
+	// AlarmAlertUnreadable: a restore skipped stored alerts after the
+	// checkpoint's last_alert_seq that it could not read, so it does not
+	// hold them back (C13 0.3 section 1.2). A replay that raises one again
+	// stores it a second time, and since the hold matches alerts by
+	// position, it may store the alerts after it a second time too, each
+	// counted under mismatches with AlarmDetectorMismatch raised (D4's N1
+	// on #682). Raised once, at the start whose restore skipped them, in
+	// status and the OS log only, with no health event; a restore that
+	// skips none raises nothing. The alerts stay in the store.
+	AlarmAlertUnreadable = "network-alert-unreadable"
 )
 
 // FrameIndexEntries bounds the frame index, from a cited frame's SHA-256
@@ -84,6 +95,9 @@ type DetectorStatus struct {
 	Alerts              int64 `json:"alerts"`
 	AlertsFramesMissing int64 `json:"alerts_frames_missing"`
 	AlertsNotStored     int64 `json:"alerts_not_stored"`
+	// AlertsUnreadable are the stored alerts this process's restore
+	// skipped because it could not read them (C13 0.3 section 1.2).
+	AlertsUnreadable int64 `json:"detector_alerts_unreadable"`
 	// AlertsPending are the alerts raised and not yet committed, and
 	// AlertCommitFailures the commits of them that failed since start.
 	AlertsPending       int   `json:"alerts_pending"`
@@ -253,13 +267,15 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 			nd.saved = c.Through
 		}
 	}
+	var skipped int64
 	if seqs, doc, err := r.detectorCheckpoints(ctx); err != nil {
 		return err
 	} else if doc != nil {
 		// Every stored checkpoint goes once a newer one is stored, the
 		// one that didn't restore too.
 		nd.ckpts = seqs
-		committed, err := r.alertsAfter(ctx, doc)
+		var committed []netdetect.Committed
+		committed, skipped, err = r.alertsAfter(ctx, doc)
 		if err == nil {
 			nd.d, err = netdetect.RestoreDetector(nd.cfg, doc, committed, head)
 		}
@@ -297,6 +313,13 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 	if n := nd.st.EndpointsNotTracked; n > 0 {
 		r.opt.Status.Raise("", AlarmEndpointsNotTracked, fmt.Sprintf("%d enrolled run endpoint addresses past %d are not tracked, so before acknowledgement their sessions are never judged", n, netobs.MaxDetectorEndpoints))
 	}
+	// After the last step that can fail, so a start tried again after a
+	// failed store read raises it once, at the start that succeeds (D6's
+	// N4 on #682).
+	if skipped > 0 {
+		nd.st.AlertsUnreadable = skipped
+		r.opt.Status.Raise("", AlarmAlertUnreadable, fmt.Sprintf("the restore skipped %d stored alerts it could not read, so it does not hold them back; a replay that raises one again stores it a second time and may store the alerts after it a second time too, each counted under mismatches; they stay in the store", skipped))
+	}
 	r.detector = nd
 	return nil
 }
@@ -310,9 +333,21 @@ func observationOf(st c5.Stored) (*netobs.Observation, error) {
 	return netobs.ObservationFromEvent(e)
 }
 
+// detectorDocument reports whether a configuration document's schema and
+// half name a detector checkpoint of any otsec.netcheckpoint/0.x minor
+// (CH-35's bridge item 1). One of a minor this build cannot read is then
+// refused by the restore, which raises AlarmDetectorNotRestored and starts
+// from the oldest retained observation, and is removed once the node's own
+// first checkpoint commits (bridge item 2).
+func detectorDocument(schema, half string) bool {
+	self, _ := version.Parse(netobs.CheckpointIdentifier)
+	got, err := version.Parse(schema)
+	return err == nil && self.Accepts(got) && half == netobs.HalfDetector
+}
+
 // detectorCheckpoints are the seqs of the netcheckpoint.detector records
-// on the intake's configuration stream, oldest first, and the newest's
-// document, or nil.
+// on the intake's configuration stream, of any 0.x minor, oldest first,
+// and the newest's document, or nil.
 func (r *Runtime) detectorCheckpoints(ctx context.Context) ([]c5.Seq, []byte, error) {
 	stream := r.intakeStream()
 	db := r.Store(stream)
@@ -332,7 +367,7 @@ func (r *Runtime) detectorCheckpoints(ctx context.Context) ([]c5.Seq, []byte, er
 		for _, st := range got {
 			after = st.Key.Seq
 			var head struct{ Schema, Half string }
-			if json.Unmarshal(st.Event, &head) == nil && head.Schema == netobs.CheckpointIdentifier && head.Half == netobs.HalfDetector {
+			if json.Unmarshal(st.Event, &head) == nil && detectorDocument(head.Schema, head.Half) {
 				seqs, doc = append(seqs, st.Key.Seq), st.Event
 			}
 		}
@@ -344,37 +379,46 @@ func (r *Runtime) detectorCheckpoints(ctx context.Context) ([]c5.Seq, []byte, er
 
 // alertsAfter are the alerts on the alert stream after the checkpoint's
 // last_alert_seq, which a restore holds back when its replay raises them
-// again (D1 in D4-74).
-func (r *Runtime) alertsAfter(ctx context.Context, doc []byte) ([]netdetect.Committed, error) {
+// again (D1 in D4-74), and how many it skipped. A stored alert that
+// event.Decode or AlertFromEvent cannot read, such as one of a later minor
+// written before a rollback, is skipped and counted, and the restore goes
+// on with those it read (C13 0.3 section 1.2). A failed read of the store
+// or of the checkpoint fails the restore, with none counted.
+func (r *Runtime) alertsAfter(ctx context.Context, doc []byte) ([]netdetect.Committed, int64, error) {
 	k, err := netobs.DecodeDetectorCheckpoint(doc)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	stream := NetAlertStream(r.cfg.NetworkSensor.SensorID)
 	db := r.Store(stream)
 	if db == nil {
-		return nil, errors.New("the network database is not open")
+		return nil, 0, errors.New("the network database is not open")
 	}
-	var out []netdetect.Committed
+	var (
+		out     []netdetect.Committed
+		skipped int64
+	)
 	for after := c5.Seq(k.LastAlertSeq); ; {
 		got, err := db.Read(ctx, stream, after, detectorReadPage)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, st := range got {
 			after = st.Key.Seq
 			e, err := event.Decode(st.Event)
 			if err != nil {
-				return nil, err
+				skipped++
+				continue
 			}
 			a, err := netobs.AlertFromEvent(e)
 			if err != nil {
-				return nil, err
+				skipped++
+				continue
 			}
 			out = append(out, netdetect.Committed{Seq: st.Key.Seq, Alert: *a})
 		}
 		if len(got) < detectorReadPage {
-			return out, nil
+			return out, skipped, nil
 		}
 	}
 }
