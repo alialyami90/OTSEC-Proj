@@ -35,9 +35,6 @@ func TestLinkKeyAnotherFaultAlarms(t *testing.T) {
 	if got := linkKeyAlarms(st); len(got) != 1 || !strings.Contains(got[0], "malformed") {
 		t.Fatalf("sensor-link-key alarms %q; want one naming the malformed file", got)
 	}
-	if err := nc.UnlockTLS(); err != nil {
-		t.Fatal(err)
-	}
 	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -46,8 +43,16 @@ func TestLinkKeyAnotherFaultAlarms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeLinkKeyFile(t, nc, pub)
-	lockTLS(t, nc)
+	// The manager is held while tls_dir is unlocked and the file rewritten,
+	// so no step reads a half-written file or the unlocked directory, each
+	// of which is a fault of its own and raises the alarm too.
+	heldManager(r, func() {
+		if err := nc.UnlockTLS(); err != nil {
+			t.Fatal(err)
+		}
+		writeLinkKeyFile(t, nc, pub)
+		lockTLS(t, nc)
+	})
 	sensorStep(t, r)
 	sensorStep(t, r)
 	got := linkKeyAlarms(st)
