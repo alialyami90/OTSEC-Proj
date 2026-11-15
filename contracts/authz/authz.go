@@ -29,8 +29,11 @@ import (
 // node.network_baseline_ack, and on an accepted admin-signed reply the
 // digest and list of the collector's pinned administrator keys
 // (AdminAccepted.KeysDigest and Keys) (D4-68,
-// docs/phase4/D3-c7-0.10-c8-0.12.md).
-const ContractID = "otsec.authz/0.10"
+// docs/phase4/D3-c7-0.10-c8-0.12.md). 0.11 adds the admin-signed kinds
+// node.sensor_enrol and node.sensor_revoke, each a grant of its own
+// (docs/phase4/D3-sensor-link.md §11.1, D4-92); no product path accepts,
+// relays or applies them yet (D4-103 ruling 3).
+const ContractID = "otsec.authz/0.11"
 
 // AcceptsContract reports whether a reader of this package can read a
 // message stamped id: any minor of its major (contracts/README.md). What a

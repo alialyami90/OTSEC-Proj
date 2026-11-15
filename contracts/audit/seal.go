@@ -31,6 +31,9 @@ func ValidatePending(pending []byte) (*Record, error) {
 	if len(pending) > MaxRecordBytes {
 		return nil, fmt.Errorf("%w: %d bytes", ErrRecordRejected, len(pending))
 	}
+	if err := refuseSensorUnset(pending); err != nil {
+		return nil, fmt.Errorf("%w: pending record: %v", ErrRecordRejected, err)
+	}
 	var r Record
 	if err := strictjson.Decode(pending, &r); err != nil {
 		return nil, fmt.Errorf("%w: pending record: %v", ErrRecordRejected, err)

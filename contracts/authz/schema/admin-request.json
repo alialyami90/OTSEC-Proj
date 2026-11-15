@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "otsec.authz/0.10/admin-request",
-  "title": "Admin-signed request payload (C7 0.4, D2-11; node bodies since 0.5; configuration bodies since 0.6; the network baseline acknowledgement since 0.10). Strict. Decoded only after the signature verifies. Every field is signed.",
+  "$id": "otsec.authz/0.11/admin-request",
+  "title": "Admin-signed request payload (C7 0.4, D2-11; node bodies since 0.5; configuration bodies since 0.6; the network baseline acknowledgement since 0.10; the sensor kinds since 0.11). Strict. Decoded only after the signature verifies. Every field is signed.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -29,7 +29,9 @@
         "node.seq_reset_ack",
         "node.change_approval",
         "node.baseline_ack",
-        "node.network_baseline_ack"
+        "node.network_baseline_ack",
+        "node.sensor_enrol",
+        "node.sensor_revoke"
       ],
       "description": "Must equal the request's kind."
     },
@@ -317,6 +319,102 @@
         }
       },
       "description": "Since 0.10. Acknowledges one sensor's network baseline (D4-68 ruling 8)."
+    },
+    "node_sensor_enrol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sensor_id",
+        "generation",
+        "sensor_spki",
+        "sensor_address",
+        "node_spki",
+        "node_address",
+        "not_after",
+        "reason"
+      ],
+      "properties": {
+        "sensor_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "The C13 sensor ID, a lowercase UUID, drawn by the administrator's client."
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$",
+          "description": "A decimal from 1, canonical, at most 2^64-1 (C13's seq form). One above this sensor_id's last enrolment; 1 if and only if reason is new."
+        },
+        "sensor_spki": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256: and 64 lowercase hex digits, over the sensor key's SubjectPublicKeyInfo. Differs from node_spki."
+        },
+        "sensor_address": {
+          "type": "string",
+          "description": "An IP literal and a port from 1 to 65535, in its one written form: 192.0.2.10:8443, or [2001:db8::10]:8443 for IPv6. No zone, never a hostname."
+        },
+        "node_spki": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The node's link key, the same form."
+        },
+        "node_address": {
+          "type": "string",
+          "description": "An IP literal with no port, brackets or zone, in its one written form: the source the sensor admits."
+        },
+        "not_after": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339, UTC, canonical form. The node checks it against issued_at (C8-2)."
+        },
+        "reason": {
+          "enum": [
+            "new",
+            "renew",
+            "rekey",
+            "replace"
+          ]
+        }
+      },
+      "description": "Since 0.11 (docs/phase4/D3-sensor-link.md §11.1, C7-2). Pins one sensor and this node to each other. The collector checks the shape only."
+    },
+    "node_sensor_revoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sensor_id",
+        "generation",
+        "sensor_spki",
+        "reason"
+      ],
+      "properties": {
+        "sensor_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "generation": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]{0,19}$",
+          "description": "A decimal from 1, canonical, at most 2^64-1 (C13's seq form)."
+        },
+        "sensor_spki": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "reason": {
+          "enum": [
+            "compromised",
+            "lost",
+            "retired"
+          ]
+        },
+        "suspect_from": {
+          "type": "string",
+          "format": "date-time",
+          "description": "RFC 3339, UTC, canonical form; not after issued_at. Absent means from enrolment."
+        }
+      },
+      "description": "Since 0.11 (C7-3). Ends trust in one enrolment."
     }
   },
   "oneOf": [
@@ -369,6 +467,16 @@
           {
             "required": [
               "node_network_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
             ]
           }
         ]
@@ -424,6 +532,16 @@
             "required": [
               "node_network_baseline_ack"
             ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
+            ]
           }
         ]
       }
@@ -477,6 +595,16 @@
           {
             "required": [
               "node_network_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
             ]
           }
         ]
@@ -532,6 +660,16 @@
             "required": [
               "node_network_baseline_ack"
             ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
+            ]
           }
         ]
       }
@@ -585,6 +723,16 @@
           {
             "required": [
               "node_network_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
             ]
           }
         ]
@@ -640,6 +788,16 @@
             "required": [
               "node_network_baseline_ack"
             ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
+            ]
           }
         ]
       }
@@ -693,6 +851,16 @@
           {
             "required": [
               "node_network_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
             ]
           }
         ]
@@ -748,6 +916,16 @@
             "required": [
               "node_network_baseline_ack"
             ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
+            ]
           }
         ]
       }
@@ -801,6 +979,144 @@
           {
             "required": [
               "node_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "node.sensor_enrol"
+        }
+      },
+      "required": [
+        "node_sensor_enrol"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_network_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_revoke"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "kind": {
+          "const": "node.sensor_revoke"
+        }
+      },
+      "required": [
+        "node_sensor_revoke"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "credential_install"
+            ]
+          },
+          {
+            "required": [
+              "credential_revoke"
+            ]
+          },
+          {
+            "required": [
+              "credential_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "asset_clear_suspension"
+            ]
+          },
+          {
+            "required": [
+              "node_quarantine_clear"
+            ]
+          },
+          {
+            "required": [
+              "node_seq_reset_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_change_approval"
+            ]
+          },
+          {
+            "required": [
+              "node_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_network_baseline_ack"
+            ]
+          },
+          {
+            "required": [
+              "node_sensor_enrol"
             ]
           }
         ]

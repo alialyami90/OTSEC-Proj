@@ -97,7 +97,7 @@ func TestWriterStampStays011(t *testing.T) {
 	if ContractID != "otsec.audit/0.11" {
 		t.Fatalf("ContractID is %s: the writer stamp moves only with the node change that writes 0.12 records", ContractID)
 	}
-	if ReaderID != "otsec.audit/0.12" {
+	if ReaderID != "otsec.audit/0.13" {
 		t.Fatalf("ReaderID is %s", ReaderID)
 	}
 }

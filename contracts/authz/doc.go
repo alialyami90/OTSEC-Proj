@@ -1,4 +1,4 @@
-// Package authz is contract C7, otsec.authz/0.10: who may ask for what, how
+// Package authz is contract C7, otsec.authz/0.11: who may ask for what, how
 // device credentials are referenced without being held, what the main process
 // may ask the collector to do, and how the collector verifies a register
 // package before using it.
@@ -298,6 +298,30 @@
 // digest and the list, and does not apply the decision if that write
 // fails, so a key's grant of a kind is in the audit chain before its first
 // use (D4-68 ruling 9). The node takes both from the reply only.
+//
+// # The sensor kinds (0.11)
+//
+// node.sensor_enrol pins one network sensor and this node to each other
+// (NodeSensorEnrolBody), and node.sensor_revoke ends trust in one enrolment
+// (NodeSensorRevokeBody) (docs/phase4/D3-sensor-link.md §11.1, C7-1 to
+// C7-3; D4-92). Each is a grant of its own: a key signs one only when its
+// list names it, and neither is in DefaultAdminKinds (SL-7). A request
+// stamped before 0.11 cannot ask for either. The collector checks the
+// bodies' shape only. An enrolment names the sensor, its generation (a
+// decimal from 1; new comes with generation 1 and only with it), the two
+// pins, which differ, the sensor's address as an IP literal and a port,
+// the node's address as an IP literal, not_after in UTC, and its reason
+// (new, renew, rekey or replace). A revocation names the sensor, the
+// generation, the pin, its reason (compromised, lost or retired), and
+// optionally suspect_from, which is not after issued_at. Whether the
+// reason agrees with the pin (C7-4) is the node's and the link agent's to
+// check, and not_after's bound against issued_at the node's (C8-2).
+//
+// No product path accepts, relays or applies either kind in 0.11 (D4-103
+// ruling 3): the node's admin relay does not relay them, and the
+// collector's pipeline refuses a verified one. What the collector does with
+// them (C7-5), the sensor's own verifier (C7-6), and the node's check of
+// the reason (C7-4) are owed by later briefs.
 //
 // Not covered: the approver and the person who changed the relay may be
 // the same. Nothing observes who changed a relay until engineering access

@@ -54,6 +54,7 @@ var adminKinds = map[RequestKind]bool{
 	KindNodeQuarantineClear: true, KindNodeSeqResetAck: true,
 	KindNodeChangeApproval: true, KindNodeBaselineAck: true,
 	KindNodeNetworkBaselineAck: true,
+	KindNodeSensorEnrol:        true, KindNodeSensorRevoke: true,
 }
 
 // AdminSigned is the envelope of an admin-signed request (0.4). The
@@ -103,6 +104,10 @@ type AdminRequest struct {
 	// The network acknowledgement's body (since 0.10), the same way: a
 	// 0.9 reader refuses it as a payload error.
 	NodeNetworkBaselineAck *NodeNetworkBaselineAckBody `json:"node_network_baseline_ack,omitempty"`
+	// The sensor kinds' bodies (since 0.11), the same way: a 0.10 reader
+	// refuses either as a payload error.
+	NodeSensorEnrol  *NodeSensorEnrolBody  `json:"node_sensor_enrol,omitempty"`
+	NodeSensorRevoke *NodeSensorRevokeBody `json:"node_sensor_revoke,omitempty"`
 }
 
 // Expires is the request's parsed expiry; it is valid on a request
@@ -366,7 +371,7 @@ func (p *AdminRequest) validate() error {
 	set := 0
 	for _, present := range []bool{p.CredentialInstall != nil, p.CredentialRevoke != nil, p.CredentialClearSusp != nil, p.AssetClearSusp != nil,
 		p.NodeQuarantineClear != nil, p.NodeSeqResetAck != nil, p.NodeChangeApproval != nil, p.NodeBaselineAck != nil,
-		p.NodeNetworkBaselineAck != nil} {
+		p.NodeNetworkBaselineAck != nil, p.NodeSensorEnrol != nil, p.NodeSensorRevoke != nil} {
 		if present {
 			set++
 		}
@@ -374,10 +379,17 @@ func (p *AdminRequest) validate() error {
 	if set != 1 {
 		return fmt.Errorf("exactly one body must be set, got %d", set)
 	}
-	return validateBody(p.Kind, p.Principal, requestBodies{
+	if err := validateBody(p.Kind, p.Principal, requestBodies{
 		CredentialInstall: p.CredentialInstall, CredentialRevoke: p.CredentialRevoke,
 		CredentialClearSusp: p.CredentialClearSusp, AssetClearSusp: p.AssetClearSusp,
 		NodeQuarantineClear: p.NodeQuarantineClear, NodeSeqResetAck: p.NodeSeqResetAck,
 		NodeChangeApproval: p.NodeChangeApproval, NodeBaselineAck: p.NodeBaselineAck,
-		NodeNetworkBaselineAck: p.NodeNetworkBaselineAck})
+		NodeNetworkBaselineAck: p.NodeNetworkBaselineAck,
+		NodeSensorEnrol:        p.NodeSensorEnrol, NodeSensorRevoke: p.NodeSensorRevoke}); err != nil {
+		return err
+	}
+	if p.NodeSensorRevoke != nil {
+		return p.NodeSensorRevoke.checkIssued(p.IssuedAt)
+	}
+	return nil
 }

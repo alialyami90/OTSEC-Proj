@@ -54,7 +54,8 @@ var (
 // request stamped with an earlier minor cannot ask for it.
 var kindSince = map[RequestKind]int{KindAssetClearSusp: 2, KindNodeQuarantineClear: nodeKindsSince, KindNodeSeqResetAck: nodeKindsSince,
 	KindNodeChangeApproval: configKindsSince, KindNodeBaselineAck: configKindsSince,
-	KindNodeNetworkBaselineAck: networkAckSince}
+	KindNodeNetworkBaselineAck: networkAckSince,
+	KindNodeSensorEnrol:        sensorKindsSince, KindNodeSensorRevoke: sensorKindsSince}
 
 // snmpv3Since is the minor that added the snmpv3 transport and
 // CredentialRef.USM. A request stamped with an earlier minor cannot install
@@ -649,6 +650,10 @@ type requestBodies struct {
 	NodeBaselineAck     *NodeBaselineAckBody     // admin-signed only
 	// NodeNetworkBaselineAck is admin-signed only (since 0.10).
 	NodeNetworkBaselineAck *NodeNetworkBaselineAckBody
+	// NodeSensorEnrol and NodeSensorRevoke are admin-signed only (since
+	// 0.11).
+	NodeSensorEnrol  *NodeSensorEnrolBody
+	NodeSensorRevoke *NodeSensorRevokeBody
 }
 
 // validateBody checks that the one body set matches kind and passes its
@@ -699,6 +704,10 @@ func validateBody(kind RequestKind, by Principal, b requestBodies) error {
 		return b.NodeBaselineAck.Validate()
 	case kind == KindNodeNetworkBaselineAck && b.NodeNetworkBaselineAck != nil:
 		return b.NodeNetworkBaselineAck.Validate()
+	case kind == KindNodeSensorEnrol && b.NodeSensorEnrol != nil:
+		return b.NodeSensorEnrol.Validate()
+	case kind == KindNodeSensorRevoke && b.NodeSensorRevoke != nil:
+		return b.NodeSensorRevoke.Validate()
 	default:
 		return refuse(RefuseInvalid, "body does not match kind %q", kind)
 	}

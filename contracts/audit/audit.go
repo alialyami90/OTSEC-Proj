@@ -26,9 +26,9 @@ import (
 const ContractID = "otsec.audit/0.11"
 
 // ReaderID is the newest minor this package reads in full, strictly and with
-// every gate: 0.12 (docs/phase4/D3-c7-0.10-c8-0.12.md §2). A record stamped
+// every gate: 0.13 (docs/phase4/D3-sensor-link.md §11.2). A record stamped
 // later is read forward-compatibly (ParseRecord).
-const ReaderID = "otsec.audit/0.12"
+const ReaderID = "otsec.audit/0.13"
 
 // MaxRecordBytes bounds one stored record. It is stable for every 0.x minor:
 // a forwarder sizes its targets by it (C8-A4-6), so a later minor may lower
@@ -98,9 +98,11 @@ type Actor struct {
 	AuthMethod string              `json:"auth_method,omitempty"`
 }
 
-// Action is the closed set of audited actions. A reader that meets an
-// action it does not know keeps the record (the chain covers it) and shows it
-// as ActionUnrecognized.
+// Action is the closed set of audited actions. Validate refuses an action
+// this reader does not know, at any minor, so ParseRecord refuses the record:
+// that refusal is what makes a newer minor's actions a reader floor (C8 0.13,
+// C8-1; D4-105 item 6). Normalize maps an unknown action to
+// ActionUnrecognized for display only.
 type Action string
 
 const (
@@ -165,6 +167,7 @@ func init() {
 		ActionConfigCheckpointNotRestored,
 		ActionAdvisorySetInstalled, ActionAdvisorySetRefused,
 		ActionStoreRetentionMoved, ActionConfigLearnerRetired,
+		ActionSensorEnrolled, ActionSensorRevoked, ActionSensorLinkRefused,
 	} {
 		actions[a] = true
 	}
@@ -182,6 +185,7 @@ var actionSince = map[Action]int{
 	ActionConfigCheckpointNotRestored: configCheckpointSince,
 	ActionAdvisorySetInstalled:        advisorySince, ActionAdvisorySetRefused: advisorySince,
 	ActionStoreRetentionMoved: networkSince, ActionConfigLearnerRetired: networkSince,
+	ActionSensorEnrolled: sensorSince, ActionSensorRevoked: sensorSince, ActionSensorLinkRefused: sensorSince,
 }
 
 // Normalize maps an action this reader does not know to ActionUnrecognized.
@@ -288,6 +292,10 @@ type Record struct {
 	// policy.apply with reason_code admin_keys only (0.12): network.go.
 	Retention *Retention `json:"retention,omitempty"`
 	AdminKeys *AdminKeys `json:"admin_keys,omitempty"`
+
+	// Sensor is on the sensor records and on C8-6's collector.request only
+	// (0.13): sensor.go.
+	Sensor *Sensor `json:"sensor,omitempty"`
 }
 
 // Admin names one admin-signed request (C7 AdminAccepted): the signing
@@ -317,6 +325,9 @@ func (a *Admin) validate(minor int) error {
 		}
 		if err := authz.ValidateAdminKinds([]authz.RequestKind{a.Kind}); err != nil {
 			return err
+		}
+		if sensorKind(a.Kind) && minor < sensorSince {
+			return fmt.Errorf("kind %s is new in 0.%d", a.Kind, sensorSince)
 		}
 	}
 	switch {
@@ -471,6 +482,9 @@ func (r *Record) Validate() error {
 		return err
 	}
 	if err := r.validateNetwork(got.Minor); err != nil {
+		return err
+	}
+	if err := r.validateSensor(); err != nil {
 		return err
 	}
 	switch r.Outcome {
@@ -758,6 +772,9 @@ func ParseRecord(b []byte) (*Record, error) {
 		}
 		return nil
 	}); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
+	}
+	if err := refuseSensorUnset(b); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
 	}
 	var r Record
