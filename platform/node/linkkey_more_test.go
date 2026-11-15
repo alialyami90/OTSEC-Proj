@@ -144,3 +144,10 @@ func TestRunReadsLinkKey(t *testing.T) {
 		t.Fatal("no sensor-link-key alarm within a minute of Run: the link key was never read")
 	}
 }
+
+// TEMPORARY (removed before review): fifty runs in CI, as -count=50.
+func TestLinkKeyAnotherFaultAlarms50(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		t.Run("run", TestLinkKeyAnotherFaultAlarms)
+	}
+}
