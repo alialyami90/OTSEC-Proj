@@ -2370,3 +2370,85 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no C8 change beyond the time fields' form and precision.
 - Uncertainty or safety risks: a writer that emits the comma form today would have its records refused; the PR states, by search, that no writer on `main` does.
 - Scratch files: `d3-c8t-*`
+
+### P4-4-HR2325S (D6; D4 and D2 review the labels, D3 the parse surface): HR-23's stage-2 cases and the rest of HR-25's inputs (issued 2026-11-15, D4-111)
+- Objective and rationale: HR-23 must close on a measured fix before item 4's gate (D4-98); whether HR-25 blocks the gate is still the owner's question (D4-101 item 8). Both counted runs need every input built and pinned first (D4-111 item 5). One generator serves both, so the false-positive set is built once.
+- Owner, and the reviewers (CLAUDE.md §5.6): a D6 writing instance. D4 and D2 review the labels; D3 reviews for the sensor host's parse surface (HR-21). No D6 instance that wrote this reviews it.
+- Required inputs and dependencies:
+  - starts after #714 merges, and builds on its builder;
+  - brief P4-4-HR23, stage 2, and `docs/phase4/D4-hr23-design.md` §4.3;
+  - `docs/phase4/D4-hr25-design.md` §2.10 and §3; `docs/phase4/D6-hr25-resync-conditions.md`; rows `fp-*`, `chg-malformed`, `chg-eof`, `fuzz-seeds`, `fuzz-bit7`, `rerun-scope`, `s5-*` of `resync-conditions.tsv`;
+  - D4's packing of S5's inputs and baselines, 6900746074 on #714, and D4's list of what must be built, 6900745749 (question 4).
+- Files or modules each role may modify: D6, the GT-PCAP paths (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) and `.github/workflows/a6-gt-pcap.yml`. In the two pinned TSVs, only: row `s5-inputs`, for the TCP counts per connection that D4's packing gives; and the new cases of D4-111 item 8.2, after item 8.1's ruling. `test_resync_conditions.py`'s pinned hashes are updated in the same commit.
+- Expected interfaces: C13 0.3 (D4-102). No contract change.
+- Deliverable, in order, each its own PR:
+  1. HR-23's stage-2 cases and pass conditions, the shared false-positive set, and HR-23's malformed set;
+  2. S5's seven inputs and two baselines, with row `s5-inputs` amended.
+  3. The cases of D4-111 item 8.2, after item 8.1's ruling.
+- Acceptance tests:
+  - every capture is rebuilt in `a6-gt-pcap`, checked against committed hashes and labels, and each expected tshark difference is listed with its cause, as #714 does;
+  - labels come from how each case was built, never from an engine; the control's expected result is pinned row by row, and a row the control passes reads `unknown` for the fix;
+  - each builder rule has a test with a named control shown failing;
+  - the self-check list in this file, with the items that apply named.
+- Owed: the same cases on the real sensor over the rig (the sensor's brief).
+- Explicit exclusions: no edit to `pins.env` or `modules/telemetry/`; no engine run that counts; no device contact.
+- Uncertainty or safety risks: a label that rests on unread Zeek code is a finding when the run disagrees, never a reason to edit the pin after the run.
+- Scratch files: `d6-hr2325s-*`
+
+### P4-4-INT (D5 with D4; D6, D3 and D4 review): the C13 0.2 intake, unwired (issued 2026-11-15, D4-111)
+- Objective and rationale: R6 (passive network monitoring) and P5. The node's intake still reads C13 0.1 (D4-103). This brief moves it to the approved C13 0.2 and 0.3 (D4-92, D4-102): heartbeats, coverage gaps, the cursor and `sensorrun.json`, and it carries the owed tests that P4-4-CC's "Owed" table gives to "the C13 0.2 intake brief".
+- Owner, and the reviewers (CLAUDE.md §5.6): D5 writes the node's intake; D4 writes the detector change and the C13 code change below. D5's PR: D6 for reliability and the owed tests, D3 for trust boundaries, and D4 for C13's meaning. D4's PR: D6 for detection accuracy, D2 for protocol interpretation, and D5 for the node's calls.
+- Required inputs and dependencies:
+  - C13 0.2 (`docs/phase4/D4-c13-netobs.md`, `docs/phase4/D4-c13-0.2-proposal.md`, and D4-106 item 1.3's amended text, which is the source where they differ) and C13 0.3 (`docs/phase4/D4-c13-0.3-proposal.md`); `contracts/netobs/`;
+  - `docs/phase4/D5-sensor-node.md` §1.4, §1.6, §1.8, §1.9 and §1.15;
+  - P4-4-CC's "Owed" table, the rows whose owner is this brief; D4-104 item 1.3, D4-106 item 1.6, D4-107 items 3.1 and 5.2, and D4-108 item 4;
+  - `platform/node` (`netsensor.go`, `sensormgr.go`, `sensor.go`), and `modules/detection/`.
+- Files or modules each role may modify: D5, `platform/node/` and its test packages. D4, `modules/detection/` and `contracts/netobs/` (D1 authorizes the C13 code change named below; no contract text changes).
+- Expected interfaces: C13 0.2 and 0.3, C4 0.4 and C5 as on `main`. No contract text changes; a gap found in a contract is raised to D1, never filled in code.
+- Deliverable:
+  1. **The split first** (D4-99): D5 and D4 agree in comments on one tracking PR which owed test each writes and the order of their PRs, and D1 rules. No intermediate `main` weakens a guarantee.
+  2. **D4's PR:** the detector change for `hold-timeout`, and the refusal of a 0.1 counter sent as `null` on the 0.2 channel (D4-107 item 3.1).
+  3. **D5's PR:** the intake on C13 0.2 and 0.3, unwired.
+- Acceptance tests: each owed test below is a named pass in both `go` jobs, each with its control shown failing (self-check item 1):
+  - C13 0.2 §15's node legs that the "Owed" table gives to this brief, R-5's cursor leg in `Record.Bytes` among them;
+  - C13 0.2 §15's detector legs S-7's, T-6 and U-3, and `TestSchedulerPanicTakenAsTimeout` (T-12) and `TestResultTimeoutKeepsSession`, with D4's change;
+  - C13 0.3: N-9's node half, N-18's node legs and item 5 (c)'s code; N-14 waits for P4-4-HR24's stage 3 and stays owed if that has not merged;
+  - C4 0.4: E4-6's builder leg (the node's own worst-case `sensor.counters` within 2,048 octets on the default target) and E4-7's node leg, `TestHeldPoolEventBuiltAtWrite`;
+  - D4-106 item 1.6's D3 condition-1 test and the tied leg of D4-104 item 1.3's test;
+  - a sensor connection live at `sensor-failed` is closed (D4-107 item 5.2), with a test;
+  - D4-104 item 1.3's invariant: a stored record's schema is the minor the node checked strictly on the channel; its control stores the schema the sensor sent;
+  - R-6's node leg: the node passes the hello's schema to `DecodeFromSensorIn`; its control decodes every frame with `DecodeFromSensor` (D4-108 item 4);
+  - a 0.1 counter sent as `null` on the 0.2 channel is refused (D4's PR);
+  - **D4-111 item 4.1:** if a PR of this brief is the first to let the node write an audit record of a sensor kind stamped 0.13 or above, by any means (raising `audit.ContractID` or a node-local constant), the `relayKinds` probe reruns on its head, run by a D6 instance, before `relayKinds` is widened, with the collector check firing;
+  - **F-027's gate:** the merge-check greps show no product caller of `ServeSensor`, no `network_sensor` section outside the tests, and no wired intake entry point (D4-96);
+  - the self-check list in this file, with the items that apply named.
+- Owed: the rig legs (the sensor's brief and D6's rig brief); N-14 if P4-4-HR24's stage 3 has not merged.
+- Explicit exclusions: no product wiring of any sensor path (F-027's gate); no dialer or enrolment (P4-4-DE); no detector rule beyond `hold-timeout` (CH-51 is HR-24's stage 3); no change to the engine's script.
+- Uncertainty or safety risks: the intake reads data from another host; every decode is strict on the channel's minor, and a refused frame never reaches the store.
+- Scratch files: `d5-int-*`, `d4-int-*`
+
+### P4-4-DE (D5 with D3; D6, D3 and D2 review): the dialer and enrolment, unwired (issued 2026-11-15, D4-111)
+- Objective and rationale: R6 and P4, P5. The node dials its sensor, enrols, renews and revokes its key, and writes the C8 sensor records. It carries the owed tests that P4-4-CC's "Owed" table gives to "the dialer-and-enrolment brief", and those of D4-111 item 4. It starts after P4-4-INT's D5 PR merges.
+- Owner, and the reviewers (CLAUDE.md §5.6): D5 writes the node's dialer, enrolment and writers; D3 writes any change under `modules/security/` and `cmd/otsec-collector/` (C7-5, the collector's part). D6 reviews for the owed tests, D3 for trust boundaries in D5's PR, D5 for the node's calls in D3's, and D2 for the collector's callers.
+- Required inputs and dependencies:
+  - `docs/phase4/D3-sensor-link.md` (SL-9, SL-13 to SL-16, enrolment step 4, §11.2); `docs/phase4/D5-sensor-node.md` §1.1, §1.3, §1.5 and §1.7;
+  - C7 0.11 and C8 0.13 as coded (#699), with D4-107 item 2 and D4-108 items 1 and 4;
+  - P4-4-CC's "Owed" table, the rows whose owner is this brief; D4-111 item 4.
+- Files or modules each role may modify: D5, `platform/node/` and its test packages. D3, `modules/security/` and `cmd/otsec-collector/`. A D6 writing instance, `tests/security/sensor_kinds_no_path_d6_test.go`: it writes item 4.2's replacement test in its own PR, which passes on `main` before the widening, and in the PR that widens `relayKinds`, D5 removes the old test's sensor legs, which D1 authorizes here, with that D6 instance's review.
+- Expected interfaces: C7 0.11, C8 0.13, C13 0.2 and 0.3. No contract text changes.
+- Deliverable: the split agreed in comments first (D4-99), then D3's PR (if any) and D5's PR, merged unwired. The product wiring comes only in the PR that passes the last owed test (D4-96), and that PR is named in the split.
+- Acceptance tests: each owed test below is a named pass in both `go` jobs, with its control shown failing:
+  - C13 0.2 §15's node legs that need enrolment, renewal, revocation or a re-arm: M-9's `TestSensorEnrolClosesOldConnection`, M-11, H-7's `renew` leg, H-8, H-9, H-11, V-11, V-12 and V-15; the `sensor.link_refused` legs of H-1, H-4 and T-5; and the dialer and hello legs, M-6's dialer leg among them;
+  - C7-4's node test, C7-5, C8-5 and C8-7 (SL-T13's legs), and the node's writers of C8-1 to C8-6;
+  - C8 0.13's node legs (D4-107 item 2): T1's clamp and its node-start step check, K1's count, and F1's map with its three controls;
+  - SL-9's asset-address check compares after unmapping an IPv4-mapped IPv6 address on either side (D4-108 item 4);
+  - the node records `collector.request` in `collector_seq` order within an epoch; its control is a collector that answers a lower number (D4-108 item 4);
+  - the `sensor.revoked` writer checks the chain for its own record before rewriting after a crash (D4-108 item 4);
+  - **D4-111 item 4.1:** if this brief's PR is the first to let the node write an audit record of a sensor kind stamped 0.13 or above, by any means (raising `audit.ContractID` or a node-local constant), the `relayKinds` probe reruns on its head, run by a D6 instance, before `relayKinds` is widened, with the collector check firing;
+  - **D4-111 item 4.2:** the node acts on a sensor kind only after a verified acceptance (C8-8); its control is a node that acts on an unverified or refused reply. It replaces the sensor legs of `TestD6SensorKindsNotRelayedByNode` once `relayKinds` is widened;
+  - F-027's merge-check greps, until the wiring PR;
+  - the self-check list in this file, with the items that apply named.
+- Owed: the rig legs (the sensor's brief and D6's rig brief).
+- Explicit exclusions: no contact with any device or site network; no `network_sensor` section outside the tests until F-027's gate lifts; no release.
+- Uncertainty or safety risks: the dialer opens a connection from the node to another host (TB-boundary, D3); the enrolment writes key material, and a crash between steps must leave the chain verifiable.
+- Scratch files: `d5-de-*`, `d3-de-*`
