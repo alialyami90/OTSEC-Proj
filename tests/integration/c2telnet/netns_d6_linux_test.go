@@ -543,12 +543,16 @@ func (o abortObs) checkGraceful() []string {
 // TestC2v10T8InFlightClosesGracefully: test 8's second CI-Linux leg. With
 // the close phase's QUI unacknowledged at the read, the seam gives
 // rexmit_unknown "in-flight" and no count, and the socket still closes
-// gracefully (§1.4, §3.3: no abortive close).
+// gracefully (§1.4, §3.3: no abortive close). The far end receives the
+// transcript's lines and octets and nothing else: the Rexmit seam, called
+// here while the socket is still writable, sends no payload octet (§3.3;
+// D3's N1 on #684).
 func TestC2v10T8InFlightClosesGracefully(t *testing.T) {
 	o := abortRun(t, false)
 	if o.captureErr != nil {
 		t.Fatal(o.captureErr)
 	}
+	passive(t, o.r, o.rec, false)
 	tf := o.r.Session.Telnet
 	if tf.RexmitUnknown != adapter.RexmitInFlight || tf.RexmitOctets != nil {
 		t.Errorf("rexmit_octets %v, rexmit_unknown %q: want %q and no count, with QUI in flight",
@@ -564,12 +568,15 @@ func TestC2v10T8InFlightClosesGracefully(t *testing.T) {
 
 // TestC2v10T10AbortDeliversQUI: test 10. QUI's first copy is dropped and the
 // run aborted; the far end receives QUI once the drop ends, and no RST
-// comes before it (D6's B1: no abortive close).
+// comes before it (D6's B1: no abortive close). As in test 8's in-flight
+// leg, the far end receives nothing but the transcript's lines and octets
+// (§3.3; D3's N1 on #684).
 func TestC2v10T10AbortDeliversQUI(t *testing.T) {
 	o := abortRun(t, false)
 	if o.captureErr != nil {
 		t.Fatal(o.captureErr)
 	}
+	passive(t, o.r, o.rec, false)
 	for _, b := range o.check10() {
 		t.Error(b)
 	}
