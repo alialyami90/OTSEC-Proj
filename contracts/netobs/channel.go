@@ -196,6 +196,13 @@ type Counters struct {
 	EngineLinesRefused *uint64 `json:"engine_lines_refused,omitempty"`
 }
 
+// counters01 names the 0.1 counts a heartbeat always carries: every 0.1
+// counter but drops_driver, whose absence means unknown.
+var counters01 = []string{
+	"packets", "bytes", "drops_decoder", "drops_channel", "decoder_errors", "sessions_unparsed",
+	"table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed",
+}
+
 // counts02 lists the counters new in 0.2 by name.
 func (k *Counters) counts02() []struct {
 	name string
@@ -237,6 +244,16 @@ func (h *Heartbeat) validateChannel(want string, keys map[string]bool) error {
 	}
 	if !contains([]string{"ok", "bound", "unknown"}, h.InterfaceCheck) {
 		c.fail(CodeForm, "interface_check", "%q is not ok, bound or unknown", h.InterfaceCheck)
+	}
+	// An absent 0.1 count decodes as 0. On the 0.2 channel it is refused,
+	// not read as 0; only drops_driver may be absent (C13 §6; D3's N1 on
+	// #687). The 0.1 channel reads as it did.
+	if c.need02 && c.keys != nil {
+		for _, name := range counters01 {
+			if !c.keys["counters."+name] {
+				c.fail(CodeMissing, "counters."+name, "required")
+			}
+		}
 	}
 	// A key present with null decodes as absent; it is refused, not read
 	// as the count or object it lacks.
