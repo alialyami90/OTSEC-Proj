@@ -570,6 +570,32 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 			recs[2].Sensor.PayloadSHA256 = payloadOf(99)
 			return recs
 		},
+		// The copied body fields (D1's ruling 6894951825, option (a)): each
+		// edits the acceptance's copy only, so no other rule breaks.
+		"an enrolment's generation not its acceptance's": func(recs []*Record) []*Record {
+			recs[3].Sensor.Generation = "3"
+			return recs
+		},
+		"an enrolment's pin not its acceptance's": func(recs []*Record) []*Record {
+			recs[3].Sensor.SensorSPKI = testPinA
+			return recs
+		},
+		"a revocation's generation not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.Generation = "2"
+			return recs
+		},
+		"a revocation's pin not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.SensorSPKI = testPinB
+			return recs
+		},
+		"a revocation's reason not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.Reason = string(authz.SensorRevokeLost)
+			return recs
+		},
+		"a revocation's suspect_from not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.SuspectFrom = "2026-11-10T11:00:00Z"
+			return recs
+		},
 		"another sensor's acceptance": func(recs []*Record) []*Record {
 			recs[5].Target.SensorID = "7c1e0d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
 			return recs
@@ -617,6 +643,13 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 	recs[4].Sensor.PreviousGeneration, recs[4].Sensor.PreviousSPKI, recs[4].Sensor.PreviousState = "", "", PreviousStateUnknown
 	if err := VerifySensorFrom(recs, 1); err != nil {
 		t.Fatalf("previous_state: %v", err)
+	}
+	// suspect_from on both copies is accepted. Control for "a revocation's
+	// suspect_from not its acceptance's".
+	recs = cloneSensorChain(sensorChain())
+	recs[5].Sensor.SuspectFrom, recs[6].Sensor.SuspectFrom = "2026-11-10T11:00:00Z", "2026-11-10T11:00:00Z"
+	if err := VerifySensorFrom(recs, 1); err != nil {
+		t.Fatalf("suspect_from on both: %v", err)
 	}
 }
 

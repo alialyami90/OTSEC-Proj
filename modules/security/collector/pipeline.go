@@ -460,7 +460,11 @@ func (p *Pipeline) decideAdmin(req *authz.CollectorRequest, a *authz.AdminReques
 		// acceptance (docs/phase4/D3-c7-0.10-c8-0.12.md §1.2).
 		return nil
 	}
-	return &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"} // VerifyAdminRequest refuses this first
+	// VerifyAdminRequest refuses a body that does not match its kind before
+	// this. C7 0.11's node.sensor_enrol and node.sensor_revoke pass it and
+	// have no case above, so they are refused here: no product path accepts
+	// either kind until C7-5's brief (D4-103 ruling 2.3).
+	return &authz.Refusal{Code: authz.RefuseInvalid, Detail: "body does not match kind"}
 }
 
 // ClearSuspensionFileName, ClearSuspensionSchema and

@@ -399,7 +399,9 @@ func refuseSensorNull(b []byte) error {
 //   - A succeeded sensor.enrolled, and a sensor.revoked, follows an allowed,
 //     verified collector.request earlier in the same collector epoch whose
 //     collector_seq (or, for a repeat answer, repeat_of) is the record's
-//     decision_seq, for the same sensor and payload_sha256 (C8-6). A
+//     decision_seq, for the same sensor and payload_sha256 (C8-6). Its
+//     copies of the verified body equal the acceptance's: generation and
+//     sensor_spki, and on a sensor.revoked reason and suspect_from too. A
 //     repeat's own collector_seq names no decision. At most one
 //     sensor.revoked names one decision.
 //   - Where previous_spki is present, a succeeded renew carries a pin equal
@@ -451,6 +453,8 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 			return nil, broken("record %d (%s) names decision %d, which no earlier acceptance in its epoch has", r.Seq, r.Action, s.DecisionSeq)
 		case acc.Target == nil || acc.Target.SensorID != r.Target.SensorID || acc.Verified.PayloadSHA256 != s.PayloadSHA256:
 			return nil, broken("record %d (%s) does not match the acceptance of decision %d", r.Seq, r.Action, s.DecisionSeq)
+		case acc.Sensor == nil || !copiesAcceptance(r.Action, s, acc.Sensor):
+			return nil, broken("record %d (%s) copies a body field that differs from the acceptance of decision %d (C8-6)", r.Seq, r.Action, s.DecisionSeq)
 		}
 		return acc, net.granted(r, acc)
 	}
@@ -499,6 +503,20 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 		}
 	}
 	return nil
+}
+
+// copiesAcceptance reports whether a sensor record's copies of the verified
+// body equal C8-6's copy on its acceptance: generation and sensor_spki, and
+// on a sensor.revoked reason and suspect_from too (D1's ruling 6894951825,
+// option (a)). The payload hash is over bytes the chain does not hold, so
+// without this a writer fault could show one pin revoked while the node
+// revoked another, and a later enrolment of that one would pass C8-8.
+func copiesAcceptance(action Action, rec, acc *Sensor) bool {
+	same := rec.Generation == acc.Generation && rec.SensorSPKI == acc.SensorSPKI
+	if action == ActionSensorRevoked {
+		same = same && rec.Reason == acc.Reason && rec.SuspectFrom == acc.SuspectFrom
+	}
+	return same
 }
 
 // NetworkAckInForce reports whether ack, a record in recs, is a succeeded
