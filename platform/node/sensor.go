@@ -142,6 +142,10 @@ type SensorStatus struct {
 	// forwarder's owed report or a drop count is, is counted at each try
 	// (section 1.9 item 5; D4's N2 on #676).
 	HealthHeld uint64 `json:"health_held"`
+	// LinkKeyPin is the pin of the node's link key once it has loaded,
+	// for the administrator to read at enrolment (NK-4; linkkey.go). It is
+	// empty while AlarmSensorLinkKey stands.
+	LinkKeyPin string `json:"link_key_pin,omitempty"`
 }
 
 // AlarmNetworkSessionNotTied: a scheduler call on the link timed out or
@@ -480,6 +484,7 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 	s.DispatchTimeouts, s.ResultTimeouts, s.LockWaitMaxMS = st.DispatchTimeouts, st.ResultTimeouts, st.LockWaitMax.Milliseconds()
 	s.SchedPanics = st.SchedPanics
 	s.HealthHeld = r.sensorHeld.Load()
+	s.LinkKeyPin = r.linkKeyPin()
 	r.opt.Status.SetSensor(s)
 	return more
 }
