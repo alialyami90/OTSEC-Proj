@@ -783,10 +783,10 @@ func TestAlertCoverage02(t *testing.T) {
 	}
 }
 
-// CH-35's table, "Read": the 0.2 decoders read a 0.1 checkpoint strictly,
-// its coverage without the two new fields, and write 0.2.
+// CH-35's table, "Read": the decoders read a 0.1 checkpoint strictly,
+// its coverage without the two new fields; 0.3 code writes 0.3.
 func TestCheckpoint01Read(t *testing.T) {
-	if CheckpointIdentifier != "otsec.netcheckpoint/0.2" {
+	if CheckpointIdentifier != "otsec.netcheckpoint/0.3" {
 		t.Fatalf("CheckpointIdentifier %s", CheckpointIdentifier)
 	}
 	k := fxDetectorCheckpoint()
@@ -823,7 +823,7 @@ func TestCheckpoint01Read(t *testing.T) {
 	if _, err := DecodeLearnerCheckpoint(b); err != nil {
 		t.Errorf("a 0.1 learner checkpoint: %v", err)
 	}
-	for _, s := range []string{"otsec.netcheckpoint/0.3", "otsec.netcheckpoint/0.0", Identifier02} {
+	for _, s := range []string{"otsec.netcheckpoint/0.4", "otsec.netcheckpoint/0.0", Identifier02} {
 		k := fxDetectorCheckpoint()
 		k.Schema = s
 		if err := k.Validate(); !hasCode(err, CodeSchema) {

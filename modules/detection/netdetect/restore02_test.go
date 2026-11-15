@@ -53,18 +53,23 @@ func TestLearnerRestores01Checkpoint(t *testing.T) {
 	if !bytes.Contains(cp, []byte(`"held":[{`)) {
 		t.Fatal("the checkpoint holds no start: the test covers no held state")
 	}
-	ordered, sorted := lxRestamp(t, cp, netobs.CheckpointIdentifier01)
-	for name, doc := range map[string][]byte{"ordered": ordered, "sorted": sorted} {
-		r, err := RestoreLearner(lxConfig(), doc)
-		if err != nil {
-			t.Fatalf("%s 0.1: %v", name, err)
-		}
-		again := checkpoint(t, r)
-		if bytes.Equal(again, doc) {
-			t.Fatalf("%s 0.1: the writer's re-encoding equals the 0.1 document, so the control shows nothing", name)
-		}
-		if !bytes.Equal(again, cp) {
-			t.Fatalf("%s 0.1: the next checkpoint is not the 0.2 one restored from\n got %s\nwant %s", name, again, cp)
+	// 0.2 too since C13 0.3 (D6's N2 on #689); its control is the round
+	// trip narrowed to 0.1 (D6's L1).
+	ordered, _ := lxRestamp(t, cp, netobs.CheckpointIdentifier01)
+	for _, sch := range []string{netobs.CheckpointIdentifier01, netobs.CheckpointIdentifier02} {
+		ord, sorted := lxRestamp(t, cp, sch)
+		for name, doc := range map[string][]byte{"ordered": ord, "sorted": sorted} {
+			r, err := RestoreLearner(lxConfig(), doc)
+			if err != nil {
+				t.Fatalf("%s %s: %v", name, sch, err)
+			}
+			again := checkpoint(t, r)
+			if bytes.Equal(again, doc) {
+				t.Fatalf("%s %s: the writer's re-encoding equals the earlier document, so the control shows nothing", name, sch)
+			}
+			if !bytes.Equal(again, cp) {
+				t.Fatalf("%s %s: the next checkpoint is not this code's one restored from\n got %s\nwant %s", name, sch, again, cp)
+			}
 		}
 	}
 	if _, err := RestoreLearner(lxConfig(), cp); err != nil {

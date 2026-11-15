@@ -164,7 +164,11 @@ func num(s string) uint64 {
 	return n
 }
 
-// Validate checks node-hello's strict form (CH-5, CH-6).
+// Validate checks node-hello's strict form (CH-5, CH-6). C13 0.3 changes
+// neither of the node's two messages, so both keep Identifier02: the node
+// sends node-hello before it knows the sensor's minor, and a 0.2 agent
+// reads only 0.2, so a 0.3 node's messages must read at 0.2 for the link
+// to stay up in 0.3's upgrade order, node first (C13 0.3 §1.1).
 func (m *NodeHello) Validate() error {
 	c := &checker{}
 	c.strictSchema(m.Schema, Identifier02)
@@ -196,10 +200,11 @@ func (m *Ack) Validate() error {
 
 // Validate is CH-13's row 1 on a sensor-hello: its strict form, every
 // field in its form and range, and every lost span in its form (CH-40).
-// A failure closes the node's connection as hello.
+// A failure closes the node's connection as hello. Its schema is a channel
+// minor this code knows, 0.2 or 0.3, and names the connection's (CH-36).
 func (m *SensorHello) Validate() error {
 	c := &checker{}
-	c.strictSchema(m.Schema, Identifier02)
+	c.channelSchema(m.Schema)
 	if m.Type != TypeSensorHello {
 		c.fail(CodeType, "type", "%q is not %s", m.Type, TypeSensorHello)
 	}
@@ -242,10 +247,10 @@ func (m *SensorHello) Validate() error {
 }
 
 // Validate checks a tick's strict form (CH-8). A failure closes the node's
-// connection as tick.
+// connection as tick. Its schema is a channel minor this code knows.
 func (m *Tick) Validate() error {
 	c := &checker{}
-	c.strictSchema(m.Schema, Identifier02)
+	c.channelSchema(m.Schema)
 	if m.Type != TypeTick {
 		c.fail(CodeType, "type", "%q is not %s", m.Type, TypeTick)
 	}
@@ -293,8 +298,8 @@ func (c *checker) declared(field string, list []Span) {
 	}
 }
 
-// FromSensor is one frame the 0.2 node reads from a sensor: at most one of
-// the four is set. Type is the frame's type when it could be read.
+// FromSensor is one frame the node reads from a sensor: at most one of the
+// four is set. Type is the frame's type when it could be read.
 type FromSensor struct {
 	Type        string
 	Hello       *SensorHello
@@ -303,17 +308,29 @@ type FromSensor struct {
 	Observation *Observation
 }
 
-// DecodeFromSensor decodes and validates one frame from a sensor on the
-// 0.2 channel, strictly: an unknown or duplicate key, a minor other than
-// 0.2, or an unknown closed-enum value is refused. What a refusal does is
-// the node's: a sensor-hello or tick that fails closes the connection
-// (hello, tick); a heartbeat or observation that fails is one record
-// refused by its code; a type outside SensorTypes is CodeType, an alert's
-// included (CH-5, CH-11, AP-34). The 0.2 records require the fields C13
-// 0.2 adds (made_utc, the coverage statement's config_digest and
+// DecodeFromSensor decodes and validates a connection's first frame from a
+// sensor: DecodeFromSensorIn with no connection minor yet, so a frame of
+// either channel minor this code knows is read at its own minor. The node
+// uses it for the frame it reads as the hello, and DecodeFromSensorIn,
+// with the accepted hello's schema, for every later frame (CH-36).
+func DecodeFromSensor(b []byte) (*FromSensor, error) { return DecodeFromSensorIn(b, "") }
+
+// DecodeFromSensorIn decodes and validates one frame from a sensor on the
+// channel, strictly: an unknown or duplicate key, a minor other than conn,
+// or an unknown closed-enum value is refused. conn is the schema of the
+// connection's accepted sensor-hello, or "" before it, when either channel
+// minor this code knows, 0.2 or 0.3, is read (CH-36; C13 0.3 §1.1). A frame
+// of another minor than conn is refused as CodeSchema, and the connection
+// stays open. What a refusal does is the node's: a sensor-hello or tick
+// that fails closes the connection (hello, tick); a heartbeat or
+// observation that fails is one record refused by its code; a type outside
+// SensorTypes is CodeType, an alert's included (CH-5, CH-11, AP-34). Each
+// record requires the fields of its minor and every earlier one: 0.2's
+// (made_utc, the coverage statement's config_digest and
 // settings.prp_window_ms, and the heartbeat's new counters, interfaces and
-// agent).
-func DecodeFromSensor(b []byte) (*FromSensor, error) {
+// agent), and at 0.3 the end's counts (CH-52 to CH-54) and the
+// heartbeat's frame_stage and two agent counts (CH-53).
+func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 	if len(b) > MaxChannelFrame {
 		return &FromSensor{}, &Error{Code: CodeRange, Field: "record", Detail: fmt.Sprintf("%d bytes, above %d", len(b), MaxChannelFrame)}
 	}
@@ -334,8 +351,11 @@ func DecodeFromSensor(b []byte) (*FromSensor, error) {
 	if err := strictjson.Forward(b, &head); err != nil {
 		return m, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 	}
-	if head.Schema != Identifier02 {
-		return m, &Error{Code: CodeSchema, Field: "schema", Detail: fmt.Sprintf("%q is not %s", head.Schema, Identifier02)}
+	switch {
+	case conn != "" && head.Schema != conn:
+		return m, &Error{Code: CodeSchema, Field: "schema", Detail: fmt.Sprintf("%q is not the connection's %s", head.Schema, conn)}
+	case !contains(channelIdentifiers, head.Schema):
+		return m, &Error{Code: CodeSchema, Field: "schema", Detail: fmt.Sprintf("%q is not a channel minor this code knows, %v", head.Schema, channelIdentifiers)}
 	}
 	decode := func(v any, validate func() error) error {
 		if err := strictjson.Decode(b, v); err != nil {
@@ -357,10 +377,10 @@ func DecodeFromSensor(b []byte) (*FromSensor, error) {
 		return m, decode(m.Tick, m.Tick.Validate)
 	case TypeHeartbeat:
 		m.Heartbeat = &Heartbeat{}
-		return m, decode(m.Heartbeat, func() error { return m.Heartbeat.validateChannel(Identifier02, keyPaths(b)) })
+		return m, decode(m.Heartbeat, func() error { return m.Heartbeat.validateChannel(head.Schema, keyPaths(b)) })
 	default:
 		m.Observation = &Observation{}
-		return m, decode(m.Observation, func() error { return m.Observation.validateChannel(Identifier02, keyPaths(b)) })
+		return m, decode(m.Observation, func() error { return m.Observation.validateChannel(head.Schema, keyPaths(b)) })
 	}
 }
 
