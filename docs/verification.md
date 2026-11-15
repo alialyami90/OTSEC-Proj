@@ -523,6 +523,38 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
+### F-028 — 2026-11-13 — A database's change to `drain-only` wrote no `store.mode_change` record, because C8's reason-code pattern refused the hyphen. Closed by #692 (P4-4-DO)
+
+- **What it was.** Each writer of `store.mode_change` put the new C5 mode in `reason_code` as it is. C8's pattern for every `reason_code` is `^[a-z][a-z0-9_]{0,47}$`: `codePattern` in `contracts/audit/audit.go`, and `reason_code` in `contracts/audit/schema/record.json`. It refuses the "-" of `drain-only`.
+  - `Runtime.AuditRecord` (`platform/node/runtime.go`) checks each record with `audit.ValidatePending`. So the record was refused and lost, and only `store-commit-failed` reached status. The C4 health event is written apart from the record, and D3 found it was still written.
+  - The three writers were `modeChanged` and `commitDeferred` (`runtime.go`), and the sensor manager's `recordMode` (`sensormgr.go`), which `sensorModeChanged` and `flushModeChanges` call.
+  - It held for any database that goes `drain-only`, the slice's included. A Syslog flood that fills a store is one way to cause it (brief P4-4-DO).
+- **Found by D3,** in its review 6852333699 of #663. D3 showed it there (`desk`) on a copy of `main` at `650a62be`: of the four C5 modes, only `drain-only`'s record was refused. D1 ruled on #663 (6852845352) that the writer maps "-" to "_", and that C8's pattern stays.
+- **What it disproves.** C8's table under "Audit actions and C4 health types" ("reason_code is the new mode") and C5's comment on `ModeChange` both said that a mode change is written as a C8 record. For `drain-only` it was not, so that change was not observable in the audit stream (P5).
+- **Closed by #692** (brief P4-4-DO):
+  - D5's `modeReason` (`platform/node/runtime.go`) gives the new mode with each "-" written as "_". All three writers use it (`2ddbb050`).
+  - C8 0.13's sentence on `store.mode_change` is in `contracts/audit/doc.go`, with the table's Source cell and `ActionStoreModeChange`'s comment. C5's sentence is on `ModeChange` (`contracts/store/startup.go`). D3 and D5 drafted them, and D1 approved and wrote them (`f28794fa`). C8's pattern and schema are unchanged.
+- **Tests, each with its control.** A control is a change that must make its test fail.
+  - **D5's node tests** (`platform/node/modereason_test.go`): `TestModeChangedRecordsDrainOnly`, `TestCommitDeferredRecordsDrainOnly` and `TestSensorRecordModeRecordsDrainOnly`.
+    - Through each writer, a database's change to `drain-only` is in the audit stream as `drain_only`. The record passes `audit.ParseRecord`, and no `store-commit-failed` is raised.
+    - Control for each: that writer back to `string(mc.To)`. D5 ran the three controls (`desk`, the owner's PC, at `2ddbb050`; #692's body), and each test failed, with no record and one `store-commit-failed`. D6 did not rerun them for this entry.
+  - **D6's contract test** (`tests/contract/c8_mode_reason_d6_test.go`): `TestC8ModeChangeReasonEveryC5Mode`. It is written from the two sentences, not from `modeReason`.
+    - Every C5 mode is read from `contracts/store`'s source, so a mode added later is checked too. Each is recorded with each "-" written as "_". The record passes `audit.ValidatePending` and the schema's pattern, and its `reason_code` reads back as its mode.
+    - The sentence's four values hold: `drain_only`, and `collecting`, `blocked` and `failed` as they are.
+    - Its built-in control: with the modes unmapped, only `drain-only` is refused, by both checks, and `ValidatePending` names its reason code.
+    - Controls, each run once by D6 (`desk`, the owner's PC, Go 1.27.3, on the code of `bd4fa068`). Each failed the test:
+      1. the mapping leaves "-" (the brief's control);
+      2. C8's Go pattern widened to accept "-";
+      3. the schema's pattern widened the same way;
+      4. a new mode `hold_only` in `contracts/store`, which does not read back;
+      5. a new mode `read.only`, which the pattern refuses even when mapped.
+  - **CI (`CI-Linux`, `CI-Windows`).** At `bd4fa068`, each of the four tests shows `--- PASS` once in both `go` jobs of `ci` run 43707542769: [Linux](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43707542769/job/132791778739) and [Windows](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43707542769/job/132791778931). Neither log has a `--- FAIL` line. The commit after `bd4fa068` adds this entry and changes no code.
+- **What remains.**
+  - `commitDeferred` records only the audit database's own change, which on `main` is always to `collecting`. So its test calls it directly (D5's limit, which D1 accepted in 6892996485).
+  - No run of the real binaries drives a database to `drain-only` and reads its record from the audit stream. The tests above run in process.
+  - Outside F-028: C8 0.13's approved text has hyphens in four of C8-4's reasons and in C8-2's five denial codes, and the same pattern refuses each. They are not in `main`'s code yet. D3 settles their form in P4-4-CC deliverable 5, where P4-4-DO's mapping is one option and not a decision (D4-104 item 2 (b)).
+- **Status: closed** by #692.
+
 ### F-027 — 2026-11-11 — The sensor's work on the node can reach SER collection, Syslog receive, forwarding and the node's start: couplings F1 to F11, found by reading; P4-4-F27's four steps merged in #662, #663, #676, #672 and #685, with P4-4-F27's drive leg and later briefs' tests owed
 
 - **What it is.** Eleven ways in which the node's side of the passive sensor can stop or hold SER collection, Syslog receive, forwarding or the node's start. D5 and D6 found ten of them by reading the code for brief P4-4-L3 (#628), and the review of #631 found the eleventh. **Evidence class: `desk`** for the finding; the closings below give their own. D6 read `main` at `4d0c7154` for this entry, at `65980515` for the update of 2026-11-13, and at `805e8567` for the record of steps (3) and (4) on 2026-11-15. **The couplings were found by reading, not by a run.** #662 and #663 brought the first tests of them. Each test's control puts back `main`'s earlier behaviour, and so reproduces its coupling in process: with the sensor databases back in `Runtime.dbs`, for example, `TestRunWhileSensorResumeHeld` times out (see "Closed on `main`" below). "F1" to "F11" are D5's numbers for the couplings. They are not the entries F-001 to F-011 of this log.
@@ -578,7 +610,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
   - **F9, mode changes: the hourly cap is closed (#663). Its health event under the platform ceiling is not;** it comes with F1 in step (3).
     - Tests: `TestSensorModeChangeCapped` and `TestSensorHeldModeChangeFlushed` (`sensortest`).
     - Controls: the cap removed; the cap on the wall clock (MUT-F); the held change's flush removed.
-    - *Limit.* On `main` a change to `drain-only` writes no `store.mode_change` record, because C8's reason-code pattern refuses the hyphen. D1's ruling 6852845352 on #663 routes the fix. So `TestSensorModeChangeCapped` flaps between `blocked` and `failed`.
+    - *Limit.* Before #692, a change to `drain-only` wrote no `store.mode_change` record, because C8's reason-code pattern refuses the hyphen. #692 records it as `drain_only` (F-028). `TestSensorModeChangeCapped` still flaps between `blocked` and `failed`.
   - **F10, one forwarder session over every stream: closed (#662 and #663).**
     - #662 gives a target a second session that carries only the sensor's streams. It releases a too-large event once the main session's saved cursor on the health stream reaches the event's `forward.too-large` record (D1's ruling 6852502571 on #662). #663 wires it in `NewForwarding`, and `Check` judges each session on its own.
     - Tests in `modules/telemetry/forward`: `TestNewSecondSession`, `TestSecondSessionTooLargeWaitsForHealthCursor`, `TestSecondSessionReleasedByMainSession`, `TestSecondSessionFailureLeavesMainSession`, `TestSecondSessionHealthCursorReadFails` and `TestSecondSessionHealthCursorReadsPerPoll`.
