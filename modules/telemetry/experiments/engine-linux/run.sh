@@ -249,6 +249,25 @@ fifos() {
   locked=
 }
 
+# CH-53's and CH-57's requirements on the script (D4-102 item 6; D1's
+# ruling 1 on #715): script_reqs.py's captures under its configurations,
+# each a test or the control that undoes one requirement, on the stock
+# image. Prints its table; returns non-zero on a row that did not pass.
+reqs() {
+  r=$work/reqs
+  rm -rf "$r"
+  python3 -I "$here/script_reqs.py" write "$r/pcaps"
+  pcaps=$r/pcaps
+  out=$r/out
+  mkdir -p "$out"
+  python3 -I "$here/script_reqs.py" configs > "$r/configs.txt"
+  while read -r cfg args; do
+    # $args is word-split on purpose: each word is one Zeek argument.
+    zeek_run zeek "$cfg" /exp/probe.zeek /exp/script-reqs/reqtest.zeek $args < /dev/null
+  done < "$r/configs.txt"
+  python3 -I "$here/script_reqs.py" check "$out"
+}
+
 # P4-4-E2 (D4-90): the Modbus signature against D6's conditions for it
 # (tests/integration/gt_pcap/modbus-signature-conditions.tsv). Every corpus
 # member (tests/fixtures/network/modbus-sig-corpus/corpus.tsv) is fetched at
@@ -359,6 +378,13 @@ case $mode in
     { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; python3 -I "$here/table.py" hr23 "$work/out-dnp3"; } > "$work/dnp3.md"
     fifos "$work/dnp3" "$work/out-dnp3-pipe"
     python3 -I "$here/table.py" fifo "$work/out-dnp3" "$work/out-dnp3-pipe" >> "$work/dnp3.md"
+    reqrc=0
+    reqs >> "$work/dnp3.md" || reqrc=$?
+    if [ "$reqrc" != 0 ]; then
+      cat "$work/dnp3.md" >&2
+      echo "CH-53's or CH-57's requirements on the script: a row did not pass (exit $reqrc); the job fails" >&2
+      exit 1
+    fi
     ;;
   public)
     cache=$3

@@ -9,7 +9,15 @@
 #        build.sh build WORK    the same, then both images, and writes
 #                               WORK/images.env (HR23_C1P_IMAGE and
 #                               HR23_C2_IMAGE, each an image ID) and
-#                               WORK/zeek-build.txt (the build record)
+#                               WORK/zeek-build.txt (the build record),
+#                               then the record checks below
+#        build.sh record-check WORK   the record checks alone, on
+#                               WORK/files-c1p.txt, files-c2.txt (each
+#                               image's `sha256sum` list under
+#                               /usr/local/zeek), plugins-c1p.txt,
+#                               plugins-c2.txt (`zeek -NN`) and binpac.txt
+#                               (CMakeCache's binpac lines); selftest.sh
+#                               runs it on made-up lists
 # ZEEK_TARBALL_DIR, if set, is read for zeek-9.0.1.tar.gz and its .asc
 # instead of fetching them; they are checked the same way.
 #
@@ -25,6 +33,41 @@ work=$2
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 fail() { echo "build.sh: $*" >&2; exit 1; }
+
+# The record checks (D6's N4 and N5 on #715).
+# - One tree: the two images differ in exactly the four files the patch
+#   changes, so a cache miss that rebuilt C2 from another tree fails here.
+# - The binpac CMake used is the tarball's own target, not one on the PATH.
+# - What the five effective `--disable-*` options leave out is absent: zkg,
+#   ZeekControl, Broker's Python bindings, the JavaScript and ZeroMQ plugins.
+#   (`--disable-af-packet` has no effect in 9.0.1; see the Dockerfile.)
+record_check() {
+  for f in files-c1p.txt files-c2.txt plugins-c1p.txt plugins-c2.txt binpac.txt; do
+    [ -s "$work/$f" ] || fail "record check: $f is missing or empty"
+  done
+  awk 'NR == FNR { h[$2] = $1; next } { if (!($2 in h) || h[$2] != $1) print $2; delete h[$2] } END { for (p in h) print p }' \
+    "$work/files-c1p.txt" "$work/files-c2.txt" | sort > "$work/changed.txt"
+  printf '%s\n' ./bin/zeek ./include/zeek/analyzer/protocol/dnp3/dnp3-analyzer.pac \
+    ./include/zeek/analyzer/protocol/dnp3/dnp3-protocol.pac ./share/otsec-build/generated.sha256 > "$work/changed-want.txt"
+  cmp -s "$work/changed.txt" "$work/changed-want.txt" \
+    || { cat "$work/changed.txt" >&2; fail "record check: C1p and C2 differ in other files than the patch's four, so they are not one tree"; }
+  grep -qx 'BinPAC_EXE:STRING=binpac' "$work/binpac.txt" \
+    && grep -q '^BinPAC_INCLUDE_DIR:STRING=/src/zeek/tools/binpac/lib' "$work/binpac.txt" \
+    || { cat "$work/binpac.txt" >&2; fail "record check: CMake's binpac is not the tarball's in-tree target"; }
+  for v in c1p c2; do
+    if grep -E '^[0-9a-f]+  \./(bin/zkg|bin/zeekctl|lib/zeek/python/broker/)' "$work/files-$v.txt" >&2; then
+      fail "record check: $v installs what --disable-zkg, --disable-zeekctl or --disable-python leave out"
+    fi
+    if grep -iE 'javascript|zeromq' "$work/plugins-$v.txt" >&2; then
+      fail "record check: $v's zeek -NN lists what --disable-javascript or --disable-cluster-backend-zeromq leave out"
+    fi
+  done
+  echo "build.sh: record checked: one tree (four files differ), the in-tree binpac, nothing the five options leave out"
+}
+if [ "$mode" = record-check ]; then
+  record_check
+  exit 0
+fi
 
 # 1. The committed files at their pins.
 pin() {
@@ -102,12 +145,15 @@ rec=$work/zeek-build.txt
   echo "tarball: $ZEEK_TARBALL_URL sha256 $ZEEK_TARBALL_SHA256"
   echo "signature: $(grep '^\[GNUPG:\] VALIDSIG' "$work/gpgv.txt" | cut -d' ' -f3,12)"
   echo "patch: hr23-fc-dispatch.patch sha256 $HR23_PATCH_SHA256 (C2 only)"
-  echo "configure: $(sed -n '/^RUN \.\/configure/,/af-packet$/p' "$here/Dockerfile" | tr -d '\\' | tr -s ' \n' '  ')"
+  echo "configure: $(sed -n '/^RUN --network=none \.\/configure/,/af-packet$/p' "$here/Dockerfile" | tr -d '\\' | tr -s ' \n' '  ')"
 } > "$rec"
 for v in c1p c2; do
   id=$(docker image inspect -f '{{.Id}}' "otsec-zeek:$v")
   V=$(echo "$v" | tr a-z A-Z)
   echo "HR23_${V}_IMAGE=$id" >> "$work/images.env"
+  docker run --rm --network none "$id" sh -c 'cd /usr/local/zeek && find . -type f | sort | xargs sha256sum' > "$work/files-$v.txt"
+  docker run --rm --network none "$id" zeek -NN > "$work/plugins-$v.txt"
+  docker run --rm --network none "$id" cat /usr/local/zeek/share/otsec-build/binpac.txt > "$work/binpac.txt"
   {
     echo
     echo "## $v: image $id"
@@ -116,9 +162,9 @@ for v in c1p c2; do
     echo "generated parser:"
     docker run --rm --network none "$id" cat /usr/local/zeek/share/otsec-build/generated.sha256
     echo "binpac (CMakeCache):"
-    docker run --rm --network none "$id" cat /usr/local/zeek/share/otsec-build/binpac.txt
+    cat "$work/binpac.txt"
     echo "zeek -NN:"
-    docker run --rm --network none "$id" zeek -NN
+    cat "$work/plugins-$v.txt"
     echo "ldd zeek:"
     docker run --rm --network none "$id" ldd /usr/local/zeek/bin/zeek
     echo "build packages:"
@@ -126,7 +172,10 @@ for v in c1p c2; do
     echo "runtime packages:"
     docker run --rm --network none "$id" cat /usr/local/zeek/share/otsec-build/runtime-packages.txt
     echo "files under /usr/local/zeek (sha256):"
-    docker run --rm --network none "$id" sh -c 'cd /usr/local/zeek && find . -type f | sort | xargs sha256sum'
+    cat "$work/files-$v.txt"
   } >> "$rec"
 done
+# Not in a pipe: a failed check must stop this script.
+record_check >> "$rec"
+tail -1 "$rec"
 cat "$work/images.env"

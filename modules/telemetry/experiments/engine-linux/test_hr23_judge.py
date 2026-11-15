@@ -6,6 +6,8 @@ modules/telemetry/experiments/engine-linux/test_hr23_judge.py"""
 import json
 import os
 
+import pytest
+
 import table
 
 R, M = ("192.0.2.20", "20000"), ("192.0.2.14", "20000")
@@ -134,3 +136,87 @@ def test_present_lists_hr23_configurations_only_when_they_ran(tmp_path):
     (tmp_path / "cap" / "zeek-probe-c2").mkdir()
     assert "zeek-probe-c2" in table.present(str(tmp_path))
     assert table.present(os.path.join(str(tmp_path), "missing")) == table.CONFIGS
+
+
+# D6's B1 on #715: the relay-start reading over every configuration that
+# loads part (a), each named here rather than read from table.LINKED, so
+# that dropping one from LINKED fails. C0 is the control.
+@pytest.mark.parametrize("cfg", ["zeek-probe", "zeek-modbus-sig", "zeek-probe-c1p", "zeek-probe-c2"])
+def test_relay_start_names_the_relay_under_every_linked_configuration(tmp_path, cfg):
+    s = table.zeek(logs(tmp_path, cfg, RELAY_START), cfg, T)
+    assert service(s, R, M) == "pass"
+    c0 = table.zeek(logs(tmp_path, "zeek-probe-c0", RELAY_START), "zeek-probe-c0", T)
+    assert service(c0, R, M).startswith("fail (service also at 192.0.2.14")
+
+
+def test_link_rows_name_the_server_when_conn_log_names_no_service(tmp_path):
+    # The analyzer was removed, so conn.log's service is empty; the frames
+    # still named the relay (design section 3 item 7). Control: C0.
+    s = table.zeek(logs(tmp_path, "zeek-probe-c2", RELAY_START, service=None), "zeek-probe-c2", T)
+    assert service(s, R, M) == "pass"
+    c0 = table.zeek(logs(tmp_path, "zeek-probe-c0", RELAY_START, service=None), "zeek-probe-c0", T)
+    assert service(c0, R, M) == "fail"
+
+
+# D6's N2 on #715.
+def test_dir_is_paired_with_the_code_on_its_own_side(tmp_path):
+    # The two sides' rows interleaved: the relay's DIR clear with its 129,
+    # the master's DIR set with its READ. Neither disagrees; pairing by uid
+    # alone would read the master's DIR against the relay's 129.
+    probe = [("link", True, False), ("link", False, True), ("fc", True, 129), ("fc", False, 1)]
+    assert table.zeek(logs(tmp_path, "zeek-probe", probe), "zeek-probe", T).dir_disagree == 0
+
+
+def test_a_flow_that_names_one_server_is_not_counted_as_both_ends(tmp_path):
+    d = logs(tmp_path, "zeek-probe", RELAY_START)
+    assert table.hr23_readings(d, "zeek-probe")["both"] == 0
+
+
+# D6's N1 on #715: the record and field check of C2 against C1 and C1p.
+def fields_out(tmp_path, extra):
+    out = tmp_path / "out"
+    for cfg in ("zeek-probe", "zeek-probe-c1p", "zeek-probe-c2"):
+        logs(out / "cap", cfg, RELAY_START)
+    if extra:
+        d = out / "cap" / "zeek-probe-c2"
+        conn = json.loads((d / "conn.log").read_text())
+        conn["only_c2"] = 1
+        (d / "conn.log").write_text(json.dumps(conn) + "\n")
+        (d / "c2only.log").write_text(json.dumps({"ts": 1.0, "f": 1}) + "\n")
+    return str(out)
+
+
+def test_record_and_field_check_lists_what_only_c2_emits(tmp_path, capsys):
+    table.hr23(fields_out(tmp_path, True))
+    got = capsys.readouterr().out
+    assert "- against zeek-probe: c2only.log:f, c2only.log:ts, conn.log:only_c2" in got
+    assert "- against zeek-probe-c1p: c2only.log:f, c2only.log:ts, conn.log:only_c2" in got
+
+
+def test_record_and_field_check_prints_none_on_equal_logs(tmp_path, capsys):
+    table.hr23(fields_out(tmp_path, False))
+    got = capsys.readouterr().out
+    assert "- against zeek-probe: none" in got and "- against zeek-probe-c1p: none" in got
+
+
+# D6's N6 on #715: reporter.log in the readings, by level and message.
+def test_reporter_rows_are_read_by_level_and_message(tmp_path):
+    d = logs(tmp_path, "zeek-probe-c2", RELAY_START)
+    assert table.hr23_readings(d, "zeek-probe-c2")["reporter"] == {}
+    with open(os.path.join(d, "reporter.log"), "w") as fh:
+        fh.write(json.dumps({"ts": 1.0, "level": "Reporter::ERROR", "message": "m", "location": "x"}) + "\n")
+    assert table.hr23_readings(d, "zeek-probe-c2")["reporter"] == {"Reporter::ERROR: m": 1}
+
+
+# D6's held item on #715: the regression C2 against C1p, and C1 against C0,
+# by reg-rows' rule.
+def test_hr23_regression_names_a_row_the_reference_passes_and_the_new_one_fails(monkeypatch, capsys):
+    rows = [{"capture": "cap", "condition": "service", "code": ""}, {"capture": "cap", "condition": "function", "code": "2"}]
+    res = {"zeek-probe-c0": ["fail", "pass"], "zeek-probe": ["pass", "pass"],
+           "zeek-probe-c1p": ["pass", "pass"], "zeek-probe-c2": ["pass", "fail"]}
+    monkeypatch.setattr(table, "CONFIGS", tuple(res))
+    monkeypatch.setattr(table, "evaluate", lambda conds, loaded, cfg: [(r, v, "") for r, v in zip(rows, res[cfg])])
+    table.hr23_regression(rows, {})
+    got = capsys.readouterr().out
+    assert "- zeek-probe against zeek-probe-c0: pass; rows lost: none" in got
+    assert "- zeek-probe-c2 against zeek-probe-c1p: fail; rows lost: cap function 2" in got

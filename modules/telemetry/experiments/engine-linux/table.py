@@ -727,7 +727,25 @@ def dnp3(out, gt, work, root):
                   f"| {row['dst']}:{row['dport']}/{row['l4']} | {row.get('direction', '')} | {row['code']} | {row['objects']} "
                   f"| {row['show']} | {r} | {cite} |")
         print()
+    hr23_regression(conds, loaded)
     pipe_case(conds, loaded, cases)
+
+
+def hr23_regression(conds, loaded):
+    """HR-23's regression over D6's rows, by reg-rows' rule: C2 against C1p
+    (option (i) alone) and C1 against C0 (part (a) alone; the design's
+    section 4.1). Printed for each pair whose two configurations ran."""
+    pairs = [(a, b) for a, b in (("zeek-probe-c0", "zeek-probe"), ("zeek-probe-c1p", "zeek-probe-c2"))
+             if a in CONFIGS and b in CONFIGS]
+    if not pairs:
+        return
+    print("### HR-23's regression (reg-rows' rule: a row the first passes that fails under the second)\n")
+    for ref, new in pairs:
+        a, b = evaluate(conds, loaded, ref), evaluate(conds, loaded, new)
+        v, lost = reg_rows([(x[1], y[1]) for x, y in zip(a, b)])
+        shown = "; ".join(f"{a[i][0]['capture']} {a[i][0]['condition']} {a[i][0]['code']}" for i in lost) or "none"
+        print(f"- {new} against {ref}: {v}; rows lost: {shown}")
+    print()
 
 
 CITE = re.compile(r"[\w.]+\.(?:log|json):[\w.:,]*")
@@ -1358,14 +1376,19 @@ def hr23_readings(d, cfg):
     section 4.4): {"weirds": Counter of dnp3_ weird names, "analyzer":
     Counter of (analyzer, failure_reason), "disagree": count, "flows":
     [(flow ends, conn.log names DNP3, link-row servers)], "both": flows
-    whose frames name two servers}. analyzer.log's failure_data is never
-    read: it carries payload (D3's N1 on #675)."""
-    out = {"weirds": collections.Counter(), "analyzer": collections.Counter()}
+    whose frames name two servers, "reporter": Counter of reporter.log's
+    (level, message)}. analyzer.log's failure_data is never read: it carries
+    payload (D3's N1 on #675). reporter.log carries no payload field; its
+    level and message are read, its location is not (D4-100 item 2, D6's N6
+    on #715)."""
+    out = {"weirds": collections.Counter(), "analyzer": collections.Counter(), "reporter": collections.Counter()}
     for _, r in lines(os.path.join(d, "weird.log")):
         if str(r.get("name", "")).startswith("dnp3_"):
             out["weirds"][r["name"]] += 1
     for _, r in lines(os.path.join(d, "analyzer.log")):
         out["analyzer"][(r.get("analyzer_name") or "?", r.get("failure_reason") or "?")] += 1
+    for _, r in lines(os.path.join(d, "reporter.log")):
+        out["reporter"][f"{r.get('level') or '?'}: {r.get('message') or '?'}"] += 1
     s = zeek(d, cfg, {"zeek_fc": {}, "zeek_modbus_fc": {}})
     out["disagree"] = s.dir_disagree if cfg in LINKED else None
     out["flows"] = []
@@ -1403,20 +1426,21 @@ def hr23(out):
           "name. `both ends` counts flows whose frames name two servers, which part (a) logs and never suppresses. "
           "`DIR against code` counts application headers whose frame's DIR disagrees with the code's class (DIR set "
           "on 129 to 131, or clear on any other code). analyzer.log is read for the analyzer and `failure_reason` "
-          "only, never `failure_data`.\n")
-    print("| capture | configuration | dnp3_ weirds | analyzer.log (analyzer: reason) | DIR against code | both ends "
-          "| DNP3 flows: named by conn.log; servers from the link rows |")
-    print("| --- | --- | --- | --- | --- | --- | --- |")
+          "only, never `failure_data`. reporter.log is read for each row's level and message (D4-100 item 2: no "
+          "reporter or analyzer error that the control lacks).\n")
+    print("| capture | configuration | dnp3_ weirds | analyzer.log (analyzer: reason) | reporter.log (level: message) "
+          "| DIR against code | both ends | DNP3 flows: named by conn.log; servers from the link rows |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
     for c in sorted(x for x in os.listdir(out) if os.path.isdir(os.path.join(out, x))):
         for cfg in cfgs:
             d = os.path.join(out, c, cfg)
             why = ran(d)
             if why:
                 if os.path.isdir(d):
-                    print(f"| {c} | {cfg} | | | | | {why} |")
+                    print(f"| {c} | {cfg} | | | | | | {why} |")
                 continue
             r = hr23_readings(d, cfg)
-            if not (r["weirds"] or r["analyzer"] or r["flows"]):
+            if not (r["weirds"] or r["analyzer"] or r["reporter"] or r["flows"]):
                 continue
             fmt = lambda k: ", ".join(f"{x}={n}" for x, n in sorted(k.items())) or "-"
             flows = "; ".join(f"{e}: {'yes' if b else 'no'}; "
@@ -1424,7 +1448,7 @@ def hr23(out):
                               for e, b, l in r["flows"]) or "-"
             dis = "-" if r["disagree"] is None else r["disagree"]
             print(f"| {c} | {cfg} | {fmt(r['weirds'])} | {fmt({f'{a}: {b}': n for (a, b), n in r['analyzer'].items()})} "
-                  f"| {dis} | {r['both'] if cfg in LINKED else '-'} | {flows} |")
+                  f"| {fmt(r['reporter'])} | {dis} | {r['both'] if cfg in LINKED else '-'} | {flows} |")
     have = present(out)
     if "zeek-probe-c2" in have:
         c2 = log_fields(out, "zeek-probe-c2")
