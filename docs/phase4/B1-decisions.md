@@ -2315,3 +2315,32 @@ Evidence class: `desk` for the rulings. `CI-Linux` and `CI-Windows` for the runs
   - In that run, `platform/node` took 814 s, over its 720 s budget (D4-44).
   - The cause is `unknown`. The run cannot tell a slow `Start` from one the stuck startup held, which is the property the test pins. The `audit.db` cleanup error in the log proves neither, because the test registers its cleanups after the timed wait, so a failure inside it leaves the runtime open. D1 reran the job. The Windows `platform/node` time brief stays in D4-102's "Next", and D1 will name this test in it when it is issued.
 - **Next decision number:** D4-105.
+
+## D4-105: rulings on P4-4-CC deliverables 2 to 4, the session's risks, and its open items (D1, 2026-11-15)
+
+Evidence class: `desk` for the rulings. `CI-Linux` and `CI-Windows` for the runs named, and `simulated` for the probes named.
+
+- **1. On #687 (P4-4-CC deliverable 2, C13 0.2 and C4 0.4):**
+  1. **Finding A, CH-13's order, is open.** D4, D5 and D6 prefer option 2, the code's order with a text amendment (D6's 6884851086, D4's options 6884974393). D5's N1 (6885614739) and D6's B1 (6885755366) find the same masking at rows 5 and 7, and D4 answered with options N1-a to N1-c (6885648519). N1-b widens D3's `run-regressed`. D3 judges finding A and N1 together, and D1 rules in the next entry. Until then `TestC13v02H1Row1SpansFirst` stays as D6 wrote it, and #687 does not merge.
+  2. **The alert's stamp, brought forward.** `DetectorWindow.Alert` stamps `otsec.netobs/0.2` when the alert's coverage carries a 0.2 field (D6's N2 on #687). D1's comment 6884408818 had left this to the C13 0.2 intake brief. It moves into deliverable 2, because deliverable 2's merge commit is C13 0.3 §1.2's rollback floor, and that floor re-judges retained 0.2 observations.
+  3. **D4's path.** D4's `modules/detection/netdetect` path, authorized for `RestoreDetector`'s round trip (D1's 6885273905), extends to `RestoreLearner` (D1's 6885766644).
+  4. **D4's five readings** (6884408818) are consistent with the text (D6's N5, 6885755366). Two lines are recorded:
+     - the agent merges lost spans that touch;
+     - any later C4 minor that adds a capture-loss counter states its reader floor before D1 approves it. A 0.4 reader refuses such an event whenever that counter rises (C4-0.4-2).
+  5. **Still owed to the C13 0.2 intake brief:** `DetectorWindow`'s assets.
+- **2. On #689 (deliverable 3, C13 0.3; D1's comment 6884729573):**
+  1. **The node's messages stay `otsec.netobs/0.2`.** A 0.3 agent accepts 0.2-stamped node messages, and the sensor's brief owes that test.
+  2. **Erratum, C13 0.3 §1.3:** the heartbeat grows by 58 + 84 octets, not 57 + 82, because CH-53's counts are `<uint64>` of up to 20 digits. Heartbeats are never stored, so no cap or bound changes. The approved text is not edited.
+  3. **"No TCP `end` carries neither"** is refused on the 0.3 channel only. A stored record's fields are optional at every minor (CH-35, 0.3 §1.1).
+  4. **Erratum, C13 0.3 §1.1:** its sentence that a tie re-encodes the held record describes the code before CH-35 item 5. `Link.record` patches the raw body (`tieBody`). So N-8's leg (2) can fail its non-pointer control only at the reader, not inside the tie (D5's 6885530098).
+- **3. On #684 (deliverable 4, C2 0.10):**
+  1. **Open item for P4-4-HR24's stage 3** (D4's N2, 6885554006): C13 §1.4 and C2 §4 say a Telnet result without `session.telnet` comes only from a 0.9 collector. The code also accepts a later-minor result without it. So the detector acts on the object's absence at any minor, and test 9 has a 0.11 case. D4 corrects C13 §1.4 in its next C13 change.
+  2. **Risk** (D2's N1, 6885556425): on Windows, what `SIO_TCP_INFO` returns once the relay has reset the socket is not measured. Either answer, `unsupported` or `call-failed`, fails closed: alert noise, not a miss. Test 8's owed WinDivert Windows leg includes a reset after the half-close.
+  3. **D1's merge check** adds the jobs `c2-old-reader` and `c2-netns` (`.github/workflows/a6-c2-old-reader.yml` and `a6-c2-netns.yml`, added by #684) when a PR triggers them. CLAUDE.md's "Testing and merging" carries the line.
+  4. **D5's review of #684 is dropped.** §5.6 does not require it, and D4 and D2 covered what the node reads.
+- **4. On #685 (P4-4-F27 (4), F11's wiring), a risk** (D6's N1, 6884765137; D1's 6884771516): while the provider holds another key under the link key's name, `linkkey.Load` refuses the key and never releases its CNG handle, so about 1,440 handles leak a day (`desk`). Only a node with a `network_sensor` section reaches it, and F-027's gate keeps that section out of every configuration outside the tests. D3 posts the options in comments (D4-99), and D1 rules before the code. It is fixed before F-027's gate lifts.
+- **5. On #682 (deliverable 1), a risk** (D4's N2, 6885173711): C13 0.3 §1.2's "What the skip costs" understates the cost. `hold` matches by position, so one skipped alert shifts every comparison after it (D4's scratch test: 6 alerts stored a second time and 5 mismatches, where the text expects 1 and 0). The cost is bounded by the alerts after the skipped one, up to the restore's head, and the mismatch alarm makes it loud. Making `hold` tolerate a gap is a new mechanism, settled by options in comments before anyone writes it.
+- **6. On #683 (deliverable 0), an open item for deliverable 5** (D3's N3, 6884405798): the comment on `Action` in `contracts/audit/audit.go` says a reader keeps a record with an unknown action. `Validate` refuses it, and that refusal is what holds §11.2's reader floor. Whoever writes C8 0.13's code corrects the comment.
+- **7. On #690 (HR-25's options), D7's finding** (C6 in 6885160234): §4.5's configure line does not disable Spicy, so (i)'s image appears to carry Spicy's runtime and its bundled code, which `COPYING-3rdparty` does not name. One bundled folder holds a GPL-3.0-only text not mapped to its files. It is a finding against (i)'s image. It is mapped before an image with Spicy ships, and D7 carries it into `docs/release.md` with the first build's inventory entry.
+- **8. Order.** D5 takes its P4-4-CC parts before P4-4-DO.
+- **Next decision number:** D4-106.
