@@ -800,6 +800,31 @@ func TestVerifySensorFromLateRevoked(t *testing.T) {
 	if err := VerifySensorFrom(whole, 1); !errors.Is(err, ErrChainBroken) {
 		t.Errorf("the same from seq 1: %v, want broken", err)
 	}
+
+	// The unknown rule is narrower for a sensor.enrolled (D6's B1 on #702):
+	// an enrolment's acceptance must be in its own epoch, so in the same
+	// view a sensor.enrolled in epoch 1 naming decision 9 breaks. Control:
+	// the same enrolment in epoch 0, with no reset before it, is unknown.
+	// The mutant that drops "epoch == 0 &&" from the unknown case accepts
+	// the first chain.
+	renew := func(seq uint64) *Record {
+		r := enrolledRec(seq, 9, "3", authz.SensorEnrolRenew, testPinB)
+		r.Sensor.PreviousGeneration, r.Sensor.PreviousSPKI = "2", testPinB
+		return r
+	}
+	inEpoch1 := append(cloneSensorChain(sensorChain())[:5], resetRec(7), renew(8))
+	inEpoch0 := append(cloneSensorChain(sensorChain())[:5], renew(7))
+	for _, r := range append(inEpoch1[5:], inEpoch0[5]) {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifySensorFrom(inEpoch1[3:], 5); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("a cut view, an enrolment in epoch 1 before the view: %v, want broken", err)
+	}
+	if err := VerifySensorFrom(inEpoch0[3:], 5); err != nil {
+		t.Errorf("a cut view, the same enrolment in epoch 0: %v", err)
+	}
 }
 
 // C8-9: an acknowledgement before the latest sensor.revoked of its sensor
