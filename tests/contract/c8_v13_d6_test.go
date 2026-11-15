@@ -779,8 +779,11 @@ var c8v13Breaks = map[string]func(ms []map[string]any) []map[string]any{
 		c8v13S(ms[6])["generation"], c8v13S(ms[7])["generation"] = "3", "3"
 		return ms
 	},
+	// A rekey names what it replaces (N1, D1's 6896234420 on #699), here
+	// generation 1 under another pin, which no record of the view holds.
 	"a first enrolment above 1": func(ms []map[string]any) []map[string]any {
 		c8v13S(ms[2])["generation"], c8v13S(ms[3])["generation"], c8v13S(ms[3])["reason"] = "2", "2", "rekey"
+		c8v13S(ms[3])["previous_generation"], c8v13S(ms[3])["previous_spki"] = "1", c8v13P2
 		return ms[:4]
 	},
 	"the revoked pin enrolled under another sensor_id": func(ms []map[string]any) []map[string]any {
@@ -934,7 +937,10 @@ func TestC8v13C88Chain(t *testing.T) {
 		},
 		"a first enrolment above 1, the state unknown": func(ms []map[string]any) []map[string]any {
 			ms = c8v13Breaks["a first enrolment above 1"](ms)
-			c8v13S(ms[3])["previous_state"] = "unknown"
+			s := c8v13S(ms[3])
+			s["previous_state"] = "unknown"
+			delete(s, "previous_generation")
+			delete(s, "previous_spki")
 			return ms
 		},
 		"a decision named through its repeat": func(ms []map[string]any) []map[string]any {
@@ -1017,12 +1023,14 @@ func TestC8v13C88CopiedFields(t *testing.T) {
 }
 
 // C8-8 in a cut view (§11.2, "in a cut view"; D3's B1 in 6896040121 on #699,
-// D1's 6896052095). A view after seq 1 holds the lowest collector_seq it
-// records before its first collector.seq_reset. A sensor.revoked with no
-// acceptance in view, and a succeeded sensor.enrolled with none in the
-// view's first epoch, are unknown only when their decision_seq is below it:
-// at or above it, each breaks. A succeeded sensor.enrolled with no
-// acceptance in a later epoch breaks whatever its decision_seq.
+// D1's 6896052095, and D1's 6896234420, option (a)). A view after seq 1
+// holds the lowest collector_seq it records before its first
+// collector.seq_reset. A succeeded sensor.enrolled with no acceptance in the
+// view's first epoch is unknown only when its decision_seq is below it: at
+// or above it, it breaks; in a later epoch it breaks whatever its
+// decision_seq. A sensor.revoked with no acceptance in view is unknown
+// whatever its decision_seq, since its acceptance may be in an epoch before
+// the view, numbered by another collector.
 func TestC8v13C88CutView(t *testing.T) {
 	view := func(ms []map[string]any, from int) error {
 		_, recs := c8v13Seal(t, ms)
@@ -1043,27 +1051,18 @@ func TestC8v13C88CutView(t *testing.T) {
 		return m
 	}
 
-	// At and above the bound: each breaks. From index 2 the view's lowest
-	// collector_seq is 30, the enrolment's acceptance.
-	for name, c := range map[string]struct {
+	type cut struct {
 		ms   []map[string]any
 		from int
-	}{
-		"a revocation naming 99, above the view's lowest 30": {func() []map[string]any {
-			ms := c8v13Chain()
-			decision(ms[5], 99)
-			return ms
-		}(), 2},
+	}
+	// An enrolment at and above the bound breaks. From index 2 the view's
+	// lowest collector_seq is 30, the enrolment's acceptance.
+	for name, c := range map[string]cut{
 		"a rekey naming 99, above the view's lowest 30": {func() []map[string]any {
 			ms := c8v13Chain()
 			decision(ms[7], 99)
 			return ms
 		}(), 2},
-		"a revocation naming 31, a denied decision and the view's lowest": {func() []map[string]any {
-			ms := c8v13Chain()[:6]
-			ms[4] = denied(31)
-			return ms
-		}(), 4},
 		"an enrolment naming 30, a denied decision and the view's lowest": {func() []map[string]any {
 			ms := c8v13Chain()[:4]
 			ms[2] = denied(30)
@@ -1074,21 +1073,27 @@ func TestC8v13C88CutView(t *testing.T) {
 			t.Errorf("%s: %v, want a break", name, err)
 		}
 	}
-	// Control: below the bound, the same records are unknown and not a break.
-	for name, ms := range map[string][]map[string]any{
-		"a revocation naming 29": func() []map[string]any { ms := c8v13Chain(); decision(ms[5], 29); return ms }(),
-		"a rekey naming 29":      func() []map[string]any { ms := c8v13Chain(); decision(ms[7], 29); return ms }(),
+	// Unknown, not a break: the enrolment below the bound (its control), and
+	// a revocation with no acceptance in view below, at or above it.
+	for name, c := range map[string]cut{
+		"a rekey naming 29, below the view's lowest 30":      {func() []map[string]any { ms := c8v13Chain(); decision(ms[7], 29); return ms }(), 2},
+		"a revocation naming 29, below the view's lowest 30": {func() []map[string]any { ms := c8v13Chain(); decision(ms[5], 29); return ms }(), 2},
+		"a revocation naming 99, above the view's lowest 30": {func() []map[string]any { ms := c8v13Chain(); decision(ms[5], 99); return ms }(), 2},
+		"a revocation naming 31, a denied decision and the view's lowest": {func() []map[string]any {
+			ms := c8v13Chain()[:6]
+			ms[4] = denied(31)
+			return ms
+		}(), 4},
 	} {
-		if err := view(ms, 2); err != nil {
-			t.Errorf("%s, below the view's lowest 30: %v", name, err)
+		if err := view(c.ms, c.from); err != nil {
+			t.Errorf("%s: %v, want unknown", name, err)
 		}
 	}
 
 	// §11.2's epoch-1 case. The view runs from the rekey's acceptance (32)
-	// across a collector reset; epoch 1 holds a request at collector_seq 1.
-	// The lowest collector_seq before the reset is 32, so a late revocation
-	// of decision 31, whose acceptance is before the view, is unknown. A
-	// lowest taken across the reset would be 1, and would break it.
+	// across a collector reset; epoch 1 holds a request at collector_seq 1,
+	// and the lowest collector_seq before the reset is 32. A late revocation
+	// of decision 31, whose acceptance is before the view, is unknown.
 	ms := c8v13Chain()
 	reset := c8v13Reset()
 	reset["previous_high"] = 32
@@ -1100,7 +1105,8 @@ func TestC8v13C88CutView(t *testing.T) {
 	}
 	// A succeeded enrolment in the revocation's place breaks: its acceptance
 	// must be in its own epoch. Control: the same enrolment in the view's
-	// first epoch, before the reset, is unknown.
+	// first epoch, before the reset, is unknown; a lowest taken across the
+	// reset would be 1, and would break it.
 	rekey := c8v13Enrolled()
 	s := c8v13S(rekey)
 	s["decision_seq"], s["payload_sha256"], s["generation"], s["sensor_spki"], s["reason"] = 31, c8v13Hash("enrol 3"), "3", c7v11Pin("d6 c8 0.13 sensor key 3"), "rekey"
