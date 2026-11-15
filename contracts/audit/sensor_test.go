@@ -290,6 +290,48 @@ func TestSensorEnrolledRules(t *testing.T) {
 	}
 }
 
+// C7-4 and C8-2 on a succeeded enrolment (D1's ruling 6896234420 on #699,
+// N1): new exactly when none of previous_generation, previous_spki and
+// previous_state is present, and previous_state only on a rekey or a
+// replace. Controls: the accepted forms below, and a denied record, which
+// these rules leave alone. The mutant that drops the first rule accepts the
+// first three cases; the one that drops the second accepts the fourth.
+func TestSensorEnrolledReplaces(t *testing.T) {
+	enrol := func(gen string, reason authz.SensorEnrolReason, prev, state string) *Record {
+		r := enrolledRec(6, 11, gen, reason, testPinB)
+		if prev != "" {
+			r.Sensor.PreviousGeneration, r.Sensor.PreviousSPKI = prev, testPinA
+		}
+		r.Sensor.PreviousState = state
+		return r
+	}
+	for name, r := range map[string]*Record{
+		"a renew with none of the three": enrol("2", authz.SensorEnrolRenew, "", ""),
+		"a rekey with none of the three": enrol("2", authz.SensorEnrolRekey, "", ""),
+		"a new with the previous pair":   enrol("1", authz.SensorEnrolNew, "1", ""),
+		"a renew with previous_state":    enrol("2", authz.SensorEnrolRenew, "", PreviousStateUnknown),
+		"a new with previous_state":      enrol("1", authz.SensorEnrolNew, "", PreviousStateUnknown),
+	} {
+		if err := r.Validate(); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+	denied := enrol("2", authz.SensorEnrolRenew, "", "")
+	denied.Outcome, denied.ReasonCode = OutcomeDenied, DeniedReason
+	for name, r := range map[string]*Record{
+		"a new with none of the three":   enrol("1", authz.SensorEnrolNew, "", ""),
+		"a renew with the previous pair": enrol("2", authz.SensorEnrolRenew, "1", ""),
+		"a rekey with the previous pair": enrol("2", authz.SensorEnrolRekey, "1", ""),
+		"a rekey with previous_state":    enrol("2", authz.SensorEnrolRekey, "", PreviousStateUnknown),
+		"a replace with previous_state":  enrol("2", authz.SensorEnrolReplace, "", PreviousStateUnknown),
+		"a denied renew with none":       denied,
+	} {
+		if err := r.Validate(); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
 // C8-3, T1 and St1: the revocation record.
 func TestSensorRevokedRules(t *testing.T) {
 	for name, edit := range map[string]func(r *Record){
@@ -604,7 +646,9 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 			return recs
 		},
 		"the first enrolment at 2": func(recs []*Record) []*Record {
-			return append([]*Record{recs[0]}, enrolAt(3, 10, "2", authz.SensorEnrolReplace, testPinA)...)
+			first := enrolAt(3, 10, "2", authz.SensorEnrolReplace, testPinA)
+			first[1].Sensor.PreviousGeneration, first[1].Sensor.PreviousSPKI = "1", testPinB
+			return append([]*Record{recs[0]}, first...)
 		},
 		"a revoked pin enrolled again, under another sensor": func(recs []*Record) []*Record {
 			again := enrolAt(10, 13, "1", authz.SensorEnrolNew, testPinA)
@@ -660,6 +704,30 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 			recs[4].Sensor.Reason = string(authz.SensorEnrolRenew)
 			return recs
 		},
+		// What an enrolment replaces is the last enrolment (D1's ruling
+		// 6896234420 on #699, N1). A renew under a new key whose previous_spki
+		// is written as the new pin would carry the old run over (C7-4).
+		"a renew under a new pin, previous_spki the new pin": func(recs []*Record) []*Record {
+			recs[4].Sensor.Reason, recs[4].Sensor.PreviousSPKI = string(authz.SensorEnrolRenew), testPinB
+			return recs
+		},
+		"previous_generation not the last enrolment's": func(recs []*Record) []*Record {
+			recs[4].Sensor.PreviousGeneration = "7"
+			return recs
+		},
+		"previous_state at the last enrolment's generation": func(recs []*Record) []*Record {
+			pinC := "sha256:" + strings.Repeat("3", 64)
+			again := enrolAt(10, 13, "2", authz.SensorEnrolReplace, pinC)
+			again[1].Sensor.PreviousState = PreviousStateUnknown
+			return append(recs, again...)
+		},
+		"one acceptance applied twice with previous_state": func(recs []*Record) []*Record {
+			again := *recs[4]
+			s := *again.Sensor
+			again.Seq, again.Sensor = 10, &s
+			s.PreviousGeneration, s.PreviousSPKI, s.PreviousState = "", "", PreviousStateUnknown
+			return append(recs, &again)
+		},
 		"a rekey with the same pin": func(recs []*Record) []*Record {
 			recs[4].Sensor.SensorSPKI, recs[3].Sensor.SensorSPKI = testPinA, testPinA
 			recs[4].Sensor.PreviousSPKI = testPinA
@@ -695,6 +763,11 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			recs := edit(cloneSensorChain(sensorChain()))
+			for _, r := range recs {
+				if err := r.Validate(); err != nil {
+					t.Fatalf("record %d: %v", r.Seq, err)
+				}
+			}
 			if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
 				t.Fatalf("%v, want broken", err)
 			}
@@ -714,6 +787,28 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 	recs[5].Sensor.SuspectFrom, recs[6].Sensor.SuspectFrom = "2026-11-10T11:00:00Z", "2026-11-10T11:00:00Z"
 	if err := VerifySensorFrom(recs, 1); err != nil {
 		t.Fatalf("suspect_from on both: %v", err)
+	}
+	// A renew that keeps the last enrolment's pin, and previous_state above
+	// the last enrolment's generation, are accepted. Controls for the N1
+	// cases above.
+	recs = cloneSensorChain(sensorChain())
+	recs[3].Sensor.SensorSPKI, recs[4].Sensor.SensorSPKI, recs[4].Sensor.Reason = testPinA, testPinA, string(authz.SensorEnrolRenew)
+	if err := VerifySensorFrom(recs[:5], 1); err != nil {
+		t.Fatalf("a renew under the last pin: %v", err)
+	}
+	recs = cloneSensorChain(sensorChain())
+	pinC := "sha256:" + strings.Repeat("3", 64)
+	again := []*Record{sensorAccept(10, 13, authz.KindNodeSensorEnrol, "3", pinC),
+		enrolledRec(11, 13, "3", authz.SensorEnrolReplace, pinC)}
+	again[1].Sensor.PreviousState = PreviousStateUnknown
+	recs = append(recs[:5], again...)
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifySensorFrom(recs, 1); err != nil {
+		t.Fatalf("previous_state above the last enrolment's generation: %v", err)
 	}
 }
 

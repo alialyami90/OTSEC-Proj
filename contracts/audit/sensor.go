@@ -263,6 +263,18 @@ func (r *Record) validateSensorAction() error {
 		case s.PreviousGeneration != "" && (!authz.ValidGeneration(s.PreviousGeneration) || !authz.ValidSPKI(s.PreviousSPKI)):
 			return errors.New("previous_generation is a generation and previous_spki a pin")
 		}
+		// What a succeeded enrolment replaces agrees with its reason (C7-4,
+		// C8-2; D1's ruling 6896234420 on #699, N1): new comes only with no
+		// enrolment held and the state known, so with none of the three;
+		// renew and new are denied while the state is unknown.
+		none := s.PreviousGeneration == "" && s.PreviousState == ""
+		switch {
+		case r.Outcome != OutcomeSucceeded:
+		case (s.Reason == string(authz.SensorEnrolNew)) != none:
+			return errors.New("a succeeded new carries none of previous_generation, previous_spki and previous_state, and every other reason one of them")
+		case s.PreviousState != "" && s.Reason != string(authz.SensorEnrolRekey) && s.Reason != string(authz.SensorEnrolReplace):
+			return fmt.Errorf("previous_state is on a succeeded rekey or replace only, not %s", s.Reason)
+		}
 	case ActionSensorRevoked:
 		if r.Outcome != OutcomeSucceeded || r.ReasonCode != "" {
 			return errors.New("is succeeded, always, with no reason code (C8-3)")
@@ -420,6 +432,12 @@ func refuseSensorUnset(b []byte) error {
 //     most one sensor.revoked names one acceptance, across collector resets.
 //   - Where previous_spki is present, a succeeded renew carries a pin equal
 //     to it, and a rekey or a replace a different one (C7-4).
+//   - What a succeeded sensor.enrolled replaces is the sensor's last
+//     succeeded enrolment: previous_generation and previous_spki equal its
+//     generation and pin, and with previous_state the generation is above
+//     its generation (C8-2 check 2; D1's ruling 6896234420 on #699, N1). So
+//     a renew under a new key breaks however previous_spki is written, and
+//     one acceptance applied twice with previous_state breaks.
 //   - C8 0.12's key-set rule: the decision was accepted under a key set that
 //     lists the verified key as active and allowed the kind. For a
 //     sensor.enrolled that is the latest policy.apply admin_keys before the
@@ -469,11 +487,16 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 		decision uint64
 		payload  string
 	}
+	// enrolment is a sensor's last succeeded sensor.enrolled.
+	type enrolment struct {
+		gen uint64
+		pin string
+	}
 	epoch := 0
 	accepted := map[num]*Record{}
 	keysAt := map[*Record]*Record{}      // the latest admin_keys record before each acceptance
 	revokedBy := map[revocation]uint64{} // the sensor.revoked that names each acceptance
-	lastGen := map[string]uint64{}       // each sensor's last succeeded enrolment
+	lastEnrol := map[string]enrolment{}  // each sensor's last succeeded enrolment
 	revokedPin := map[string]bool{}      // every pin a sensor.revoked names
 	net := newNetworkChain(recs, cut)
 	// match checks that acc, the acceptance r names, is for r's sensor,
@@ -523,8 +546,16 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 				}
 			}
 			gen, _ := strconv.ParseUint(s.Generation, 10, 64) // checked by Validate
-			if last, ok := lastGen[sensor]; s.PreviousState == "" && (ok || !cut) && gen != last+1 {
-				return broken("record %d enrols sensor %s at generation %d, but its last enrolment is at %d", r.Seq, sensor, gen, last)
+			last, ok := lastEnrol[sensor]
+			switch {
+			case s.PreviousState == "" && (ok || !cut) && gen != last.gen+1:
+				return broken("record %d enrols sensor %s at generation %d, but its last enrolment is at %d", r.Seq, sensor, gen, last.gen)
+			case s.PreviousState != "" && gen <= last.gen:
+				return broken("record %d enrols sensor %s with previous_state at generation %d, not above its last enrolment at %d", r.Seq, sensor, gen, last.gen)
+			case s.PreviousGeneration != "" && (ok || !cut) &&
+				(s.PreviousGeneration != strconv.FormatUint(last.gen, 10) || s.PreviousSPKI != last.pin):
+				return broken("record %d names previous generation %s and pin %s, but sensor %s's last enrolment is generation %d, pin %s",
+					r.Seq, s.PreviousGeneration, s.PreviousSPKI, sensor, last.gen, last.pin)
 			}
 			if revokedPin[s.SensorSPKI] {
 				return broken("record %d enrols pin %s, which an earlier sensor.revoked revoked", r.Seq, s.SensorSPKI)
@@ -532,7 +563,7 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 			if s.PreviousSPKI != "" && (s.Reason == string(authz.SensorEnrolRenew)) != (s.SensorSPKI == s.PreviousSPKI) {
 				return broken("record %d is a %s whose pin is %s and whose previous pin is %s", r.Seq, s.Reason, s.SensorSPKI, s.PreviousSPKI)
 			}
-			lastGen[sensor] = gen
+			lastEnrol[sensor] = enrolment{gen, s.SensorSPKI}
 		case r.Action == ActionSensorRevoked:
 			s := r.Sensor
 			var acc *Record
