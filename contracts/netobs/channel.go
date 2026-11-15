@@ -278,7 +278,7 @@ func (h *Heartbeat) validateChannel(want string, keys map[string]bool) error {
 	// An absent 0.1 count decodes as 0. On the 0.2 channel it is refused,
 	// not read as 0; only drops_driver may be absent (C13 §6; D3's N1 on
 	// #687). The 0.1 channel reads as it did.
-	if c.need02 && c.keys != nil {
+	if c.need >= 2 && c.keys != nil {
 		for _, name := range counters01 {
 			if !c.keys["counters."+name] {
 				c.fail(CodeMissing, "counters."+name, "required")
