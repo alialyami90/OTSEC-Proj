@@ -712,8 +712,10 @@ func TestC13v02T9Aggregate(t *testing.T) {
 	if _, err := read(d); err != nil {
 		t.Errorf("a 0.3 alert under an aggregate key: %v", err)
 	}
-	// A hold-timeout alert built by the detector names its assets, through
-	// the health body and back.
+	// A hold-timeout alert, built here from its details and not by the
+	// detector, keeps its assets through the health body and back. The
+	// detector's leg (DetectorWindow's assets) is owed to the C13 0.2 intake
+	// brief (D4-105 item 1.5).
 	a, err := read(unseen("hold-timeout"))
 	if err != nil {
 		t.Fatal(err)

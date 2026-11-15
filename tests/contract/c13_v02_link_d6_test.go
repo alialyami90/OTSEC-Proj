@@ -16,8 +16,11 @@ package contract
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -184,8 +187,20 @@ func TestC13v02M2FrameCaps(t *testing.T) {
 	if f, err := netobs.DecodeFromSensor(pad(tick, 64<<10)); err != nil || f.Tick == nil {
 		t.Errorf("a tick of exactly 64 KiB: %v", err)
 	}
-	if _, err := netobs.DecodeFromSensor(pad(tick, 64<<10+1)); !slices.Contains(netobs.Codes(err), netobs.CodeRange) {
-		t.Errorf("a sensor frame of 64 KiB + 1: %v, want range", err)
+	// The node's close point is ReadFrame (CH-2: "a 4-byte big-endian
+	// length, then one JSON document"): a length of 64 KiB is read, and 64
+	// KiB + 1 is ErrFrameTooLarge (frame-too-large), with its whole body
+	// there to be read.
+	frame := func(body []byte) io.Reader {
+		var hdr [4]byte
+		binary.BigEndian.PutUint32(hdr[:], uint32(len(body)))
+		return io.MultiReader(bytes.NewReader(hdr[:]), bytes.NewReader(body))
+	}
+	if b, err := netobs.ReadFrame(frame(pad(tick, 64<<10))); err != nil || len(b) != 64<<10 {
+		t.Errorf("ReadFrame, a length of 64 KiB: %d bytes, %v", len(b), err)
+	}
+	if b, err := netobs.ReadFrame(frame(pad(tick, 64<<10+1))); !errors.Is(err, netobs.ErrFrameTooLarge) {
+		t.Errorf("ReadFrame, a length of 64 KiB + 1: %d bytes, %v; want ErrFrameTooLarge", len(b), err)
 	}
 	var w bytes.Buffer
 	if err := netobs.WriteFrame(&w, pad(tick, 64<<10+1)); err != netobs.ErrFrameTooLarge {
