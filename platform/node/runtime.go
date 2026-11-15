@@ -18,6 +18,7 @@ import (
 	"otsec.local/otsec/contracts/register"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/netretain"
+	"otsec.local/otsec/platform/sensorlink"
 	"otsec.local/otsec/platform/store"
 )
 
@@ -102,6 +103,9 @@ type Runtime struct {
 	// sensorHeld counts the ceiling's refusals of the sensor's health
 	// events, each try of an event once (sensorceiling.go).
 	sensorHeld atomic.Uint64
+	// linkReg is the node's key register as KeysResolved handed it to the
+	// sensor manager, nil until then (linkkey.go).
+	linkReg atomic.Pointer[sensorlink.RegisterView]
 	// startMono is the monotonic time of the node's start, the origin of
 	// the sensor-unreachable timer however late the intake starts (D4-73).
 	startMono time.Duration
