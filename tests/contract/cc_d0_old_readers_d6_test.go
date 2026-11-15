@@ -27,6 +27,14 @@ package contract
 // The brief's "The backward fixtures also hold forward": deliverable 2's
 // branch reads the event-0.4-* files with the new code, so they keep their
 // names.
+//
+// The old-reader proof ran on main before 0.2, at #683's merge commit
+// 36fabc3a, as a one-time proof. Since deliverable 2 these functions are
+// the C13 0.2 and C4 0.4 readers. By D1's ruling D on #687 (comment
+// 6884862565), TestCCD0R3Alert and TestCCD0E44SensorCounters assert what
+// that code does with the same fixtures, which are unchanged. The other
+// three tests hold as written under both codes; their messages name the
+// old readers.
 // Ground truth: independent (the approved text). The SER row is D6's
 // transcription of SEL-751 Figure 10.16; every other value is constructed.
 // None is device output. Evidence class: desk.
@@ -165,11 +173,11 @@ func TestCCD0R3StoredObservation(t *testing.T) {
 func TestCCD0R3Alert(t *testing.T) {
 	e, err := event.Decode(ccD0File(t, "event-0.4-netobs-alert.json"))
 	if err != nil {
-		t.Fatalf("the 0.3 event reader refuses the 0.4 alert event: %v", err)
+		t.Fatalf("the 0.4 event reader refuses the 0.4 alert event: %v", err)
 	}
 	a, err := netobs.AlertFromEvent(e)
 	if err != nil {
-		t.Fatalf("the 0.1 alert reader refuses a 0.2 alert: %v", err)
+		t.Fatalf("the 0.2 alert reader refuses a 0.2 alert: %v", err)
 	}
 	if a.Schema != "otsec.netobs/0.2" || !netobs.ValidUUID(a.AssetID) {
 		t.Errorf("schema %q, asset_id %q: want a 0.2 alert under an asset ID", a.Schema, a.AssetID)
@@ -190,7 +198,9 @@ func TestCCD0R3Alert(t *testing.T) {
 		}
 	}
 	// Stamped 0.1, the alert without them is valid, and with either one it
-	// is refused: the acceptance rests on reading a later minor.
+	// is refused, naming the key: the 0.2 reader reads an earlier minor
+	// strictly (CH-35). CH-35 states no code, so none is asserted (the 0.1
+	// reader on main gave conflict, this code gives decode).
 	at01 := func(keep string) event.Health {
 		h := event.Health{Type: e.Health.Type, Related: e.Health.Related, Details: maps.Clone(d)}
 		h.Details["schema"] = "otsec.netobs/0.1"
@@ -206,8 +216,8 @@ func TestCCD0R3Alert(t *testing.T) {
 	}
 	for _, k := range added {
 		_, err := netobs.AlertFromHealth(at01(k))
-		if !slices.Contains(netobs.Codes(err), netobs.CodeConflict) || !strings.Contains(fmt.Sprint(err), k) {
-			t.Errorf("stamped 0.1 with %s: %v, want it refused by name", k, err)
+		if err == nil || !strings.Contains(fmt.Sprint(err), k) {
+			t.Errorf("stamped 0.1 with %s: %v, want it refused, naming the key", k, err)
 		}
 	}
 }
@@ -220,7 +230,7 @@ func TestCCD0E44SensorCounters(t *testing.T) {
 	ok := ccD0File(t, "event-0.4-sensor-counters.json")
 	e, err := event.Decode(ok)
 	if err != nil {
-		t.Fatalf("the 0.3 code refuses a 0.4 sensor.counters with diff.packets: %v", err)
+		t.Fatalf("the 0.4 code refuses a 0.4 sensor.counters with diff.packets: %v", err)
 	}
 	// diff.packets and, beside it, only 0.4's counters, none of them a 0.3
 	// counter; and the capture_loss that C4-0.4-2 asks for the two that rose.
@@ -245,11 +255,13 @@ func TestCCD0E44SensorCounters(t *testing.T) {
 		t.Errorf("capture_loss %q", got)
 	}
 
-	// Without diff.packets, refused by the 0.3 code for that alone.
+	// Without diff.packets, refused by the 0.4 code for that alone
+	// (C4-0.4-3). At 0.4 the eight new counters count as counters, so 0.3's
+	// "no diff.<counter>" no longer applies (D4's N1 on #683, 6884433844).
 	no := ccD0File(t, "event-0.4-sensor-counters-no-packets.json")
 	_, err = event.Decode(no)
-	if !slices.Equal(event.Codes(err), []event.Code{event.CodeMissing}) || !strings.Contains(fmt.Sprint(err), "health.details: missing: no diff.<counter>") {
-		t.Errorf("without diff.packets: %v, want only %q", err, "no diff.<counter>")
+	if !slices.Equal(event.Codes(err), []event.Code{event.CodeMissing}) || !strings.Contains(fmt.Sprint(err), "health.details.diff.packets: missing") {
+		t.Errorf("without diff.packets: %v, want only %q", err, "health.details.diff.packets: missing")
 	}
 	a, b := ccD0Map(t, ok), ccD0Map(t, no)
 	delete(a["health"].(map[string]any)["details"].(map[string]any), "diff.packets")
@@ -257,8 +269,8 @@ func TestCCD0E44SensorCounters(t *testing.T) {
 		t.Error("the two fixtures differ in more than diff.packets")
 	}
 
-	// Stamped 0.3, each 0.4 detail is refused: the acceptance above rests on
-	// reading a later minor.
+	// Stamped 0.3, each 0.4 detail is refused, as 0.3 refuses it (C4-0.4-1):
+	// the 0.4 code accepts them at 0.4 only.
 	m := ccD0Map(t, ok)
 	m["schema"] = "otsec.event/0.3"
 	_, err = event.Decode(ccD0JSON(t, m))

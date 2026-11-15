@@ -1,4 +1,4 @@
-// Package netobs is contract C13, otsec.netobs/0.1: what the passive
+// Package netobs is contract C13, otsec.netobs/0.2 with its 0.1 channel kept (below): what the passive
 // network sensor hands the node, and the records the node builds from it.
 // It is owned by D4. The text is docs/phase4/D4-c13-netobs.md, approved in
 // D4-68, with the coding gaps of §14 agreed in D4-69 (#543); the baseline,
@@ -37,9 +37,36 @@
 //     SortBaseline, so the same observations folded in any order give the
 //     same bytes.
 //
-// The learner's and the detector's checkpoint documents
-// (otsec.netcheckpoint/0.1) come with modules/detection, which defines the
-// state they hold.
+// The learner's and the detector's checkpoint documents come with
+// modules/detection, which defines the state they hold.
+//
+// # C13 0.2
+//
+// otsec.netobs/0.2 (docs/phase4/D4-c13-0.2-proposal.md, approved in D4-92;
+// coded under P4-4-CC) is the channel over the network link. This package
+// carries it beside 0.1:
+//
+//   - The 0.1 channel stays as main's intake reads it (D4-103 ruling 2):
+//     Identifier is still otsec.netobs/0.1, and DecodeChannel,
+//     Observation.Validate and Heartbeat.Validate read 0.1 only, refusing
+//     every field 0.2 adds. The C13 0.2 intake brief moves the channel.
+//   - The 0.2 channel (link.go): Identifier02; the four messages
+//     (NodeHello, Ack, SensorHello, Tick) with DecodeFromNode, which names
+//     the agent's close reason, and DecodeFromSensor, which also reads the
+//     0.2 heartbeat and observation with every field 0.2 requires.
+//   - The pure checks (judge.go): JudgeHello (CH-13), JudgeTick (CH-8),
+//     AckValid (CH-9) and PlaceRecord (CH-14), the first two with CH-40's
+//     span check. No product code calls them yet (F-027's gate, D4-96).
+//   - The new fields of §1 and §11: made_utc; node.late, backlog, skewed
+//     and lost; coverage.config_digest and settings.prp_window_ms; the
+//     heartbeat's interfaces, agent, egress_check and eight counters; and
+//     CH-47's aggregate keys with assets and assets_total. Each is refused
+//     in a record below 0.2, required on the 0.2 channel, and optional in
+//     a stored record.
+//   - The stored readers read 0.1 and 0.2 strictly and a later minor
+//     forward; the bridge's unknown degraded value is read from 0.3 on.
+//   - The checkpoints: CheckpointIdentifier is otsec.netcheckpoint/0.2, and
+//     the decoders read a 0.1 document strictly (CheckpointIdentifier01).
 //
 // # Bounds
 //

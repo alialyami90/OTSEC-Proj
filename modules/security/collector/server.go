@@ -99,13 +99,15 @@ const lingerTimeout = 5 * time.Second
 const lingerMaxBytes = 64 << 10
 
 // Serve accepts connections until Close. A peer that fails the transport's
-// identity check is logged and skipped.
+// identity check is logged and skipped. After Close, Serve closes ln and
+// returns ErrServerClosed, so the endpoint is not left bound and unserved.
 func (s *Server) Serve(ln net.Listener) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		cancel()
+		ln.Close()
 		return ErrServerClosed
 	}
 	s.ln, s.cancel = ln, cancel

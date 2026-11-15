@@ -64,8 +64,9 @@ type Param struct {
 	Value string
 }
 
-// Cite is one flow's citation in an alert: a capture and up to
-// MaxAlertFramesPerFlow frames, shown as "<capture_id> <n>=<sha256> ...".
+// Cite is one cited observation's citation in an alert: its capture and up
+// to MaxAlertFramesPerFlow of its frames in citation order, whichever flows
+// they belong to (C13 0.2 CH-50), shown as "<capture_id> <n>=<sha256> ...".
 type Cite struct {
 	CaptureID string      `json:"capture_id"`
 	Frames    []CiteFrame `json:"frames"`
@@ -114,14 +115,32 @@ type Alert struct {
 	// frame, and the alert is never dropped for it (C13 §4.2, §7.1).
 	FramesMissing int64
 	Coverage      Coverage
+	// Assets and AssetsTotal name what an alert under an aggregate key
+	// covers: up to MaxAggregateAssets asset IDs, enrolled assets first,
+	// and how many in all. Both are present exactly when AssetID is one of
+	// AggregateKeys (new in 0.2, CH-47).
+	Assets      []string
+	AssetsTotal int64
 }
 
 var baselineHashForm = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// laterAssetKeys are the aggregate keys C13 0.2 adds to an alert's asset_id
-// (CH-47). This reader accepts them only in an alert of a later minor, as
-// the bridge build must (CH-35 item 3); at 0.1 they are still refused.
-var laterAssetKeys = []string{"clock-skew", "sensor-records-late", "hold-timeout"}
+// The aggregate keys C13 0.2 adds to an alert's asset_id (CH-47), each only
+// for the two own-session rules: no tie was made for skew (CH-41); a
+// backlog record untied after a break (CH-39); a tie the scheduler's wait
+// could not make (#644 §1.9 items 4 and 9). This reader accepts them in an
+// alert of 0.2 or later; at 0.1 they are refused.
+const (
+	AggregateClockSkew   = "clock-skew"
+	AggregateRecordsLate = "sensor-records-late"
+	AggregateHoldTimeout = "hold-timeout"
+)
+
+// AggregateKeys lists every aggregate key.
+var AggregateKeys = []string{AggregateClockSkew, AggregateRecordsLate, AggregateHoldTimeout}
+
+// MaxAggregateAssets bounds an aggregated alert's assets (CH-47).
+const MaxAggregateAssets = 8
 
 // Validate checks every rule of C13 that holds on one alert.
 func (a *Alert) Validate() error {
@@ -131,9 +150,11 @@ func (a *Alert) Validate() error {
 	if !ok {
 		c.fail(CodeForm, "rule", "%q is not a rule", a.Rule)
 	}
-	if a.AssetID != AssetUnresolved && !ValidUUID(a.AssetID) && !(c.later && contains(laterAssetKeys, a.AssetID)) {
+	aggregate := c.minor >= 2 && contains(AggregateKeys, a.AssetID)
+	if a.AssetID != AssetUnresolved && !ValidUUID(a.AssetID) && !aggregate {
 		c.fail(CodeForm, "asset_id", "%q is not an asset ID or %s", a.AssetID, AssetUnresolved)
 	}
+	a.checkAggregate(c, aggregate)
 	switch {
 	case a.Baseline == "" && ok && !contains(BaselineFree, a.Rule):
 		c.fail(CodeMissing, "baseline", "rule %s judges against the acknowledged baseline", a.Rule)
@@ -227,6 +248,35 @@ func (a *Alert) Validate() error {
 	return c.err()
 }
 
+// checkAggregate applies CH-47: an aggregate key only under the two
+// own-session rules, and assets and assets_total exactly with one, the
+// assets at most MaxAggregateAssets distinct asset IDs and the total at
+// least their number.
+func (a *Alert) checkAggregate(c *checker, aggregate bool) {
+	if aggregate && a.Rule != RuleOwnSessionUnseen && a.Rule != RuleOwnSessionOutsideRecord {
+		c.fail(CodeConflict, "asset_id", "%s is a key only of %s and %s", a.AssetID, RuleOwnSessionUnseen, RuleOwnSessionOutsideRecord)
+	}
+	if !aggregate {
+		if len(a.Assets) != 0 || a.AssetsTotal != 0 {
+			c.fail(CodeConflict, "assets", "only under an aggregate key %v", AggregateKeys)
+		}
+		return
+	}
+	n := len(a.Assets)
+	if n == 0 || n > MaxAggregateAssets {
+		c.fail(CodeConflict, "assets", "%d assets, not in [1, %d]: an aggregated alert names what it covers", n, MaxAggregateAssets)
+	}
+	for i, id := range a.Assets {
+		c.uuid(fmt.Sprintf("assets[%d]", i), id)
+		if slices.Index(a.Assets, id) != i {
+			c.fail(CodeOrder, "assets", "%q repeated", id)
+		}
+	}
+	if a.AssetsTotal < int64(n) {
+		c.fail(CodeConflict, "assets_total", "%d, below the %d assets listed", a.AssetsTotal, n)
+	}
+}
+
 // Health is the alert as a C4 health event body: type HealthAlert, Related
 // the hits' observations, and every other field as a detail (C13 §7.1).
 // The detail keys are schema, rule, asset_id, baseline and
@@ -266,6 +316,10 @@ func (a *Alert) Health() (event.Health, error) {
 	}
 	if a.FramesMissing > 0 {
 		d["frames_missing"] = strconv.FormatInt(a.FramesMissing, 10)
+	}
+	if len(a.Assets) > 0 {
+		d["assets"] = strings.Join(a.Assets, " ")
+		d["assets_total"] = strconv.FormatInt(a.AssetsTotal, 10)
 	}
 	for k, v := range flattenCoverage(&a.Coverage) {
 		d[k] = v
@@ -324,6 +378,19 @@ func AlertFromHealth(h event.Health) (*Alert, error) {
 	if d["frames_missing"] == "0" {
 		c.fail(CodeConflict, "frames_missing", "0 is left out")
 	}
+	got, perr := version.Parse(a.Schema)
+	at02 := perr == nil && self.Accepts(got) && got.Minor >= 2
+	if at02 {
+		known["assets"] = true
+		if v, ok := d["assets"]; ok {
+			a.Assets = strings.Split(v, " ")
+		}
+		num("assets_total", &a.AssetsTotal, true)
+		_, okA := d["assets"]
+		if _, okT := d["assets_total"]; okA != okT {
+			c.fail(CodeConflict, "assets_total", "present exactly with assets")
+		}
+	}
 	for _, name := range ruleParams[a.Rule] {
 		known["param."+name] = true
 		if v, ok := d["param."+name]; ok {
@@ -357,7 +424,6 @@ func AlertFromHealth(h event.Health) (*Alert, error) {
 	for _, k := range ckeys {
 		known[k] = true
 	}
-	got, perr := version.Parse(a.Schema)
 	later := perr == nil && self.Accepts(got) && got.Minor > self.Minor
 	for name := range d {
 		if !known[name] && !later {
@@ -400,6 +466,13 @@ func flattenCoverage(cv *Coverage) map[string]string {
 	}
 	for i, in := range cv.Interfaces {
 		d[fmt.Sprintf("coverage.interface.%d", i+1)] = in.Name + " " + in.Attachment + " " + in.LAN
+	}
+	// The two fields new in 0.2, each only when the statement has it.
+	if cv.ConfigDigest != "" {
+		d["coverage.config_digest"] = cv.ConfigDigest
+	}
+	if cv.Settings.PRPWindowMS != 0 {
+		d["coverage.settings.prp_window_ms"] = strconv.Itoa(cv.Settings.PRPWindowMS)
 	}
 	return d
 }
@@ -453,6 +526,19 @@ func unflattenCoverage(d map[string]string) (Coverage, []string, error) {
 	cv.Settings.SAReplyTimeoutMS = integer("coverage.settings.sa_reply_timeout_ms", get("coverage.settings.sa_reply_timeout_ms"))
 	cv.Settings.MaxPendingDNP3 = integer("coverage.settings.max_pending_dnp3", get("coverage.settings.max_pending_dnp3"))
 	cv.Settings.FlowIdleS = integer("coverage.settings.flow_idle_s", get("coverage.settings.flow_idle_s"))
+	// Optional at every minor; Alert.Validate refuses them below 0.2.
+	if v, ok := d["coverage.config_digest"]; ok {
+		keys = append(keys, "coverage.config_digest")
+		if cv.ConfigDigest = v; v == "" {
+			c.fail(CodeForm, "coverage.config_digest", "empty; left out when there is none")
+		}
+	}
+	if v, ok := d["coverage.settings.prp_window_ms"]; ok {
+		keys = append(keys, "coverage.settings.prp_window_ms")
+		if cv.Settings.PRPWindowMS = integer("coverage.settings.prp_window_ms", v); cv.Settings.PRPWindowMS == 0 {
+			c.fail(CodeRange, "coverage.settings.prp_window_ms", "0; left out when there is none")
+		}
+	}
 	for i := 1; i <= MaxInterfaces; i++ {
 		k := fmt.Sprintf("coverage.interface.%d", i)
 		v, ok := d[k]

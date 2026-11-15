@@ -1,0 +1,73 @@
+# D6 (P4-4-CC deliverable 4): C2 0.10's test 8, its CI-Linux legs, and
+# test 10 (docs/phase4/D2-c2-0.10-proposal.md section 8; D4-102 item 5 (a)).
+# They need root, nft and a packet socket, so they run here and not in
+# ci.yml, where they skip. The test binary runs as root under unshare -n, in
+# a network namespace that holds only lo: the tests refuse to set an nft
+# rule anywhere else. Everything is on 127.0.0.1 in that namespace, between
+# the collector's SEL751Runner and D6's scripted relay. Nothing reaches the
+# runner's own network, and no device is contacted.
+#
+# Test 8: the collector's rexmit_octets lies within a pinned range of the
+# retransmitted octets counted from the same run's capture, and a run with
+# data in flight gives rexmit_unknown "in-flight" and closes gracefully.
+# Test 10: the close phase's QUI is dropped once and the run aborted; the
+# relay receives QUI once the drop ends, with no RST before it. Its control,
+# SO_LINGER 0 on the session's socket, runs here too and must fail test 10's
+# pass condition.
+#
+# It runs by hand, on pushes to main, and on pull requests that change C2's
+# code, the Telnet transport, the SEL-751 adapter, the collector, the tests
+# or this file (brief P4-4-CC). Linux only, no secrets, read-only token.
+# Evidence class: CI-Linux, simulated.
+name: a6-c2-netns
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - '.github/workflows/a6-c2-netns.yml'
+      - 'tests/integration/c2telnet/**'
+      - 'contracts/adapter/**'
+      - 'modules/ied/telnet/**'
+      - 'modules/ied/sel751/**'
+      - 'modules/security/collector/**'
+permissions:
+  contents: read
+jobs:
+  c2-netns:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: nft, ip and the kernel
+        run: |
+          if ! command -v nft >/dev/null; then
+            sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables
+          fi
+          nft --version
+          ip -V
+          uname -r
+      - name: Build the test binary
+        run: go test -c -o "$RUNNER_TEMP/c2telnet.test" ./tests/integration/c2telnet
+      - name: Tests 8 and 10, as root in a network namespace of their own
+        working-directory: tests/integration/c2telnet
+        run: |
+          sudo env OTSEC_C2_NETNS=1 unshare -n "$RUNNER_TEMP/c2telnet.test" \
+            -test.run '^TestC2v10T(8|10)' -test.count=1 -test.v -test.timeout 10m 2>&1 | tee "$RUNNER_TEMP/netns.txt"
+          for t in TestC2v10T8RexmitWithinCaptureRange TestC2v10T8InFlightClosesGracefully \
+            TestC2v10T10AbortDeliversQUI TestC2v10T10LingerZeroControl; do
+            if ! grep -q "^--- PASS: $t " "$RUNNER_TEMP/netns.txt"; then
+              echo "::error::$t did not pass"
+              exit 1
+            fi
+          done

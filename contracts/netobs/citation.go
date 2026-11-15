@@ -137,6 +137,10 @@ type Coverage struct {
 	Degraded      []string    `json:"degraded"`
 	Settings      Settings    `json:"settings"`
 	SinceUTC      string      `json:"since_utc"`
+	// ConfigDigest is the run's configuration digest, "sha256:" and 64
+	// lowercase hex digits (new in 0.2, CH-32): required in a 0.2 channel
+	// record, optional in a stored record or an alert of 0.2 or later.
+	ConfigDigest string `json:"config_digest,omitempty"`
 }
 
 // Engine names the sensor's decoding engine.
@@ -165,6 +169,9 @@ type Settings struct {
 	SAReplyTimeoutMS int `json:"sa_reply_timeout_ms"`
 	MaxPendingDNP3   int `json:"max_pending_dnp3"`
 	FlowIdleS        int `json:"flow_idle_s"`
+	// PRPWindowMS is the PRP discard's window (new in 0.2, CH-28), 0 when
+	// absent; present as Coverage.ConfigDigest is.
+	PRPWindowMS int `json:"prp_window_ms,omitempty"`
 }
 
 // HSRNotDecoded is coverage.hsr in 0.1.
@@ -252,4 +259,10 @@ func (cv *Coverage) check(c *checker, field string) {
 		c.fail(CodeRange, field+".settings.flow_idle_s", "%d not in [%d, %d]", s.FlowIdleS, MinFlowIdleS, MaxFlowIdleS)
 	}
 	c.utc(field+".since_utc", cv.SinceUTC)
+	if c.new02(field+".config_digest", cv.ConfigDigest != "") && !baselineHashForm.MatchString(cv.ConfigDigest) {
+		c.fail(CodeForm, field+".config_digest", "%q is not sha256:<hex>", cv.ConfigDigest)
+	}
+	if c.new02(field+".settings.prp_window_ms", s.PRPWindowMS != 0) && (s.PRPWindowMS < MinPRPWindowMS || s.PRPWindowMS > MaxPRPWindowMS) {
+		c.fail(CodeRange, field+".settings.prp_window_ms", "%d not in [%d, %d]", s.PRPWindowMS, MinPRPWindowMS, MaxPRPWindowMS)
+	}
 }
