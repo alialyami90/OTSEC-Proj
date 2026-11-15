@@ -552,7 +552,6 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
 - **What remains.**
   - `commitDeferred` records only the audit database's own change, which on `main` is always to `collecting`. So its test calls it directly (D5's limit, which D1 accepted in 6892996485).
   - No run of the real binaries drives a database to `drain-only` and reads its record from the audit stream. The tests above run in process.
-  - F-027's limit under F9 says that `main` writes no record for `drain-only`. That describes `main` before #692. This change does not edit F-027, which is recorded under brief P4-D6-F027R (#695).
   - Outside F-028: C8 0.13's approved text has hyphens in four of C8-4's reasons and in C8-2's five denial codes, and the same pattern refuses each. They are not in `main`'s code yet. D3 settles their form in P4-4-CC deliverable 5, where P4-4-DO's mapping is one option and not a decision (D4-104 item 2 (b)).
 - **Status: closed** by #692.
 
@@ -611,7 +610,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
   - **F9, mode changes: the hourly cap is closed (#663). Its health event under the platform ceiling is not;** it comes with F1 in step (3).
     - Tests: `TestSensorModeChangeCapped` and `TestSensorHeldModeChangeFlushed` (`sensortest`).
     - Controls: the cap removed; the cap on the wall clock (MUT-F); the held change's flush removed.
-    - *Limit.* On `main` a change to `drain-only` writes no `store.mode_change` record, because C8's reason-code pattern refuses the hyphen. D1's ruling 6852845352 on #663 routes the fix. So `TestSensorModeChangeCapped` flaps between `blocked` and `failed`.
+    - *Limit.* Before #692, a change to `drain-only` wrote no `store.mode_change` record, because C8's reason-code pattern refuses the hyphen. #692 records it as `drain_only` (F-028). `TestSensorModeChangeCapped` still flaps between `blocked` and `failed`.
   - **F10, one forwarder session over every stream: closed (#662 and #663).**
     - #662 gives a target a second session that carries only the sensor's streams. It releases a too-large event once the main session's saved cursor on the health stream reaches the event's `forward.too-large` record (D1's ruling 6852502571 on #662). #663 wires it in `NewForwarding`, and `Check` judges each session on its own.
     - Tests in `modules/telemetry/forward`: `TestNewSecondSession`, `TestSecondSessionTooLargeWaitsForHealthCursor`, `TestSecondSessionReleasedByMainSession`, `TestSecondSessionFailureLeavesMainSession`, `TestSecondSessionHealthCursorReadFails` and `TestSecondSessionHealthCursorReadsPerPoll`.
