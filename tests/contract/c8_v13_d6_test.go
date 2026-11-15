@@ -775,8 +775,19 @@ func c8v13Seal(t *testing.T, ms []map[string]any) ([][]byte, []*audit.Record) {
 
 // c8v13Breaks are chains that each break one of C8-8's rules.
 var c8v13Breaks = map[string]func(ms []map[string]any) []map[string]any{
+	// Generation 3 names 2, as Validate requires (D3's A4 on #699), after
+	// the view's generation 1.
 	"a skipped generation": func(ms []map[string]any) []map[string]any {
-		c8v13S(ms[6])["generation"], c8v13S(ms[7])["generation"] = "3", "3"
+		c8v13S(ms[6])["generation"], c8v13S(ms[7])["generation"], c8v13S(ms[7])["previous_generation"] = "3", "3", "2"
+		return ms
+	},
+	// N1's previous_generation check also breaks the case above, so this one
+	// breaks on the generation rule alone: a new, which names nothing it
+	// replaces, at generation 1 again after the view's generation 1.
+	"a second new of an enrolled sensor": func(ms []map[string]any) []map[string]any {
+		c8v13S(ms[6])["generation"], c8v13S(ms[7])["generation"], c8v13S(ms[7])["reason"] = "1", "1", "new"
+		delete(c8v13S(ms[7]), "previous_generation")
+		delete(c8v13S(ms[7]), "previous_spki")
 		return ms
 	},
 	// A rekey names what it replaces (N1, D1's 6896234420 on #699), here
