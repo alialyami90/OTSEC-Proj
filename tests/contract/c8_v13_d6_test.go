@@ -555,6 +555,45 @@ func TestC8v13ZeroRefused(t *testing.T) {
 	m := c8v13Revoked()
 	c8v13S(m)["streams"] = map[string]any{"observation_through_seq": 0, "alert_through_seq": 0}
 	c8v13Accept(t, "streams, both keys at 0", m)
+
+	// The schema's leg, read structurally (no JSON Schema validator runs
+	// here): each key's own keywords refuse its zero.
+	raw, err := os.ReadFile(filepath.Join("..", "..", "contracts", "audit", "schema", "record.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Sensor struct {
+				Properties map[string]map[string]any `json:"properties"`
+			} `json:"sensor"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range zero {
+		p, refused := schema.Properties.Sensor.Properties[k], false
+		if v == 0 {
+			lo, _ := p["minimum"].(float64)
+			refused = lo >= 1
+		} else {
+			n, _ := p["minLength"].(float64)
+			e, isEnum := p["enum"].([]any)
+			c, isConst := p["const"]
+			refused = n >= 1 || (isEnum && !slices.Contains(e, any(""))) || (isConst && c != "")
+			if s, ok := p["pattern"].(string); ok {
+				re, err := regexp.Compile(s)
+				if err != nil {
+					t.Fatal(err)
+				}
+				refused = refused || !re.MatchString("")
+			}
+		}
+		if !refused {
+			t.Errorf("schema: sensor.%s %v does not refuse %q", k, p, fmt.Sprint(v))
+		}
+	}
 }
 
 // C8-4, K1 and F1: sensor.link_refused, its six codes in underscore form,
