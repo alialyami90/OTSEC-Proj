@@ -30,8 +30,9 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
   1. P4-4-HR25 deliverable 3: D6's builder and captures, then D4's build with its `pins.env` lines and coverage site map, then the counted run (D4-107 item 1.5; D4-108 item 2).
   2. The Windows `platform/node` time brief (D4-107 item 5.4). It names `TestSensorStartupStuckDoesNotHoldStart`.
   3. The C13 0.2 intake brief and the dialer-and-enrolment brief. They hold most of P4-4-CC's "Owed" table, and F-027's gate waits on them.
-  4. The rest of D4-102's "Next": HR-23's and HR-24's next stages, P4-COL-1's follow-up risk (D4-107 item 5.1), and D3's `time.utc` fix (D4-108 item 3.1).
-- **Waiting on the owner:** unchanged. Whether HR-25 blocks item 4's gate (D4-101 item 8), the BSD-3 grant, and authorization for the H-rows ("Waiting on the owner" below).
+  4. D6's elevated run of the `relayKinds` probe, before F-027's gate lifts (D4-108 item 3.2).
+  5. The rest of D4-102's "Next": HR-23's and HR-24's next stages, P4-COL-1's follow-up risk (D4-107 item 5.1), and D3's `time.utc` fix (D4-108 item 3.1).
+- **Waiting on the owner:** unchanged (D4-101 item 8, and "Waiting on the owner" below).
 
 **Earlier checkpoint (D1), 2026-11-15, evening (D4-104 to D4-108), superseded by the checkpoints above.** It listed P4-4-CC's deliverables 0 to 5 as merged, and #703 as open.
 

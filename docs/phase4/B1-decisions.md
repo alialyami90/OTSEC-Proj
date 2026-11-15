@@ -2496,11 +2496,11 @@ Evidence class: `desk`, for the rulings and the probes named.
 
 Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the runs named.
 
-- **1. P4-4-CC is complete.** Deliverables 0 to 6 are merged. Each deliverable's own merge commit on `main` is its floor: the bridge `26dce26e` (#682), C13 0.2 and C4 0.4 `26545062` (#687), C13 0.3 `65ad611b` (#689), C2 0.10 `410a04d5` (#684), and C7 0.11 and C8 0.13 `2ef5639f` (#699). `docs/release.md` §7 records them (#704, `1d82fcc3`).
+- **1. P4-4-CC is complete.** Deliverables 0 to 6 are merged, each as its own merge commit on `main`: the bridge `26dce26e` (#682), C13 0.2 and C4 0.4 `26545062` (#687), C13 0.3 `65ad611b` (#689), C2 0.10 `410a04d5` (#684), C7 0.11 and C8 0.13 `2ef5639f` (#699), and the release record (#704, `1d82fcc3`). The rollback floors are `docs/release.md` §7.1's four rows: C12 0.2 `f1f48ce6`, the bridge `26dce26e`, C13 0.3 `26545062`, and C8 0.13's reader `2ef5639f`. §7.2 gives what rolls back with them, C2 0.10 and C4 0.4 among it.
 - **2. The order of the first release (D1's ruling 6897989367 on #704; `docs/release.md` §7.3).** CH-35's rule is read as a rule about rollback sets.
   - No OTSEC build has been released, so a node first installed from a release at or above every §7.1 floor has no earlier release to roll back to. Nothing needs to ship before the writer.
   - **Condition:** this holds only while no build below a floor has been released to any site. "Released" means installed at a site, and each release checks its commit against every floor with `git merge-base --is-ancestor` (D3 on #704). If any build below a floor ever ships, CH-35's rule as written applies to that floor, and a bridge release goes first.
-  - Nothing on a node enforces the floors yet: AP-10's anti-rollback floor is not designed. When it is, the signed floor is at or above every §7.1 floor.
+  - Nothing on a node enforces the floors yet: AP-10's anti-rollback floor is not designed. When it is, the signed floor is at or above every §7.1 floor that applies to a build that node has run.
 - **3. A test defect on `main`, fixed by #705 (`6b1a27e3`).**
   - `main`'s push run 43737404596 at `2ef5639f` failed `go (ubuntu-latest)` on `TestLinkKeyAnotherFaultAlarms`. The node's manager step read the link-key file and the `tls` directory while the test was rewriting them, and raised an intermediate alarm before the one the test asserts. The product behaved correctly.
   - The failed job's rerun passed. #705 (D5) runs the test's file changes under `heldManager`, the lock every full step holds. It does the same for `TestLinkKeyFaultNodeStarts/missing` (D6's N1). The assertions are unchanged, and the K7 control fails in CI (D6, run 43743679645).
