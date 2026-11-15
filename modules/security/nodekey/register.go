@@ -350,13 +350,12 @@ func (r *Register) LoadCertificate(ref string, keys Keys) (*tls.Certificate, *En
 	if err != nil {
 		return nil, nil, fmt.Errorf("nodekey: %s certificate does not parse", ref)
 	}
-	signer, err := keys.Open(KeyName(e.Ref, e.Version))
+	signer, err := OpenPinned(keys, KeyName(e.Ref, e.Version), e.PublicKey)
+	if errors.Is(err, ErrKeyMismatch) {
+		return nil, nil, fmt.Errorf("nodekey: the %s key %s is not the key the register names: %w", e.Provider, KeyName(e.Ref, e.Version), err)
+	}
 	if err != nil {
 		return nil, nil, err
-	}
-	spki, err := x509.MarshalPKIXPublicKey(signer.Public())
-	if err != nil || !bytes.Equal(spki, e.PublicKey) {
-		return nil, nil, fmt.Errorf("nodekey: the %s key %s is not the key the register names", e.Provider, KeyName(e.Ref, e.Version))
 	}
 	return &tls.Certificate{Certificate: slices.Clone(e.Certificates), PrivateKey: signer, Leaf: leaf}, e, nil
 }

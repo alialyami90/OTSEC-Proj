@@ -1,6 +1,7 @@
 package nodekey
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -44,6 +45,28 @@ type Keys interface {
 
 // ErrNoKey is wrapped when a provider holds no key of the name asked for.
 var ErrNoKey = errors.New("nodekey: no such key")
+
+// ErrKeyMismatch is wrapped by OpenPinned when the provider holds another
+// key under the name: one whose public key is not the one asked for.
+var ErrKeyMismatch = errors.New("nodekey: the provider holds another key under the name")
+
+// OpenPinned opens the key with this name in keys and returns its signer
+// only when the key's public half, as PKIX DER, is spki. Otherwise it frees
+// the key's provider handle here, before it returns, and the error wraps
+// ErrKeyMismatch; so no caller ever holds a handle it refused, and no
+// package outside this one can free a signer (D4-106 item 3). An error of
+// Open, ErrNoKey among them, is returned as it is.
+func OpenPinned(keys Keys, name string, spki []byte) (crypto.Signer, error) {
+	signer, err := keys.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if got, err := x509.MarshalPKIXPublicKey(signer.Public()); err != nil || !bytes.Equal(got, spki) {
+		release(signer)
+		return nil, fmt.Errorf("%w: %s", ErrKeyMismatch, name)
+	}
+	return signer, nil
+}
 
 var keyNamePattern = regexp.MustCompile(`^otsec-nodekey_[a-z0-9]{8,40}-v[1-9][0-9]{0,8}$`)
 

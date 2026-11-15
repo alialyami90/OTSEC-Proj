@@ -94,6 +94,10 @@ func (c CNG) open() (uintptr, error) {
 
 func free(h uintptr) { procFreeObject.Call(h) }
 
+// freeKey frees a key handle that release gives up. It is a variable so
+// that a test can count the frees.
+var freeKey = free
+
 // sddl is the key's final DACL: SYSTEM and Administrators have full
 // control, the listed users may use it, and nobody else has any right.
 // Administrators keep use of the key because the Software KSP needs read
@@ -254,11 +258,28 @@ func publicKey(key uintptr) (*ecdsa.PublicKey, error) {
 }
 
 // cngSigner signs with a CNG key. The handle stays open for the life of
-// the process, as the key is in use for as long as the node runs.
+// the process, as the key is in use for as long as the node runs; only
+// OpenPinned frees one, through release, and only one it refused, which
+// no caller holds.
 type cngSigner struct {
 	mu  sync.Mutex
 	key uintptr
 	pub *ecdsa.PublicKey
+}
+
+// release frees the handle of a CNG signer that OpenPinned refused. Any
+// other signer holds no handle.
+func release(s crypto.Signer) {
+	c, ok := s.(*cngSigner)
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.key != 0 {
+		freeKey(c.key)
+		c.key = 0
+	}
 }
 
 func (s *cngSigner) Public() crypto.PublicKey { return s.pub }
