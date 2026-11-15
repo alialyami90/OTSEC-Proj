@@ -523,9 +523,9 @@ A1 consolidates the five risks the gate requires. A6 proposes these, ranked by c
 
 Independent findings, newest first. Each entry: date, what was tested, how, result, evidence path, and whether it disproves a claim.
 
-### F-027 — 2026-11-11 — The sensor's work on the node can reach SER collection, Syslog receive, forwarding and the node's start: couplings F1 to F11, found by reading; five, and F9's cap, closed in #662 and #663, and F11's step in #672 and #685
+### F-027 — 2026-11-11 — The sensor's work on the node can reach SER collection, Syslog receive, forwarding and the node's start: couplings F1 to F11, found by reading; P4-4-F27's four steps closed on `main` in #662, #663, #676, #672 and #685, with tests still owed
 
-- **What it is.** Eleven ways in which the node's side of the passive sensor can stop or hold SER collection, Syslog receive, forwarding or the node's start. D5 and D6 found ten of them by reading the code for brief P4-4-L3 (#628), and the review of #631 found the eleventh. **Evidence class: `desk`** for the finding; the closings below give their own. D6 read `main` at `4d0c7154` for this entry, at `65980515` for the update of 2026-11-13, and at `805e8567` for F11's record of 2026-11-15. **The couplings were found by reading, not by a run.** #662 and #663 brought the first tests of them. Each test's control puts back `main`'s earlier behaviour, and so reproduces its coupling in process: with the sensor databases back in `Runtime.dbs`, for example, `TestRunWhileSensorResumeHeld` times out (see "Closed on `main`" below). "F1" to "F11" are D5's numbers for the couplings. They are not the entries F-001 to F-011 of this log.
+- **What it is.** Eleven ways in which the node's side of the passive sensor can stop or hold SER collection, Syslog receive, forwarding or the node's start. D5 and D6 found ten of them by reading the code for brief P4-4-L3 (#628), and the review of #631 found the eleventh. **Evidence class: `desk`** for the finding; the closings below give their own. D6 read `main` at `4d0c7154` for this entry, at `65980515` for the update of 2026-11-13, and at `805e8567` for the record of steps (3) and (4) on 2026-11-15. **The couplings were found by reading, not by a run.** #662 and #663 brought the first tests of them. Each test's control puts back `main`'s earlier behaviour, and so reproduces its coupling in process: with the sensor databases back in `Runtime.dbs`, for example, `TestRunWhileSensorResumeHeld` times out (see "Closed on `main`" below). "F1" to "F11" are D5's numbers for the couplings. They are not the entries F-001 to F-011 of this log.
 - **The list.** F1 to F11 are the table in `docs/phase4/D5-sensor-node.md` §1.0, which gives the file and function for each. F1 to F10 were read there at `551b03dd`, and F11's row is there since #633. It is not copied here. The files that table names are unchanged between `551b03dd` and `4d0c7154`: `git diff --stat` over them prints nothing. What closes each is that note's §1.9.
 - **At `4d0c7154`, six needed only configuration: F2, F5, F6, F7, F9 and F10.** `main` accepts a `network_sensor` section in the node's configuration, with `evidence_class` `simulated` only (`checkNetworkSensor`, `platform/node/netsensor.go`). These six needed that section and no sensor at all (§1.0; D1's comment 6803782160 on #628).
   - **D6 checked F2 for this entry, at `4d0c7154`.** There, `Start` (`platform/node/runtime.go`) closed the runtime and returned the error of `startSensor`, as "node: the sensor's intake". `startSensor` (`platform/node/sensor.go`) returned nil without the section. With it, it returned the error of `loadIntake`, `sensorlink.New` or `Link.RecoverHold`. So a hold record of the intake that could not be read failed the node's start, and SER collection and Syslog receive with it.
@@ -540,7 +540,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
   - `git grep -n "ServeSensor(" -- "*.go" ":!*_test.go"` prints one line, the definition at `platform/node/sensor.go:381`.
   - `git grep -n "\.Serve(" -- "*.go" ":!*_test.go"` prints four lines. One is a call on a `sensorlink.Link`: `platform/node/sensor.go:397`, inside `ServeSensor`. The other three are the collector's own server and the Syslog receiver.
   - So no product code calls `ServeSensor`, and `ServeSensor` is the only caller of `sensorlink.Link.Serve`. Only tests feed the intake: `platform/node/*_test.go`, `platform/node/sensortest`, and three of D6's files in `tests/security/`.
-  - #662 and #663 add no entry point to or from a sensor (D6's reviews 6852798104 on #662, which changes nothing outside `modules/telemetry/forward/`, and 6854757554 on #663), so after them these two greps were still the whole check of point 4 below. On #663 at `521f311d`, D5's PR body, D3's review 6854487308 and D6's review 6854757554 also checked `git grep -n "SensorSeams" -- "*.go" ":!*_test.go"`; D1's merge comment 6855716114 does not. At `65980515` it prints the type and the `RuntimeOptions` field with their comments, and three reads, in `pruneDB` (`prune.go`) and in `runStartup` and `resume` (`sensormgr.go`), so no product code sets a seam. At `805e8567` it prints the same declarations and comments, and seven reads: #676 added the seams `Append`, `SaveIntake`, `Observe` and `Retention`, each read the same way. No product code sets a seam there either.
+  - #662 and #663 add no entry point to or from a sensor (D6's reviews 6852798104 on #662, which changes nothing outside `modules/telemetry/forward/`, and 6854757554 on #663), so after them these two greps were still the whole check of point 4 below. On #663 at `521f311d`, D5's PR body, D3's review 6854487308 and D6's review 6854757554 also checked `git grep -n "SensorSeams" -- "*.go" ":!*_test.go"`; D1's merge comment 6855716114 does not. At `65980515` it prints the type and the `RuntimeOptions` field with their comments, and three reads, in `pruneDB` (`prune.go`) and in `runStartup` and `resume` (`sensormgr.go`), so no product code sets a seam. At `805e8567` it prints the same declarations and comments, and seven reads: #676 added the seams `Append`, `SaveIntake`, `Observe` and `Retention`, each read the same way. No product code sets a seam there either. #676 also adds the tests' wait, `WaitSensorStep`, and the lock's test seams `tried` and `woken`. At `805e8567`, `git grep -n "WaitSensorStep(" -- "*.go" ":!*_test.go"` prints its definition only, and `git grep -n "\.tried = \|\.woken = " -- "*.go" ":!*_test.go"` prints nothing.
   - #672 adds the link-key reader unwired: at its merged head, no non-test file imports `modules/security/linkkey` (its PR body's greps). #685 wires it, and that wiring is F11's step. Its entry points join the merge check (D1's ruling 6884398465 on #685: "The greps in the body stand as the merge check's"). At `805e8567`, outside `_test.go` files:
     - `git grep -n -E 'security/linkkey"'` prints one import, in `platform/sensorlink/linkkey.go`;
     - `git grep -n -E "ReadLinkKey\b"` prints its definition and two comment lines in `platform/sensorlink/linkkey.go`, and one call, in `stepLinkKey` (`platform/node/linkkey.go`);
@@ -595,6 +595,76 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
   - **Also in #663, from D6's reviews:**
     - `TestSensorStartupAlarmConcurrent` (`platform/node`): the startup alarms' record is under a lock. Control: no lock, under which the test binary crashes: on a concurrent map write in D5's runs, and on a nil pointer dereference in D6's rerun at `65980515`.
     - `TestSensorSeamsUnsetInProduct` (`sensortest`). Control: a seam set in `RunFrom` (`service.go`). The seams grep under "No record can arrive" stays the authority, because the test's pattern misses a write through a pointer (D6's review 6852820847).
+- **Closed on `main`: step (3) of P4-4-F27, F1's, F3's and F4's parts** (D6, recorded 2026-11-15). The closing is #676 (D5), merged as `b5503060` from head `39dfff20`.
+  - **What closed.** F9's health event under the ceiling closes with it, and so do the items that the record of step (2) above gives to step (3), except the detector drive's leg of §1.9 item 9 (below). P4-4-F27's table owes later briefs some tests of F1, F3 and F4 (below), so none of the three is closed in full.
+    - **F1:**
+      - Below a platform-class quota of `C + S` (`Config.PlatformFloor`), the node starts and collects, the intake is not started, and `sensor-platform-floor` stands once. Nothing is refused at load.
+      - Every sensor health event on `main` is written only under the ceiling, `quota − C` (`Runtime.sensorHealth`). That covers `intake.drop-counted`, the network database's store alarms and mode changes (F9's health event), and the reports of the forwarder's sensor session.
+      - Past the ceiling an event is not written and is counted in `health_held`.
+    - **F3:**
+      - The sensor's tick, the detector's drive and the alert stream's retention consumer run on the manager's goroutine, and `Tick` only kicks the manager.
+      - Each drive is bounded (`DriveObservations`, 1,000; `DriveTime`, 200 ms), and `network-detector-lag` is raised past 60 s.
+    - **F4:**
+      - The link's lock lets a waiting scheduler call go first (`platform/sensorlink/fairlock.go`).
+      - `Dispatch`, `Result` and `Abandon` wait at most `HoldLockWait` (2 s), and each recovers a panic.
+      - On a timeout, or on a panic before the batch's receipts, the run goes on untied and `network-session-not-tied` stands. The base rules judge the run's flows at its deadline.
+    - **Carried from #663:**
+      - `after_seq` comes from the batch's receipts, and a head that cannot be read begins no release.
+      - After `sensor-failed`, nothing is held and no `Result` is called. `liveAppender` appends nothing after `sensor-failed`, or in a mode that takes no events.
+      - The final `tickSensor` moves from `Close` to the manager's stop (`finalStep`), under `SensorStopTimeout`.
+  - **Evidence for the tests: `CI-Linux` and `CI-Windows`.**
+    - Each test named below shows `--- PASS` once, and no `--- SKIP`, in both `go` jobs of `ci` run 43705578882 on `main` at `805e8567`: [Linux](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43705578882/job/132785813395) and [Windows](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43705578882/job/132785813658). Neither log has a `--- FAIL` line.
+    - On the merged head `39dfff20`, D6's merge check read 25 runs, each `success`, the 20 `integration-long` legs included (`ci` run 43516020680 and `ci-long` run 43516020646; review 6866863147).
+  - **Evidence for the controls: `desk`, on the owner's PC.**
+    - D5 ran every control in #676's body: at `7f9a79a7`, `98aa92e8` and `39dfff20`, each applied alone, run by name and reverted.
+    - D6 reran them, or killed the same rule with a mutant of its own, in a copy of each head outside the checkout (reviews 6864547851, 6865786770 and 6866863147). At `39dfff20` D6 reran all ten controls of D5's last round, and each failed 3 of 3.
+    - Across the three reviews, every test named below with a control failed under D5's control or under a D6 mutant of the same rule.
+  - **The tests, each with its control.**
+    - **F1** (`platform/node`, unless named):
+      - `TestPlatformFloorTerms`: the floor's and the ceiling's arithmetic. Controls: `<` to `<=` in `ceilingFits`, and `>=` to `>` in the floor.
+      - `TestPlatformFloorShortNodeStarts`: a quota below `C + S` still starts the node. Control: a load refusal in `checkNetworkSensor`.
+      - `TestSensorEventsHeldPastCeiling`: the network database's store alarms are held past the ceiling. Control: `Tick`'s queue not routed under it.
+      - `TestSensorEventsUnderPlatformCeiling` (`sensortest`): the platform class stays under the ceiling over `main`'s events. Control 1: `ceilingFits` always true.
+      - `TestSensorModeChangeHeldPastCeiling`: F9's health event, through a real mode change in the manager's step. Control: `recordMode`'s event sent through `Runtime.health` (D6's B2 on #676).
+      - `TestSensorSessionUnreachableUnderCeiling`: the sensor session's `forward.unreachable`. Control: `reach`'s sensor branch sent through `Runtime.health` (D6's N2 on #676).
+    - **F3** (`platform/node`):
+      - `TestTickReturnsWithSlowDetector` and `TestTickReturnsWithStalledRetention`: `Tick` returns while the detector, or the retention call, is stuck. Controls: `tickSensor`, or `tickRetention`, back in `Tick`.
+      - `TestDriveBounds` and `TestStepBeforeNextDrive`. Control: a take that never stops.
+      - `TestDriveSlowBeforeFirstTake`. Control: the drive's clock started at `newDrive` (D4's B1 on #676).
+      - `TestDetectorLagAlarm`. Controls: no alarm, and `>` to `>=`. `TestDetectorLagStretchKept`. Control: the stretch ended below 60 s (D6's N1 on #676).
+    - **F4, with §1.9 item 9 in the scheduler calls:**
+      - `TestFairLockSchedulerFirst` and `TestSchedulerFirstOnLinkLock` (`sensorlink`). Control 2: the rule removed. `TestSchedulerFirstOnLinkLock` counts `Lock`'s takes while a call waits, and does not time the wait (D4-101 item 3).
+      - `TestSchedulerCallTimesOut` (control: `lockSched(time.Hour)`) and `TestSchedulerCallPanicRecovered` (control: no `recover`), in `sensorlink`.
+      - `TestResultTimeoutUntiedJudged` (`platform/node`): a timed-out session stays untied, and the base rules judge it. Control: no lock bound, so the session is treated as tied.
+      - `TestSchedulerPanicTakenAsTimeoutUntied` (`platform/node`). Control: no `recover`.
+      - `TestPanicUnderLinkMuReleased` (`sensorlink`; D3's B1 on #676). Control: the plain unlock.
+      - The phased clean-up, `endPhase`: `TestRepointSavePanicRolledBack`, `TestPanicAfterBatchFinished`, `TestPanicInBatchBeforeCommit`, `TestPanicBeforeBatchRestartUntied`, `TestPanicBeforeBatchResaveFails` and `TestAbandonPanicAfterBatchFinished` (`sensorlink`), and `TestSchedulerPanicAfterBatchHandedOn` (`platform/node`). #676's body gives each one's controls.
+    - **Carried from #663:**
+      - `after_seq`: `TestResultHeadUnknownNoAfterSeq`, `TestResultAfterSeqFromReceipts`, `TestRecordCapHeadUnreadCommitted` and `TestWaitingEndHeadUnreadCommitted` (`sensorlink`), and `TestResultWhileNetworkSwappedOut` (`platform/node`). #676's body gives each one's controls.
+      - After `sensor-failed`: `TestNoHoldAfterSensorFailed`, `TestNoResultAfterSensorFailed` and `TestLiveAppenderSensorFailedDrops`. In a mode that takes no events: `TestLiveAppenderDrainOnlyDrops`. In each, the control removes the check.
+      - The stop: `TestStopInStepStillFinal`. Control: the loop returns on a failed step without `finalStep`.
+  - **Limits.**
+    - No test kills a mutant of the `network-session-not-tied` stretch. `DriveTime` is killed only by a take that never stops, not by a finer mutant (#676's self-check).
+    - D6 accepted three surviving mutants: C rounded down, `RecoverHold`'s receipts callback removed, and `ph.saved` set after a failed save (its reviews).
+    - Shown only by reading:
+      - `NewForwarding` gives the sensor session `sensorHealthSink` for its other `forward.*` reports.
+      - `closeSensorStores` bounds the final step by `SensorStopTimeout`. No test holds the final step itself past that bound.
+    - The ceiling is checked and then appended, so concurrent writers can pass it by one record each.
+    - A panic inside `AppendBatch` after its commit, then a restart, commits the run's records twice, one copy tied and one untied (D4-101 item 7.4; §1.9 item 9).
+    - No test fails when the re-save runs before the open table's rollback (D6's N1 on #676; D4-101 item 7.1). The head is correct. D5's next brief owes the test.
+  - **Owed, by later briefs** (P4-4-F27's table):
+    - F1: the cap of 12 drop counts an hour, and the events that need `sensorrun.json`, `sensor.redial-granted` or coverage gaps. These are owed by the C13 0.2 intake brief and the dialer-and-enrolment brief.
+    - F3: leg (a)'s lag condition, by the rig.
+    - F4:
+      - `TestSchedulerPanicTakenAsTimeout` (C13's T-12) and `TestResultTimeoutKeepsSession` as written, whose alerts under `hold-timeout` need C13 0.2's `Alert`. These are owed by the C13 0.2 contract brief and D4's detector change.
+      - The lock's wait over a real link, by the rig.
+    - §1.9 item 9:
+      - the poison record and its restart leg, by the C13 0.2 intake brief;
+      - the read loop's `recover` (D6's N5 on #676; D4-101 item 7.5), by the brief that adds `ServeSensor`'s first caller outside the tests (§1.9 item 9).
+  - **Not built, and still owed by P4-4-F27 itself: the detector drive's leg of `TestSensorPanicContained`.**
+    - P4-4-F27's table puts that leg in the brief itself, in the "Item 9 in the manager" row, and the record of step (2) above gives it to step (3). #676 does not build it.
+    - No test on `main` panics in a drive: `git grep -n "func TestSensorPanicContained" -- "*_test.go"` prints nothing at `805e8567`.
+    - By D6's reading at `805e8567`, a drive runs inside `managerStep`, under the `recover` that `TestSensorManagerPanicContained` tests. So the containment is read, not shown by a test. D1 assigns the leg.
 - **Closed on `main`: step (4) of P4-4-F27, F11's part** (D6, recorded 2026-11-15). The closings are #672 (D3's link-key reader, `modules/security/linkkey`), merged as `83c9f697`, and #685 (D5's wiring), merged as `805e8567`.
   - **What closed.**
     - The link key is in a file of its own, `linkkey.json`, beside `key_register` (or in `tls_dir` on a lab node). The register's reader never reads it.
@@ -648,12 +718,12 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
     - **The fix** is D1's ruling 6893095888 on #685, option (c), owned by D3. A new `nodekey.OpenPinned` compares the public key inside `nodekey` and frees a refused handle there, so no caller holds one, and `Register.LoadCertificate` uses it too. Its test runs on Windows only and counts the frees over N wrong pins. Its control is the mutant that drops the free. D6 tests it independently, and D2 and D5 review it.
     - It must be fixed before F-027's gate lifts (D4-105 item 4). At `805e8567` it is not fixed.
 - **Not closed.**
-  - F1, F3 and F4 are P4-4-F27's step (3). #676 merged it as `b5503060` (D4-101 item 1). D6 has not yet recorded its closings here, so this entry still counts them open, and D6 records them in a later change.
+  - The owed tests of F1, F3 and F4, and the detector drive's leg that P4-4-F27 still owes, are under step (3) above.
   - F11's owed legs, and the CNG handle leak, are under step (4) above.
   - F8 is owed in full by the dialer-and-enrolment brief.
   - P4-4-F27's table names every owed test, with the rig legs of §1.9 item 8 and SL-T13's legs (d) and (e) among them.
   - **Also owed, from #676** (D3's N2, 6864105144; D4-101 item 7.3): until the C13 0.2 intake brief lands `sensorrun.json`, a held store alarm of the network database, a held mode change and a held report of the forwarder's sensor session are counted in `health_held` and never written, so the forwarded health stream never carries them. That brief owes `TestHeldEventsSurviveRestart` and `TestHeldPoolEventBuiltAtWrite`, which D3's N2 names as closing it.
-- **Status: open.** F2, F5, F6, F7 and F10 are closed on `main`, and so are F9's cap and F11's part in P4-4-F27. F1, F3 and F4 (merged in #676, not yet recorded here), F8, F9's health event and F11's owed legs are open, and no owed test has run. The link key's CNG handle leak is open, and the gate does not lift before it is fixed. It blocks a release, and any PR that wires a path to or from a sensor.
+- **Status: open.** F2, F5, F6, F7, F9 and F10 are closed on `main`, and so are F1's, F3's, F4's and F11's parts in P4-4-F27. Open: F8; the owed tests of F1, F3, F4 and F11; and the detector drive's leg of §1.9 item 9, which P4-4-F27 still owes. No owed test has run. The link key's CNG handle leak is open, and the gate does not lift before it is fixed. It blocks a release, and any PR that wires a path to or from a sensor.
 
 ### F-026 — 2026-11-11 — The forwarder's rsyslog tests had never run in CI, and failed in their own set-up when first made to run. Fixed in #620
 
