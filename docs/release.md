@@ -278,7 +278,7 @@ Brief P4-4-CC deliverable 6, and P4-D7-2's two floors and release blocker (D4-88
 **Evidence class.** Each rule is `desk`: it is read from the approved texts and the decision log named in its row. Each test named passed in `main`'s push CI at the commit given, on both `go` jobs (`CI-Linux` and `CI-Windows`, with the run), with these exceptions:
 
 - the C8 0.13 row also cites #699's PR-head run, and the first attempt of its push run's Linux job failed on another test;
-- D6's lifted old-reader leg (§7.1, "Below C8 0.13's reader") is PR-head evidence only;
+- D6's lifted old-reader leg (§7.1, "Below C8 0.13's reader") cites #699's PR-head run as well as `main`'s push run;
 - the C12 0.2 row's Linux job ran `go test` without `-v`, so only its package's result is in that log.
 
 Those tests run in process, over fixtures written from the texts. No release has been built from any commit below, no node has been upgraded or rolled back, and no rollback has been run end to end.
@@ -304,7 +304,7 @@ What a rollback below each floor costs, and what each floor still costs:
   - `hold` matches by position, so a skipped alert shifts the comparisons after it (D4-105 item 5; D4 owes the options).
 - **Below C8 0.13's reader,** a 0.12 build refuses a `sensor.*` record and a `collector.request` with a sensor target. The scheduler takes such a record as a bad record and holds every run (`asset-suspensions-unknown`), so SER collection stops on that node, not only the sensor (C8-1). D6's old-reader leg, `TestCCD0C81OldReaderRefuses`, tests a different form in each run:
   - at `36fabc3a` (#683), run [43649202635](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43649202635), both `go` jobs, `main`'s 0.12 reader refused the narrowed records of D4-104 item 2 (a);
-  - in #699, D6 lifted the leg to full 0.13 records. At #699's head `2f301d4b`, run [43732127564](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43732127564) (PR-head evidence), both `go` jobs, the 0.13 reader read each full record and refused the same bytes stamped 0.12. The 0.12 reader's refusal of the full records ran only at `8e96c821`, as `desk` (the test file's own note).
+  - in #699, D6 lifted the leg to full 0.13 records. At #699's head `2f301d4b`, run [43732127564](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43732127564) (PR-head evidence), both `go` jobs, the 0.13 reader read each full record and refused the same bytes stamped 0.12. The same test passed at `2ef5639f` in `main`'s push run [43737404596](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43737404596): both `go` jobs, and the Linux rerun. The 0.12 reader's refusal of the full records ran only at `8e96c821`, as `desk` (the test file's own note).
 - **Readers before writers** (C8-1): the first build that writes a 0.13 record ships no earlier than a release that carries `2ef5639f`.
 - **No floor for the key register** (NK-6): its schema does not change.
 
