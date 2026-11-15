@@ -44,7 +44,6 @@
 package linkkey
 
 import (
-	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -237,13 +236,14 @@ func Load(read func(path string, max int64) ([]byte, error), path, nodeID, ref s
 		return nil, fmt.Errorf("%w: %s is a %s key and that provider is not available", ErrNoKey, e.Ref, e.Provider)
 	}
 	name := nodekey.KeyName(e.Ref, e.Version)
-	signer, err := p.Open(name)
+	// OpenPinned compares the key with the entry's public key and frees a
+	// refused key's handle itself (D4-106 item 3).
+	signer, err := nodekey.OpenPinned(p, name, e.PublicKey)
+	if errors.Is(err, nodekey.ErrKeyMismatch) {
+		return nil, fmt.Errorf("%w: the %s key %s is not the key the file names", ErrNoKey, e.Provider, name)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNoKey, err)
-	}
-	spki, err := x509.MarshalPKIXPublicKey(signer.Public())
-	if err != nil || !bytes.Equal(spki, e.PublicKey) {
-		return nil, fmt.Errorf("%w: the %s key %s is not the key the file names", ErrNoKey, e.Provider, name)
 	}
 	return &Key{Signer: signer, Pin: "sha256:" + e.Fingerprint, Entry: e, Entries: f.Entries}, nil
 }
