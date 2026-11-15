@@ -118,6 +118,11 @@ type Alert struct {
 
 var baselineHashForm = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
+// laterAssetKeys are the aggregate keys C13 0.2 adds to an alert's asset_id
+// (CH-47). This reader accepts them only in an alert of a later minor, as
+// the bridge build must (CH-35 item 3); at 0.1 they are still refused.
+var laterAssetKeys = []string{"clock-skew", "sensor-records-late", "hold-timeout"}
+
 // Validate checks every rule of C13 that holds on one alert.
 func (a *Alert) Validate() error {
 	c := &checker{}
@@ -126,7 +131,7 @@ func (a *Alert) Validate() error {
 	if !ok {
 		c.fail(CodeForm, "rule", "%q is not a rule", a.Rule)
 	}
-	if a.AssetID != AssetUnresolved && !ValidUUID(a.AssetID) {
+	if a.AssetID != AssetUnresolved && !ValidUUID(a.AssetID) && !(c.later && contains(laterAssetKeys, a.AssetID)) {
 		c.fail(CodeForm, "asset_id", "%q is not an asset ID or %s", a.AssetID, AssetUnresolved)
 	}
 	switch {
