@@ -208,12 +208,18 @@ func TestLinkKeyFaultNodeStarts(t *testing.T) {
 			if tc.name != "missing" {
 				return
 			}
-			// The file put in place later loads at the next step.
-			if err := nc.UnlockTLS(); err != nil {
-				t.Fatal(err)
-			}
-			want := writeLinkKeyFile(t, nc, newLinkKey(t, nc))
-			lockTLS(t, nc)
+			// The file put in place later loads at the next step. The
+			// manager is held while tls_dir is unlocked and the file
+			// written, so no step reads the unlocked directory or a
+			// half-written file, each a fault that raises the alarm too.
+			var want string
+			heldManager(r, func() {
+				if err := nc.UnlockTLS(); err != nil {
+					t.Fatal(err)
+				}
+				want = writeLinkKeyFile(t, nc, newLinkKey(t, nc))
+				lockTLS(t, nc)
+			})
 			sensorStep(t, r)
 			if pin := linkPin(st); pin != want {
 				t.Fatalf("pin %q after the file was put in place; want %q", pin, want)
