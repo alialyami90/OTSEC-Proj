@@ -751,8 +751,11 @@ var c8v13Breaks = map[string]func(ms []map[string]any) []map[string]any{
 		c8v13S(ms[6])["sensor_spki"], c8v13S(ms[7])["sensor_spki"] = c8v13P1, c8v13P1
 		return slices.Delete(ms, 4, 6)
 	},
-	"a key set without the kind": func(ms []map[string]any) []map[string]any {
+	"a key set without the enrolment's kind": func(ms []map[string]any) []map[string]any {
 		return c8v13Rekeyed(ms, authz.KeyActive, authz.KindNodeSensorRevoke)
+	},
+	"a key set without the revocation's kind": func(ms []map[string]any) []map[string]any {
+		return c8v13Rekeyed(ms, authz.KeyActive, authz.KindNodeSensorEnrol)
 	},
 	"a revoked admin key": func(ms []map[string]any) []map[string]any {
 		return c8v13Rekeyed(ms, authz.KeyRevoked, authz.KindNodeSensorEnrol, authz.KindNodeSensorRevoke)
