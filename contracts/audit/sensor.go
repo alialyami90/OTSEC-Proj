@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,9 +75,11 @@ var LinkRefusedReasons = []string{RefusedPeerKey, RefusedExpired, RefusedBinding
 // state was unknown when it enrolled (C7-4, C8-2).
 const PreviousStateUnknown = "unknown"
 
-// maxAppliedAtDigits is applied_at's finest form: microseconds, the form of
-// the node's record time (T1).
-const maxAppliedAtDigits = 6
+// appliedAtPattern is the schema's form of applied_at: UTC with Z, and at
+// most microseconds after a '.', the form of the node's record time (T1).
+// time.Parse also takes a ',' before the fraction, so the form is checked
+// by this pattern, not by the parse (D1's ruling 6896234420 on #699, N2).
+var appliedAtPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$`)
 
 // Sensor is the sensor object (0.13). It is on the three sensor actions and
 // on C8-6's collector.request, and each carries exactly its own fields:
@@ -312,11 +315,8 @@ func (r *Record) validateSensorAction() error {
 // comparison would be wrong both ways.
 func (r *Record) checkAppliedAt() error {
 	a := r.Sensor.AppliedAt
-	if !utcZ(a) {
-		return fmt.Errorf("applied_at %q is not RFC 3339 UTC with Z", a)
-	}
-	if i := strings.IndexByte(a, '.'); i >= 0 && len(a)-i-2 > maxAppliedAtDigits {
-		return fmt.Errorf("applied_at %q is finer than microseconds", a)
+	if !appliedAtPattern.MatchString(a) || !utcZ(a) {
+		return fmt.Errorf("applied_at %q is not RFC 3339 UTC with Z, with at most microseconds after a '.'", a)
 	}
 	applied, _ := time.Parse(time.RFC3339Nano, a)
 	at, _ := time.Parse(time.RFC3339Nano, r.Time.UTC) // checked by validateTime

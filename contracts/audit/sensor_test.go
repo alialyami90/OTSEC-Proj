@@ -344,7 +344,12 @@ func TestSensorRevokedRules(t *testing.T) {
 		"the alert alone":        func(r *Record) { r.Sensor.Streams.ObservationThroughSeq = nil },
 		"applied_at an offset":   func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T14:59:00+03:00" },
 		"applied_at nanoseconds": func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T11:59:00.0000001Z" },
-		"applied_at later":       func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T12:00:00.000001Z" },
+		// The schema's pattern takes '.' only; time.Parse takes ',' too (D1's
+		// ruling 6896234420 on #699, N2). Control: the same values with '.'
+		// below.
+		"applied_at a comma":              func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T11:59:00,123456Z" },
+		"applied_at a comma, nanoseconds": func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T11:59:00,123456789Z" },
+		"applied_at later":                func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T12:00:00.000001Z" },
 		// After the record's time as an instant, before it as a string.
 		"applied_at later, half a second": func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T12:00:00.5Z" },
 		"an unknown reason":               func(r *Record) { r.Sensor.Reason = "rotated" },
@@ -364,6 +369,7 @@ func TestSensorRevokedRules(t *testing.T) {
 		"earlier, after as a string": {"2026-11-10T12:00:00.5Z", "2026-11-10T12:00:00Z"},
 		"equal, two precisions":      {"2026-11-10T12:00:00Z", "2026-11-10T12:00:00.000000Z"},
 		"equal":                      {"2026-11-10T12:00:00.000125Z", "2026-11-10T12:00:00.000125Z"},
+		"earlier, with a '.'":        {"2026-11-10T12:00:00Z", "2026-11-10T11:59:00.123456Z"},
 	} {
 		r := revokedRec(8, 12, "1", testPinA)
 		r.Time, r.Sensor.AppliedAt = at(c[0]), c[1]
@@ -378,6 +384,11 @@ func TestSensorRevokedRules(t *testing.T) {
 		if err == nil {
 			t.Errorf("alert_through_seq %s: accepted", name)
 		}
+	}
+	if err := parseEdited(t, revokedRec(8, 12, "1", testPinA), func(m map[string]any) {
+		sensorObj(m)["applied_at"] = "2026-11-10T11:59:00,123456789Z"
+	}); err == nil {
+		t.Error("a stored applied_at with a comma: accepted")
 	}
 	if err := parseEdited(t, revokedRec(8, 12, "1", testPinA), func(m map[string]any) {
 		sensorObj(m)["streams"].(map[string]any)["netbaseline_through_seq"] = 3
