@@ -269,14 +269,19 @@ func (r *Record) validateSensorAction() error {
 		// What a succeeded enrolment replaces agrees with its reason (C7-4,
 		// C8-2; D1's ruling 6896234420 on #699, N1): new comes only with no
 		// enrolment held and the state known, so with none of the three;
-		// renew and new are denied while the state is unknown.
+		// renew and new are denied while the state is unknown. The generation
+		// is one above previous_generation (C8-2 check 2, as far as one record
+		// shows; D6's A4 on #699).
 		none := s.PreviousGeneration == "" && s.PreviousState == ""
+		prev, _ := strconv.ParseUint(s.PreviousGeneration, 10, 64) // checked above when present
 		switch {
 		case r.Outcome != OutcomeSucceeded:
 		case (s.Reason == string(authz.SensorEnrolNew)) != none:
 			return errors.New("a succeeded new carries none of previous_generation, previous_spki and previous_state, and every other reason one of them")
 		case s.PreviousState != "" && s.Reason != string(authz.SensorEnrolRekey) && s.Reason != string(authz.SensorEnrolReplace):
 			return fmt.Errorf("previous_state is on a succeeded rekey or replace only, not %s", s.Reason)
+		case s.PreviousGeneration != "" && s.Generation != strconv.FormatUint(prev+1, 10):
+			return fmt.Errorf("a succeeded enrolment at generation %s names previous generation %s, not one below it", s.Generation, s.PreviousGeneration)
 		}
 	case ActionSensorRevoked:
 		if r.Outcome != OutcomeSucceeded || r.ReasonCode != "" {

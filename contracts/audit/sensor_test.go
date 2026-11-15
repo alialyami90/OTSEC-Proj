@@ -311,6 +311,9 @@ func TestSensorEnrolledReplaces(t *testing.T) {
 		"a new with the previous pair":   enrol("1", authz.SensorEnrolNew, "1", ""),
 		"a renew with previous_state":    enrol("2", authz.SensorEnrolRenew, "", PreviousStateUnknown),
 		"a new with previous_state":      enrol("1", authz.SensorEnrolNew, "", PreviousStateUnknown),
+		// D6's A4 on #699: generation is previous_generation + 1.
+		"a rekey two above its previous": enrol("3", authz.SensorEnrolRekey, "1", ""),
+		"a rekey at its previous":        enrol("2", authz.SensorEnrolRekey, "2", ""),
 	} {
 		if err := r.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -318,6 +321,8 @@ func TestSensorEnrolledReplaces(t *testing.T) {
 	}
 	denied := enrol("2", authz.SensorEnrolRenew, "", "")
 	denied.Outcome, denied.ReasonCode = OutcomeDenied, DeniedReason
+	deniedGen := enrol("3", authz.SensorEnrolRekey, "1", "")
+	deniedGen.Outcome, deniedGen.ReasonCode = OutcomeDenied, DeniedGeneration
 	for name, r := range map[string]*Record{
 		"a new with none of the three":   enrol("1", authz.SensorEnrolNew, "", ""),
 		"a renew with the previous pair": enrol("2", authz.SensorEnrolRenew, "1", ""),
@@ -325,6 +330,7 @@ func TestSensorEnrolledReplaces(t *testing.T) {
 		"a rekey with previous_state":    enrol("2", authz.SensorEnrolRekey, "", PreviousStateUnknown),
 		"a replace with previous_state":  enrol("2", authz.SensorEnrolReplace, "", PreviousStateUnknown),
 		"a denied renew with none":       denied,
+		"a denied rekey two above":       deniedGen,
 	} {
 		if err := r.Validate(); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -352,8 +358,13 @@ func TestSensorRevokedRules(t *testing.T) {
 		"applied_at later":                func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T12:00:00.000001Z" },
 		// After the record's time as an instant, before it as a string.
 		"applied_at later, half a second": func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T12:00:00.5Z" },
-		"an unknown reason":               func(r *Record) { r.Sensor.Reason = "rotated" },
-		"baseline_digest bare":            func(r *Record) { r.Sensor.BaselineDigest = strings.Repeat("c", 64) },
+		// The pattern's form, but not a time (D6's A2 on #699): utcZ refuses
+		// them.
+		"applied_at 30 February": func(r *Record) { r.Sensor.AppliedAt = "2026-02-30T11:59:00Z" },
+		"applied_at hour 24":     func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T24:00:00Z" },
+		"applied_at minute 60":   func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T11:60:00Z" },
+		"an unknown reason":      func(r *Record) { r.Sensor.Reason = "rotated" },
+		"baseline_digest bare":   func(r *Record) { r.Sensor.BaselineDigest = strings.Repeat("c", 64) },
 		// D6's Q17 (6896196067): the mutant that skips the pattern accepts it.
 		"payload_sha256 an uppercase hex digit": func(r *Record) {
 			r.Sensor.PayloadSHA256 = "A" + r.Sensor.PayloadSHA256[1:]
@@ -655,10 +666,16 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 		return []*Record{sensorAccept(seq, decision, authz.KindNodeSensorEnrol, gen, pin), enrolledRec(seq+1, decision, gen, reason, pin)}
 	}
 	for name, edit := range map[string]func(recs []*Record) []*Record{
+		// Generation 3 names generation 2, as Validate requires (D6's A4 on
+		// #699), so the pair check breaks it too.
 		"a generation skipped": func(recs []*Record) []*Record {
-			recs[4].Sensor.Generation = "3"
+			recs[4].Sensor.Generation, recs[4].Sensor.PreviousGeneration = "3", "2"
 			recs[3].Sensor.Generation = "3"
 			return recs
+		},
+		// A new carries no pair, so only the generation check breaks it.
+		"a second new while enrolled": func(recs []*Record) []*Record {
+			return append(recs, enrolAt(10, 13, "1", authz.SensorEnrolNew, "sha256:"+strings.Repeat("3", 64))...)
 		},
 		"the first enrolment at 2": func(recs []*Record) []*Record {
 			first := enrolAt(3, 10, "2", authz.SensorEnrolReplace, testPinA)
@@ -727,7 +744,8 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 			return recs
 		},
 		"previous_generation not the last enrolment's": func(recs []*Record) []*Record {
-			recs[4].Sensor.PreviousGeneration = "7"
+			recs[4].Sensor.Generation, recs[4].Sensor.PreviousGeneration = "8", "7"
+			recs[3].Sensor.Generation = "8"
 			return recs
 		},
 		"previous_state at the last enrolment's generation": func(recs []*Record) []*Record {
@@ -824,6 +842,30 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 	}
 	if err := VerifySensorFrom(recs, 1); err != nil {
 		t.Fatalf("previous_state above the last enrolment's generation: %v", err)
+	}
+}
+
+// C8-8: an enrolment with previous_state is the sensor's last enrolment
+// for the next one (D6's A1 on #699). A rekey at generation 5 with
+// previous_state, then a renew at generation 6 that names generation 5 and
+// its pin, verifies. Control: the mutant that updates the last enrolment
+// only without previous_state breaks this chain at the renew.
+func TestVerifySensorFromAfterPreviousState(t *testing.T) {
+	pinC := "sha256:" + strings.Repeat("3", 64)
+	rekey := enrolledRec(11, 13, "5", authz.SensorEnrolRekey, pinC)
+	rekey.Sensor.PreviousState = PreviousStateUnknown
+	renew := enrolledRec(13, 14, "6", authz.SensorEnrolRenew, pinC)
+	renew.Sensor.PreviousGeneration, renew.Sensor.PreviousSPKI = "5", pinC
+	recs := append(sensorChain(),
+		sensorAccept(10, 13, authz.KindNodeSensorEnrol, "5", pinC), rekey,
+		sensorAccept(12, 14, authz.KindNodeSensorEnrol, "6", pinC), renew)
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifySensorFrom(recs, 1); err != nil {
+		t.Fatal(err)
 	}
 }
 
