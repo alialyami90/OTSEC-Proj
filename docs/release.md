@@ -318,14 +318,13 @@ What a rollback below each floor costs, and what each floor still costs:
   - a later C13 minor that adds a `coverage.degraded` value states what a bridge-floor node writes for it (D4-104 item 1.2);
   - a later C4 minor that adds a capture-loss counter states its reader floor (D4-105 item 1.4, reading 5).
 
-### 7.3 The order of the first release, open for D1
+### 7.3 The order of the first release
 
-CH-35 and `docs/phase4/D5-sensor-node.md` §1.15 item 1 say that the bridge build is released on its own, before any build that writes 0.2, and that the 0.2 writer ships no earlier than the release after it. On `main` the bridge, the 0.2 writer and the 0.3 writer were merged in turn, and none has been released. So the rule can be read in two ways:
+CH-35 and `docs/phase4/D5-sensor-node.md` §1.15 item 1 say that the bridge build is released on its own, before any build that writes 0.2, and that the 0.2 writer ships no earlier than the release after it. **D1 ruled that this is a rule about rollback sets** (D1's comment 6897989367 on #704; D4-109). Its purpose is that a node never rolls back below a reader of what it has written (D4-61, CH-35).
 
-1. **Taken as written:** the first release is built from a commit between `26dce26e` and `26545062`, and the release after it may carry the writers.
-2. **As a rule about rollback sets:** a node first installed from a release that already writes 0.3 has no earlier release to roll back to. Only releases at or above each floor in §7.1 then exist, and nothing needs to ship before the writer.
-
-D7 reads the rule's purpose as the second: it keeps a node that ran an older build from rolling back below a reader. That reading is not decided. D1 rules on it before the first release is built.
+- **No OTSEC build has been released.** A node first installed from a release at or above every floor in §7.1 has no earlier release to roll back to. So the first release may carry the 0.2 and 0.3 writers, and nothing needs to ship before them.
+- **The condition.** This holds only while no build below a floor has been released to any site. The record of the first release states that no earlier release exists.
+- **If a build below a floor ever ships,** the rule applies to that floor as written: a release of the floor build goes first, and the writer ships no earlier than the release after it.
 
 ### 7.4 Release blocker
 
