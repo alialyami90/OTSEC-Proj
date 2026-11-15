@@ -2434,7 +2434,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - `docs/phase4/D3-sensor-link.md` (SL-9, SL-13 to SL-16, enrolment step 4, §11.2); `docs/phase4/D5-sensor-node.md` §1.1, §1.3, §1.5 and §1.7;
   - C7 0.11 and C8 0.13 as coded (#699), with D4-107 item 2 and D4-108 items 1 and 4;
   - P4-4-CC's "Owed" table, the rows whose owner is this brief; D4-111 item 4.
-- Files or modules each role may modify: D5, `platform/node/` and its test packages. D3, `modules/security/` and `cmd/otsec-collector/`.
+- Files or modules each role may modify: D5, `platform/node/` and its test packages. D3, `modules/security/` and `cmd/otsec-collector/`. A D6 writing instance, `tests/security/sensor_kinds_no_path_d6_test.go`: it writes item 4.2's replacement test in its own PR, which passes on `main` before the widening, and the PR that widens `relayKinds` removes the old test's sensor legs, with that D6 instance's review.
 - Expected interfaces: C7 0.11, C8 0.13, C13 0.2 and 0.3. No contract text changes.
 - Deliverable: the split agreed in comments first (D4-99), then D3's PR (if any) and D5's PR, merged unwired. The product wiring comes only in the PR that passes the last owed test (D4-96), and that PR is named in the split.
 - Acceptance tests: each owed test below is a named pass in both `go` jobs, with its control shown failing:
