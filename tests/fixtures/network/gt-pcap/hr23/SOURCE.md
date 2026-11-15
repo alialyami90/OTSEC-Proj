@@ -1,0 +1,45 @@
+# GT-PCAP: HR-23's stage-2 cases and malformed set (D6, brief P4-4-HR2325S, deliverable 1)
+
+These are the captures and labels for HR-23's counted run (brief P4-4-HR23, stage 2; D4-111 items 5.2 and 5.4). The cases and their pass conditions are `hr23-cases.tsv`, `hr23-malformed.tsv` and `hr23-conditions.tsv` in `tests/integration/gt_pcap/`, pinned by `test_hr23_conditions.py`. They were written from brief P4-4-HR23 and `docs/phase4/D4-hr23-design.md` section 4 alone: no D6 instance read D4's stage-3 branch or its rehearsals (D4-111 item 5.3). Every result on these captures is `simulated`.
+
+| Output | Origin | Nature | Terms |
+| --- | --- | --- | --- |
+| `<capture>.pcap` for each name in `hr23.sha256`: 71 captures, the 9 cases of `hr23-cases.tsv` that `hr23_cases.py` builds and the 62 inputs of the malformed set | Written by D6, 2026-11-16, with `tests/integration/gt_pcap/hr23_cases.py` (stdlib only: `dnp3.py`, `synth.py`, `pcapfile.py`) | Synthesized frame by frame, never recorded through a kernel and never sent. The hosts of `dnp3_cases.py`: M5 192.0.2.14 (link 5) and M1 192.0.2.10 (link 1), masters; O1 192.0.2.20:20000 (link 10) and O2 192.0.2.21:20001 (link 11), outstations; locally administered MACs. M1's TCP ports run from 41300 in the captures' order | This project's own. Not committed: `hr23_cases.py` rebuilds them byte for byte, and `hr23.sha256` pins them |
+| `<capture>.tsv`, one per capture | The same run of `hr23_cases.py` | The builder's labels, from how each capture was made (`judge-labels`): every link-layer unit with its end, its role (master or outstation, whatever its DIR bit says), its DIR bit as built, the side Zeek gives its end, and its message's code, objects and state. Each file's header lines say what the columns mean | `desk` until D4 (labels) and D2 (protocol reading) review them. The labels hold addresses, ports, counts and packet numbers, and no capture bytes |
+| `tshark-beside-labels.tsv` | `hr23_tshark.py labels` over the captures, with a `cause` column added by D6 | The 21 messages where tshark's DNP3 reading differs from the builder's state: 20 `reads-malformed` (tshark reads the code of a message the builder labels absent because it is malformed) and 1 `no-limit`. A reading beside the labels, never a label | Drafted with tshark 4.2.3 on the owner's PC (`desk`); the `hr23` job's run with the pinned 4.2.2 is the check |
+| `sides.tsv` | `hr23_tshark.py sides` over GT-PCAP's DNP3 captures, `prp-pairs.pcap`, the 9 cases, and the 6 public DNP3 captures with their 12 PRP pairs | Every flow on which tshark reads a DNP3 application header, the side Zeek gives each end, and how many fragments carry a code that disagrees with its side (design section 4.7, "Where it shows"; `rerun-sides`). It holds the public captures' own private-range addresses, already published with them, as `modbus-moved-port.tsv` does | Drafted with tshark 4.2.3 (`desk`); the `hr23` and `prp` jobs check it with 4.2.2 |
+
+## The cases
+
+The design's section 4.2 names seven new cases, and the brief two existing ones. Each id names its transport, and none ends in `-udp` or holds `moved-port` (design section 4, opening).
+
+- **`dnp3-udp-relay-write`** (D4-100 item 3). A sensor joining mid-session (D2's Q4): O1's solicited 129, CON clear, to a request the capture does not hold, is the 5-tuple's first datagram; then M5's deadband write (code 2, g34v1, `dnp3-udp-unsolicited`'s write) and O1's 129. Both ends on 20000.
+- **`dnp3-udp-relay-restart`** (D4-100 item 3). The same start, then M5's cold restart (13, 2 application octets), O1's empty 129, then, 5 s later, M5's poll, O1's 129 with IIN1.7 set, and M5's write of g80v1 index 7 (code 2) that clears it.
+- **`dnp3-udp-master-short`** (design 4.1, ruling 3). A flow M5 starts: a poll answered with CON set, M5's 2-octet confirm, a read of classes 1 to 3, a cold restart (13), the write of g80v1, a record current time (24), and a time write (g50v1). Each 2-octet message is followed by a request of 4 octets or more.
+- **`dnp3-udp-dir-spoof`** and **`dnp3-tcp-dir-spoof`** (design 4.2). A flow the master starts, with one frame from the master's address with DIR clear and valid CRCs: a direct operate (code 5) with g12v1. Its label gives the master as its role, from the builder.
+- **`dnp3-udp-swap-control`** (design 4.1). `dnp3-udp-relay-write`'s packets with M5's port moved to 41019, outside `likely_server_ports`, so Zeek swaps the roles at creation. The test checks that nothing else differs.
+- **`dnp3-tcp-master-short`** (design 4.1 and 4.2). A TCP connection the sensor joins mid-stream, with no SYN and no SYN-ACK, O2 on 20001 and M1 on 41300, both outside the TCP set, so O2 is the originator. O2's 129 with CON set comes first (17 octets, within the PIA's 1,024 octets and 100 packets), then M1's confirm, cold restart and record current time, each followed by a write (g34v1, g80v1, g50v1).
+- **D6's additions, `dnp3-udp-relay-off-set` and `dnp3-udp-relay-both-off-set`** (design section 1 item 2). `dnp3-udp-unsolicited`'s application data, from O2 on 20001, with M5 on 20000 (the third unswapped arrangement, which the design says needs no case of its own and invites D6 to number) and on 41021 (neither port in the set). The test checks that their APDUs are `dnp3-udp-unsolicited`'s, the event time aside.
+
+`dnp3-udp-temp-port` and `dnp3-udp-unsolicited` are `dnp3_cases.py`'s, unchanged; their rows in `hr23-cases.tsv` are `engine-pass-conditions.tsv`'s.
+
+## The malformed set
+
+Each input of design section 4.3 is its own capture, run alone (`judge-alone`), so that one input's failure reaches no other. A UDP input sits between a poll that confirms the flow and a read that shows whether parsing goes on (`P R | X | Q R`); one on the responder's side starts with O1's 129 instead (`R0 | X | Q R`). A TCP input sits on a connection M1 opens. `hr23-malformed.tsv`'s build cell is each capture's packets, and the test checks it against the builder. The two inputs of DIR against the code's class are the two `dir-spoof` cases.
+
+## Choices the design leaves open
+
+`hr23_cases.py` makes each in one place, with a comment there.
+
+1. **Time.** Capture k (from 0, cases first, then the malformed set) starts its clock at 2025-11-17T17:20:00Z plus k hours. A packet follows the one before by 1 ms, except the 5 s before `dnp3-udp-relay-restart`'s poll.
+2. **Sequences.** Each end's transport sequence counts per frame; a message's frames take consecutive numbers when it is built, so a frame never sent still takes its number (as `resync_cases.py` does). Where a capture starts with O's solicited 129 (the relay-write, relay-restart, swap-control and TCP master-short cases, and the responder-side inputs), the master's transport sequence starts at 1 and its application sequence at 1, as after the one request the sensor missed.
+3. **Empty responses.** Every 129 carries no objects, as in every other GT-PCAP capture, except the echo of a direct operate. A real relay's answer to a cold restart carries a time delay object (g52), and a solicited response sets CON when it carries events; both are left out so that no object parser that no run has measured sits before the message a case tests (`inference`, IEEE 1815 not held).
+4. **The 1 to 3 octets** are the first octets of a header, `05 64 0B`. **len(k)** is a header of link length k with a passing CRC, then six 00 octets, as `resync_cases.py`'s; length 4 with a transport octet is 11 octets. **badhdr** is M5's poll header with its CRC's first octet inverted, and **badchunk** a read's frame with its chunk CRC's first octet inverted, as `resync_cases.py`'s.
+5. **The fragment beyond the limit** is `resync_cases.py`'s `overlimit` read, 102,649 application octets in 413 frames. **The frame of length 255** is the first of a two-frame read of 83 class objects.
+
+## Limits
+
+- **Every expectation is `desk`,** from the design and the code it read. A label that rests on unread Zeek code is a finding when the run disagrees, never a reason to edit the pin after the run (the brief).
+- **Zeek's sides** in the labels and in `sides.tsv` come from the design's reading of `UDPAnalyzer::WantConnection`, `IPBasedAnalyzer::NewConn` and `TCP.cc`, with C0's `likely_server_ports` from run 43373373987's `ports.zeek` line (CI-Linux). The run checks each flow's originator against `conn.log` (`cfg-ports`, `rerun-sides`).
+- **The sort reads tshark's codes.** A fragment tshark cannot dissect gives no code, so a flow of `dnp3-malformed` whose only fragment tshark refuses is sorted as agreeing. The run's C1p-against-C2 comparison still covers it (`rerun-agree`).
+- **Real devices.** These captures say nothing about a real relay's traffic, which ports it sends from (H-23), or how a SEL device treats a frame whose DIR is forged (the design's section 6, R-6, written and not run).

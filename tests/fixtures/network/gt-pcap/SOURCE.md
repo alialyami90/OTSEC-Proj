@@ -96,3 +96,7 @@ GT-PCAP is the labelled capture set for V-M6 and R6.1 to R6.5. The plan is `docs
 ## HR-25's dnp3-resync-* captures (brief P4-4-HR25, deliverable 3)
 
 `resync/` holds the SHA-256s and the builder's labels of the 302 captures that `tests/integration/gt_pcap/resync_cases.py` writes for `resync-cases.tsv`. `resync/SOURCE.md` describes them.
+
+## HR-23's stage-2 cases, its malformed set, and the false-positive set (brief P4-4-HR2325S, deliverable 1)
+
+`hr23/` holds the SHA-256s and the builder's labels of the 71 captures that `tests/integration/gt_pcap/hr23_cases.py` writes for `hr23-cases.tsv` and `hr23-malformed.tsv`, and the sort of every rerun capture's DNP3 flows by side. `fp/` holds those of the false-positive set that `fp_set.py` writes once for HR-23 and HR-25. `hr23/SOURCE.md` and `fp/SOURCE.md` describe them.

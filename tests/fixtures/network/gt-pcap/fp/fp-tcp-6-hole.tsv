@@ -1,0 +1,37 @@
+# GT-PCAP labels for fp-tcp-6-hole: the false-positive set's class (6-hole) (D6, brief P4-4-HR2325S, deliverable 1). The builder's, from how each item was made; tshark's reading is reported beside them by hr23_tshark.py, never used as a label.
+# one row per item, each on its own 5-tuple: src is the first sender. packets: the item's 1-based packet numbers. datagrams: the octets of each datagram, or for TCP each end's segments, c the client's and s the server's, a lost one in parentheses (its ACK is kept).
+# header_at: per datagram, the offsets at which the item was built to hold a header whose CRC passes; - for none. No other offset holds one (the redraw rule; draws counts the draws it took).
+# code and side: the function code a class (3b-data) or (3c) item's fragment carries, and the side it is sent from (orig: the first sender, by the design's section 1 item 1 with C0's likely_server_ports). dir: the link header's DIR bit as built.
+capture	class	item	l4	src	sport	dst	dport	packets	datagrams	header_at	code	side	dir	draws	facts
+fp-tcp-6-hole	6-hole	0	tcp	192.0.2.100	59000	192.0.2.200	20000	1-13	c:79+(79)+80;s:643	-	-	orig	-	0	kind=http;octets=c:238,s:643;delivered=802;hole=c:79;reaches=none
+fp-tcp-6-hole	6-hole	1	tcp	192.0.2.100	59001	192.0.2.200	20000	14-26	c:893;s:1471+(1471)+1472	-	-	orig	-	0	kind=tls;octets=c:893,s:4414;delivered=3836;hole=s:1471;reaches=O
+fp-tcp-6-hole	6-hole	2	tcp	192.0.2.100	59002	192.0.2.200	20000	27-39	c:204+(205)+205;s:920	-	-	orig	-	0	kind=ssh;octets=c:614,s:920;delivered=1329;hole=c:205;reaches=none
+fp-tcp-6-hole	6-hole	3	tcp	192.0.2.100	59003	192.0.2.200	20000	40-52	c:1111;s:988+(988)+989	-	-	orig	-	0	kind=random;octets=c:1111,s:2965;delivered=3088;hole=s:988;reaches=O
+fp-tcp-6-hole	6-hole	4	tcp	192.0.2.100	59004	192.0.2.200	20000	53-65	c:314+(314)+315;s:620	-	-	orig	-	0	kind=http;octets=c:943,s:620;delivered=1249;hole=c:314;reaches=none
+fp-tcp-6-hole	6-hole	5	tcp	192.0.2.100	59005	192.0.2.200	20000	66-78	c:1380;s:1333+(1334)+1334	-	-	orig	-	0	kind=tls;octets=c:1380,s:4001;delivered=4047;hole=s:1334;reaches=O
+fp-tcp-6-hole	6-hole	6	tcp	192.0.2.100	59006	192.0.2.200	20000	79-91	c:47+(47)+47;s:836	-	-	orig	-	0	kind=ssh;octets=c:141,s:836;delivered=930;hole=c:47;reaches=none
+fp-tcp-6-hole	6-hole	7	tcp	192.0.2.100	59007	192.0.2.200	20000	92-106	c:1460+897;s:1403+(1404)+1404	-	-	orig	-	0	kind=random;octets=c:2357,s:4211;delivered=5164;hole=s:1404;reaches=O
+fp-tcp-6-hole	6-hole	8	tcp	192.0.2.100	59008	192.0.2.200	20000	107-119	c:112+(112)+113;s:435	-	-	orig	-	0	kind=http;octets=c:337,s:435;delivered=660;hole=c:112;reaches=none
+fp-tcp-6-hole	6-hole	9	tcp	192.0.2.100	59009	192.0.2.200	20000	120-132	c:1108;s:1001+(1001)+1002	-	-	orig	-	0	kind=tls;octets=c:1108,s:3004;delivered=3111;hole=s:1001;reaches=O
+fp-tcp-6-hole	6-hole	10	tcp	192.0.2.100	59010	192.0.2.200	20000	133-145	c:289+(290)+290;s:911	-	-	orig	-	0	kind=ssh;octets=c:869,s:911;delivered=1490;hole=c:290;reaches=none
+fp-tcp-6-hole	6-hole	11	tcp	192.0.2.100	59011	192.0.2.200	20000	146-158	c:274;s:641+(641)+641	-	-	orig	-	0	kind=random;octets=c:274,s:1923;delivered=1556;hole=s:641;reaches=none
+fp-tcp-6-hole	6-hole	12	tcp	192.0.2.100	59012	192.0.2.200	20000	159-171	c:273+(273)+273;s:920	-	-	orig	-	0	kind=http;octets=c:819,s:920;delivered=1466;hole=c:273;reaches=none
+fp-tcp-6-hole	6-hole	13	tcp	192.0.2.100	59013	192.0.2.200	20000	172-190	c:1460+1460+1460+88;s:884+(884)+885	-	-	orig	-	0	kind=tls;octets=c:4468,s:2653;delivered=6237;hole=s:884;reaches=O
+fp-tcp-6-hole	6-hole	14	tcp	192.0.2.100	59014	192.0.2.200	20000	191-203	c:55+(56)+56;s:178	-	-	orig	-	0	kind=ssh;octets=c:167,s:178;delivered=289;hole=c:56;reaches=none
+fp-tcp-6-hole	6-hole	15	tcp	192.0.2.100	59015	192.0.2.200	20000	204-220	c:1460+1460+689;s:237+(238)+238	-	-	orig	-	0	kind=random;octets=c:3609,s:713;delivered=4084;hole=s:238;reaches=O
+fp-tcp-6-hole	6-hole	16	tcp	192.0.2.100	59016	192.0.2.200	20000	221-233	c:61+(62)+62;s:186	-	-	orig	-	0	kind=http;octets=c:185,s:186;delivered=309;hole=c:62;reaches=none
+fp-tcp-6-hole	6-hole	17	tcp	192.0.2.100	59017	192.0.2.200	20000	234-252	c:1460+1460+1460+441;s:159+(160)+160	-	-	orig	-	0	kind=tls;octets=c:4821,s:479;delivered=5140;hole=s:160;reaches=O
+fp-tcp-6-hole	6-hole	18	tcp	192.0.2.100	59018	192.0.2.200	20000	253-265	c:240+(241)+241;s:897	-	-	orig	-	0	kind=ssh;octets=c:722,s:897;delivered=1378;hole=c:241;reaches=none
+fp-tcp-6-hole	6-hole	19	tcp	192.0.2.100	59019	192.0.2.200	20000	266-278	c:151;s:1400+(1401)+1401	-	-	orig	-	0	kind=random;octets=c:151,s:4202;delivered=2952;hole=s:1401;reaches=O
+fp-tcp-6-hole	6-hole	20	tcp	192.0.2.100	59020	192.0.2.200	20000	279-291	c:154+(154)+154;s:588	-	-	orig	-	0	kind=http;octets=c:462,s:588;delivered=896;hole=c:154;reaches=none
+fp-tcp-6-hole	6-hole	21	tcp	192.0.2.100	59021	192.0.2.200	20000	292-308	c:1460+1460+1199;s:1073+(1073)+1073	-	-	orig	-	0	kind=tls;octets=c:4119,s:3219;delivered=6265;hole=s:1073;reaches=O
+fp-tcp-6-hole	6-hole	22	tcp	192.0.2.100	59022	192.0.2.200	20000	309-321	c:86+(87)+87;s:350	-	-	orig	-	0	kind=ssh;octets=c:260,s:350;delivered=523;hole=c:87;reaches=none
+fp-tcp-6-hole	6-hole	23	tcp	192.0.2.100	59023	192.0.2.200	20000	322-336	c:1460+779;s:1001+(1001)+1001	-	-	orig	-	0	kind=random;octets=c:2239,s:3003;delivered=4241;hole=s:1001;reaches=O
+fp-tcp-6-hole	6-hole	24	tcp	192.0.2.100	59024	192.0.2.200	20000	337-349	c:209+(210)+210;s:540	-	-	orig	-	0	kind=http;octets=c:629,s:540;delivered=959;hole=c:210;reaches=none
+fp-tcp-6-hole	6-hole	25	tcp	192.0.2.100	59025	192.0.2.200	20000	350-364	c:1460+1010;s:216+(216)+216	-	-	orig	-	0	kind=tls;octets=c:2470,s:648;delivered=2902;hole=s:216;reaches=O
+fp-tcp-6-hole	6-hole	26	tcp	192.0.2.100	59026	192.0.2.200	20000	365-377	c:330+(330)+330;s:991	-	-	orig	-	0	kind=ssh;octets=c:990,s:991;delivered=1651;hole=c:330;reaches=none
+fp-tcp-6-hole	6-hole	27	tcp	192.0.2.100	59027	192.0.2.200	20000	378-392	c:1460+639;s:946+(947)+947	-	-	orig	-	0	kind=random;octets=c:2099,s:2840;delivered=3992;hole=s:947;reaches=O
+fp-tcp-6-hole	6-hole	28	tcp	192.0.2.100	59028	192.0.2.200	20000	393-405	c:235+(235)+235;s:564	-	-	orig	-	0	kind=http;octets=c:705,s:564;delivered=1034;hole=c:235;reaches=none
+fp-tcp-6-hole	6-hole	29	tcp	192.0.2.100	59029	192.0.2.200	20000	406-420	c:1460+673;s:601+(601)+601	-	-	orig	-	0	kind=tls;octets=c:2133,s:1803;delivered=3335;hole=s:601;reaches=O
+fp-tcp-6-hole	6-hole	30	tcp	192.0.2.100	59030	192.0.2.200	20000	421-433	c:260+(261)+261;s:407	-	-	orig	-	0	kind=ssh;octets=c:782,s:407;delivered=928;hole=c:261;reaches=none
+fp-tcp-6-hole	6-hole	31	tcp	192.0.2.100	59031	192.0.2.200	20000	434-446	c:921;s:911+(911)+912	-	-	orig	-	0	kind=random;octets=c:921,s:2734;delivered=2744;hole=s:911;reaches=O

@@ -1,0 +1,27 @@
+# The pinned tshark's DNP3 reading of HR-23's stage-2 captures and malformed set, where it differs from the builder's label (D6, brief P4-4-HR2325S, deliverable 1). hr23_tshark.py labels writes the same list without the cause column, and the hr23 job of a6-gt-pcap.yml fails when the two differ.
+# A row is reported, never used as a label (hr23-conditions.tsv, judge-labels). Its columns are hr23_tshark.py's: the message's last packet, the label's function code, the codes tshark reads in that packet, and the builder's state.
+# cause: why tshark reads it otherwise.
+#   reads-malformed: tshark reads the function code of a message the builder labels absent because it is malformed (a response of 2 or 3 application octets, an empty arm with a trailing octet, a read with 1 object octet).
+#   no-limit: tshark has no fragment limit, so it reads a fragment over the limit, which the builder labels absent.
+capture	message	end	packet	label_code	tshark_codes	note	cause
+dnp3-mal-tcp-fc129-2-dirclear	X	m	8	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-tcp-fc129-2-dirset	X	m	8	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-tcp-fc129-3-dirclear	X	m	8	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-tcp-fc129-3-dirset	X	m	8	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc129-2-orig	X	m	3	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc129-2-resp	X	o	3	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc129-3-orig	X	m	3	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc129-3-resp	X	o	3	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc130-2-orig	X	m	3	130	130	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc130-2-resp	X	o	3	130	130	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc130-3-orig	X	m	3	130	130	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc130-3-resp	X	o	3	130	130	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc131-2-orig	X	m	3	131	131	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc131-2-resp	X	o	3	131	131	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc131-3-orig	X	m	3	131	131	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc131-3-resp	X	o	3	131	131	the builder labels it absent	reads-malformed
+dnp3-mal-udp-limit	X	m	415	1	1	the builder labels it absent	no-limit
+dnp3-mal-udp-short-13x-orig	X	m	3	13	13	the builder labels it absent	reads-malformed
+dnp3-mal-udp-short-13x-resp	X	m	2	13	13	the builder labels it absent	reads-malformed
+dnp3-mal-udp-short-1x-orig	X	m	3	1	1	the builder labels it absent	reads-malformed
+dnp3-mal-udp-short-1x-resp	X	m	2	1	1	the builder labels it absent	reads-malformed

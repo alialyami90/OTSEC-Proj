@@ -1,0 +1,47 @@
+# GT-PCAP labels for fp-udp-3b-data: the false-positive set's class (3b-data) (D6, brief P4-4-HR2325S, deliverable 1). The builder's, from how each item was made; tshark's reading is reported beside them by hr23_tshark.py, never used as a label.
+# one row per item, each on its own 5-tuple: src is the first sender. packets: the item's 1-based packet numbers. datagrams: the octets of each datagram, or for TCP each end's segments, c the client's and s the server's, a lost one in parentheses (its ACK is kept).
+# header_at: per datagram, the offsets at which the item was built to hold a header whose CRC passes; - for none. No other offset holds one (the redraw rule; draws counts the draws it took).
+# code and side: the function code a class (3b-data) or (3c) item's fragment carries, and the side it is sent from (orig: the first sender, by the design's section 1 item 1 with C0's likely_server_ports). dir: the link header's DIR bit as built.
+capture	class	item	l4	src	sport	dst	dport	packets	datagrams	header_at	code	side	dir	draws	facts
+fp-udp-3b-data	3b-data	0	udp	192.0.2.100	53000	192.0.2.200	40032	1-2	15,92	0,-	0	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	1	udp	192.0.2.100	53001	192.0.2.200	40032	3-4	15,200	0,-	13	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	2	udp	192.0.2.100	53002	192.0.2.200	40032	5-6	15,130	0,-	14	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	3	udp	192.0.2.100	53003	192.0.2.200	40032	7-8	15,186	0,-	15	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	4	udp	192.0.2.100	53004	192.0.2.200	40032	9-10	15,87	0,-	19	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	5	udp	192.0.2.100	53005	192.0.2.200	40032	11-12	15,116	0,-	23	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	6	udp	192.0.2.100	53006	192.0.2.200	40032	13-14	15,36	0,-	24	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	7	udp	192.0.2.100	53007	192.0.2.200	40032	15-16	15,185	0,-	0	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	8	udp	192.0.2.100	53008	192.0.2.200	40032	17-18	15,107	0,-	13	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	9	udp	192.0.2.100	53009	192.0.2.200	40032	19-20	15,158	0,-	14	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	10	udp	192.0.2.100	53010	192.0.2.200	40032	21-22	15,162	0,-	15	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	11	udp	192.0.2.100	53011	192.0.2.200	40032	23-24	15,65	0,-	19	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	12	udp	192.0.2.100	53012	192.0.2.200	40032	25-26	15,105	0,-	23	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	13	udp	192.0.2.100	53013	192.0.2.200	40032	27-28	15,160	0,-	24	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	14	udp	192.0.2.100	53014	192.0.2.200	40032	29-30	15,165	0,-	0	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	15	udp	192.0.2.100	53015	192.0.2.200	40032	31-32	15,174	0,-	13	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	16	udp	192.0.2.100	53016	192.0.2.200	40032	33-34	15,157	0,-	14	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	17	udp	192.0.2.100	53017	192.0.2.200	40032	35-36	15,138	0,-	15	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	18	udp	192.0.2.100	53018	192.0.2.200	40032	37-38	15,152	0,-	19	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	19	udp	192.0.2.100	53019	192.0.2.200	40032	39-40	15,17	0,-	23	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	20	udp	192.0.2.100	53020	192.0.2.200	40032	41-42	15,143	0,-	24	orig	1	0	app_octets=2;arm=empty
+fp-udp-3b-data	3b-data	21	udp	192.0.2.100	53021	192.0.2.200	40032	43-44	28,134	0,-	34	orig	1	0	app_octets=15;arm=default
+fp-udp-3b-data	3b-data	22	udp	192.0.2.100	53022	192.0.2.200	40032	45-46	22,197	0,-	40	orig	1	0	app_octets=9;arm=default
+fp-udp-3b-data	3b-data	23	udp	192.0.2.100	53023	192.0.2.200	40032	47-48	32,26	0,-	50	orig	1	0	app_octets=17;arm=default
+fp-udp-3b-data	3b-data	24	udp	192.0.2.100	53024	192.0.2.200	40032	49-50	32,70	0,-	60	orig	1	0	app_octets=17;arm=default
+fp-udp-3b-data	3b-data	25	udp	192.0.2.100	53025	192.0.2.200	40032	51-52	35,63	0,-	64	orig	1	0	app_octets=20;arm=default
+fp-udp-3b-data	3b-data	26	udp	192.0.2.100	53026	192.0.2.200	40032	53-54	35,59	0,-	70	orig	1	0	app_octets=20;arm=default
+fp-udp-3b-data	3b-data	27	udp	192.0.2.100	53027	192.0.2.200	40032	55-56	34,72	0,-	80	orig	1	0	app_octets=19;arm=default
+fp-udp-3b-data	3b-data	28	udp	192.0.2.100	53028	192.0.2.200	40032	57-58	16,64	0,-	90	orig	1	0	app_octets=3;arm=default
+fp-udp-3b-data	3b-data	29	udp	192.0.2.100	53029	192.0.2.200	40032	59-60	35,192	0,-	100	orig	1	0	app_octets=20;arm=default
+fp-udp-3b-data	3b-data	30	udp	192.0.2.100	53030	192.0.2.200	40032	61-62	19,153	0,-	110	orig	1	0	app_octets=6;arm=default
+fp-udp-3b-data	3b-data	31	udp	192.0.2.100	53031	192.0.2.200	40032	63-64	37,90	0,-	120	orig	1	0	app_octets=22;arm=default
+fp-udp-3b-data	3b-data	32	udp	192.0.2.100	53032	192.0.2.200	40032	65-66	34,120	0,-	128	orig	1	0	app_octets=19;arm=default
+fp-udp-3b-data	3b-data	33	udp	192.0.2.100	53033	192.0.2.200	40032	67-68	34,12	0,-	132	orig	1	0	app_octets=19;arm=default
+fp-udp-3b-data	3b-data	34	udp	192.0.2.100	53034	192.0.2.200	40032	69-70	24,171	0,-	140	orig	1	0	app_octets=11;arm=default
+fp-udp-3b-data	3b-data	35	udp	192.0.2.100	53035	192.0.2.200	40032	71-72	22,185	0,-	160	orig	1	0	app_octets=9;arm=default
+fp-udp-3b-data	3b-data	36	udp	192.0.2.100	53036	192.0.2.200	40032	73-74	15,43	0,-	180	orig	1	0	app_octets=2;arm=default
+fp-udp-3b-data	3b-data	37	udp	192.0.2.100	53037	192.0.2.200	40032	75-76	24,127	0,-	200	orig	1	0	app_octets=11;arm=default
+fp-udp-3b-data	3b-data	38	udp	192.0.2.100	53038	192.0.2.200	40032	77-78	32,96	0,-	220	orig	1	0	app_octets=17;arm=default
+fp-udp-3b-data	3b-data	39	udp	192.0.2.100	53039	192.0.2.200	40032	79-80	32,190	0,-	240	orig	1	0	app_octets=17;arm=default
+fp-udp-3b-data	3b-data	40	udp	192.0.2.100	53040	192.0.2.200	40032	81-82	22,38	0,-	250	orig	1	0	app_octets=9;arm=default
+fp-udp-3b-data	3b-data	41	udp	192.0.2.100	53041	192.0.2.200	40032	83-84	26,99	0,-	255	orig	1	0	app_octets=13;arm=default

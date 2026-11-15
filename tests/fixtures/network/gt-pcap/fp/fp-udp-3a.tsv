@@ -1,0 +1,37 @@
+# GT-PCAP labels for fp-udp-3a: the false-positive set's class (3a) (D6, brief P4-4-HR2325S, deliverable 1). The builder's, from how each item was made; tshark's reading is reported beside them by hr23_tshark.py, never used as a label.
+# one row per item, each on its own 5-tuple: src is the first sender. packets: the item's 1-based packet numbers. datagrams: the octets of each datagram, or for TCP each end's segments, c the client's and s the server's, a lost one in parentheses (its ACK is kept).
+# header_at: per datagram, the offsets at which the item was built to hold a header whose CRC passes; - for none. No other offset holds one (the redraw rule; draws counts the draws it took).
+# code and side: the function code a class (3b-data) or (3c) item's fragment carries, and the side it is sent from (orig: the first sender, by the design's section 1 item 1 with C0's likely_server_ports). dir: the link header's DIR bit as built.
+capture	class	item	l4	src	sport	dst	dport	packets	datagrams	header_at	code	side	dir	draws	facts
+fp-udp-3a	3a	0	udp	192.0.2.100	52000	192.0.2.200	40031	1-1	36	0	-	orig	0	0	link_length=27;chunk_crc=fails
+fp-udp-3a	3a	1	udp	192.0.2.100	52001	192.0.2.200	40031	2-2	61	0	-	orig	1	0	link_length=50;chunk_crc=fails
+fp-udp-3a	3a	2	udp	192.0.2.100	52002	192.0.2.200	40031	3-3	189	0	-	orig	0	0	link_length=164;chunk_crc=fails
+fp-udp-3a	3a	3	udp	192.0.2.100	52003	192.0.2.200	40031	4-4	40	0	-	orig	1	0	link_length=31;chunk_crc=fails
+fp-udp-3a	3a	4	udp	192.0.2.100	52004	192.0.2.200	40031	5-5	75	0	-	orig	0	0	link_length=62;chunk_crc=fails
+fp-udp-3a	3a	5	udp	192.0.2.100	52005	192.0.2.200	40031	6-6	108	0	-	orig	1	0	link_length=91;chunk_crc=fails
+fp-udp-3a	3a	6	udp	192.0.2.100	52006	192.0.2.200	40031	7-7	129	0	-	orig	0	0	link_length=110;chunk_crc=fails
+fp-udp-3a	3a	7	udp	192.0.2.100	52007	192.0.2.200	40031	8-8	52	0	-	orig	1	0	link_length=41;chunk_crc=fails
+fp-udp-3a	3a	8	udp	192.0.2.100	52008	192.0.2.200	40031	9-9	122	0	-	orig	0	0	link_length=103;chunk_crc=fails
+fp-udp-3a	3a	9	udp	192.0.2.100	52009	192.0.2.200	40031	10-10	270	0	-	orig	1	0	link_length=235;chunk_crc=fails
+fp-udp-3a	3a	10	udp	192.0.2.100	52010	192.0.2.200	40031	11-11	226	0	-	orig	0	0	link_length=197;chunk_crc=fails
+fp-udp-3a	3a	11	udp	192.0.2.100	52011	192.0.2.200	40031	12-12	123	0	-	orig	1	0	link_length=104;chunk_crc=fails
+fp-udp-3a	3a	12	udp	192.0.2.100	52012	192.0.2.200	40031	13-13	95	0	-	orig	0	0	link_length=80;chunk_crc=fails
+fp-udp-3a	3a	13	udp	192.0.2.100	52013	192.0.2.200	40031	14-14	193	0	-	orig	1	0	link_length=166;chunk_crc=fails
+fp-udp-3a	3a	14	udp	192.0.2.100	52014	192.0.2.200	40031	15-15	291	0	-	orig	0	0	link_length=254;chunk_crc=fails
+fp-udp-3a	3a	15	udp	192.0.2.100	52015	192.0.2.200	40031	16-16	35	0	-	orig	1	0	link_length=26;chunk_crc=fails
+fp-udp-3a	3a	16	udp	192.0.2.100	52016	192.0.2.200	40031	17-17	123	0	-	orig	0	0	link_length=104;chunk_crc=fails
+fp-udp-3a	3a	17	udp	192.0.2.100	52017	192.0.2.200	40031	18-18	39	0	-	orig	1	0	link_length=30;chunk_crc=fails
+fp-udp-3a	3a	18	udp	192.0.2.100	52018	192.0.2.200	40031	19-19	134	0	-	orig	0	0	link_length=115;chunk_crc=fails
+fp-udp-3a	3a	19	udp	192.0.2.100	52019	192.0.2.200	40031	20-20	229	0	-	orig	1	0	link_length=198;chunk_crc=fails
+fp-udp-3a	3a	20	udp	192.0.2.100	52020	192.0.2.200	40031	21-21	231	0	-	orig	0	0	link_length=200;chunk_crc=fails
+fp-udp-3a	3a	21	udp	192.0.2.100	52021	192.0.2.200	40031	22-22	203	0	-	orig	1	0	link_length=176;chunk_crc=fails
+fp-udp-3a	3a	22	udp	192.0.2.100	52022	192.0.2.200	40031	23-23	212	0	-	orig	0	0	link_length=183;chunk_crc=fails
+fp-udp-3a	3a	23	udp	192.0.2.100	52023	192.0.2.200	40031	24-24	54	0	-	orig	1	0	link_length=43;chunk_crc=fails
+fp-udp-3a	3a	24	udp	192.0.2.100	52024	192.0.2.200	40031	25-25	146	0	-	orig	0	0	link_length=125;chunk_crc=fails
+fp-udp-3a	3a	25	udp	192.0.2.100	52025	192.0.2.200	40031	26-26	99	0	-	orig	1	0	link_length=84;chunk_crc=fails
+fp-udp-3a	3a	26	udp	192.0.2.100	52026	192.0.2.200	40031	27-27	267	0	-	orig	0	0	link_length=232;chunk_crc=fails
+fp-udp-3a	3a	27	udp	192.0.2.100	52027	192.0.2.200	40031	28-28	243	0	-	orig	1	0	link_length=212;chunk_crc=fails
+fp-udp-3a	3a	28	udp	192.0.2.100	52028	192.0.2.200	40031	29-29	75	0	-	orig	0	0	link_length=62;chunk_crc=fails
+fp-udp-3a	3a	29	udp	192.0.2.100	52029	192.0.2.200	40031	30-30	42	0	-	orig	1	0	link_length=33;chunk_crc=fails
+fp-udp-3a	3a	30	udp	192.0.2.100	52030	192.0.2.200	40031	31-31	107	0	-	orig	0	0	link_length=90;chunk_crc=fails
+fp-udp-3a	3a	31	udp	192.0.2.100	52031	192.0.2.200	40031	32-32	176	0	-	orig	1	0	link_length=151;chunk_crc=fails
