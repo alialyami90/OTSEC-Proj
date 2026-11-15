@@ -3,9 +3,9 @@
 D6, 2026-11-15. Brief P4-4-HR25 (`docs/agent-handoffs.md`), deliverable 2: the `dnp3-resync-*` cases, each naming its transport, and their pass conditions, pinned before any counted run. D4 wrote the design, `docs/phase4/D4-hr25-design.md` on #690 at `a5fe07616775096e3910a5e5d9882856206e75e9`. No D6 instance wrote any of it, and this instance did not write any of the comments it answers.
 
 - **The conditions are two files, and they decide; this note explains them.**
-  - `tests/integration/gt_pcap/resync-cases.tsv`: 110 cases, one row each, with the configuration each expectation holds under, and 187 twins (section 3.3).
+  - `tests/integration/gt_pcap/resync-cases.tsv`: 114 cases, one row each, with the configuration each expectation holds under, and 191 twins (section 3.3).
   - `tests/integration/gt_pcap/resync-conditions.tsv`: the judge, the values, the false-positive set, the changed expectations, the reruns, the reporting, the fuzz pins, the coverage condition, S5 and the static checks.
-  - `test_resync_conditions.py` pins both by SHA-256 (LF line endings, as Git stores them), and checks the rules in section 10 against them. The cases file's SHA-256 is `ab7ea46d5dc88b0b3a5cc618c6b19d0e4885c11f6910c64142a2abf745793c3a`, and the conditions file's is `7f7defbb2b7408d474a3866d145f87a4b642f6b1f52bac9eae44752e0bcbf0cf`.
+  - `test_resync_conditions.py` pins both by SHA-256 (LF line endings, as Git stores them), and checks the rules in section 10 against them. The cases file's SHA-256 is `3d1d976aa99c42a8dabbf506157efc62e2d7ebced3dc535531350dc8172039fc`, and the conditions file's is `f09eca8fd699bb7676335a2f364a9b474c9feb8e1470d63d079861ae8020ba22`.
 - **Where they are pinned for the run** (row `pin-files`): D4 adds `RESYNC_CASES_SHA256` and `RESYNC_CONDITIONS_SHA256` to `modules/telemetry/experiments/engine-linux/pins.env` in deliverable 3, with the values the test holds. D6 does not edit D4's files. A run with other files is a rehearsal (row `judge-counted`).
 - **Evidence class: `desk`.** Nothing was built, captured or run against any engine. No device or network was contacted, and no session content was read.
 - **Zeek's code** is read from GitHub at the tag `v9.0.1`, by file, with these SHA-256s. The first six match the HR-23 note's table, and `FuzzBuffer.h` matches the HR-25 note's.
@@ -80,7 +80,7 @@ The values are D6's choice, `desk`. Both of F and O are reachable by the fuzz ha
 | R3, a TCP gap that splits a frame then a write | | 3 | A gap inside a header, inside a frame's data, and before the octets past a failed frame whose tail starts a header (D2's B1, the gap twin). Each is valid only under R3's rule (row `judge-r3`). |
 | R4, a link-only frame then a write | 3 | 4 | In two deliveries and in one, over each transport; the relay's TCP heartbeat, its link-status request and the master's link status; a link-only frame between two frames of one fragment (D6's B1 (c)). |
 | No quiet failure | 1 | 1 | One throwing write alone on a fresh 5-tuple (D6's B1, ruled (b)): never named, the master's `end` row with `app_parse`. Its control names the flow and raises a violation. |
-| Insertion | 6 | | S8's residual: a multi-frame write with a datagram inserted between its frames, under 10 octets and with a bad chunk CRC, on a fresh 5-tuple (never named, the `end` row with `first_chunk_missing`); each of the two again with a direct operate without reply (code 6), so that no response is the protocol's and not the capture's (D2 on #698); the same answered by the device, which confirms the flow at its response; and the same after confirmation, where W is unseen, counted, and Q is still parsed. |
+| Insertion | 10 | | S8's residual: a multi-frame write with a datagram inserted between its frames, under 10 octets and with a bad chunk CRC, on a fresh 5-tuple (never named, the `end` row with `first_chunk_missing`); each of the two again with a direct operate without reply (code 6), so that no response is the protocol's and not the capture's (D2 on #698); the same answered by the device, which confirms the flow at its response; and the same after confirmation, where W is unseen, counted, and Q is still parsed. S8's third cause, `fir_restart` (D3's B1 on #698): a whole FIR frame inserted between the write's frames on a fresh 5-tuple, a read that parses and confirms the flow, and a read that throws, each with code 5 and with code 6. |
 | Budget | 4 | 1 | F reached on one end, and split across the two ends with F − 1 beside it; O reached in one failure; F reached above 10 KiB, reached with link-only frames that spend no budget, so that only the analyzer's own `skip` hides the session. |
 | Benign | 7 | 3 | D2's join after a response's first frame, over each transport; a TCP sensor start inside a frame on both ends; D2's unknown object, with qualifier 06h and with qualifier 00h and a range (the form SEL-751 Table D.9 lists; D2's B1 on #698), each once and F times in a row; a link-layer retry of a first frame and of a middle frame (L-3); a lost TCP segment whose edges fall on frame boundaries. |
 | Invariants | | 10 | T9's `tpflags` case, and W's header split across two segments at each of its 9 split points. Seen under every configuration. |
@@ -89,7 +89,7 @@ The values are D6's choice, `desk`. Both of F and O are reachable by the fuzz ha
 | S5's bound | 2 | 2 | R − 1 and R throws before W in one delivery. Judged only if the bound is added. |
 | A `gap` row on a flow that is not DNP3 | | 1 | 6893732701: exactly one `end` row, on the end with the hole. |
 
-That is 49 cases on R1, 6 on R2, 3 on R3 and 7 on R4, and 45 others.
+That is 49 cases on R1, 6 on R2, 3 on R3 and 7 on R4, and 49 others.
 
 ### 3.3 The twins
 
@@ -106,6 +106,9 @@ Every route case has `nofail` and `nowrite`. It has `otherend` unless its failur
 - **UDP attaches by content.** `main.zeek` registers port 20000 for `DNP3_TCP` only, and `dpd.sig` enables `dnp3_udp` on a payload that starts `05 64`. So every fresh UDP 5-tuple in these cases starts with a datagram that starts `05 64`. The budget cases on UDP use `badhdr`, not garbage, for that reason.
 - **Rows before and after confirmation.** A failure before confirmation raises no weird and writes no row of its own. Its count reaches the `first` row at confirmation, stamped with the confirming fragment's time (R2's cases), or the `end` row under the five-cause rule, or the `budget` row.
 - **The device answers.** In the insertion case on a fresh 5-tuple, the design's section 3 expects the flow never named. That holds only if no response follows. A device that acted on W answers, its response is a whole fragment, and the flow confirms there. All are pinned: the case without a response, as the design states it, which stands for a capture that misses the response (a one-sided SPAN, or the response lost at the sensor); the same with a direct operate without reply (code 6), where no response is the protocol's; and `dnp3-resync-udp-insert-truncated-answered`. D4 confirmed on #698 that the design means the unanswered form. Either way the write is counted, never quiet.
+- **S8's third cause** (D3's B1 on #698). D1's ruling 6893581874 leaves `fir_restart` out of the five causes because an inserted FIR either confirms the flow (a `first` row) or throws (`app_parse`). Two cases test that reading on a fresh 5-tuple, each also with code 6: `dnp3-resync-udp-insert-fir-restart-confirms`, where the inserted frame is a read that parses, and `-throws`, where it is `throw`. If the reading were wrong, the flow would be quiet, and a quiet flow fails either case.
+  - Under C2A, the inserted frame drops W1's fragment under `fir_restart`. It then confirms the flow, which writes the `first` row at it, or it throws and writes the `end` row under `app_parse`. W2 then counts `first_chunk_missing`.
+  - Under the controls, the inserted frame is appended to W1's fragment (the design's section 1 item 3). W1 holds only the transport octet and W's application control octet (row `builder-msgs`), so the fragment's function code is the inserted frame's own application control octet, C0h to CFh. The request parser's default arm takes it (row `arm-3bdata`), so W is absent and the flow is named, whatever the inserted frame holds.
 - **What the builder fixes** (D2's N1 to N4 on #698; row `builder-msgs`). Every response echoes its request's application sequence number, and the response to W echoes W's g12v1 with status 0, so the response parser's g12v1 path runs under C2A. The transport sequence wraps mod 64. A message of more than one frame goes one frame per datagram or segment. Confirmed user data follows Reset Link States and its ACK.
 
 ## 4. The false-positive set
@@ -193,7 +196,8 @@ Rows `s5-*`.
   3. frames without FIR after confirmation;
   4. the same before confirmation (D6's B7);
   5. `05 64` repeated;
-  6. a chain of the solved length-4 header, in which every header's CRC octets start the next.
+  6. a chain of the solved length-4 header, in which every header's CRC octets start the next;
+  7. the embedded-header check at its densest, with a candidate in every frame (D3's N1 on #698; row `builder-s5-7`). Each frame has link length 255, and every octet from its offset 10 to 289 is from `05 64` repeated, so every chunk CRC fails and the check computes a header CRC at every even offset. `05 64` repeated alone gives no candidate, because the CRC of `05 64 05 64 05 64 05 64` is `82 E4` (D3). So each frame's last two octets are `82 E4`, which makes offset 282 a candidate, the last offset at which a whole one fits in the frame. That costs one header CRC: 140 per frame instead of 141. Its counts must show `chunk_crc` and `embedded_header` each equal to its frames.
 - **Each input is valid only if its counts match how it was built.**
 - **The ratio is at most 5.** Above it on any input, the bound R = 16 is added before the image is fixed, and its four cases are judged.
 
@@ -221,10 +225,11 @@ Each check is run once on a copy of the patch with its defect planted, and must 
 - the conditions' values;
 - the solved headers' CRC octets;
 - the false `05 64`'s failing CRC;
-- the builder's arithmetic;
+- the builder's arithmetic, W1's split among it, and that an inserted frame's application control octet, as a function code, falls in the request parser's default arm;
+- S5 input (7)'s frame: every chunk CRC fails, `05 64` at every even offset from 10 to 288 and nowhere else, and one candidate, at offset 282, whether a datagram's end or the next frame follows;
 - the two weird counts, from the sampling rule.
 
-Seven planted mutants were each killed: a route moved, a transport mismatched, a cause misnamed, a solved header changed, a twin dropped, a weird misnamed, and `-max_len` lowered. Each ran on a copy of the files with the hash test deselected, on the owner's PC, `desk`.
+Seven planted mutants were each killed: a route moved, a transport mismatched, a cause misnamed, a solved header changed, a twin dropped, a weird misnamed, and `-max_len` lowered. After D3's review six more were each killed: input (7)'s CRC octets changed, input (7) put back to `05 64` alone, a new case's cause dropped, its transport mismatched, its weird misnamed, and the `builder-s5-7` row renamed. Each ran on a copy of the files with the hash test deselected, on the owner's PC, `desk`.
 
 **Not pinned here, and owed before the counted run:**
 - **The builder and the captures** (row `pin-builder`). `resync_cases.py` must write every case and twin frame by frame with `dnp3.py`. Their hashes and labels go in `tests/fixtures/network/gt-pcap/resync/`, and `a6-gt-pcap` must rebuild and check them. The brief gives D6 the GT-PCAP paths, so D6 writes it, in its own PR under this brief. Until it merges, no run counts.
@@ -253,7 +258,7 @@ Seven planted mutants were each killed: a route moved, a transport mismatched, a
 | | 4. the budget: F − 1 and F, O − 1 and O, one failure for O, both ends, above 10 KiB, the benign maximum, the fuzz reach | `val-F`, `val-O`; the budget cases; the benign cases |
 | | 5. the reporting | `report-*`; the R2 cases' `first` rows; every UDP `end` row |
 | | 6. the weird burst | `report-weird-sampling`, `report-weird-log`; the two burst cases; `report-cap` |
-| | 7. insertion | the four insertion cases; the R1 UDP cases are the inserted datagram of each cause before a one-frame write |
+| | 7. insertion | the ten insertion cases; the R1 UDP cases are the inserted datagram of each cause before a one-frame write |
 | | 8. the reruns | `rerun-*` |
 | | 9. (3b-data)'s labels from the arms | `arm-3bdata`, `fp-3bdata` |
 | | 10. S5 | `s5-*`, `val-ratio`, `val-R`; the bound cases |
@@ -264,3 +269,4 @@ Seven planted mutants were each killed: a route moved, a transport mismatched, a
 | The design's section 3 | every listed case | section 3.2 |
 | The design's section 5 | the coverage condition | `cov-*` |
 | D2 (6894443879) and D4 (6894466378) on #698 | D2's B1, N1 to N4 and code 6; D4's B1, B2, N1, N2 and the three readings | `arm-g0` and `dnp3-resync-udp-unknown-object-range*`; `builder-msgs`, `builder-limit`, `builder-join`, the link-retry cases; the `-no-reply` insertion cases; `judge-defaults`, `budget-split-ends`, `gap-non-dnp3`; the `fir-restart` rows; `udp-weird-burst`; section 10 |
+| D3 (6895101173) on #698 | B1, S8's third cause; N1, S5's input for the embedded-header check; N2, the count | `dnp3-resync-udp-insert-fir-restart-*` and W1's split in `builder-msgs` (section 3.4); `s5-inputs` (7) and `builder-s5-7` (section 8); this note's head and section 3.2 |

@@ -20,8 +20,8 @@ import dnp3
 HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "resync-cases.tsv")
 CONDITIONS = os.path.join(HERE, "resync-conditions.tsv")
-CASES_SHA256 = "ab7ea46d5dc88b0b3a5cc618c6b19d0e4885c11f6910c64142a2abf745793c3a"
-CONDITIONS_SHA256 = "7f7defbb2b7408d474a3866d145f87a4b642f6b1f52bac9eae44752e0bcbf0cf"
+CASES_SHA256 = "3d1d976aa99c42a8dabbf506157efc62e2d7ebced3dc535531350dc8172039fc"
+CONDITIONS_SHA256 = "f09eca8fd699bb7676335a2f364a9b474c9feb8e1470d63d079861ae8020ba22"
 
 # The closed set of causes and their weirds (design section 2.8).
 WEIRDS = {
@@ -149,7 +149,7 @@ def test_the_conditions_are_whole_and_hold_the_values():
     assert int(v["val-F"]) <= 64
     for need in ("cov-causes", "cov-drop", "cov-delete", "cov-paths", "cov-udp", "cov-tcp", "cov-not", "cov-left",
                  "pin-files", "pin-builder", "judge-ctl", "judge-route", "judge-r3", "fp-counts", "rerun-ed403",
-                 "report-no-new-field", "s5-inputs", "static-control"):
+                 "report-no-new-field", "s5-inputs", "builder-s5-7", "static-control"):
         assert need in v, need
 
 
@@ -195,6 +195,50 @@ def test_the_builder_arithmetic():
     assert frame_len(250) == 292 and frame_len(57) == 75 and 7 * 292 + 75 == 2119
     # embed and embedtail: a frame of link length 53 is 64 octets, W5's 35 fit at 20.
     assert frame_len(53 - 5) == 64 and 20 + 35 <= 64
+    # builder-msgs: W1 is the transport octet and W's application control, W2
+    # the other 19 octets. Under the controls an inserted FIR frame follows W1
+    # in one fragment, whose function code is then the inserted frame's own
+    # application control, C0h to CFh: the request's default arm (arm-3bdata).
+    w = dnp3.request(0, dnp3.DIRECT_OPERATE, dnp3.crob(0))
+    assert len(w) == 20 and frame_len(1 + 1) == 14 and frame_len(1 + 19) == 34
+    for s in range(16):
+        code = dnp3.request(s, dnp3.READ, dnp3.all_objects(60, 1))[0]
+        assert 34 <= code <= 255 and code not in (129, 130, 131)
+
+
+def chunks(frame):
+    out, i = [], 10
+    while i < len(frame):
+        n = min(16, len(frame) - i - 2)
+        out.append((frame[i:i + n], frame[i + n:i + n + 2]))
+        i += n + 2
+    return out
+
+
+def candidate(buf, i):
+    # The design's candidate (2.1, 2.2): 05 64, a passing header CRC, a length of 5 to 255.
+    h = buf[i:i + 10]
+    return len(h) == 10 and h[:2] == b"\x05\x64" and dnp3.crc(h[:8]) == h[8:] and h[2] >= 5
+
+
+def test_s5_input_7_has_one_candidate_per_frame_at_its_densest():
+    # D3's N1 on #698: 05 64 repeated gives no candidate, since the CRC of
+    # 05 64 05 64 05 64 05 64 is 82 E4. Input (7) ends each frame with that
+    # header and its CRC (builder-s5-7).
+    v = {r["id"]: r["value"] for r in rows(CONDITIONS)}
+    tail = bytes.fromhex(v["builder-s5-7"])
+    run = b"\x05\x64" * 4
+    assert dnp3.crc(run) == b"\x82\xe4" and tail == run + dnp3.crc(run)
+    for src in (5, 1):  # m's link address over UDP and over TCP (builder-msgs)
+        hdr = b"\x05\x64" + bytes([255, 0xC4, 10, 0, src, 0])
+        f = hdr + dnp3.crc(hdr) + b"\x05\x64" * 136 + tail
+        assert len(f) == frame_len(250) == 292 and f[:10] == dnp3.link(10, src, True, bytes(250))[:10]
+        assert len(chunks(f)) == 16 and all(dnp3.crc(d) != c for d, c in chunks(f))
+        assert [i for i in range(1, 292) if f[i:i + 2] == b"\x05\x64"] == list(range(10, 290, 2))
+        for after in (b"", f):
+            assert [i for i in range(1, 292) if candidate(f + after, i)] == [282]
+        # The last offset at which a whole candidate fits inside the frame.
+        assert len(f) - 10 == 282
 
 
 def sampled(n, threshold=25, rate=1000):
