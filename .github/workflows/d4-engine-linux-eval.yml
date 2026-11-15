@@ -94,24 +94,30 @@ jobs:
         shell: bash
         run: sh modules/telemetry/experiments/engine-linux/zeek-patch/selftest.sh "$RUNNER_TEMP/hr23-selftest" | tee "$RUNNER_TEMP/hr23-selftest.md"
       - name: Build C1p and C2 from one pinned tree
+        id: build
         run: |
           sh modules/telemetry/experiments/engine-linux/zeek-patch/build.sh build "$RUNNER_TEMP/e-d4-03"
           cat "$RUNNER_TEMP/e-d4-03/images.env" >> "$GITHUB_ENV"
       - name: D4's unit and negative tests of the patch, on both builds
         run: sh modules/telemetry/experiments/engine-linux/run.sh hr23-unit "$RUNNER_TEMP/e-d4-03"
       - name: Install tshark (the labeller prp_check.py pins)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           sudo apt-get update -q
           echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
           tshark -v | head -1
       - name: Fetch the public captures (pinned SHA-256s)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; run.sh checks each again and drops it, and its rows read not run"
       - name: GT-PCAP cases under every configuration, the two builds included
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh dnp3 "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - name: Public and extra captures under every configuration, the two builds included
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh public "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - name: PRP pairs under every configuration, the two builds included
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh prp "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

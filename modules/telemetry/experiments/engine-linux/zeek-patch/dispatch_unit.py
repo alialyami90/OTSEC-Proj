@@ -163,7 +163,7 @@ EXPECT = [
 
 
 def check(out):
-    bad = 0
+    bad, failed = 0, []
     print("| case | kind | expectation | C2 | C1p | result |")
     print("| --- | --- | --- | --- | --- | --- |")
     for case, kind, what, test in EXPECT:
@@ -181,6 +181,16 @@ def check(out):
             res = "pass" if c2 == "met" and c1 == "not met" else "fail"
         bad |= res != "pass"
         print(f"| {case} | {kind} | {what} | {c2} | {c1} | {res} |")
+        if res != "pass":
+            failed.append(case)
+    # What each build logged on a case with a row that did not pass: codes,
+    # sides, object headers, DIR and analyzer.log's failure_reason only (no
+    # payload; failure_data is never read).
+    for case in dict.fromkeys(failed):
+        for cfg in (C2, C1P):
+            s = seen(os.path.join(out, case, cfg))
+            print(f"\n{case} under {cfg}: " + ("not run" if s is None else
+                  f"headers {s[0]}; link rows {s[1]}; DNP3 violations {s[2]}"))
     return 1 if bad else 0
 
 
