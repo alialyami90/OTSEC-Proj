@@ -578,6 +578,11 @@ func TestC13v02H1Row1SpansFirst(t *testing.T) {
 // newest_seq below T or drops_channel below D (N1-b; CH-15 as amended, D3's
 // condition 2). Each close here is one of C8-4's six reasons, so the node
 // writes its record; the record itself is the node intake's leg (owed).
+// v2LinkRefusedCloses are those six as C13 writes them, with hyphens; the
+// record's reason_code is their underscore form (F1, D4-107), which the
+// node maps from its typed verdicts, never from these strings.
+var v2LinkRefusedCloses = []string{"peer-key", "expired", "binding", "run-regressed", "run-forked", "sensor-id"}
+
 func TestC13v02H1OrderAudited(t *testing.T) {
 	regressed := func(m v2Msg) { m["first_seq"], m["newest_seq"] = "10", "9" } // T is 10
 	for _, c := range []struct {
@@ -616,7 +621,7 @@ func TestC13v02H1OrderAudited(t *testing.T) {
 		if v.Close != c.close {
 			t.Errorf("%s: close %q, want %q (CH-13 as amended)", c.name, v.Close, c.close)
 		}
-		if !slices.Contains(ccD0LinkRefusedReasons, v.Close) {
+		if !slices.Contains(v2LinkRefusedCloses, v.Close) {
 			t.Errorf("%s: close %q is not one of C8-4's six, so no sensor.link_refused is written", c.name, v.Close)
 		}
 	}

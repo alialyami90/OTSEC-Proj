@@ -764,6 +764,51 @@ var c8v13Breaks = map[string]func(ms []map[string]any) []map[string]any{
 	"no key set before the decision": func(ms []map[string]any) []map[string]any {
 		return slices.Delete(ms, 1, 2)
 	},
+	// The kind (D1's ruling 6895174039 on #699): a sensor.enrolled names an
+	// enrolment's acceptance, and a sensor.revoked a revocation's. The first
+	// case differs in the kind alone.
+	"an enrolment naming a revocation's acceptance": func(ms []map[string]any) []map[string]any {
+		ms[2]["verified"].(map[string]any)["kind"] = c8v13Rev
+		c8v13S(ms[2])["reason"] = "compromised"
+		return ms[:4]
+	},
+	"a revocation naming an enrolment's acceptance": func(ms []map[string]any) []map[string]any {
+		ms[4]["verified"].(map[string]any)["kind"] = c8v13Enrol
+		delete(c8v13S(ms[4]), "reason")
+		delete(c8v13S(ms[4]), "suspect_from")
+		return ms[:6]
+	},
+	// Option (c) of that ruling: an enrolment is still judged at its own
+	// place, so a key-set change or a collector reset between its acceptance
+	// and its record breaks the chain; and one acceptance names at most one
+	// revocation, across a reset.
+	"a key-set change before an enrolment is applied": func(ms []map[string]any) []map[string]any {
+		return []map[string]any{ms[0], ms[1], ms[2], c8v13Rotation(), ms[3]}
+	},
+	"a collector reset before an enrolment is applied": func(ms []map[string]any) []map[string]any {
+		return []map[string]any{ms[0], ms[1], ms[2], c8v13Reset(), ms[3]}
+	},
+	"two revocations of one acceptance across a reset": func(ms []map[string]any) []map[string]any {
+		return append(ms[:6], c8v13Reset(), c8v13Revoked())
+	},
+}
+
+// c8v13Rotation is a policy.apply admin_keys record that follows the chain's
+// key set and lists its one key as revoked.
+func c8v13Rotation() map[string]any {
+	_, old := c8v13KeySet(authz.KeyActive, authz.KindNodeSensorEnrol, authz.KindNodeSensorRevoke)
+	m, _ := c8v13KeySet(authz.KeyRevoked, authz.KindNodeSensorEnrol, authz.KindNodeSensorRevoke)
+	m["admin_keys"].(map[string]any)["previous_digest"] = old
+	return m
+}
+
+// c8v13Reset is a collector.seq_reset after collector_seq 31: a new epoch.
+func c8v13Reset() map[string]any {
+	m := c8v13Rec("collector.seq_reset", "info", nil)
+	delete(m, "sensor")
+	delete(m, "target")
+	m["previous_high"], m["install_key_id"] = 31, "site-a-node-1.collector-install.2"
+	return m
 }
 
 // c8v13Rekeyed replaces the chain's key set, and names its digest on every
@@ -821,6 +866,15 @@ func TestC8v13C88Chain(t *testing.T) {
 			c8v13S(ms[5])["reason"] = "renew"
 			return ms
 		},
+		// Option (c): a revocation written late is judged by the key set and
+		// the epoch in force at its acceptance, so neither a key-set change
+		// nor a collector reset after the acceptance breaks it.
+		"a revocation applied after a key-set change": func(ms []map[string]any) []map[string]any {
+			return []map[string]any{ms[0], ms[1], ms[2], ms[3], ms[4], c8v13Rotation(), ms[5]}
+		},
+		"a revocation applied after a collector reset": func(ms []map[string]any) []map[string]any {
+			return []map[string]any{ms[0], ms[1], ms[2], ms[3], ms[4], c8v13Reset(), ms[5]}
+		},
 	} {
 		_, recs := c8v13Seal(t, edit(c8v13Chain()))
 		if err := audit.VerifySensorFrom(recs, 1); err != nil {
@@ -853,9 +907,9 @@ func TestC8v13C88Chain(t *testing.T) {
 // C8-8, D1's option (a) of 6894951825 on #699: when the decision is in the
 // view, sensor.revoked's generation, sensor_spki, reason and suspect_from,
 // and a succeeded sensor.enrolled's generation and sensor_spki, equal the
-// C8-6 record's.
+// C8-6 record's. The control is TestC8v13C88Chain's valid chain, whose
+// copies are equal.
 func TestC8v13C88CopiedFields(t *testing.T) {
-	t.Skip("owed: D3 adds C8-8's comparison of the copied fields to this PR (D1's 6894951825 on #699); this leg is pinned when it lands")
 	for name, edit := range map[string]func(ms []map[string]any){
 		"revoked, another generation":   func(ms []map[string]any) { c8v13S(ms[5])["generation"] = "2" },
 		"revoked, another pin":          func(ms []map[string]any) { c8v13S(ms[5])["sensor_spki"] = c8v13P2 },
