@@ -6,29 +6,42 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"otsec.local/otsec/modules/security/collectorwire"
 )
 
-// closeSignalConn reports when the server closes its end.
+// closeSignalConn reports when the server closes its end, and whether the
+// server's lock was held at that moment.
 type closeSignalConn struct {
 	net.Conn
-	once   sync.Once
-	closed chan struct{}
+	mu         *sync.Mutex
+	lockedAtCl atomic.Bool
+	once       sync.Once
+	closed     chan struct{}
 }
 
 func (c *closeSignalConn) Close() error {
-	c.once.Do(func() { close(c.closed) })
+	c.once.Do(func() {
+		if c.mu.TryLock() {
+			c.mu.Unlock()
+		} else {
+			c.lockedAtCl.Store(true)
+		}
+		close(c.closed)
+	})
 	return c.Conn.Close()
 }
 
 // lateListener hands over one connection only once Close has begun: Accept
 // blocks until release is closed. With handInClose, its own Close releases
-// the connection and waits, bounded, for the server to close it, so the
-// connection is accepted while Server.Close runs. Without it, the test
-// releases the connection after Server.Close has returned.
+// the connection and then waits, for at most 10 s, for the server to close
+// it. That wait is the test's, not the server's: Server.Close calls this
+// Close synchronously, so the wait is what orders the connection's close
+// before Server.Close returns. Without handInClose, the test releases the
+// connection after Server.Close has returned.
 type lateListener struct {
 	conn        *closeSignalConn
 	handInClose bool
@@ -65,11 +78,15 @@ func (l *lateListener) Addr() net.Addr { return &net.UnixAddr{Name: "late", Net:
 
 // TestConnAcceptedDuringCloseNotDecided: a connection that Accept returns
 // only after Close has begun carries a well-formed request, and no request
-// on it is decided: neither Handle nor Refuse is called (P4-COL-2, D4-107
-// item 5.1). In "during", the connection is accepted while Close runs, and
-// Close returns only after the server has closed it. In "after", it is
-// accepted once Close has returned, the order D6's N1 names; the server
-// closes it unserved and Serve returns ErrServerClosed.
+// on it is decided: neither Handle nor Refuse is called, and Serve closes it
+// unserved and returns ErrServerClosed (P4-COL-2, D4-107 item 5.1). The
+// server's lock is free when it closes the connection and after Serve
+// returns.
+//
+// In "during", the connection is accepted while Close runs. Server.Close
+// does not wait for it; lateListener.Close's own bounded wait is what makes
+// the connection close before Server.Close returns. In "after", it is
+// accepted once Close has returned, the order D6's N1 names.
 func TestConnAcceptedDuringCloseNotDecided(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -86,14 +103,14 @@ func TestConnAcceptedDuringCloseNotDecided(t *testing.T) {
 				client.Close()
 			}()
 
+			h := &fakeHandler{}
+			s := &Server{Handler: h, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			ln := &lateListener{
-				conn:        &closeSignalConn{Conn: server, closed: make(chan struct{})},
+				conn:        &closeSignalConn{Conn: server, mu: &s.mu, closed: make(chan struct{})},
 				handInClose: tc.handInClose,
 				release:     make(chan struct{}),
 				closing:     make(chan struct{}),
 			}
-			h := &fakeHandler{}
-			s := &Server{Handler: h, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			served := make(chan error, 1)
 			go func() { served <- s.Serve(ln) }()
 			waitServing(t, s)
@@ -109,7 +126,7 @@ func TestConnAcceptedDuringCloseNotDecided(t *testing.T) {
 				select {
 				case <-ln.conn.closed:
 				default:
-					t.Fatal("Close returned before the connection accepted during it was closed")
+					t.Fatal("the server did not close the connection accepted during Close within lateListener.Close's 10 s wait")
 				}
 			} else {
 				ln.relOnce.Do(func() { close(ln.release) })
@@ -130,6 +147,13 @@ func TestConnAcceptedDuringCloseNotDecided(t *testing.T) {
 			if handled, refused := h.counts(); handled != 0 || refused != 0 {
 				t.Fatalf("a request on a connection accepted after Close began was decided: handled %d, refused %d", handled, refused)
 			}
+			if ln.conn.lockedAtCl.Load() {
+				t.Fatal("s.mu was held when the server closed the connection")
+			}
+			if !s.mu.TryLock() {
+				t.Fatal("s.mu is still held after Serve returned")
+			}
+			s.mu.Unlock()
 		})
 	}
 }
