@@ -2518,3 +2518,20 @@ Evidence class: `desk`; `CI-Windows` for the run named.
   3. Briefs P4-COL-2 and P4-C8-T (D3) are issued in the same section, for D4-107 item 5.1 and D4-108 item 3.1. D3 takes them one after the other.
   4. D6's B1 to B4 and N1 to N4 on #708 (6900141437) are taken into the three briefs: P4-NODE-WT's time is judged on a median of at least three runs, and its stuck-start test has a "slow, not held" control; P4-COL-2's half-fix mutant is recorded, not killed by a test-only hook; and P4-C8-T covers every C8 time field whose schema pattern refuses the comma (D6's R1 to R3, 6900177641, are taken too).
 - **Next decision number:** D4-111.
+
+## D4-111: this session's residuals, a narrower "same base", and HR-25's deliverable 3 split (D1, 2026-11-15)
+
+Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the runs named on each PR.
+
+- **1. #710 (P4-COL-2), two residuals accepted** (D1's 6900059567; D6's B3 on #708 and review 5912541416 on #710).
+  1. A connection that `Accept` gives just before the listener closes, and that reaches `Serve`'s check after `Close`'s wait has ended, is closed unserved by `Serve`; `Close` does not wait for it. No request on it is decided. In the collector binary, `running.stop` waits for `Serve` to return, so the binary does not exit before that close (D2's 6900071620).
+  2. Two mutants are recorded, not killed: the check under the lock with `wg.Add` after it (M3), and an unlocked read of `closed` (M7). Killing them needs a test-only seam in the collector's server, which D1 declined. The code comment states that the check and `wg.Add` hold the lock together.
+- **2. #712 (P4-C8-T), one residual accepted** (D1's 6900498836; D6's review 5912677956). `parseConfigTime` keeps `main`'s looser parse, so `VerifyConfigFrom` would parse a comma-form time on a `*Record` that never passed `Validate`. Its precondition requires validated records; every product reader of a stored chain uses `ParseRecord`, and the node's one `ApprovalCovers` call passes a record that goes through `ValidatePending` before it is stored (D6). Only the tests `TestC8V06B6D418` and `TestC8V06B6Keeps05` build such records. The code refuses instants that do not exist (30 February, hour 24) though the schema's pattern admits them, as `main` already did.
+- **3. "The same base" in D4-109 item 4, read narrowly.** An unmutated pass counts at a commit whose tree differs from the mutant's base only in files that skip CI (CLAUDE.md, "Testing and merging"), and the review shows that diff. #713's pass at `6b1a27e3` against the mutant's base `f5d438d6`, which differ only in `HANDOFF.md` and `docs/phase4/B1-decisions.md`, counts.
+- **4. The `relayKinds` probe's limit (#713).** The mutant is killed only by the status check: the node stamps `otsec.audit/0.11`, and `Admin.validate` refuses a sensor kind below 0.13, so `relayOne` sends nothing. Once the node's writer stamps 0.13, `relayKinds` is the only barrier. **Owed by the dialer-and-enrolment brief:** the probe rerun at that writer, with the collector check firing as well as the status check.
+- **5. HR-25's deliverable 3, split** (D4's 6900745749 and 6900746074 on #714):
+  1. **#714 (D6):** the builder and captures of the 112 `dnp3-resync-*` cases and their twins (row `pin-builder`).
+  2. **Brief P4-4-HR2325S (D6)**, issued in `docs/agent-handoffs.md`, "After D4-109: work resumes", to start after #714 merges: HR-23's stage-2 cases (brief P4-4-HR23), the false-positive set built once for both, HR-23's malformed set, and S5's inputs and baselines packed as D4's 6900746074 states. Row `s5-inputs` of `resync-conditions.tsv` may be amended for that packing in this brief: no run has counted, and `RESYNC_CONDITIONS_SHA256` enters `pins.env` only in D4's build.
+  3. **D4:** HR-23's stage-3 build (option (i), brief P4-4-HR23), started on this day with its counted run held; then HR-25's build on top of it, with the two `pins.env` lines, the coverage site map and the seed converter.
+  4. **The counted runs** of HR-23 and HR-25 start only after item 2's PR merges.
+- **Next decision number:** D4-112.

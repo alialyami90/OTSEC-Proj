@@ -2370,3 +2370,26 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no C8 change beyond the time fields' form and precision.
 - Uncertainty or safety risks: a writer that emits the comma form today would have its records refused; the PR states, by search, that no writer on `main` does.
 - Scratch files: `d3-c8t-*`
+
+### P4-4-HR2325S (D6; D4 and D2 review the labels, D3 the parse surface): HR-23's stage-2 cases and the rest of HR-25's inputs (issued 2026-11-15, D4-111)
+- Objective and rationale: HR-23 and HR-25 must close on measured fixes before item 4's gate (D4-98). Their counted runs need every input built and pinned first (D4-111 item 5). One generator serves both, so the false-positive set is built once.
+- Owner, and the reviewers (CLAUDE.md §5.6): a D6 writing instance. D4 and D2 review the labels; D3 reviews for the sensor host's parse surface (HR-21). No D6 instance that wrote this reviews it.
+- Required inputs and dependencies:
+  - starts after #714 merges, and builds on its builder;
+  - brief P4-4-HR23, stage 2, and `docs/phase4/D4-hr23-design.md` §4.3;
+  - `docs/phase4/D4-hr25-design.md` §2.10 and §3; `docs/phase4/D6-hr25-resync-conditions.md`; rows `fp-*`, `chg-malformed`, `chg-eof`, `fuzz-seeds`, `fuzz-bit7`, `rerun-scope`, `s5-*` of `resync-conditions.tsv`;
+  - D4's packing of S5's inputs and baselines, 6900746074 on #714, and D4's list of what must be built, 6900745749 (question 4).
+- Files or modules each role may modify: D6, the GT-PCAP paths (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) and `.github/workflows/a6-gt-pcap.yml`. `resync-conditions.tsv`'s row `s5-inputs` only, for the TCP counts per connection that D4's packing gives, with `test_resync_conditions.py`'s pinned hash updated in the same commit.
+- Expected interfaces: C13 0.3 (D4-102). No contract change.
+- Deliverable, in order, each its own PR:
+  1. HR-23's stage-2 cases and pass conditions, the shared false-positive set, and HR-23's malformed set;
+  2. S5's seven inputs and two baselines, with row `s5-inputs` amended.
+- Acceptance tests:
+  - every capture is rebuilt in `a6-gt-pcap`, checked against committed hashes and labels, and each expected tshark difference is listed with its cause, as #714 does;
+  - labels come from how each case was built, never from an engine; the control's expected result is pinned row by row, and a row the control passes reads `unknown` for the fix;
+  - each builder rule has a test with a named control shown failing;
+  - the self-check list in this file, with the items that apply named.
+- Owed: the same cases on the real sensor over the rig (the sensor's brief).
+- Explicit exclusions: no edit to `pins.env` or `modules/telemetry/`; no engine run that counts; no device contact.
+- Uncertainty or safety risks: a label that rests on unread Zeek code is a finding when the run disagrees, never a reason to edit the pin after the run.
+- Scratch files: `d6-hr2325s-*`
