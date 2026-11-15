@@ -376,34 +376,40 @@ func (n *networkChain) adminKeys(r *Record) error {
 // revoked key's decision breaks the chain, D6 on #545). With no admin_keys
 // record yet, it is unknown in a view that starts after seq 1.
 func (n *networkChain) granted(r, acc *Record) error {
+	return n.grantedUnder(r, acc, n.keys)
+}
+
+// grantedUnder is granted's check against keys, an admin_keys record, or nil
+// when none comes before the point that names the key set.
+func (n *networkChain) grantedUnder(r, acc, keys *Record) error {
 	if !atLeast(acc, networkSince) {
 		return nil
 	}
 	v := acc.Verified
-	if n.keys == nil {
+	if keys == nil {
 		if n.cut {
 			return nil
 		}
 		return broken("record %d applies decision %d before any policy.apply records the key set %s", r.Seq, acc.CollectorSeq, v.KeysDigest)
 	}
-	if n.keys.AdminKeys.Digest != v.KeysDigest {
-		return broken("record %d applies a decision made under key set %s, but the latest admin_keys record (%d) is %s", r.Seq, v.KeysDigest, n.keys.Seq, n.keys.AdminKeys.Digest)
+	if keys.AdminKeys.Digest != v.KeysDigest {
+		return broken("record %d applies a decision made under key set %s, but the admin_keys record in force (%d) is %s", r.Seq, v.KeysDigest, keys.Seq, keys.AdminKeys.Digest)
 	}
-	for _, e := range n.keys.AdminKeys.Keys {
+	for _, e := range keys.AdminKeys.Keys {
 		if e.KeyID != v.AdminKeyID {
 			continue
 		}
 		if e.Status != authz.KeyActive {
-			return broken("record %d applies a decision signed by %s, which the key set in record %d lists as %s", r.Seq, v.AdminKeyID, n.keys.Seq, e.Status)
+			return broken("record %d applies a decision signed by %s, which the key set in record %d lists as %s", r.Seq, v.AdminKeyID, keys.Seq, e.Status)
 		}
 		for _, k := range e.Kinds {
 			if k == v.Kind {
 				return nil
 			}
 		}
-		return broken("record %d applies %s signed by %s, whose kinds in record %d do not include it", r.Seq, v.Kind, v.AdminKeyID, n.keys.Seq)
+		return broken("record %d applies %s signed by %s, whose kinds in record %d do not include it", r.Seq, v.Kind, v.AdminKeyID, keys.Seq)
 	}
-	return broken("record %d applies a decision signed by %s, which the key set in record %d does not hold", r.Seq, v.AdminKeyID, n.keys.Seq)
+	return broken("record %d applies a decision signed by %s, which the key set in record %d does not hold", r.Seq, v.AdminKeyID, keys.Seq)
 }
 
 // atLeast reports whether r is stamped with minor or a later one.
