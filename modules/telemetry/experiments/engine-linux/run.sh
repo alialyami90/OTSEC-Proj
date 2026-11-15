@@ -72,15 +72,23 @@ if [ "$mode" = hr23-unit ]; then
   rm -rf "$u"
   python3 -I "$here/zeek-patch/dispatch_unit.py" write "$u/pcaps"
   mkdir -p "$u/out"
-  for c in "zeek-probe-c1p $HR23_C1P_IMAGE" "zeek-probe-c2 $HR23_C2_IMAGE"; do
+  # C0, the stock image with the script as before part (a), for D1's
+  # experiment on #715 (the `*-first` cases are quoted under C0 too).
+  docker pull -q "$ZEEK_IMAGE" > /dev/null
+  zv=$(docker run --rm --network none "$ZEEK_IMAGE" zeek --version)
+  [ "$zv" = "$ZEEK_VERSION" ] || { echo "Zeek image is not $ZEEK_VERSION: $zv" >&2; exit 1; }
+  for c in "zeek-probe-c0 $ZEEK_IMAGE OtsecProbe::log_dir=F" "zeek-probe-c1p $HR23_C1P_IMAGE" "zeek-probe-c2 $HR23_C2_IMAGE"; do
     set -- $c
+    cfg=$1
+    im=$2
+    shift 2
     docker run --rm --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
-      "$2" sh /exp/in-container.sh zeek "$1" /exp/probe.zeek
+      "$im" sh /exp/in-container.sh zeek "$cfg" /exp/probe.zeek "$@"
   done
   rc=0
   { echo "# HR-23: D4's unit and negative tests of option (i)'s patch"; echo
     echo "D4's own inputs (\`d4u-*\`), not GT-PCAP or stage 2's cases; no counted measurement reads them. Each test's"
-    echo "control is C1p, the same tree without the patch."; echo
+    echo "control is C1p, the same tree without the patch. C0 (the stock image) runs for D1's experiment on #715."; echo
     python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?; } > "$work/hr23-unit.md"
   cat "$work/hr23-unit.md"
   [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/hr23-unit.md" >> "$GITHUB_STEP_SUMMARY"
