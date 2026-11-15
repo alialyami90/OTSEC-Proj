@@ -2372,7 +2372,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Scratch files: `d3-c8t-*`
 
 ### P4-4-HR2325S (D6; D4 and D2 review the labels, D3 the parse surface): HR-23's stage-2 cases and the rest of HR-25's inputs (issued 2026-11-15, D4-111)
-- Objective and rationale: HR-23 and HR-25 must close on measured fixes before item 4's gate (D4-98). Their counted runs need every input built and pinned first (D4-111 item 5). One generator serves both, so the false-positive set is built once.
+- Objective and rationale: HR-23 must close on a measured fix before item 4's gate (D4-98); whether HR-25 blocks the gate is still the owner's question (D4-101 item 8). Both counted runs need every input built and pinned first (D4-111 item 5). One generator serves both, so the false-positive set is built once.
 - Owner, and the reviewers (CLAUDE.md §5.6): a D6 writing instance. D4 and D2 review the labels; D3 reviews for the sensor host's parse surface (HR-21). No D6 instance that wrote this reviews it.
 - Required inputs and dependencies:
   - starts after #714 merges, and builds on its builder;
@@ -2396,7 +2396,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 
 ### P4-4-INT (D5 with D4; D6, D3 and D4 review): the C13 0.2 intake, unwired (issued 2026-11-15, D4-111)
 - Objective and rationale: R6 (passive network monitoring) and P5. The node's intake still reads C13 0.1 (D4-103). This brief moves it to the approved C13 0.2 and 0.3 (D4-92, D4-102): heartbeats, coverage gaps, the cursor and `sensorrun.json`, and it carries the owed tests that P4-4-CC's "Owed" table gives to "the C13 0.2 intake brief".
-- Owner, and the reviewers (CLAUDE.md §5.6): D5 writes the node's intake; D4 writes the detector change and the C13 code change below. D6 reviews for reliability and the owed tests, D3 for trust boundaries, and D4 for C13's meaning in D5's PR (D5 reviews D4's for the node's calls).
+- Owner, and the reviewers (CLAUDE.md §5.6): D5 writes the node's intake; D4 writes the detector change and the C13 code change below. D5's PR: D6 for reliability and the owed tests, D3 for trust boundaries, and D4 for C13's meaning. D4's PR: D6 for detection accuracy, D2 for protocol interpretation, and D5 for the node's calls.
 - Required inputs and dependencies:
   - C13 0.2 (`docs/phase4/D4-c13-netobs.md`, `docs/phase4/D4-c13-0.2-proposal.md`, and D4-106 item 1.3's amended text, which is the source where they differ) and C13 0.3 (`docs/phase4/D4-c13-0.3-proposal.md`); `contracts/netobs/`;
   - `docs/phase4/D5-sensor-node.md` §1.4, §1.6, §1.8, §1.9 and §1.15;
@@ -2418,6 +2418,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - D4-104 item 1.3's invariant: a stored record's schema is the minor the node checked strictly on the channel; its control stores the schema the sensor sent;
   - R-6's node leg: the node passes the hello's schema to `DecodeFromSensorIn`; its control decodes every frame with `DecodeFromSensor` (D4-108 item 4);
   - a 0.1 counter sent as `null` on the 0.2 channel is refused (D4's PR);
+  - **D4-111 item 4.1:** if a PR of this brief is the first to raise `audit.ContractID` to 0.13, the `relayKinds` probe reruns on its head before `relayKinds` is widened, with the collector check firing;
   - **F-027's gate:** the merge-check greps show no product caller of `ServeSensor`, no `network_sensor` section outside the tests, and no wired intake entry point (D4-96);
   - the self-check list in this file, with the items that apply named.
 - Owed: the rig legs (the sensor's brief and D6's rig brief); N-14 if P4-4-HR24's stage 3 has not merged.

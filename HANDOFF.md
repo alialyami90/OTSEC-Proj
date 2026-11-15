@@ -26,7 +26,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **CHECKPOINT (D1), 2026-11-15, later (D4-110, D4-111).** Merged: #708 (D4-110 and three briefs), #713 (F-027's `relayKinds` probe, killed on `CI-Linux` and `CI-Windows`). Open PRs: `gh pr list`. Where each stands:
 - #710 (P4-COL-2) and #712 (P4-C8-T): accepted; merge after `ci-long` and D1's merge check.
-- #714 (HR-25's builder, D6): D2's B1, B2 and D4's B1, N1 being fixed by a fresh D6; then D2 and D4 re-read, and D3 reviews for the parse surface.
+- #714 (HR-25's builder, D6): D2's B1, B2 and D4's B1, N1 fixed at `4a1abee3`; D2 and D4 accept that head, and D3 reviews it for the parse surface.
 - #711 (P4-NODE-WT, D5): option (B) (D4-111 item 6). D6's `ci.yml` change runs `platform/node` alone; then a fresh D5 rebases #711 onto it.
 - HR-23's stage-3 build (D4): under way, its counted run held (D4-111 item 5).
 - **Next, in order:** brief P4-4-HR2325S (D6) after #714 merges; HR-25's build (D4) after HR-23's; the counted runs after P4-4-HR2325S; then P4-4-INT and P4-4-DE (D5), after #711. The night checkpoint's items 3 to 5 stand where these do not replace them.
