@@ -36,8 +36,8 @@ type HelloState struct {
 	// stated, and the D at which they were last accepted (CH-40).
 	Spans []Span
 	Ds    uint64
-	// PinnedBy is the first pinned_by seen in the live generation, "" when
-	// none has been (CH-33).
+	// PinnedBy is the pinned_by of the first hello accepted in the live
+	// generation, "" when none has been (CH-33).
 	PinnedBy string
 	// ConfigDigest is the expected digest, network_sensor's (CH-32).
 	ConfigDigest string
@@ -71,9 +71,14 @@ type HelloVerdict struct {
 	SpansWidened   bool
 }
 
-// JudgeHello applies CH-13 to a hello that Validate passed (row 1), in its
-// order, the first failure deciding. CH-40's widening check needs the run's
-// held spans, so it is applied at row 5 or 6, still closing as hello.
+// JudgeHello applies CH-13 to a hello that Validate passed (row 1), the
+// first failure deciding, in CH-13's order: rows 2 to 4, then row 7, then
+// row 5 (5a first) or row 6, then rows 8 and 9. Identity and regression
+// (rows 2 to 4, 7 and 5a) are decided before any of the sensor's
+// declarations (prior, drops_channel, lost, prior.lost) is judged, so no
+// declaration can turn an audited close into hello (D1's ruling on #687).
+// CH-40's widening check needs the run's held spans, so it is applied at
+// row 5 or 6, still closing as hello.
 func JudgeHello(s HelloState, h *SensorHello) HelloVerdict {
 	var v HelloVerdict
 	close := func(r string) HelloVerdict { return HelloVerdict{Close: r} }
@@ -91,8 +96,17 @@ func JudgeHello(s HelloState, h *SensorHello) HelloVerdict {
 		return close(CloseRunRegressed)
 	case counter == saved.RunCounter && h.RunID != saved.RunID: // row 4
 		return close(CloseRunForked)
-	case counter == saved.RunCounter: // row 5, a resume
-		if h.Prior != nil || drops < saved.D {
+	}
+	// Row 7.
+	if s.PinnedBy != "" && h.PinnedBy != s.PinnedBy {
+		return close(CloseBinding)
+	}
+	if counter == saved.RunCounter { // row 5, a resume
+		// 5a: the sensor's disk holds less of the run than the node.
+		if num(h.NewestSeq) < saved.Taken || drops < saved.D {
+			return close(CloseRunRegressed)
+		}
+		if h.Prior != nil {
 			return close(CloseHello)
 		}
 		v.Accept = HelloResume
@@ -100,17 +114,14 @@ func JudgeHello(s HelloState, h *SensorHello) HelloVerdict {
 			return close(CloseHello)
 		}
 		if saved.Generation < s.Generation {
-			v.Accept = HelloResumeRenewed
-		}
-		if num(h.NewestSeq) < saved.Taken { // 5a
-			return close(CloseRunRegressed)
+			v.Accept = HelloResumeRenewed // 5b
 		}
 		widened, ok := widenedSpans(s.Spans, s.Ds, h.Lost, drops)
 		if !ok {
 			return close(CloseHello)
 		}
 		v.SpansWidened = widened
-	default: // row 6, a new run
+	} else { // row 6, a new run
 		if h.Prior == nil {
 			return close(CloseHello)
 		}
@@ -123,10 +134,6 @@ func JudgeHello(s HelloState, h *SensorHello) HelloVerdict {
 		}
 		v.Accept, v.SpansWidened = HelloNewRun, widened
 		v.RunsUndeclared = num(h.Prior.RunsSkipped) != counter-saved.RunCounter-1
-	}
-	// Row 7.
-	if s.PinnedBy != "" && h.PinnedBy != s.PinnedBy {
-		return close(CloseBinding)
 	}
 	// Rows 8 and 9.
 	v.DigestMismatch = h.ConfigDigest != s.ConfigDigest
