@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -449,6 +450,56 @@ func TestSensorNullRefused(t *testing.T) {
 	}
 }
 
+// S1 (D1's 6896052095 on #699): "" and 0, which the decoder reads as
+// absent, are refused for every key of the sensor object, stored or pending,
+// on every action, so that the object carries exactly its keys. Control: the
+// strict decoder alone accepts the bytes and reads the key as absent. A
+// streams value of 0 is a seq, and stays valid (St1).
+func TestSensorUnsetRefused(t *testing.T) {
+	good := sensorGood()
+	for _, record := range []string{"enrolled, previous", "revoked, suspect and voids", "link_refused", "collector.request, suspect"} {
+		for _, f := range reflect.VisibleFields(reflect.TypeOf(Sensor{})) {
+			var zero any
+			switch f.Type.Kind() {
+			case reflect.String:
+				zero = ""
+			case reflect.Uint64:
+				zero = 0
+			default:
+				continue // streams: an object, whose {} is valid
+			}
+			name := fmt.Sprintf("%s: %s %v", record, jsonName(f), zero)
+			b, _ := json.Marshal(good[record])
+			var m map[string]any
+			_ = json.Unmarshal(b, &m)
+			sensorObj(m)[jsonName(f)] = zero
+			b, _ = json.Marshal(m)
+			var r Record
+			if err := strictjson.Decode(b, &r); err != nil || !reflect.ValueOf(*r.Sensor).FieldByIndex(f.Index).IsZero() {
+				t.Fatalf("%s: control, the strict decoder: %v", name, err)
+			}
+			if _, err := ParseRecord(b); !errors.Is(err, ErrRecordRejected) || !strings.Contains(fmt.Sprint(err), "reads as absent") {
+				t.Errorf("%s: stored, %v", name, err)
+			}
+			delete(m, "seq")
+			delete(m, "prev_hash")
+			pending, _ := json.Marshal(m)
+			if _, err := ValidatePending(pending); !errors.Is(err, ErrRecordRejected) || !strings.Contains(fmt.Sprint(err), "reads as absent") {
+				t.Errorf("%s: pending, %v", name, err)
+			}
+		}
+	}
+	// streams with both keys at 0 is the record of a link ended with both
+	// streams empty, and is read.
+	b, _ := json.Marshal(good["revoked, both streams empty"])
+	if !bytes.Contains(b, []byte(`"streams":{"observation_through_seq":0,"alert_through_seq":0}`)) {
+		t.Fatalf("no zeros in %s", b)
+	}
+	if _, err := ParseRecord(b); err != nil {
+		t.Errorf("streams with both keys at 0: %v", err)
+	}
+}
+
 // C8-6: the sensor target and object only on an allowed, verified sensor
 // kind, and required there.
 func TestSensorRequest(t *testing.T) {
@@ -685,6 +736,50 @@ func TestVerifySensorFromCut(t *testing.T) {
 	}
 	if err := VerifySensorFrom(append(cloneSensorChain(recs), late), 1); !errors.Is(err, ErrChainBroken) {
 		t.Fatalf("the same from seq 1: %v, want broken", err)
+	}
+
+	// The bound (D3's B1 on #699, D1's 6896052095). From seq 3 the view's
+	// lowest collector_seq is 10. A record whose decision is at or above it,
+	// with no acceptance in view, breaks: only a decision below it is before
+	// the view. Controls: the mutant that drops "s.DecisionSeq >= low" from
+	// the revocation's case (M1) accepts the first two; the one that drops
+	// "s.DecisionSeq < low" from the enrolment's unknown case (M3) accepts
+	// the third.
+	for name, edit := range map[string]func(recs []*Record){
+		"a revocation at the bound, its acceptance not in view": func(recs []*Record) {
+			recs[6].Sensor.DecisionSeq, recs[6].Sensor.PayloadSHA256 = 10, payloadOf(99)
+		},
+		"a revocation above the bound, no acceptance": func(recs []*Record) {
+			recs[6].Sensor.DecisionSeq, recs[6].Sensor.PayloadSHA256 = 13, payloadOf(13)
+		},
+		"an enrolment above the bound, no acceptance": func(recs []*Record) {
+			recs[4].Sensor.DecisionSeq, recs[4].Sensor.PayloadSHA256 = 13, payloadOf(13)
+		},
+	} {
+		recs := cloneSensorChain(sensorChain())
+		edit(recs)
+		if err := VerifySensorFrom(recs[1:], 3); !errors.Is(err, ErrChainBroken) {
+			t.Errorf("from seq 3, %s: %v, want broken", name, err)
+		}
+	}
+
+	// The bound is taken before the view's first collector.seq_reset (§11.2
+	// C8-8). From seq 5, epoch 0's lowest collector_seq is 11, and epoch 1
+	// holds the new collector's decision 1. A late sensor.revoked in epoch 1
+	// naming decision 9 is below epoch 0's bound, so it is unknown. Control:
+	// the mutant that takes the bound across resets (M4) puts it at 1, and
+	// breaks this chain. The epoch-1 cases without a later decision are in
+	// TestVerifySensorFromLateRevoked.
+	other := sensorAccept(8, 1, authz.KindNodeSensorEnrol, "1", testPinB)
+	other.Target.SensorID = "7c1e0d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+	reset := append(cloneSensorChain(sensorChain())[:5], resetRec(7), other, revokedRec(9, 9, "1", testPinA))
+	for _, r := range reset[5:] {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifySensorFrom(reset[3:], 5); err != nil {
+		t.Errorf("from seq 5, a decision in epoch 1 below the late revocation's: %v", err)
 	}
 }
 

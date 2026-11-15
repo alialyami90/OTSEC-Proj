@@ -774,7 +774,7 @@ func ParseRecord(b []byte) (*Record, error) {
 	}); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
 	}
-	if err := refuseSensorNull(b); err != nil {
+	if err := refuseSensorUnset(b); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRecordRejected, err)
 	}
 	var r Record

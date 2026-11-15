@@ -99,7 +99,8 @@ const maxAppliedAtDigits = 6
 //
 // The body's fields are checked by C7's own checks (authz), so the rules
 // have one source. JSON null is refused for every key of this object, and
-// for the object itself, as C13 refuses it (St1-b).
+// for the object itself, as C13 refuses it (St1-b); and "" and 0, which the
+// decoder reads as absent, for every key of this object (S1).
 type Sensor struct {
 	DecisionSeq        uint64 `json:"decision_seq,omitempty"`
 	PayloadSHA256      string `json:"payload_sha256,omitempty"`
@@ -349,12 +350,16 @@ func (r *Record) validateSensorRequest() error {
 	return nil
 }
 
-// refuseSensorNull refuses JSON null as the sensor object or as the value of
+// refuseSensorUnset refuses JSON null as the sensor object or as the value of
 // any of its keys, at any minor (St1-b). The decoders read a null as absent,
 // which would turn {"observation_through_seq":null,...} into {}, a record of
-// no link ended, and "previous_state":null into a known state. b is a
-// record's raw bytes; a malformed record is left for the decoder to refuse.
-func refuseSensorNull(b []byte) error {
+// no link ended, and "previous_state":null into a known state. It refuses ""
+// and 0 as the value of a key of the sensor object too, since the decoder
+// reads each as absent, so that the object carries exactly its keys (S1; D1's
+// 6896052095 on #699). A streams value of 0 is a seq, and stays valid (St1).
+// b is a record's raw bytes; a malformed record is left for the decoder to
+// refuse.
+func refuseSensorUnset(b []byte) error {
 	var rec struct {
 		Sensor json.RawMessage `json:"sensor"`
 	}
@@ -369,8 +374,11 @@ func refuseSensorNull(b []byte) error {
 		return nil
 	}
 	for _, f := range reflect.VisibleFields(reflect.TypeOf(Sensor{})) {
-		if v, ok := s[jsonName(f)]; ok && string(v) == "null" {
+		switch v, ok := s[jsonName(f)]; {
+		case ok && string(v) == "null":
 			return fmt.Errorf("sensor.%s is null", jsonName(f))
+		case ok && (string(v) == `""` || string(v) == "0"):
+			return fmt.Errorf("sensor.%s is %s, which reads as absent: a writer leaves the key out", jsonName(f), v)
 		}
 	}
 	var st map[string]json.RawMessage

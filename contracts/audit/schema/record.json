@@ -566,7 +566,7 @@
     "sensor": {
       "type": "object",
       "additionalProperties": false,
-      "description": "0.13: the sensor object, on sensor.enrolled, sensor.revoked, sensor.link_refused and C8-6's collector.request only, each with exactly its own keys (contracts/audit/sensor.go). No key is null.",
+      "description": "0.13: the sensor object, on sensor.enrolled, sensor.revoked, sensor.link_refused and C8-6's collector.request only, each with exactly its own keys (contracts/audit/sensor.go). No key is null, \"\" or 0.",
       "properties": {
         "decision_seq": {
           "type": "integer",
@@ -589,6 +589,7 @@
         },
         "sensor_address": {
           "type": "string",
+          "minLength": 1,
           "description": "C7: an IP literal and a port, 192.0.2.10:8443 or [2001:db8::10]:8443"
         },
         "node_spki": {
@@ -597,6 +598,7 @@
         },
         "node_address": {
           "type": "string",
+          "minLength": 1,
           "description": "C7: an IP literal, no port"
         },
         "not_after": {

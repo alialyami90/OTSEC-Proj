@@ -489,7 +489,8 @@
 // object with the verified body's generation and sensor_spki, and for a
 // revocation its reason and suspect_from; the info and denied records, and
 // every other kind, name no sensor. JSON null is refused as the sensor
-// object or the value of any of its keys. VerifySensorFrom checks C8-8's
+// object or the value of any of its keys, and "" and 0 as the value of any
+// of its keys, which a decoder reads as absent. VerifySensorFrom checks C8-8's
 // chain rules in a verifier of its own, and NetworkAckInForce is C8-9's
 // reader's rule. A sensor link that opens or closes is not an audit record
 // (C8-7).
