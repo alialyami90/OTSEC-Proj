@@ -2515,5 +2515,5 @@ Evidence class: `desk`; `CI-Windows` for the run named.
 - **1. Work resumes at the owner's word,** in HANDOFF's order of 2026-11-15, night.
   1. P4-4-HR25 deliverable 3's first step, D6's builder and captures (row `pin-builder`), is with a D6 writing instance.
   2. Brief P4-NODE-WT (D5) is issued in `docs/agent-handoffs.md`, "After D4-109". `platform/node` took 995.9 s on Windows in `main`'s push run 43748784508 at `6b1a27e3`. That is over D4-44's 720 s budget, and the budget stands.
+  3. Briefs P4-COL-2 and P4-C8-T (D3) are issued in the same section, for D4-107 item 5.1 and D4-108 item 3.1. D3 takes them one after the other.
 - **Next decision number:** D4-111.
-

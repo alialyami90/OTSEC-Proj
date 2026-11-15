@@ -2315,13 +2315,13 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 ## After D4-109: work resumes (issued 2026-11-15, D4-110)
 
 ### P4-NODE-WT (D5; D6 and D3 review): `platform/node` back under its Windows budget, and the stuck-start test that cannot tell its failure
-- Objective and rationale: P6 (deterministic verification). `platform/node` took 995.9 s on Windows in `main`'s push run 43748784508 at `6b1a27e3`, against the 720 s budget of D4-22, which D4-44 keeps. D4-101 item 7.6 and D4-107 item 5.4 record the earlier overruns. `TestSensorStartupStuckDoesNotHoldStart` (`platform/node/sensortest`) overran its 2 s bound on `Start` in run 43640098201, and that run cannot tell a slow `Start` from one the stuck startup held (D4-104 item 4).
+- Objective and rationale: P6 (deterministic verification). `platform/node` took 995.9 s on Windows in `main`'s push run 43748784508 at `6b1a27e3`, against the 720 s budget of D4-22, which D4-44 keeps. D4-101 item 7.6 and D4-107 item 5.4 record the earlier overruns. `TestSensorStartupStuckDoesNotHoldStart` (`platform/node/sensortest`) overran its 2 s bound on `Start` in run 43640098201's first attempt (Windows job 132585557495: "Start did not return within 2s"; D1's rerun passed), and that attempt cannot tell a slow `Start` from one the stuck startup held (D4-104 item 4).
 - Owner, and the reviewers (CLAUDE.md §5.6): D5 writes it. D6 reviews for reliability and for every test kept whole. D3 reviews only if a file outside `_test.go` files and test-only packages changes.
 - Required inputs and dependencies:
   - D4-22, D4-44, D4-104 item 4 and D4-107 item 5.4 in `docs/phase4/B1-decisions.md`;
   - `.github/workflows/ci.yml`, the steps "platform/node time budget (C5)" and "platform/node start times (P4-H2)";
-  - the Windows `go` job logs of runs 43748784508 and 43640098201, and the ten slowest tests the budget step prints, led on `6b1a27e3` by `TestC6RefusedMismatchIsNotReadAsNotNamed` (44.9 s) and four `TestConfigRead*` tests (15 to 26 s each).
-- Files or modules each role may modify: D5, `platform/node/` and its test packages. D6, `.github/workflows/ci.yml`'s two `platform/node` steps only, if D5's measurement asks for a CI change, in its own PR.
+  - the Windows `go` job logs of run 43748784508 and of run 43640098201's first attempt (job 132585557495; `gh run view 43640098201 --attempt 1`), and the ten slowest tests the budget step prints, led on `6b1a27e3` by `TestC6RefusedMismatchIsNotReadAsNotNamed` (44.9 s) and four `TestConfigRead*` tests (15 to 26 s each).
+- Files or modules each role may modify: D5, `platform/node/` and its test packages. D6, `.github/workflows/ci.yml`'s two `platform/node` steps only, which D1 owns and authorizes D6 to change here (D4-107 item 5.4), if D5's measurement asks for a CI change, in its own PR.
 - Expected interfaces: no contract change. No product behaviour changes; a fixture's cost that lives in product code is changed only with D3's review.
 - Deliverable:
   1. **The measurement, first, in the PR body:** where the time goes, from the per-test times of at least the last three green `main` Windows runs, with the share of the package's time that each cause takes. The cause is named from the logs and the code (`desk`, `CI-Windows`), or stated `unknown`.
@@ -2336,3 +2336,36 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no change to the 720 s budget or the 30-minute package timeout (D4-44); no Windows service created outside an elevated run on the owner's word; no run of `tests/security` or `tests/integration/syslogreceive` in full on the owner's PC.
 - Uncertainty or safety risks: a fixture shared to save time can hide one test's state from the next; each shared fixture is reset or proven read-only.
 - Scratch files: `d5-wt-*`
+
+### P4-COL-2 (D3; D6 and D2 review): `Server.Serve` registers a connection under the lock
+- Objective and rationale: P5 (secure failure behaviour). D4-107 item 5.1 (D6's N1 on #693, 6893427637): `Serve` in `modules/security/collector/server.go` calls `s.wg.Add` without holding `s.mu`, so a connection that `Accept` returns just before `Close` can still be decided after `Close` returns.
+- Owner, and the reviewers (CLAUDE.md §5.6): D3 writes it. D6 reviews for the test, and D2 for the collector's callers.
+- Required inputs and dependencies: D4-107 item 5.1; `Serve` and `Close` in `modules/security/collector/server.go`; brief P4-COL-1 above, whose closed branch this keeps.
+- Files or modules each role may modify: D3, `modules/security/collector/` only.
+- Expected interfaces: no contract change.
+- Deliverable: one PR. After `Accept` returns a connection, `Serve` takes `s.mu`, and if the server is closed it closes the connection unserved and returns `ErrServerClosed`; otherwise it calls `s.wg.Add` before releasing the lock.
+- Acceptance tests:
+  - **A forced-interleaving unit test:** a test listener whose `Accept` returns a connection only after `Close` has begun. `Close` returns only after that connection is closed, and no request on it is decided. The control is `main`'s order, `wg.Add` outside the lock, which the test fails.
+  - **CI:** both `go` jobs green, the new test named as a pass in each, not a skip.
+  - **Self-check:** the implementer runs the self-check list in this file.
+- Owed: none.
+- Explicit exclusions: no other change to the collector's server or wire.
+- Uncertainty or safety risks: a lock held across a blocking call; the lock covers only the check and `wg.Add`.
+- Scratch files: `d3-col2-*`
+
+### P4-C8-T (D3; D6 review, D1 for the contract): `time.utc`'s comma form refused, and its precision checked
+- Objective and rationale: P6. D4-108 item 3.1 (D6's probe on #703, 6898047901): `time.utc` in the comma form (`2026-11-15T10:00:00,5Z`) passes `ParseRecord` on `main`, though C8's schema refuses it, and `validateTime` in `contracts/audit/audit.go` counts fraction digits only after a `.`, so the comma form also skips the precision check. N2 closed the same gap for `applied_at`.
+- Owner, and the reviewers (CLAUDE.md §5.6): D3 writes it. D6 reviews for the tests, and D1 approves the contract change. D5 reviews if any node writer's output changes.
+- Required inputs and dependencies: D4-108 items 1.4 and 3.1; `validateTime` and the schema under `contracts/audit/schema/`; the `applied_at` fix of #699 as the pattern.
+- Files or modules each role may modify: D3, `contracts/audit/` (authorized by D1 for this fix).
+- Expected interfaces: C8 0.13, no version change: the code is brought to the schema it already states.
+- Deliverable: one PR.
+- Acceptance tests:
+  - `ParseRecord` refuses a record whose `time.utc` uses a comma, for every record kind that carries `time`; the control is `main`'s `validateTime`, which accepts it;
+  - the precision check counts the fraction's digits whichever separator reaches it, with an off-by-one mutant on the digit count killed;
+  - every existing golden under `contracts/audit/testdata/` still parses;
+  - **CI:** both `go` jobs green; the self-check list, with the items that apply named.
+- Owed: none.
+- Explicit exclusions: no other C8 change.
+- Uncertainty or safety risks: a writer that emits the comma form today would have its records refused; the PR states, by search, that no writer on `main` does.
+- Scratch files: `d3-c8t-*`
