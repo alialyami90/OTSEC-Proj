@@ -2,8 +2,9 @@ OTSEC patch for HR-23, option (i): Zeek 9.0.1's DNP3 analyzer picks the
 request or the response parser by the fragment's function code, not by the
 side of the connection (docs/phase4/D4-hr23-design.md, section 2.3; D1's
 ruling 1 on #675, D4-101 item 5). Codes 129 to 131 are parsed as a
-response; every other code, and a fragment of 0 or 1 application octets,
-as a request.
+response; every other code, and a fragment of fewer than 4 application
+octets, a response header's length, as a request (D2's (A) on #715, after
+D1's experiment there).
 
 Against: Zeek 9.0.1, zeek-9.0.1.tar.gz (its SHA-256 is in build.env).
 Applied from the top of the unpacked tree with `patch -p1 --fuzz=0`.
@@ -19,12 +20,12 @@ them upstream exists (D7's N1 on #675; D4-101 item 8).
  flow DNP3_Flow(is_orig: bool) {
  	flowunit = DNP3_PDU(is_orig) withcontext (connection, this);
  
-+	# OTSEC patch (HR-23, option (i)): true when the fragment's function
-+	# code, its second application octet, is 129 (RESPONSE), 130
-+	# (UNSOLICITED_RESPONSE) or 131 (AUTHENTICATE_RESP).
++	# OTSEC patch (HR-23, option (i)): true when the fragment holds a whole
++	# response header (4 octets) and its function code, its second octet,
++	# is 129 (RESPONSE), 130 (UNSOLICITED_RESPONSE) or 131 (AUTHENTICATE_RESP).
 +	function is_response_code(app: const_bytestring): bool
 +		%{
-+		if ( app.length() < 2 )
++		if ( app.length() < 4 )
 +			return false;
 +
 +		return app[1] == 0x81 || app[1] == 0x82 || app[1] == 0x83;
@@ -45,7 +46,7 @@ them upstream exists (D7's N1 on #675; D4-101 item 8).
 -} &byteorder = bigendian;
 +# OTSEC patch (HR-23, option (i)): the parser is picked by the function
 +# code, not by the side. Codes 129 to 131 are parsed as a response, every
-+# other code (and a fragment too short to carry one) as a request. The link
++# other code (and a fragment shorter than a response header) as a request. The link
 +# header stays the unit's first field, and the unit's length stays
 +# 9 + len - 5 - 1, as in Zeek 9.0.1's DNP3_Request and DNP3_Response.
 +type DNP3_PDU(is_orig: bool) = record {

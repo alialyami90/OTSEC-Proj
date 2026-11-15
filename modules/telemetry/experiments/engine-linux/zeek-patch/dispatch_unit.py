@@ -187,7 +187,8 @@ def seen(d):
 # Expectations. Each is (case, what, test), where test takes one build's
 # (msgs, links, violations) and returns True when met. `kind` says how C2
 # and C1p are read: "fix" passes when C2 meets it and C1p does not (C1p is
-# the control); "same" passes when both meet it.
+# the control); "same" passes when both meet it; "residual" is printed as
+# measured and never judged.
 RELAY_ALL = [(True, 129, "resp", ()), (False, 2, "req", ("g80v1",)), (True, 129, "resp", ()),
              (False, 0, "req", ()), (False, 13, "req", ()), (False, 2, "req", ("g80v1",)), (True, 129, "resp", ())]
 EXPECT = [
@@ -200,9 +201,29 @@ EXPECT = [
     ("d4u-master-start", "same", "the conforming flow's messages, as the control reads them",
      lambda m, l, v: m == [(True, 1, "req", ("g60v1",)), (False, 129, "resp", ()), (True, 2, "req", ("g80v1",)),
                            (False, 129, "resp", ())] and not v),
-    ("d4u-short-response-orig", "fix-negative", "a 2-octet 129 from the originator, after a whole one, throws in "
-     "the response parser, and the read after it is not seen",
-     lambda m, l, v: bool(v) and (False, 1, "req", ("g60v1",)) not in m),
+    # D2's (A), after D1's experiment on #715: a fragment shorter than a
+    # response header goes to the request parser under C2, as stock sends an
+    # originator's fragment, so the short 129 is parsed and the read after
+    # it is seen under both builds.
+    ("d4u-short-response-orig", "same", "a 2-octet 129 from the originator, after a whole one, is parsed by the "
+     "request parser, and the read after it is seen",
+     lambda m, l, v: (True, 129, "req", ()) in m and any(x[:2] == (False, 1) for x in m) and not v),
+    ("d4u-short-response-first", "same", "the same 129 as a UDP flow's first datagram: parsed by the request "
+     "parser, and the master's READ after it is seen, with no violation",
+     lambda m, l, v: m[:1] == [(True, 129, "req", ())] and any(x[:2] == (False, 1) for x in m) and not v),
+    ("d4u-short-response-first-tcp", "same", "the same over TCP",
+     lambda m, l, v: m[:1] == [(True, 129, "req", ())] and any(x[:2] == (False, 1) for x in m) and not v),
+    ("d4u-short-request-first-tcp", "same", "a truncated READ as a TCP flow's first segment: a recorded violation",
+     lambda m, l, v: m[:1] == [(True, 1, "req", ())] and bool(v)),
+    # A residual (D1's experiment on #715): a truncated READ as a UDP flow's
+    # first datagram stops stock Zeek with no record (the flow is named
+    # dnp3_udp, nothing after the throw is parsed, and no analyzer.log row
+    # is written), C1p and C2 alike. HR-25's row holds it. Measured and
+    # printed, never a pass: a fix that records the stop changes the
+    # reading, not the job.
+    ("d4u-short-request-first", "residual", "a truncated READ as a UDP flow's first datagram: the silent stop "
+     "(the READ's header only, one link row, no DNP3 analyzer.log row)",
+     lambda m, l, v: m == [(True, 1, "req", ())] and len(l) == 1 and not v),
     ("d4u-dir-clear-operate", "same", "the direct operate's g12v1 is parsed although DIR is clear",
      lambda m, l, v: (True, 5, "req", ("g12v1",)) in m and (True, False) in l),
 ]
@@ -233,6 +254,10 @@ def verdict(kind, c2, c1):
         return "unknown (not run)"
     if c2 not in ("met", "not met") or c1 not in ("met", "not met"):
         return "fail"
+    if kind == "residual":
+        # A known stop of stock Zeek's, printed as measured and never a
+        # pass, so that a fix which records it does not fail the job.
+        return "residual (measured, not judged)"
     if kind == "same":
         return "pass" if c2 == c1 == "met" else "fail"
     # "fix" and "fix-negative": C2 meets it and the control does not.
@@ -263,9 +288,10 @@ def check(out):
     for case, kind, what, test in EXPECT:
         c2, c1 = (state(os.path.join(out, case, cfg), test) for cfg in (C2, C1P))
         res = verdict(kind, c2, c1)
-        bad |= res != "pass"
+        ok = res == "pass" or res.startswith("residual")
+        bad |= not ok
         print(f"| {case} | {kind} | {what} | {c2} | {c1} | {res} |")
-        if res != "pass":
+        if not ok:
             failed.append(case)
     # What each build logged on a case with a row that did not pass: codes,
     # sides, object headers, DIR and analyzer.log's failure_reason only (no

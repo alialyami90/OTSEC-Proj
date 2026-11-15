@@ -42,6 +42,12 @@ def test_same_passes_only_when_both_meet_it():
     assert du.verdict("same", "not met", "met") == "fail"
 
 
+def test_a_residual_is_never_a_pass_and_still_fails_on_a_crash():
+    for c2, c1 in (("met", "met"), ("not met", "met"), ("met", "not met")):
+        assert du.verdict("residual", c2, c1) == "residual (measured, not judged)"
+    assert du.verdict("residual", "exit 139", "met") == "fail"
+
+
 def test_not_run_is_unknown_and_a_non_zero_exit_fails():
     assert du.verdict("same", "not run", "met") == "unknown (not run)"
     assert du.verdict("fix", "met", "not run") == "unknown (not run)"
