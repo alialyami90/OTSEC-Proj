@@ -258,17 +258,18 @@ func publicKey(key uintptr) (*ecdsa.PublicKey, error) {
 }
 
 // cngSigner signs with a CNG key. The handle stays open for the life of
-// the process, as the key is in use for as long as the node runs; only
-// OpenPinned frees one, through release, and only one it refused, which
-// no caller holds.
+// the process, as the key is in use for as long as the node runs. Only
+// release frees one: OpenPinned's for a signer it refused, and
+// Register.Certificate's for one refused on its period, which no caller
+// was handed.
 type cngSigner struct {
 	mu  sync.Mutex
 	key uintptr
 	pub *ecdsa.PublicKey
 }
 
-// release frees the handle of a CNG signer that OpenPinned refused. Any
-// other signer holds no handle.
+// release frees the handle of a CNG signer that OpenPinned or
+// Register.Certificate refused. Any other signer holds no handle.
 func release(s crypto.Signer) {
 	c, ok := s.(*cngSigner)
 	if !ok {

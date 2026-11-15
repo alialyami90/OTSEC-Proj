@@ -20,18 +20,23 @@ import (
 // key the file or the register names reach it only through
 // nodekey.OpenPinned, which frees a refused key's handle, and never through
 // a provider's Open, which would leave the caller holding a refused handle
-// (D6's N1 on #685). It holds for every non-test file of this package, and
-// for Register.LoadCertificate in nodekey. The packages are type-checked,
-// for the platform the test runs on, so a method value, a method
-// expression or an interface's Open is found as a call is. Controls: Load,
-// or LoadCertificate, back to the provider's Open: each compiles and is
-// named.
+// (D6's N1 on #685). No non-test package under modules, platform or cmd,
+// other than nodekey, uses a provider's Open: platform/sensorlink, which
+// keeps the link key, among them (D6's N2 on #697). In nodekey it holds for
+// Register.LoadCertificate. This package and LoadCertificate must each use
+// OpenPinned. The packages are type-checked, for the platform the test
+// runs on, so a method value, a method expression or an interface's Open
+// is found as a call is. The patterns are the module's own directories,
+// not ./..., because tools sits inside the checkout on the owner's PC.
+// Controls: Load, or LoadCertificate, back to the provider's Open, or a
+// provider's Open in platform/sensorlink: each compiles and is named.
 //
 // Limit: it reads static uses only, as keyUses does in
 // platform/node/sensortest.
 func TestOnlyPinnedOpens(t *testing.T) {
 	const nodekeyPath = "otsec.local/otsec/modules/security/nodekey"
-	cmd := exec.Command("go", "list", "-export", "-deps", "-json=ImportPath,Dir,Export,GoFiles,DepOnly", readerPath, nodekeyPath)
+	cmd := exec.Command("go", "list", "-export", "-deps", "-json=ImportPath,Dir,Export,GoFiles,DepOnly",
+		"otsec.local/otsec/modules/...", "otsec.local/otsec/platform/...", "otsec.local/otsec/cmd/...")
 	cmd.Stderr = os.Stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -63,9 +68,9 @@ func TestOnlyPinnedOpens(t *testing.T) {
 		}
 		return nil, errors.New("no export data for " + path)
 	})
-	checked := 0
+	read := map[string]bool{}
 	for _, p := range pkgs {
-		if p.DepOnly {
+		if p.DepOnly || len(p.GoFiles) == 0 { // a package of tests only
 			continue
 		}
 		var files []*ast.File
@@ -81,12 +86,7 @@ func TestOnlyPinnedOpens(t *testing.T) {
 			t.Fatalf("type-checking %s: %v", p.ImportPath, err)
 		}
 		var nodes []ast.Node
-		switch p.ImportPath {
-		case readerPath:
-			for _, f := range files {
-				nodes = append(nodes, f)
-			}
-		case nodekeyPath:
+		if p.ImportPath == nodekeyPath {
 			for _, f := range files {
 				for _, d := range f.Decls {
 					if fd, ok := d.(*ast.FuncDecl); ok && fd.Recv != nil && fd.Name.Name == "LoadCertificate" {
@@ -94,13 +94,15 @@ func TestOnlyPinnedOpens(t *testing.T) {
 					}
 				}
 			}
-		default:
-			continue
+		} else {
+			for _, f := range files {
+				nodes = append(nodes, f)
+			}
 		}
 		if len(nodes) == 0 {
 			t.Fatalf("%s: nothing to read", p.ImportPath)
 		}
-		checked++
+		read[p.ImportPath] = true
 		pinned := 0
 		for _, n := range nodes {
 			ast.Inspect(n, func(n ast.Node) bool {
@@ -122,12 +124,17 @@ func TestOnlyPinnedOpens(t *testing.T) {
 				return true
 			})
 		}
-		if pinned == 0 {
+		if pinned == 0 && (p.ImportPath == readerPath || p.ImportPath == nodekeyPath) {
 			t.Errorf("%s: no use of nodekey.OpenPinned found", p.ImportPath)
 		}
 	}
-	if checked != 2 {
-		t.Fatalf("%d of the 2 packages read", checked)
+	for _, want := range []string{readerPath, nodekeyPath, "otsec.local/otsec/platform/sensorlink", "otsec.local/otsec/platform/node", "otsec.local/otsec/cmd/otsec"} {
+		if !read[want] {
+			t.Errorf("%s was not read", want)
+		}
+	}
+	if len(read) < 20 { // 28 at the time of writing
+		t.Fatalf("only %d packages read", len(read))
 	}
 }
 

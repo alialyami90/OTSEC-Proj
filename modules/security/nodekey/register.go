@@ -370,6 +370,7 @@ func (r *Register) Certificate(ref string, keys Keys, now time.Time) (*tls.Certi
 		return nil, nil, err
 	}
 	if leaf := cert.Leaf; now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+		release(cert.PrivateKey.(crypto.Signer)) // refused here, so no caller holds it
 		return nil, nil, fmt.Errorf("%w: %s certificate is valid from %s to %s", ErrCertificatePeriod, ref, utc(leaf.NotBefore), utc(leaf.NotAfter))
 	}
 	return cert, e, nil

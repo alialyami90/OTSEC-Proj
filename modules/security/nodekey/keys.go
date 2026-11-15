@@ -52,10 +52,15 @@ var ErrKeyMismatch = errors.New("nodekey: the provider holds another key under t
 
 // OpenPinned opens the key with this name in keys and returns its signer
 // only when the key's public half, as PKIX DER, is spki. Otherwise it frees
-// the key's provider handle here, before it returns, and the error wraps
-// ErrKeyMismatch; so no caller ever holds a handle it refused, and no
-// package outside this one can free a signer (D4-106 item 3). An error of
-// Open, ErrNoKey among them, is returned as it is.
+// the provider handle of the signer keys.Open returned, before it returns,
+// and the error wraps ErrKeyMismatch; so no caller ever holds a handle it
+// refused (D4-106 item 3). An error of Open, ErrNoKey among them, is
+// returned as it is.
+//
+// It frees only the signer its keys.Open returned, so a Keys must return a
+// signer nobody else holds, as CNG and LabFiles do (a new handle, or a new
+// key, at each call). A Keys that handed back a signer in use would have it
+// freed here, and that signer's Sign would then fail, which fails closed.
 func OpenPinned(keys Keys, name string, spki []byte) (crypto.Signer, error) {
 	signer, err := keys.Open(name)
 	if err != nil {
