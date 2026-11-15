@@ -809,7 +809,7 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
       - On `main` at `21f68d92`, in `ci` run 43717418661, [`go (windows-latest)`](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43717418661/job/132821844450) runs `TestOpenPinnedFreesCNGHandle` elevated (`token elevated=true integrity=S-1-16-12288`). It shows `--- PASS` once, with no SKIP, and so do the other Windows tests named above.
       - [`go (ubuntu-latest)`](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43717418661/job/132821844451) passes `TestOpenPinned`, `TestOnlyPinnedOpens` and `TestKeyUseCheckBites/OpenPinned`. Neither log has a `--- FAIL` line.
     - **Evidence for the controls: `desk`.** The owner's PC, Windows 11, Go 1.27.3, not elevated, so `TestOpenPinnedFreesCNGHandle` skips there.
-      - D3 ran M1 to M6 at `1230fe5f` (#697's body), and M1, M2, M4, M5, P1, P1′, P8 and N3's control at `a8aa438d` (6894363095).
+      - D3 ran M1 to M6 at `1230fe5f` (#697's body), and M1, M2, M4, M5, P1, P1′, P8 and N3's control at `a8aa438d` (#697's body, "Fixes for D6's N1 to N4", which gives the output of P1, P1′, P8 and N3's control, and says that M1, M2, M4 and M5 still bite).
       - D6 reran M1 to M6, and ran its own P1 to P8, at `1230fe5f` (review 6894081789).
       - D6 reran P1, P1′, P8, N3's control and M1 at `a8aa438d` (re-review 6894391244). Each failed the test named above.
       - D6's mutants and probes are scratch files, and none is committed.
@@ -834,10 +834,11 @@ Independent findings, newest first. Each entry: date, what was tested, how, resu
 - **Not closed.**
   - The owed tests of F1, F3 and F4, and §1.9 item 9's, are under step (3) above. #696's O1 is under #696's closing there.
   - F11's owed legs are under step (4) above.
+  - **Owed from #697** (D4-107 item 5.3; under #697's limits in step (4) above): before any product caller of `Register.Request` is added, `Request` frees the handle that `Create` returned. **Owner: D3.**
   - F8 is owed in full by the dialer-and-enrolment brief.
   - P4-4-F27's table names every owed test, with the rig legs of §1.9 item 8 and SL-T13's legs (d) and (e) among them.
   - **Also owed, from #676** (D3's N2, 6864105144; D4-101 item 7.3): until the C13 0.2 intake brief lands `sensorrun.json`, a held store alarm of the network database, a held mode change and a held report of the forwarder's sensor session are counted in `health_held` and never written, so the forwarded health stream never carries them. That brief owes `TestHeldEventsSurviveRestart` and `TestHeldPoolEventBuiltAtWrite`, which D3's N2 names as closing it.
-- **Status: open.** F2, F5, F6, F7, F9 and F10 are closed on `main`, and so are F1's, F3's, F4's and F11's parts in P4-4-F27 and the detector drive's legs of §1.9 item 9 (#696). By D6's reading of P4-4-F27's table at `21f68d92`, every test in its "In this brief" column is now on `main`. Open, and owed by later briefs: F8; the owed tests of F1, F3, F4 and F11; §1.9 item 9's owed legs; and #696's O1. No owed test has run. The link key's CNG handle leak is fixed (#697). The gate stands until the owed tests have passed (D4-96). It blocks a release, and any PR that wires a path to or from a sensor.
+- **Status: open.** F2, F5, F6, F7, F9 and F10 are closed on `main`, and so are F1's, F3's, F4's and F11's parts in P4-4-F27 and the detector drive's legs of §1.9 item 9 (#696). By D6's reading of P4-4-F27's table at `21f68d92`, every test in its "In this brief" column is now on `main`. Open, and owed by later briefs: F8; the owed tests of F1, F3, F4 and F11; §1.9 item 9's owed legs; and #696's O1. No owed test has run. The link key's CNG handle leak is fixed (#697). Owed from #697, by D3: `Register.Request` frees its handle before any product caller of it is added (D4-107 item 5.3). The gate stands until the owed tests have passed (D4-96). It blocks a release, and any PR that wires a path to or from a sensor.
 
 ### F-026 — 2026-11-11 — The forwarder's rsyslog tests had never run in CI, and failed in their own set-up when first made to run. Fixed in #620
 
