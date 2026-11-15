@@ -24,17 +24,10 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-15 (D4-104, D4-105).** P4-4-CC is in progress. The next steps are D4-102's "Next", in D4-103's and D4-105's order.
-- **Merged this session:** #681 (D4-103, brief P4-4-CC), #686 (D4-104, brief P4-COL-1) and #683 (P4-4-CC deliverable 0).
-- **Open, each waiting on what is named** (merge order: #682, #685, #687, #689, #684):
-  - #682, deliverable 1 (the bridge), at `ef7ef984`: D3's review of D5's part, then `full-ci`.
-  - #685, P4-4-F27 (4), F11's wiring, at `60b7a915`: D6 accepts; D3's review, then `full-ci`. After it merges, D6 records F11's closing in F-027.
-  - #687, deliverable 2 (C13 0.2, C4 0.4), at `b33c4355`: D6's notes N1 to N4 are fixed and confirmed. Finding A (D4-105 item 1.1): D3 judges, D1 rules, then D4's code and D6's test.
-  - #689, deliverable 3 (C13 0.3), at `56fbc3cc`: D5's node legs are in. D6's contract tests start after #687 merges, and move the three tests that use 0.3 as an unknown minor.
-  - #684, deliverable 4 (C2 0.10), at `37f3f86a`: D6, D4 and D2 accept. D3's review, then `full-ci`.
-  - #690, HR-25's options: D2, D6 and D7 support option A. D3's comment, then D1's ruling.
-- **D3's queue, in order:** #685, finding A on #687, #684, D5's part of #682, #690's options, P4-COL-1, then P4-4-CC deliverable 5 (options for §11.2's open forms first).
-- **Then:** deliverable 6 (D7), P4-4-DO (D5, after its P4-4-CC parts), HR-23's and HR-24's next stages, and the Windows `platform/node` time brief (D4-104 item 4).
+**CHECKPOINT (D1), 2026-11-15 (D4-104, D4-105).** P4-4-CC is in progress. The next steps are D4-102's "Next", in D4-103's order and D4-105 item 8's.
+- **Merged this session:** #681 (D4-103), #686 (D4-104) and #683 (P4-4-CC deliverable 0).
+- **Open:** #682, #687, #689 and #684 (P4-4-CC deliverables 1 to 4), #685 (P4-4-F27 (4)) and #690 (HR-25's options). Each PR's last comments say what it waits on. Finding A on #687 is D4-105 item 1.1.
+- **Then:** deliverables 5 and 6 of P4-4-CC, P4-COL-1, P4-4-DO, and the rest of D4-102's "Next".
 
 **Earlier checkpoint (D1), 2026-11-14, later (D4-102, D4-103), superseded by the checkpoint above.** The next steps were D4-102's "Next". D4-103 issued the first of them, brief P4-4-CC.
 
