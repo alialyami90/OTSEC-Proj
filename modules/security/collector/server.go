@@ -135,7 +135,21 @@ func (s *Server) Serve(ln net.Listener) error {
 			}
 			return err
 		}
+		// Register the connection under the lock Close takes to set closed,
+		// so either Close waits for it or it is closed here unserved: no
+		// request on a connection accepted as Close runs is decided after
+		// Close returns (P4-COL-2, D4-107 item 5.1). The check and Add hold
+		// the lock together: a check without the lock, or an Add after
+		// Unlock, reopens the window, and no test reaches that order. The
+		// lock covers only the check and Add.
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			c.Close()
+			return ErrServerClosed
+		}
 		s.wg.Add(1)
+		s.mu.Unlock()
 		go func() {
 			defer s.wg.Done()
 			defer func() { <-slots }()
