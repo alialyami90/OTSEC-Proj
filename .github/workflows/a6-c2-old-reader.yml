@@ -1,0 +1,93 @@
+# D6 (P4-4-CC deliverable 4): C2 0.10's test 6 (i), the old reader itself
+# (docs/phase4/D2-c2-0.10-proposal.md section 8; D1's 6862737844 on #671;
+# D4-102 item 5 (b)). It checks out the last 0.9 code on main, the base of
+# the PR that codes 0.10 (#684), into a second worktree, and runs that
+# commit's DecodeResult over every 0.10 golden at the head, through the
+# driver in tests/contract/c2oldreader. Each golden must decode, the 0.9
+# reader must ignore session.telnet, and a 0.10 golden that breaks a 0.9
+# rule must be refused (the control).
+#
+# OLD_READER pins that code. On a pull request whose base is still 0.9, the
+# job first checks that every package the 0.9 reader builds from has the
+# same tree at the base as at the pin, so the reader run is the base's. A
+# base past 0.9 keeps the pin, the reader a rollback returns to.
+#
+# Linux only, no secrets, read-only token: it reads files and contacts no
+# device. It runs by hand, on pushes to main, and on pull requests that
+# change C2's code, the Telnet transport, the SEL-751 adapter, the
+# collector, the driver or this file (brief P4-4-CC). Evidence class: desk.
+name: a6-c2-old-reader
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - '.github/workflows/a6-c2-old-reader.yml'
+      - 'tests/contract/c2oldreader/**'
+      - 'contracts/adapter/**'
+      - 'modules/ied/telnet/**'
+      - 'modules/ied/sel751/**'
+      - 'modules/security/collector/**'
+permissions:
+  contents: read
+env:
+  # main at 0c9b13f1, #684's base (D4-103). Its contracts/adapter,
+  # contracts/internal and contracts/version are #547's 0.9 trees.
+  OLD_READER: 0c9b13f109c4410e97f951baa0aacdc1653c84d7
+jobs:
+  c2-old-reader:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check out the 0.9 reader into a second worktree
+        run: |
+          git fetch --no-tags --depth=1 origin "$OLD_READER"
+          git worktree add --detach "$RUNNER_TEMP/old" "$OLD_READER"
+          grep -q 'const Contract = "otsec.adapter/0.9"' "$RUNNER_TEMP/old/contracts/adapter/invocation.go"
+          cd "$RUNNER_TEMP/old"
+          go list -deps ./contracts/adapter | sed -n 's|^otsec.local/otsec/||p' > "$RUNNER_TEMP/reader-packages.txt"
+          echo "The 0.9 reader's packages at $OLD_READER, with their trees:"
+          while read -r d; do echo "$d $(git rev-parse "$OLD_READER:$d")"; done < "$RUNNER_TEMP/reader-packages.txt"
+      - name: The pin is the PR's base while the base is at 0.9
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          if ! git show "$BASE:contracts/adapter/invocation.go" | grep -q 'const Contract = "otsec.adapter/0.9"'; then
+            echo "The base $BASE is past 0.9, so the pinned reader stands."
+            exit 0
+          fi
+          while read -r d; do
+            a=$(git rev-parse "$OLD_READER:$d")
+            b=$(git rev-parse "$BASE:$d")
+            echo "$d pin $a base $b"
+            if [ "$a" != "$b" ]; then
+              echo "::error::$d differs between OLD_READER and the PR base $BASE, which is still 0.9: move OLD_READER to the base"
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/reader-packages.txt"
+      - name: Run the 0.9 DecodeResult over the head's 0.10 goldens
+        run: |
+          mkdir -p "$RUNNER_TEMP/old/tests/contract/c2oldreader"
+          cp tests/contract/c2oldreader/*.go "$RUNNER_TEMP/old/tests/contract/c2oldreader/"
+          cd "$RUNNER_TEMP/old"
+          OTSEC_C2_010_GOLDENS="$GITHUB_WORKSPACE/contracts/adapter/testdata" \
+            go test -count=1 -tags a6_c2_old_reader -v ./tests/contract/c2oldreader | tee "$RUNNER_TEMP/old-reader.txt"
+          for t in TestOldReaderIs09 TestOldReaderReads010Goldens TestOldReaderRefusesBroken010Golden; do
+            if ! grep -q "^--- PASS: $t " "$RUNNER_TEMP/old-reader.txt"; then
+              echo "::error::$t did not pass"
+              exit 1
+            fi
+          done

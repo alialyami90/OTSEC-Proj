@@ -448,13 +448,20 @@ func (l *Learner) Freeze(endUTC string) ([]byte, error) {
 	return b, nil
 }
 
-// Checkpoint returns the learner's otsec.netcheckpoint/0.1 document.
+// Checkpoint returns the learner's checkpoint document, stamped
+// CheckpointIdentifier.
 func (l *Learner) Checkpoint() ([]byte, error) {
+	return l.checkpoint(netobs.CheckpointIdentifier)
+}
+
+// checkpoint encodes the learner's state stamped schema: the writer's
+// identifier, or a restored checkpoint's own for its round trip.
+func (l *Learner) checkpoint(schema string) ([]byte, error) {
 	d, err := l.Draft()
 	if err != nil {
 		return nil, err
 	}
-	k := netobs.LearnerCheckpoint{Schema: netobs.CheckpointIdentifier, Half: netobs.HalfLearner, SensorID: l.cfg.SensorID,
+	k := netobs.LearnerCheckpoint{Schema: schema, Half: netobs.HalfLearner, SensorID: l.cfg.SensorID,
 		Through: l.through, Frozen: l.frozen, Draft: d}
 	for f, p := range l.held {
 		k.Held = append(k.Held, netobs.HeldStart{Src: f.src, Sport: f.sport, Dst: f.dst, Pair: p})
@@ -516,7 +523,16 @@ func RestoreLearner(cfg LearnerConfig, checkpoint []byte) (*Learner, error) {
 	for _, h := range k.Held {
 		l.held[flowKey{h.Src, h.Sport, h.Dst, h.Pair.Port}] = h.Pair
 	}
-	if again, err := l.Checkpoint(); err != nil || !bytes.Equal(again, checkpoint) {
+	// The round trip is at the checkpoint's own minor, as RestoreDetector's
+	// is: byte for byte at the writer's identifier, and against an earlier
+	// minor's decoded content, re-encoded, since another writer encoded it.
+	want := checkpoint
+	if k.Schema != netobs.CheckpointIdentifier {
+		if want, err = k.Encode(); err != nil {
+			return nil, err
+		}
+	}
+	if again, err := l.checkpoint(k.Schema); err != nil || !bytes.Equal(again, want) {
 		return nil, errors.New("netdetect: the checkpoint does not restore to itself")
 	}
 	return l, nil

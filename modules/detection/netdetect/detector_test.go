@@ -1030,6 +1030,99 @@ func TestDetectorRestoreRefuses(t *testing.T) {
 	}
 }
 
+// dxRestamp is cp decoded, edited by set, stamped schema and encoded again:
+// in the writer's key order, and with its keys sorted, as a document another
+// writer encoded (platform/node's laterMinor).
+func dxRestamp(t *testing.T, cp []byte, schema string, set func(*netobs.DetectorCheckpoint)) (ordered, sorted []byte) {
+	t.Helper()
+	k, err := netobs.DecodeDetectorCheckpoint(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.Schema = schema
+	if set != nil {
+		set(k)
+	}
+	if ordered, err = k.Encode(); err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(ordered, &top); err != nil {
+		t.Fatal(err)
+	}
+	sorted = must(json.Marshal(top))
+	if _, err := netobs.DecodeDetectorCheckpoint(sorted); err != nil {
+		t.Fatalf("the sorted %s document is not read strictly: %v", schema, err)
+	}
+	return ordered, sorted
+}
+
+// CH-35's "Read" (C13 0.2 proposal section 11): a strictly valid 0.1
+// checkpoint restores, in either key order, and the restored detector's
+// next checkpoint is this code's 0.2 one, the state unchanged. The control
+// is the check before the fix, which compared against the writer's own
+// re-encoding, stamped 0.2: it differs from every 0.1 document, so it
+// refused them all.
+func TestDetectorRestores01Checkpoint(t *testing.T) {
+	base := dxBaseline(t)
+	d := dxDetector(t, base)
+	for i, o := range dxStream(t, 6) {
+		if _, err := d.Observe(dxID(uint64(i+1)), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cp := must(d.Checkpoint(0))
+	ordered, sorted := dxRestamp(t, cp, netobs.CheckpointIdentifier01, nil)
+	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base,
+		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}, Exclusions: dxExclusions, Endpoints: dxEndpoints}
+	for name, doc := range map[string][]byte{"ordered": ordered, "sorted": sorted} {
+		r, err := RestoreDetector(cfg, doc, nil, 6)
+		if err != nil {
+			t.Fatalf("%s 0.1: %v", name, err)
+		}
+		again := must(r.Checkpoint(0))
+		if bytesEqual(again, doc) {
+			t.Fatalf("%s 0.1: the writer's re-encoding equals the 0.1 document, so the control shows nothing", name)
+		}
+		if !bytesEqual(again, cp) {
+			t.Fatalf("%s 0.1: the next checkpoint is not the 0.2 one restored from\n got %s\nwant %s", name, again, cp)
+		}
+	}
+	if _, err := RestoreDetector(cfg, cp, nil, 6); err != nil {
+		t.Fatalf("0.2 control: %v", err)
+	}
+}
+
+// The round trip still refuses a checkpoint that does not restore to
+// itself at its own minor: one whose baseline_version is not the
+// baseline's, which decodes strictly and names the right baseline hash, at
+// 0.1 and 0.2 and in either key order. A 0.2 document with a byte past the
+// writer's encoding is refused too.
+func TestDetectorRestoreNotItself(t *testing.T) {
+	base := dxBaseline(t)
+	d := dxDetector(t, base)
+	if _, err := d.Observe(dxID(1), dxStream(t, 1)[0]); err != nil {
+		t.Fatal(err)
+	}
+	cp := must(d.Checkpoint(0))
+	cfg := DetectorConfig{SensorID: lxSensor, NodeID: dxNode, Stream: dxStreamName, NodeAddresses: dxNodeAddrs, NodeMACs: dxNodeMACs, NodeVLANs: dxNodeVLANs, Baseline: base,
+		Params: netobs.BaselineParams{TieGraceS: netobs.DefaultTieGraceS, CoalesceWindowS: 60}, Exclusions: dxExclusions, Endpoints: dxEndpoints}
+	bump := func(k *netobs.DetectorCheckpoint) { k.BaselineVersion++ }
+	docs := map[string][]byte{"0.2 trailing space": append(slices.Clone(cp), ' ')}
+	for _, sch := range []string{netobs.CheckpointIdentifier01, netobs.CheckpointIdentifier} {
+		docs[sch+" ordered"], docs[sch+" sorted"] = dxRestamp(t, cp, sch, bump)
+		ok, _ := dxRestamp(t, cp, sch, nil)
+		if _, err := RestoreDetector(cfg, ok, nil, 1); err != nil {
+			t.Fatalf("%s control: %v", sch, err)
+		}
+	}
+	for name, doc := range docs {
+		if _, err := RestoreDetector(cfg, doc, nil, 1); err == nil || !strings.Contains(err.Error(), "does not restore to itself") {
+			t.Errorf("%s: %v, want the round trip's refusal", name, err)
+		}
+	}
+}
+
 func sha256Of(b []byte) [32]byte { return sha256.Sum256(b) }
 
 func bytesEqual(a, b []byte) bool { return string(a) == string(b) }

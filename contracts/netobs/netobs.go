@@ -1,6 +1,7 @@
 package netobs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -11,10 +12,19 @@ import (
 	"otsec.local/otsec/contracts/version"
 )
 
-// Identifier is this contract's identifier, stamped on every record.
+// Identifier is C13 0.1's identifier: the identifier of the records on the
+// 0.1 channel, the one main's intake reads (DecodeChannel), and of the
+// alerts the detector stamps today. It stays 0.1 until the C13 0.2 intake
+// brief moves the channel to 0.2 under CH-36 (D4-103 ruling 2), so that no
+// intermediate main breaks that intake or its tests.
 const Identifier = "otsec.netobs/0.1"
 
-var self = version.ID{Name: "netobs", Major: 0, Minor: 1}
+// Identifier02 is C13 0.2's identifier, carried by every message and record
+// of the 0.2 channel (DecodeFromSensor, DecodeFromNode; C13 0.2 §1). The
+// stored readers read 0.1 and 0.2 strictly, and a later 0.x minor forward.
+const Identifier02 = "otsec.netobs/0.2"
+
+var self = version.ID{Name: "netobs", Major: 0, Minor: 2}
 
 // Bounds (C13 §10).
 const (
@@ -77,6 +87,30 @@ const (
 	DefaultCoalesceWindowS = 300
 	MinCoalesceWindowS     = 60
 	MaxCoalesceWindowS     = 3600
+
+	// coverage.settings.prp_window_ms, new in 0.2 (CH-28).
+	DefaultPRPWindowMS = 400
+	MinPRPWindowMS     = 10
+	MaxPRPWindowMS     = 2000
+)
+
+// C13 0.2's bounds that the channel's pure checks use (C13 0.2 §12).
+const (
+	// MaxNodeMessage bounds a frame from the node: the agent closes on a
+	// longer one (frame-too-large, CH-2).
+	MaxNodeMessage = 1 << 10
+	// MaxLostSpans bounds each lost list (CH-40).
+	MaxLostSpans = 8
+	// sensor-hello's buffer_bytes is from MinBufferBytes to MaxBufferBytes
+	// on the wire; below SiteBufferFloor the node raises sensor-buffer-small
+	// and does not close (CH-7, CH-13 row 9, CH-20).
+	MinBufferBytes  = 16 << 20
+	MaxBufferBytes  = 64 << 30
+	SiteBufferFloor = 256 << 20
+	// TickMinSpacing: an accepted tick less than this after the previous
+	// one on the connection, other than the first after the hello, is
+	// tick_early and does nothing more (CH-8).
+	TickMinSpacing = 5 * time.Second
 )
 
 // Code is a validation failure. Closed.
@@ -119,12 +153,20 @@ func Codes(err error) []Code {
 	return out
 }
 
-// checker collects a validation's failures. later is set by storedSchema
-// when the record is of a later 0.x minor than this reader's, so the bridge
-// rules of CH-35 (C13 0.2 §11) read it forward.
+// checker collects a validation's failures. minor is the record's minor,
+// set by strictSchema and storedSchema, so that a field new in 0.2 is
+// refused in a 0.1 record. later is set by storedSchema when the record is
+// of a later 0.x minor than this reader's, so the bridge rules of CH-35
+// (C13 0.2 §11) read it forward. need02 asks for the fields a 0.2 channel
+// record requires (C13 0.2 §11: optional in the Go type and in a stored
+// record, required on the 0.2 channel). keys holds a decoded document's
+// key paths (keyPaths), nil when a Go value is validated.
 type checker struct {
-	errs  []error
-	later bool
+	errs   []error
+	minor  int
+	later  bool
+	need02 bool
+	keys   map[string]bool
 }
 
 func (c *checker) fail(code Code, field, format string, a ...any) {
@@ -213,11 +255,16 @@ func (c *checker) addr(field, s string) (netip.Addr, bool) {
 	return a, true
 }
 
-// strictSchema checks a channel record's schema. C13 is strict: a minor
-// this reader does not know refuses the record (C13 §1).
-func (c *checker) strictSchema(s string) {
-	if s != Identifier {
-		c.fail(CodeSchema, "schema", "%q is not %s", s, Identifier)
+// strictSchema checks a channel record's schema against want, the
+// connection's minor. C13 is strict: another minor refuses the record (C13
+// §1; C13 0.2 CH-36).
+func (c *checker) strictSchema(s, want string) {
+	c.minor = 1
+	if want == Identifier02 {
+		c.minor, c.need02 = 2, true
+	}
+	if s != want {
+		c.fail(CodeSchema, "schema", "%q is not %s", s, want)
 	}
 }
 
@@ -226,10 +273,74 @@ func (c *checker) strictSchema(s string) {
 func (c *checker) storedSchema(s string) {
 	got, err := version.Parse(s)
 	if err != nil || !self.Accepts(got) {
-		c.fail(CodeSchema, "schema", "%q is not %s or another 0.x minor of it", s, Identifier)
+		c.fail(CodeSchema, "schema", "%q is not %s or another 0.x minor of it", s, Identifier02)
 		return
 	}
+	c.minor = got.Minor
 	c.later = got.Minor > self.Minor
+}
+
+// new02 checks a field that C13 0.2 adds (C13 0.2 §11). The field is
+// present when set holds (its Go value is not the zero value) or when its
+// key is in the decoded document, whatever its value ("", 0, false, null).
+// In a record of a minor below 0.2 it must be absent, so a 0.1 record stays
+// as strict as the 0.1 reader was (D4-103 ruling 2). In a 0.2 channel
+// record it must be present. new02 reports whether the field's value is to
+// be checked: present, and not already refused as new.
+func (c *checker) new02(field string, set bool) bool {
+	present := set || c.keys[field]
+	switch {
+	case present && c.minor < 2:
+		c.fail(CodeDecode, field, "new in %s; not in a 0.%d record", Identifier02, c.minor)
+		return false
+	case !present && c.need02:
+		c.fail(CodeMissing, field, "required in a %s channel record", Identifier02)
+	}
+	return present
+}
+
+// keyPaths lists every key of a JSON document by its path in the checker's
+// field form ("coverage.settings.prp_window_ms", "windows[0].coverage").
+// It is called only on a document strictjson has read, so no key repeats.
+func keyPaths(b []byte) map[string]bool {
+	var doc any
+	if json.Unmarshal(b, &doc) != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, e := range x {
+				p := k
+				if path != "" {
+					p = path + "." + k
+				}
+				out[p] = true
+				walk(p, e)
+			}
+		case []any:
+			for i, e := range x {
+				walk(fmt.Sprintf("%s[%d]", path, i), e)
+			}
+		}
+	}
+	walk("", doc)
+	return out
+}
+
+// decimal parses a C13 0.2 number written "decimal from 1" (from1) or
+// "decimal from 0": no leading zero, at most 2^64 - 1 (CH-5).
+func (c *checker) decimal(field, s string, from1 bool) uint64 {
+	n, err := strconv.ParseUint(s, 10, 64)
+	switch {
+	case err != nil || strconv.FormatUint(n, 10) != s:
+		c.fail(CodeForm, field, "%q is not a decimal", s)
+	case from1 && n == 0:
+		c.fail(CodeForm, field, "%q is not a decimal from 1", s)
+	}
+	return n
 }
 
 func contains[T comparable](list []T, v T) bool {

@@ -80,13 +80,13 @@ func DecodeChannel(b []byte) (*ChannelRecord, error) {
 		if err := strictjson.Decode(b, &o); err != nil {
 			return nil, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 		}
-		return &ChannelRecord{Observation: &o}, o.Validate()
+		return &ChannelRecord{Observation: &o}, o.validateChannel(Identifier, keyPaths(b))
 	case TypeHeartbeat:
 		var h Heartbeat
 		if err := strictjson.Decode(b, &h); err != nil {
 			return nil, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 		}
-		return &ChannelRecord{Heartbeat: &h}, h.Validate()
+		return &ChannelRecord{Heartbeat: &h}, h.validateChannel(Identifier, keyPaths(b))
 	}
 	return nil, &Error{Code: CodeType, Field: "type", Detail: fmt.Sprintf("%q: the channel carries only %s and %s", head.Type, TypeHeartbeat, TypeObservation)}
 }
@@ -104,6 +104,65 @@ type Heartbeat struct {
 	Counters       Counters `json:"counters"`
 	RingOldestUTC  string   `json:"ring_oldest_utc,omitempty"`
 	InterfaceCheck string   `json:"interface_check"`
+
+	// New in 0.2 (C13 0.2 §11), each absent in a 0.1 heartbeat.
+	// Interfaces and Agent are required in a 0.2 heartbeat (CH-31, CH-43).
+	// EgressCheck is ok or absent, and left out when the agent cannot read
+	// it (CH-27).
+	Interfaces  []InterfaceCount `json:"interfaces,omitempty"`
+	Agent       *Agent           `json:"agent,omitempty"`
+	EgressCheck string           `json:"egress_check,omitempty"`
+}
+
+// InterfaceCount is one capture interface's frames read since the run
+// began, before the PRP discard, and its link state (CH-31).
+type InterfaceCount struct {
+	Name    string `json:"name"`
+	Carrier string `json:"carrier"`
+	Packets uint64 `json:"packets"`
+}
+
+// Agent is the link agent's own counts, run totals (CH-43). Every key is
+// required; a pointer is nil only when the key was absent.
+type Agent struct {
+	Closes            AgentCloses `json:"closes"`
+	TakenAhead        *uint64     `json:"taken_ahead"`
+	SyncLate          *uint64     `json:"sync_late"`
+	EntriesUnreadable *uint64     `json:"entries_unreadable"`
+}
+
+// AgentCloses counts the agent's closes by reason: the closed set
+// AgentCloseReasons (CH-11, CH-43).
+type AgentCloses struct {
+	Handshake        *uint64 `json:"handshake"`
+	NodeHello        *uint64 `json:"node-hello"`
+	NodeHelloTimeout *uint64 `json:"node-hello-timeout"`
+	Binding          *uint64 `json:"binding"`
+	Ack              *uint64 `json:"ack"`
+	Type             *uint64 `json:"type"`
+	Idle             *uint64 `json:"idle"`
+	FrameTooLarge    *uint64 `json:"frame-too-large"`
+	Superseded       *uint64 `json:"superseded"`
+	RunComplete      *uint64 `json:"run-complete"`
+	Shutdown         *uint64 `json:"shutdown"`
+}
+
+// counts lists the agent's counts by their field names, in a fixed order.
+func (a *Agent) counts() []struct {
+	name string
+	v    *uint64
+} {
+	k := &a.Closes
+	return []struct {
+		name string
+		v    *uint64
+	}{
+		{"closes.handshake", k.Handshake}, {"closes.node-hello", k.NodeHello}, {"closes.node-hello-timeout", k.NodeHelloTimeout},
+		{"closes.binding", k.Binding}, {"closes.ack", k.Ack}, {"closes.type", k.Type}, {"closes.idle", k.Idle},
+		{"closes.frame-too-large", k.FrameTooLarge}, {"closes.superseded", k.Superseded},
+		{"closes.run-complete", k.RunComplete}, {"closes.shutdown", k.Shutdown},
+		{"taken_ahead", a.TakenAhead}, {"sync_late", a.SyncLate}, {"entries_unreadable", a.EntriesUnreadable},
+	}
 }
 
 // Counters are totals since the run began, and never decrease within a run.
@@ -123,12 +182,55 @@ type Counters struct {
 	PRPDiscards          uint64  `json:"prp_discards"`
 	Redactions           uint64  `json:"redactions"`
 	LoginsNotPlaced      uint64  `json:"logins_not_placed"`
+
+	// New in 0.2, required in a 0.2 heartbeat and absent in a 0.1 one: the
+	// socket holder's (CH-26), the PRP discard's (CH-29) and the agent's
+	// allow-list count (CH-34).
+	DropsHolder        *uint64 `json:"drops_holder,omitempty"`
+	FramesOverlong     *uint64 `json:"frames_overlong,omitempty"`
+	FramesOutgoing     *uint64 `json:"frames_outgoing,omitempty"`
+	PRPMismatched      *uint64 `json:"prp_mismatched,omitempty"`
+	PRPTableFull       *uint64 `json:"prp_table_full,omitempty"`
+	PRPTagDiffers      *uint64 `json:"prp_tag_differs,omitempty"`
+	PRPWrongLAN        *uint64 `json:"prp_wrong_lan,omitempty"`
+	EngineLinesRefused *uint64 `json:"engine_lines_refused,omitempty"`
 }
 
-// Validate checks every rule of C13 that holds on one heartbeat.
-func (h *Heartbeat) Validate() error {
-	c := &checker{}
-	c.strictSchema(h.Schema)
+// counters01 names the 0.1 counts a heartbeat always carries: every 0.1
+// counter but drops_driver, whose absence means unknown.
+var counters01 = []string{
+	"packets", "bytes", "drops_decoder", "drops_channel", "decoder_errors", "sessions_unparsed",
+	"table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed",
+}
+
+// counts02 lists the counters new in 0.2 by name.
+func (k *Counters) counts02() []struct {
+	name string
+	v    *uint64
+} {
+	return []struct {
+		name string
+		v    *uint64
+	}{
+		{"drops_holder", k.DropsHolder}, {"frames_overlong", k.FramesOverlong}, {"frames_outgoing", k.FramesOutgoing},
+		{"prp_mismatched", k.PRPMismatched}, {"prp_table_full", k.PRPTableFull}, {"prp_tag_differs", k.PRPTagDiffers},
+		{"prp_wrong_lan", k.PRPWrongLAN}, {"engine_lines_refused", k.EngineLinesRefused},
+	}
+}
+
+// Carrier values of a heartbeat's interfaces (CH-31). Closed.
+var carriers = []string{"up", "down", "unknown"}
+
+// Validate checks a heartbeat of the 0.1 channel, the one main's intake
+// reads: every rule of C13 that holds on one heartbeat. It refuses any
+// field new in 0.2.
+func (h *Heartbeat) Validate() error { return h.validateChannel(Identifier, nil) }
+
+// validateChannel checks a heartbeat of the minor want; keys are the
+// decoded document's key paths, nil for a Go value.
+func (h *Heartbeat) validateChannel(want string, keys map[string]bool) error {
+	c := &checker{keys: keys}
+	c.strictSchema(h.Schema, want)
 	if h.Type != TypeHeartbeat {
 		c.fail(CodeType, "type", "%q is not %s", h.Type, TypeHeartbeat)
 	}
@@ -143,7 +245,84 @@ func (h *Heartbeat) Validate() error {
 	if !contains([]string{"ok", "bound", "unknown"}, h.InterfaceCheck) {
 		c.fail(CodeForm, "interface_check", "%q is not ok, bound or unknown", h.InterfaceCheck)
 	}
+	// An absent 0.1 count decodes as 0. On the 0.2 channel it is refused,
+	// not read as 0; only drops_driver may be absent (C13 §6; D3's N1 on
+	// #687). The 0.1 channel reads as it did.
+	if c.need02 && c.keys != nil {
+		for _, name := range counters01 {
+			if !c.keys["counters."+name] {
+				c.fail(CodeMissing, "counters."+name, "required")
+			}
+		}
+	}
+	// A key present with null decodes as absent; it is refused, not read
+	// as the count or object it lacks.
+	for _, x := range h.Counters.counts02() {
+		if c.new02("counters."+x.name, x.v != nil) && x.v == nil {
+			c.fail(CodeForm, "counters."+x.name, "null is not a count")
+		}
+	}
+	// egress_check is optional at 0.2 (CH-27), so it is only refused at 0.1.
+	if h.EgressCheck != "" || c.keys["egress_check"] {
+		if c.new02("egress_check", true) && h.EgressCheck != "ok" && h.EgressCheck != "absent" {
+			c.fail(CodeForm, "egress_check", "%q is not ok or absent", h.EgressCheck)
+		}
+	}
+	if c.new02("interfaces", h.Interfaces != nil) {
+		h.checkInterfaces(c)
+	}
+	if c.new02("agent", h.Agent != nil) && h.Agent == nil {
+		c.fail(CodeForm, "agent", "null is not the agent's counts")
+	}
+	if h.Agent != nil {
+		for _, x := range h.Agent.counts() {
+			if x.v == nil {
+				c.fail(CodeMissing, "agent."+x.name, "required")
+			}
+		}
+	}
 	return c.err()
+}
+
+// checkInterfaces applies CH-31: one entry for each interface of the
+// coverage statement, by name; carrier in its set; and the packets summing
+// to counters.packets.
+func (h *Heartbeat) checkInterfaces(c *checker) {
+	if n := len(h.Interfaces); n == 0 || n > MaxInterfaces {
+		c.fail(CodeRange, "interfaces", "%d interfaces, not in [1, %d]", n, MaxInterfaces)
+	}
+	want := map[string]bool{}
+	for _, in := range h.Coverage.Interfaces {
+		want[in.Name] = true
+	}
+	seen := map[string]bool{}
+	var sum uint64
+	overflow := false
+	for i, in := range h.Interfaces {
+		f := fmt.Sprintf("interfaces[%d]", i)
+		c.token(f+".name", in.Name)
+		if !contains(carriers, in.Carrier) {
+			c.fail(CodeForm, f+".carrier", "%q is not up, down or unknown", in.Carrier)
+		}
+		// An absent count decodes as 0; it is refused, not read as 0.
+		if c.keys != nil && !c.keys[f+".packets"] {
+			c.fail(CodeMissing, f+".packets", "required")
+		}
+		if seen[in.Name] || !want[in.Name] {
+			c.fail(CodeConflict, f+".name", "%q: the names are the coverage statement's, each once", in.Name)
+		}
+		seen[in.Name] = true
+		if sum+in.Packets < sum {
+			overflow = true
+		}
+		sum += in.Packets
+	}
+	if len(seen) != len(want) {
+		c.fail(CodeConflict, "interfaces", "%d names for the coverage statement's %d", len(seen), len(want))
+	}
+	if overflow || sum != h.Counters.Packets {
+		c.fail(CodeConflict, "interfaces", "packets sum to %d, but counters.packets is %d", sum, h.Counters.Packets)
+	}
 }
 
 // Follows checks h against prev, the last heartbeat accepted from the same
@@ -177,6 +356,30 @@ func (h *Heartbeat) Follows(prev *Heartbeat) error {
 	}
 	if a.DropsDriver != nil && b.DropsDriver != nil && *b.DropsDriver < *a.DropsDriver {
 		c.fail(CodeOrder, "counters.drops_driver", "%d is below the run's last %d", *b.DropsDriver, *a.DropsDriver)
+	}
+	// The counts new in 0.2 (CH-26, CH-29, CH-31, CH-34, CH-43): each one
+	// absent from either heartbeat is skipped, as above.
+	fall := func(name string, prev, next *uint64) {
+		if prev != nil && next != nil && *next < *prev {
+			c.fail(CodeOrder, name, "%d is below the run's last %d", *next, *prev)
+		}
+	}
+	pc, nc := a.counts02(), b.counts02()
+	for i := range pc {
+		fall("counters."+pc[i].name, pc[i].v, nc[i].v)
+	}
+	for _, p := range prev.Interfaces {
+		for _, n := range h.Interfaces {
+			if n.Name == p.Name {
+				fall("interfaces."+n.Name+".packets", &p.Packets, &n.Packets)
+			}
+		}
+	}
+	if prev.Agent != nil && h.Agent != nil {
+		pa, na := prev.Agent.counts(), h.Agent.counts()
+		for i := range pa {
+			fall("agent."+pa[i].name, pa[i].v, na[i].v)
+		}
 	}
 	return c.err()
 }
