@@ -2321,16 +2321,16 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - D4-22, D4-44, D4-104 item 4 and D4-107 item 5.4 in `docs/phase4/B1-decisions.md`;
   - `.github/workflows/ci.yml`, the steps "platform/node time budget (C5)" and "platform/node start times (P4-H2)";
   - the Windows `go` job logs of run 43748784508 and of run 43640098201's first attempt (job 132585557495; `gh run view 43640098201 --attempt 1`), and the ten slowest tests the budget step prints, led on `6b1a27e3` by `TestC6RefusedMismatchIsNotReadAsNotNamed` (44.9 s) and four `TestConfigRead*` tests (15 to 26 s each).
-- Files or modules each role may modify: D5, `platform/node/` and its test packages. D6, `.github/workflows/ci.yml`'s two `platform/node` steps only, which D1 owns and authorizes D6 to change here (D4-107 item 5.4), if D5's measurement asks for a CI change, in its own PR.
+- Files or modules each role may modify: D5, `platform/node/` and its test packages. "`platform/node`" in this brief means the package `otsec.local/otsec/platform/node`, whose time the budget step reads; its subpackages count only where a test in it calls them. D6, `.github/workflows/ci.yml`'s two `platform/node` steps only, which D1 owns and authorizes D6 to change here (D4-107 item 5.4), if D5's measurement asks for a CI change, in its own PR.
 - Expected interfaces: no contract change. No product behaviour changes; a fixture's cost that lives in product code is changed only with D3's review.
 - Deliverable:
   1. **The measurement, first, in the PR body:** where the time goes, from the per-test times of at least the last three green `main` Windows runs, with the share of the package's time that each cause takes. The cause is named from the logs and the code (`desk`, `CI-Windows`), or stated `unknown`.
   2. **One PR (D5)** that cuts fixture time until a green Windows run of the PR head is under 720 s, and that fixes `TestSensorStartupStuckDoesNotHoldStart`: its cleanups are registered before the timed wait, and a failure says whether `Start` was slow or held (for example, a control `Start` of the same rig with no stuck startup, timed in the same test).
-  3. A CI change (D6), only if item 1 shows one is needed.
+  3. A CI change (D6), only if item 1 shows one is needed. D5 and D1 review it.
 - Acceptance tests:
-  - the PR's Windows `go` job and `main`'s push run after the merge each show `platform/node` under 720 s in the budget step;
-  - **no test is weakened:** the PR body lists `platform/node`'s test names and counts per OS before and after, from the `go` jobs' logs; no test is removed, skipped or narrowed, no assertion and no approved time bound changes, and no `-short` or OS gate is added. A test made parallel shares no listener, path, clock or service with another, and D6 checks each one;
-  - `TestSensorStartupStuckDoesNotHoldStart` still fails on its control (a `Start` that waits for the stuck startup), with the diff, the run and the failing line cited;
+  - **the time, measured against the runner's noise** (D6's B1 on #708: `main`'s twelve push runs on 2026-11-15 took 641.8 to 1036.8 s with `platform/node` unchanged): the median of at least three Windows `go` runs of the final head is under 720 s, D1 reruns the job for the extra runs, and each run's time is cited. The PR also shows the saving per changed test, from the per-test times of those runs against the same tests in at least three green `main` runs. `main`'s push run after the merge is reported, and is not on its own a pass or a failure;
+  - **no test is weakened:** the PR body lists `platform/node`'s test names and counts per OS before and after, from the `go` jobs' logs; no test is removed, skipped or narrowed, no assertion and no approved time bound changes (a negative test's watch window is an approved bound), and no `-short` or OS gate is added. A test made parallel shares no listener, path, clock or service with another, and D6 checks each one;
+  - `TestSensorStartupStuckDoesNotHoldStart` is checked by two controls, each with its diff, run and failing line cited: a `Start` that waits for the stuck startup fails it as held, and a `Start` slowed past the bound with no stuck startup fails it as slow, not held. Neither control's output shows the `TempDir` cleanup error (D6's B2 on #708);
   - the self-check list in this file, with the items that apply named in the PR.
 - Owed: none.
 - Explicit exclusions: no change to the 720 s budget or the 30-minute package timeout (D4-44); no Windows service created outside an elevated run on the owner's word; no run of `tests/security` or `tests/integration/syslogreceive` in full on the owner's PC.
@@ -2345,7 +2345,8 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Expected interfaces: no contract change.
 - Deliverable: one PR. After `Accept` returns a connection, `Serve` takes `s.mu`, and if the server is closed it closes the connection unserved and returns `ErrServerClosed`; otherwise it calls `s.wg.Add` before releasing the lock.
 - Acceptance tests:
-  - **A forced-interleaving unit test:** a test listener whose `Accept` returns a connection only after `Close` has begun. `Close` returns only after that connection is closed, and no request on it is decided. The control is `main`'s order, `wg.Add` outside the lock, which the test fails.
+  - **A forced-interleaving unit test:** a test listener whose `Accept` returns a connection only after `Close` has begun. No request on that connection is decided. Where the connection reaches `Serve`'s check before `Close`'s wait ends, `Close` returns only after it is closed; one that reaches the check later is closed unserved by `Serve` (D1's ruling 6900059567 on #710). The control is `main`, which the test fails.
+  - **The surviving half-fix** (D6's B3 on #708): a check under the lock with `wg.Add` after the lock is released is not killed by that test, and `-race` does not flag it. D1 takes the option of recording it, not a test-only hook in the collector's server: the PR names the mutant, says why the test cannot reach it, and the code comment states that the check and `wg.Add` hold the lock together.
   - **CI:** both `go` jobs green, the new test named as a pass in each, not a skip.
   - **Self-check:** the implementer runs the self-check list in this file.
 - Owed: none.
@@ -2354,18 +2355,18 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Scratch files: `d3-col2-*`
 
 ### P4-C8-T (D3; D6 review, D1 for the contract): `time.utc`'s comma form refused, and its precision checked
-- Objective and rationale: P6. D4-108 item 3.1 (D6's probe on #703, 6898047901): `time.utc` in the comma form (`2026-11-15T10:00:00,5Z`) passes `ParseRecord` on `main`, though C8's schema refuses it, and `validateTime` in `contracts/audit/audit.go` counts fraction digits only after a `.`, so the comma form also skips the precision check. N2 closed the same gap for `applied_at`.
+- Objective and rationale: P6. D4-108 item 3.1 (D6's probe on #703, 6898047901), widened by D6's B4 on #708 to every C8 time field the schema states as RFC 3339 UTC with `Z`, among them `wall_utc`, `cutoff_utc` and `previous_cutoff_utc` in `store.retention_moved` and `unchanged_at` in `config.change_detected`: `time.utc` in the comma form (`2026-11-15T10:00:00,5Z`) passes `ParseRecord` on `main`, though C8's schema refuses it, and `validateTime` in `contracts/audit/audit.go` counts fraction digits only after a `.`, so the comma form also skips the precision check. N2 closed the same gap for `applied_at`.
 - Owner, and the reviewers (CLAUDE.md §5.6): D3 writes it. D6 reviews for the tests, and D1 approves the contract change. D5 reviews if any node writer's output changes.
 - Required inputs and dependencies: D4-108 items 1.4 and 3.1; `validateTime` and the schema under `contracts/audit/schema/`; the `applied_at` fix of #699 as the pattern.
 - Files or modules each role may modify: D3, `contracts/audit/` (authorized by D1 for this fix).
 - Expected interfaces: C8 0.13, no version change: the code is brought to the schema it already states.
 - Deliverable: one PR.
 - Acceptance tests:
-  - `ParseRecord` refuses a record whose `time.utc` uses a comma, for every record kind that carries `time`; the control is `main`'s `validateTime`, which accepts it;
-  - the precision check counts the fraction's digits whichever separator reaches it, with an off-by-one mutant on the digit count killed;
-  - every existing golden under `contracts/audit/testdata/` still parses;
+  - `ParseRecord` refuses a record whose `time.utc` uses a comma, for every record kind that carries `time`, and a record whose field is one of the four above, or any other time field the PR lists by search of the schema, written in the comma form; the control is `main`, which accepts each;
+  - the precision check counts the fraction's digits whichever separator reaches it, with both off-by-one mutants on the digit count killed, the under-count `len(t.UTC) - i - 3` among them (D6's N1 on #708);
+  - every valid golden under `contracts/audit/testdata/` still parses, and every golden under `testdata/invalid/` is still refused;
   - **CI:** both `go` jobs green; the self-check list, with the items that apply named.
 - Owed: none.
-- Explicit exclusions: no other C8 change.
+- Explicit exclusions: no C8 change beyond the time fields' form and precision.
 - Uncertainty or safety risks: a writer that emits the comma form today would have its records refused; the PR states, by search, that no writer on `main` does.
 - Scratch files: `d3-c8t-*`

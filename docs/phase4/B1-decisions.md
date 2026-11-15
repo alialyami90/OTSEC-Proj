@@ -2512,8 +2512,9 @@ Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the run
 
 Evidence class: `desk`; `CI-Windows` for the run named.
 
-- **1. Work resumes at the owner's word,** in HANDOFF's order of 2026-11-15, night.
+- **1. Work resumes at the owner's word,** in HANDOFF's order of 2026-11-15, night. Item 3's two briefs, the C13 0.2 intake and the dialer and enrolment, are both D5's, and D5 runs one task at a time, so D1 issues them after P4-NODE-WT. Item 4, D6's `relayKinds` probe, is with a second D6 instance.
   1. P4-4-HR25 deliverable 3's first step, D6's builder and captures (row `pin-builder`), is with a D6 writing instance.
   2. Brief P4-NODE-WT (D5) is issued in `docs/agent-handoffs.md`, "After D4-109". `platform/node` took 995.9 s on Windows in `main`'s push run 43748784508 at `6b1a27e3`. That is over D4-44's 720 s budget, and the budget stands.
   3. Briefs P4-COL-2 and P4-C8-T (D3) are issued in the same section, for D4-107 item 5.1 and D4-108 item 3.1. D3 takes them one after the other.
+  4. D6's B1 to B4 and N1 to N4 on #708 (6900141437) are taken into the three briefs: P4-NODE-WT's time is judged on a median of at least three runs, and its stuck-start test has a "slow, not held" control; P4-COL-2's half-fix mutant is recorded, not killed by a test-only hook; and P4-C8-T covers every C8 time field the schema states as RFC 3339 UTC with `Z`.
 - **Next decision number:** D4-111.
