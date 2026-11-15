@@ -485,7 +485,7 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 			return fmt.Errorf("audit stream ends at %d, before its last committed seq %d", after, last)
 		}
 		for _, st := range got {
-			rec, err := audit.ParseRecord(st.Event)
+			rec, err := parseAuditRecord(st.Event)
 			if err != nil {
 				return badRecord{st.Key.Seq, err}
 			}
@@ -529,6 +529,13 @@ func (s *Scheduler) fold(ctx context.Context, announce bool) error {
 	}
 	return nil
 }
+
+// parseAuditRecord is fold's reader of the audit stream. A record it
+// refuses holds every run on the node (foldOK), so a build whose reader
+// predates a minor's actions stops collection once one is written: C8
+// 0.13's reader floor (C8-1). C8-1's fold test swaps it for a reader
+// without the three sensor actions, as the 0.12 reader has it.
+var parseAuditRecord = audit.ParseRecord
 
 // foldOK reports whether settle may go on after fold returned err. A bad
 // record stops every run on the node, level 0 included.
