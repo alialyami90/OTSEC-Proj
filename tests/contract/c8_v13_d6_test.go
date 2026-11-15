@@ -21,6 +21,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -427,6 +428,8 @@ func TestC8v13St1Streams(t *testing.T) {
 	for name, st := range map[string]any{
 		"observation alone":          map[string]any{"observation_through_seq": 5},
 		"alert alone":                map[string]any{"alert_through_seq": 5},
+		"observation alone at 0":     map[string]any{"observation_through_seq": 0},
+		"alert alone at 0":           map[string]any{"alert_through_seq": 0},
 		"an unknown key":             map[string]any{"observation_through_seq": 5, "alert_through_seq": 1, "baseline_through_seq": 1},
 		"a list":                     []any{},
 		"a string":                   "{}",
@@ -511,6 +514,47 @@ func TestC8v13NullRefused(t *testing.T) {
 	if err := json.Unmarshal(a6JSON(t, m), &r); err != nil || r.Sensor.PreviousState != "" {
 		t.Errorf("control: the plain decoder on previous_state null: %v, %+v", err, r.Sensor)
 	}
+}
+
+// S1's "exactly its keys" (D1's 6896052095 on #699, D4-108): a key of the
+// sensor object written with its zero value, "" or 0, is refused as null
+// is, by the reader at any minor and by Seal, on every action and C8-6 kind.
+// A streams value of 0 is a seq, and stays valid (St1). The control: the
+// plain decoder reads each zero as the key absent.
+func TestC8v13ZeroRefused(t *testing.T) {
+	zero := map[string]any{"decision_seq": 0, "count": 0}
+	for k, v := range c8v13Sample {
+		if _, ok := v.(string); ok {
+			zero[k] = ""
+		}
+	}
+	if len(zero) != len(c8v13Sample)-1 { // all but streams, an object
+		t.Fatalf("zero values for %d of %d keys", len(zero), len(c8v13Sample))
+	}
+	for name, build := range c8v13Records() {
+		for k, v := range zero {
+			for _, stamp := range []string{"otsec.audit/0.13", "otsec.audit/0.14"} {
+				m := build()
+				m["contract"] = stamp
+				c8v13S(m)[k] = v
+				if read, sealed := c8v13Both(t, m); !errors.Is(read, audit.ErrRecordRejected) || (stamp == "otsec.audit/0.13" && !errors.Is(sealed, audit.ErrRecordRejected)) {
+					t.Errorf("%s, sensor.%s %q, stamped %s: read %v, sealed %v, want refused", name, k, fmt.Sprint(v), stamp, read, sealed)
+				}
+			}
+			// Control: decoded alone, the zero is the record without the key.
+			with, without := build(), build()
+			c8v13S(with)[k] = v
+			delete(c8v13S(without), k)
+			var a, b audit.Record
+			if err := errors.Join(json.Unmarshal(a6JSON(t, with), &a), json.Unmarshal(a6JSON(t, without), &b)); err != nil || !reflect.DeepEqual(a.Sensor, b.Sensor) {
+				t.Errorf("control: %s, sensor.%s %v: %v, %+v against %+v", name, k, v, err, a.Sensor, b.Sensor)
+			}
+		}
+	}
+	// The rule's edge: streams at 0 is accepted, in the reader and in Seal.
+	m := c8v13Revoked()
+	c8v13S(m)["streams"] = map[string]any{"observation_through_seq": 0, "alert_through_seq": 0}
+	c8v13Accept(t, "streams, both keys at 0", m)
 }
 
 // C8-4, K1 and F1: sensor.link_refused, its six codes in underscore form,
@@ -930,6 +974,103 @@ func TestC8v13C88CopiedFields(t *testing.T) {
 		if err := audit.VerifySensorFrom(recs, 1); !errors.Is(err, audit.ErrChainBroken) {
 			t.Errorf("%s: %v, want a break", name, err)
 		}
+	}
+}
+
+// C8-8 in a cut view (§11.2, "in a cut view"; D3's B1 in 6896040121 on #699,
+// D1's 6896052095). A view after seq 1 holds the lowest collector_seq it
+// records before its first collector.seq_reset. A sensor.revoked with no
+// acceptance in view, and a succeeded sensor.enrolled with none in the
+// view's first epoch, are unknown only when their decision_seq is below it:
+// at or above it, each breaks. A succeeded sensor.enrolled with no
+// acceptance in a later epoch breaks whatever its decision_seq.
+func TestC8v13C88CutView(t *testing.T) {
+	view := func(ms []map[string]any, from int) error {
+		_, recs := c8v13Seal(t, ms)
+		return audit.VerifySensorFrom(recs[from:], recs[from].Seq)
+	}
+	// denied is a collector.request the collector denied at collector_seq
+	// seq: a number the view records, with no acceptance.
+	denied := func(seq int) map[string]any {
+		m := c8v13Request(c8v13Enrol)
+		delete(m, "verified")
+		delete(m, "target")
+		delete(m, "sensor")
+		m["outcome"], m["reason_code"], m["collector_seq"] = "denied", "admin_unverified", seq
+		return m
+	}
+	decision := func(m map[string]any, seq int) map[string]any {
+		c8v13S(m)["decision_seq"] = seq
+		return m
+	}
+
+	// At and above the bound: each breaks. From index 2 the view's lowest
+	// collector_seq is 30, the enrolment's acceptance.
+	for name, c := range map[string]struct {
+		ms   []map[string]any
+		from int
+	}{
+		"a revocation naming 99, above the view's lowest 30": {func() []map[string]any {
+			ms := c8v13Chain()
+			decision(ms[5], 99)
+			return ms
+		}(), 2},
+		"a rekey naming 99, above the view's lowest 30": {func() []map[string]any {
+			ms := c8v13Chain()
+			decision(ms[7], 99)
+			return ms
+		}(), 2},
+		"a revocation naming 31, a denied decision and the view's lowest": {func() []map[string]any {
+			ms := c8v13Chain()[:6]
+			ms[4] = denied(31)
+			return ms
+		}(), 4},
+		"an enrolment naming 30, a denied decision and the view's lowest": {func() []map[string]any {
+			ms := c8v13Chain()[:4]
+			ms[2] = denied(30)
+			return ms
+		}(), 2},
+	} {
+		if err := view(c.ms, c.from); !errors.Is(err, audit.ErrChainBroken) {
+			t.Errorf("%s: %v, want a break", name, err)
+		}
+	}
+	// Control: below the bound, the same records are unknown and not a break.
+	for name, ms := range map[string][]map[string]any{
+		"a revocation naming 29": func() []map[string]any { ms := c8v13Chain(); decision(ms[5], 29); return ms }(),
+		"a rekey naming 29":      func() []map[string]any { ms := c8v13Chain(); decision(ms[7], 29); return ms }(),
+	} {
+		if err := view(ms, 2); err != nil {
+			t.Errorf("%s, below the view's lowest 30: %v", name, err)
+		}
+	}
+
+	// §11.2's epoch-1 case. The view runs from the rekey's acceptance (32)
+	// across a collector reset; epoch 1 holds a request at collector_seq 1.
+	// The lowest collector_seq before the reset is 32, so a late revocation
+	// of decision 31, whose acceptance is before the view, is unknown. A
+	// lowest taken across the reset would be 1, and would break it.
+	ms := c8v13Chain()
+	reset := c8v13Reset()
+	reset["previous_high"] = 32
+	epoch1 := func(late ...map[string]any) []map[string]any {
+		return append([]map[string]any{ms[0], ms[1], ms[2], ms[3], ms[4], ms[6], ms[7]}, late...)
+	}
+	if err := view(epoch1(reset, denied(1), ms[5]), 5); err != nil {
+		t.Errorf("a late revocation in epoch 1, its acceptance before the view: %v", err)
+	}
+	// A succeeded enrolment in the revocation's place breaks: its acceptance
+	// must be in its own epoch. Control: the same enrolment in the view's
+	// first epoch, before the reset, is unknown.
+	rekey := c8v13Enrolled()
+	s := c8v13S(rekey)
+	s["decision_seq"], s["payload_sha256"], s["generation"], s["sensor_spki"], s["reason"] = 31, c8v13Hash("enrol 3"), "3", c7v11Pin("d6 c8 0.13 sensor key 3"), "rekey"
+	s["previous_generation"], s["previous_spki"] = "2", c8v13P2
+	if err := view(epoch1(reset, denied(1), rekey), 5); !errors.Is(err, audit.ErrChainBroken) {
+		t.Errorf("an enrolment in epoch 1 with no acceptance in it: %v, want a break", err)
+	}
+	if err := view(epoch1(rekey, reset, denied(1)), 5); err != nil {
+		t.Errorf("control: the same enrolment in the view's first epoch: %v", err)
 	}
 }
 
