@@ -39,9 +39,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # 45 minutes on Windows, so a package that starts late in the go test
-    # step still reaches its own -timeout below (B1 and B6, #252; D4-44).
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 45 || 15 }}
+    # 60 minutes on Windows, so a package that starts late still reaches its
+    # own -timeout below and dumps its stacks before the job is killed (B1
+    # and B6, #252; D4-44). platform/node starts last, after the other
+    # packages; the arithmetic is above its go test step (D1's ruling on
+    # #717).
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 15 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -70,11 +73,12 @@ jobs:
         run: go test -count=1 -run TestA6PipeIdentityServices -v ./tests/security
       # -timeout applies to each package's test binary from its own start,
       # not to the step. On Windows it is 30m, so a slow or hung package
-      # dumps its goroutine stacks when it passes 30m; the 45-minute job
+      # dumps its goroutine stacks when it passes 30m; the 60-minute job
       # limit leaves room for packages that start late on a slow runner (B1,
-      # #230, #252, D4-22 and D4-44). A green platform/node over 12m is
-      # still a finding (D4-22, D4-44). On Windows -v gives each test's time
-      # to the budget step below, and tee keeps the log for it.
+      # #230, #252, D4-22, D4-44 and D1's ruling on #717). A green
+      # platform/node over 12m is still a finding (D4-22, D4-44). On Windows
+      # -v gives each test's time to the budget step below, and tee keeps the
+      # log for it.
       # The forwarder's own rsyslog tests (modules/telemetry/forward/
       # rsyslog_test.go) skip unless rsyslogd with imrelp is installed, and
       # the runner comes without imrelp. So it is installed here, and
@@ -119,9 +123,31 @@ jobs:
         env:
           OTSEC_RSYSLOG_REQUIRED: "1"
         run: go test -count=1 -run 'TestRsyslog' -v ./modules/telemetry/forward
-      - if: runner.os == 'Windows'
+      # On Windows, platform/node runs in a go test of its own, after every
+      # other package and with the same flags, so that the other packages'
+      # disk use does not fall on its tests' time bounds (D1's ruling on
+      # #711, brief P4-NODE-WT deliverable 3). The first step tests every
+      # package that go list ./... names except platform/node. The second
+      # tests platform/node alone, also when the first fails, so every
+      # package still runs. Each step runs under bash -e -o pipefail, so a
+      # failed go list or go test fails its step, and so the job; the second
+      # step's tee does not hide it. platform/node's test binary now starts
+      # only in the second step, so its 30m dump comes later in the job. In
+      # #717's run 1 the binary started 9.3 minutes in, which puts a hang's
+      # dump at about 39.3 minutes. With the first step at three times that
+      # run's 384 s, the binary would start at about 22 minutes and dump at
+      # about 52, inside the 60-minute job limit (D1's ruling on #717).
+      - name: go test, every package but platform/node
+        id: gotest
+        if: runner.os == 'Windows'
         shell: bash
-        run: go test -v -timeout 30m ./... 2>&1 | tee gotest.txt
+        run: |
+          pkgs=$(go list ./... | grep -vxF otsec.local/otsec/platform/node)
+          go test -v -timeout 30m $pkgs
+      - name: go test, platform/node alone
+        if: runner.os == 'Windows' && !cancelled() && steps.gotest.outcome != 'skipped'
+        shell: bash
+        run: go test -v -timeout 30m ./platform/node 2>&1 | tee gotest-node.txt
       # The platform/node budget is 720 s on a green Windows run (D4-22,
       # D4-44). This prints the package's time and its ten slowest tests, and
       # warns when it is over the budget. It never fails the job.
@@ -132,7 +158,7 @@ jobs:
           awk -F'\t' -v pkg=otsec.local/otsec/platform/node '
             /^--- (PASS|FAIL): / { split($0, f, " "); d = f[4]; gsub(/[()s]/, "", d); t[n++] = d " " f[3]; next }
             /^(ok|FAIL|\?)[ \t]/ { if ($2 == pkg) { for (i = 0; i < n; i++) print t[i] > "node-tests.txt"; print $3 > "node-total.txt" } n = 0 }
-          ' gotest.txt
+          ' gotest-node.txt
           if [ ! -s node-total.txt ]; then
             echo "::warning::platform/node has no time in the go test log"
             exit 0
@@ -144,14 +170,15 @@ jobs:
             echo "::warning::platform/node took ${total} s on Windows, over its 720 s budget (D4-22, D4-44)"
           fi
       # The node start timing lines (P4-H2, authorized by D1): each start in
-      # the go test log with its per-phase times, their count, and the ten
-      # slowest by total. It never fails the job.
+      # platform/node's go test log with its per-phase times, their count,
+      # and the ten slowest by total. Only platform/node's tests print the
+      # line. It never fails the job.
       - name: platform/node start times (P4-H2)
         if: runner.os == 'Windows' && !cancelled()
         shell: bash
         run: |
           set +e +o pipefail
-          tr -d '\r' < gotest.txt | grep -o 'otsec node start: .*' > node-starts.txt
+          tr -d '\r' < gotest-node.txt | grep -o 'otsec node start: .*' > node-starts.txt
           echo "$(wc -l < node-starts.txt) node start lines in the go test log. The ten slowest by total:"
           sed -E 's/.* total=([0-9]+)ms.*/\1 &/' node-starts.txt | sort -rn | head -n 10 | cut -d' ' -f2-
           echo "Every start line:"
