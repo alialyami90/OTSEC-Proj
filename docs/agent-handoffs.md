@@ -2271,7 +2271,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   | A sensor connection live at `sensor-failed` is closed (`docs/phase4/D5-sensor-node.md` §1.9 item 9; D4-107 item 5.2) | the C13 0.2 intake brief (D5) |
   | D4-104 item 1.3's invariant test: a stored record's schema is the minor the node checked strictly on the channel | the C13 0.2 intake brief |
   | D4-105 item 1.4's reading 2 (the agent merges lost spans that touch) and item 2.1 (a 0.3 agent accepts 0.2-stamped node messages) | the sensor's brief |
-  | The node's SL-9 asset-address check compares after unmapping an IPv4-mapped IPv6 address (D4-108 item 4) | the dialer-and-enrolment brief |
+  | The node's SL-9 asset-address check compares after unmapping an IPv4-mapped IPv6 address on either side (D4-108 item 4) | the dialer-and-enrolment brief |
   | R-6's node leg: the node passes the hello's schema to `DecodeFromSensorIn`; control, a node that decodes every frame with `DecodeFromSensor` (D4-108 item 4) | the C13 0.2 intake brief |
   | The node records `collector.request` in `collector_seq` order within an epoch, with its control (D4-108 item 4) | the dialer-and-enrolment brief |
   | The `sensor.revoked` writer checks the chain for its own record before rewriting after a crash (D4-108 item 4) | the dialer-and-enrolment brief (D5) |
