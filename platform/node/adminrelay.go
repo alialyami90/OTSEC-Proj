@@ -107,6 +107,7 @@ var relayKinds = map[authz.RequestKind]bool{
 	authz.KindAssetClearSusp:      true,
 	authz.KindNodeQuarantineClear: true, authz.KindNodeSeqResetAck: true,
 	authz.KindNodeChangeApproval: true, authz.KindNodeBaselineAck: true,
+	authz.KindNodeSensorEnrol: true, authz.KindNodeSensorRevoke: true,
 }
 
 // nodeActKinds are the relayed kinds whose node part follows the
