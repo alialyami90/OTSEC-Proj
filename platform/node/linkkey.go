@@ -87,7 +87,7 @@ func (r *Runtime) stepLinkKey() {
 		m.linkKey, m.linkFault = k, ""
 		return
 	}
-	if fault != m.linkFault {
+	if m.linkFault == "" {
 		m.linkFault = fault
 		r.opt.Status.Raise("", AlarmSensorLinkKey, "sensor "+r.sensorID()+": the link key did not load, so no sensor link is made; SER, Syslog and forwarding go on. The file is read again at each step, against the key register as the node loaded it when it resolved its references, so a register that loads only later needs a restart: "+fault)
 	}
