@@ -24,9 +24,9 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-15 (D4-104, D4-105).** P4-4-CC is in progress. The next steps are D4-102's "Next", in D4-103's order and D4-105 item 8's.
-- **Merged this session:** #681 (D4-103), #686 (D4-104) and #683 (P4-4-CC deliverable 0).
-- **Open:** #682, #687, #689 and #684 (P4-4-CC deliverables 1 to 4), #685 (P4-4-F27 (4)) and #690 (HR-25's options). Each PR's last comments say what it waits on. Finding A on #687 is D4-105 item 1.1.
+**CHECKPOINT (D1), 2026-11-15 (D4-104 to D4-106).** P4-4-CC is in progress. The next steps are D4-102's "Next", in D4-103's order and D4-105 item 8's. D4-106 records finding A, HR-25's fix and the key-handle leak.
+- **Merged this session:** #681 (D4-103), #686 (D4-104), #683 (P4-4-CC deliverable 0), #691 (D4-105) and #685 (P4-4-F27 (4)).
+- **Open:** #682, #687, #689 and #684 (P4-4-CC deliverables 1 to 4), #690 (HR-25's design note) and #692 (P4-4-DO). Each PR's last comments say what it waits on. Finding A on #687 is D4-105 item 1.1.
 - **Then:** deliverables 5 and 6 of P4-4-CC, P4-COL-1, P4-4-DO, and the rest of D4-102's "Next".
 
 **Earlier checkpoint (D1), 2026-11-14, later (D4-102, D4-103), superseded by the checkpoint above.** The next steps were D4-102's "Next". D4-103 issued the first of them, brief P4-4-CC.

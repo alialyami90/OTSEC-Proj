@@ -2351,3 +2351,70 @@ Evidence class: `desk`, for the rulings and the probes named.
   - **D3's queue:** #685; finding A on #687; #684; D5's part of #682; #690's options; item 4's key-handle options; P4-COL-1; then P4-4-CC deliverable 5, which starts with the options for §11.2's open forms (D4-104 item 2 (b)).
   - **D6's contract tests for #689** start after #687 merges. They move the three D6 tests that use 0.3 as an unknown minor to 0.4 (brief P4-4-CC, "Later-minor legs move with the minor").
 - **Next decision number:** D4-106.
+
+## D4-106: finding A on #687, HR-25's fix, the key-handle leak, and the owed reviews (D1, 2026-11-15)
+
+Evidence class: `desk`, for the rulings and the probes named.
+
+- **1. Finding A on #687, CH-13's order** (D1's ruling 6892812989; D6's 6884851086, D4's 6884974393 and 6885648519, D5's 6885614739, D6's B1 in 6885755366, D3's 6892796453). This closes D4-105 item 1.1.
+  1. **The ruling:** option 2 with N1-b, in D4's amended order. CH-13 runs rows 1 to 4, then row 7, then row 5 with 5a first, or row 6. Under 5a, a resume whose `drops_channel` is below the D the node holds for the run closes `run-regressed`. So every close that C8-4 audits is decided before any of the sensor's declarations can close the hello as `hello`. D4, D5, D6 and D3 rejected option 1, because one unpaid span would let a hello avoid SL-16's hold.
+  2. **The residual:** a hello that fails row 1's form still closes `hello`, unaudited. No identity is read from a hello that fails its strict decode, and the sender gains nothing it would not gain by staying silent. It needs no new mechanism.
+  3. **The amended C13 0.2 text** (D4's 6892899185 §4, with D6's N1 6893098431 applied to the phrase on declarations). It replaces CH-11's `binding` and `run-regressed` rows and adds a sentence after CH-11's table. It replaces CH-13's order sentence and rows 1, 5, 6 and 7, CH-15's falling-`drops_channel` bullet, CH-33's second outcome bullet, and H-1's row. `docs/phase4/D4-c13-0.2-proposal.md` is not edited. This entry is the text's source.
+
+    **CH-11, two rows of the node's close reasons, and one sentence after the table:**
+
+    > | `binding` | `sensor_id` or `generation` differ from the enrolment of the key that authenticated; `pinned_by` differs from the value kept for this generation from its first accepted hello (CH-13 row 7, CH-33) | Yes, `binding` |
+    > | `run-regressed` | CH-13 rows 3 and 5a: a `run_counter` below the saved one; on a resume, `newest_seq` below the saved taken `seq`, or `drops_channel` below the D the node holds for the run | Yes |
+    >
+    > Where a hello meets more than one reason, CH-13's order decides, and every reason that C8-4 audits (`binding`, `run-regressed`, `run-forked`) is decided before any of the sensor's declarations (`prior`, and `lost` and `prior.lost` with the rise that pays for them) can close the hello as `hello` (D1's ruling on #687).
+
+    **CH-13, the order sentence:**
+
+    > - **The checks,** in this order: rows 1 to 4, then row 7, then row 5 or row 6, then rows 8 and 9. The first failure decides. Identity and regression (rows 2 to 4, 7 and 5a) are decided before any of the sensor's declarations (`prior`, and `lost` and `prior.lost` with the rise that pays for them) can close the hello as `hello`, so that no declaration can choose a `hello` close over an audited one (D5's N1 on #687; D1's ruling on #687).
+
+    **CH-13, rows 1, 5, 6 and 7:**
+
+    > | 1 | A `sensor-hello` of a minor the node knows (CH-36), strictly decoded, every field in its form and range: `buffer_bytes` from 16 MiB to 64 GiB; `newest_seq` at least `first_seq` − 1; `pinned_by` and `prior.*` in their sets; every span in `lost` and `prior.lost` in CH-40's form: `from_utc` at or before `to_utc`, at most `MaxLostSpans`, disjoint, oldest first. CH-40's widening check is applied at row 5 or 6 | Else close, `hello` |
+    > | 5 | Equal `run_counter` and `run_id`: **a resume** | In this order. **5a:** `newest_seq` below the saved taken `seq`, or `drops_channel` below the D the node holds for the run (CH-15), closes, `run-regressed`. The agent sends only synced values (CH-19), and a run's `drops_channel` never falls, so the node can hold more of a run than the sensor's disk only when that disk went back: a restored snapshot, a copy, or a file system that lost synced data (A5) (D3 B2; D5's N1 on #687). Then `prior` must be absent; else close, `hello`. **5b: a resume under a higher generation than the saved position's**, which is how a `renew` with the pin unchanged carries its run over (CH-12). **Row 5b applies only when the node carried the position over to the live enrolment's generation, which it does for a `renew` with the pin unchanged and for nothing else** (CH-12; D3's note 3 on #634; ruling 1 on #634). Any other resume under a higher generation closes, `hello`. Then CH-40's widening check of `lost` against the spans and Ds the node holds for the run; else close, `hello`. Only after every check of this row, and row 7, has passed, and before it accepts the hello, the node saves the new generation in the cursor (CH-18), and a save that fails closes, `position-not-saved`. That save also serves as SL-30's proof for the renewed pair, which otherwise reads as unproven until the agent next starts a run (D4 on #631 at `1889d929`) |
+    > | 6 | A higher `run_counter`: **a new run** | `prior` must be present, and CH-40's widening check must pass for `lost` with no span held and Ds 0, and for `prior.lost` against a `prior.records_lost` above 0; else close, `hello`. **First, the node runs CH-15's check of G against D for the run the cursor still holds,** because the save below overwrites G and D (D5's N9 on #634). Before it accepts the hello, the node saves in the cursor, in one `SaveSourceCursor` (CH-18): the new counter and `run_id`, with taken `seq` 0; `prior`'s counts, spans, `previous_end` and `started_by`, with its owed mark (CH-16); the spans of the hello's own `lost`, with their cut ends and owed marks (CH-40); and the run's `config_digest` (CH-32). It writes the second copy of the run, with its generation, to `sensorrun.json` (CH-18). A save that fails closes, `position-not-saved` (#644 §1.4) |
+    > | 7 | `pinned_by` equals the value kept for this generation, or no value is kept yet. The value is kept from the first hello **accepted** in the generation, never at this row, so a hello that passes row 7 and then closes at row 5 or 6 keeps nothing (CH-33; D3's condition 1 on #687). **Checked after row 4 and before row 5 or 6:** a fork still closes `run-forked` and is held (SL-16), and no save of row 5b or 6 is made for a hello this row closes | Else close, `binding` (CH-33) |
+
+    **CH-15, the bullet on a falling `drops_channel` (D3's condition 2):**
+
+    > - **A falling `drops_channel`** closes the connection in a tick (`tick`), closes a resume's hello as `run-regressed` (CH-13 row 5a), and is refused as `order` in a heartbeat (`Follows`). The agent states only synced values (CH-19), so a crash does not make it fall; on a resume a fall means the sensor's disk went back, or the sensor does not follow CH-19.
+
+    **CH-33, the second outcome bullet (D3's condition 1):**
+
+    > - The node keeps the value of the first hello it **accepts** in each generation durably (CH-18), never the value of a hello that CH-13 closes. A different value in a later hello of the same generation closes the connection (`binding`, with C8, at CH-13 row 7), because the way an end is pinned changes only with a new enrolment. D3 adds the reason to C8 0.13 (D3's note 7).
+
+    **H-1's row:**
+
+    > | H-1 | CH-7, CH-13 | Every row of CH-13 in its order (rows 1 to 4, 7, then 5 with 5a first, or 6), with the first failure deciding: `hello`, `binding`, `run-regressed`, `run-forked`, `pinned_by` (`binding`), row 5a (`newest_seq` below T, and `drops_channel` below D), resume with `prior` (`hello`), new run, `position-not-saved`, digest, `sensor-buffer-small`. **The order legs, each with its control:** row 4 before row 7 (another `run_id` and a changed `pinned_by` closes `run-forked`); row 7 before 5a and before the declarations of rows 5 and 6 (a changed `pinned_by` with `newest_seq` below T, with an unpaid span, or on a new run without `prior`, closes `binding`); 5a before `prior` and the widening check (`newest_seq` below T with `prior` closes `run-regressed`). **A first hello of a generation with a changed `pinned_by` that closes at row 5 or 6 keeps nothing, and the next well-formed hello is accepted; its control is a node that keeps the value at row 7** (D3's condition 1; owed by the C13 0.2 intake brief). **Each close that C8-4 audits asserts its `sensor.link_refused` record with its reason:** `binding` for a hello's `sensor_id` or generation (row 2), and `run-regressed` for a resume below what the node took or with `drops_channel` below D (row 5a) (C8-4) | A row removed; the order changed so that a declaration (`prior`, or `lost` and `prior.lost` with the rise that pays for them) can close the hello as `hello` before row 7 or 5a, or row 7 before row 4; for the audit legs, a node that closes and writes no record | Contract (SL-T9 (b), (e)) |
+
+    Unchanged: CH-40's "closes it as `tick`, or as `hello` for `lost` and `prior.lost` in a hello", CH-11's `hello` row, and S-2.
+  4. **D3's four conditions** (6892796453):
+     1. the first `pinned_by` of a generation is kept only from an accepted hello (CH-33 and row 7 above);
+     2. CH-15's bullet (above);
+     3. D5's `docs/phase4/D5-sensor-node.md` follows the order, in #692 at `4901df82`;
+     4. D3 amends `docs/phase4/D3-sensor-link.md` (SL-14's 5a row, C8-4's `run-regressed` row and SL-T9) in a D3 records PR.
+  5. **The code and tests** are on #687: D4's `eb8e9a33`, with its `TestJudgeHello` cases and two mutants; D6's `95f2b1c9`, with `TestC13v02H1OrderAudited` and the order controls; and D1's comment fix `87e70f71`.
+  6. **Owed by the C13 0.2 intake brief,** because `JudgeHello` returns only the reason and no code in `contracts/` writes a record:
+     - each close that C8-4 audits writes its `sensor.link_refused` record. The control is a node that closes and writes none;
+     - D3's condition 1 test: a first hello with a changed `pinned_by` that closes at row 5 or 6 keeps nothing. The control keeps the value at row 7;
+     - **D3's N1 on #682** (6892985726): a tied leg (hold, then tie, then the stored body) joins the test D4-104 item 1.3 owes, since `tieBody` patches the raw body and N2's invariant now also protects the tied path.
+- **2. HR-25's fix: Option A** (D1's ruling 6893095629 on #690; D4's 6885118759, D7's 6885160234, D2's 6885169858, D6's 6885310412, D3's 6893081185).
+  1. Frame-by-frame recovery in `DNP3.cc`, as one patch on top of HR-23's option (i), under every reviewer's conditions: D2's C1 to C3 (C1, consume 1 octet after a bad length, replaces A.1); D6's T1 to T14 (T2 and T3 in the design, and the fuzz gap flag not on bit 1); D7's C1 to C6; and D3's S1 to S9.
+  2. **D3's S8 is a new residual:** a frame the sensor sees and the device never gets can hide a multi-frame write. It is counted, never quiet.
+  3. **HR-25's row** in `docs/threat-model.md` still calls the fix "not agreed". It also keeps D3's earlier condition (1), never to scan inside a failed UDP datagram, which S7 and the ruling replace. D3, who writes the row, updates it in its records PR (item 1.4.4), citing this item and adding S8. The row stays **open, high** until the counted run. Whether it blocks item 4's gate stays with the owner (D4-101 item 8).
+  4. **D7's Spicy finding (D4-105 item 7)** is mapped (D7's 6893255626, `desk`). The GPL-3.0-only text applies only to `tests/thirdparty/imapdl/filterbr.py`, a Python test helper that is not linked. The item closes once the counted run's image file list, with hashes, shows that file is not in the image. Which bundled parts are linked into the runtime stays unmapped until the first build.
+  5. **Next:** D4 writes the design note (#690). D2, D3, D6 and D7 re-read its diff. D6 pins the `dnp3-resync-*` cases before any counted run. S5's CPU number is owed by deliverable 3.
+- **3. The Windows CNG key-handle leak (D4-105 item 4): option (c)** (D1's ruling 6893095888 on #685; D3's options 6893088537).
+  - D3 writes `nodekey.OpenPinned`, which compares the public key inside `nodekey` and frees a refused handle there. It also fixes `Register.LoadCertificate`.
+  - The test is Windows only: it counts frees over N wrong pins, and its control drops the free. D6 tests it independently, and D2 and D5 review it.
+  - It is fixed before F-027's gate lifts. #685 merged as `805e8567`. A D6 instance records F11's closing in F-027, with this item open.
+- **4. P4-4-DO (#692):** D5's edit of §1.5 as well as §1.14 of `docs/phase4/D5-sensor-node.md` is taken, because three of the six #655 items sit in §1.5 (D1's 6892996485).
+- **5. Owed reviews.** Before adding `full-ci`, D1 checks each PR's review comments against its brief's "Owner, and the reviewers".
+  - On #687, three reviews that P4-4-CC requires were missing when every reviewer then running had accepted (D1's 6893130353). D3 had not reviewed D4's code or D5's node commits, D4 had not reviewed D5's node commits, and D4 and D5 had not reviewed D6's first tests.
+  - On #684, D3 had not reviewed D6's tests of its collector seams (6893130787).
+  - Neither PR merges until those reviews accept.
+- **Next decision number:** D4-107.
