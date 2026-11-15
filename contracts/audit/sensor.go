@@ -430,11 +430,14 @@ func refuseSensorUnset(b []byte) error {
 //     accepted must not break a valid chain.
 //
 // In a view that starts after seq 1, a reference to what came before first
-// is unknown, not a break, as in VerifyConfigFrom: a decision below the
-// lowest collector_seq the view records before its first
-// collector.seq_reset (for a sensor.revoked in any epoch of the view, when
-// no epoch holds its acceptance), a sensor's last enrolment, and the key
-// set.
+// is unknown, not a break, as in VerifyConfigFrom: for a sensor.enrolled in
+// the view's first epoch, a decision below the lowest collector_seq the view
+// records before its first collector.seq_reset; for a sensor.revoked, any
+// decision whose acceptance no epoch of the view holds, since that
+// acceptance may be in an epoch before the view, numbered by another
+// collector (D1's ruling 6896234420 on #699, option (a)); a sensor's last
+// enrolment; and the key set. A revocation only takes trust away, and a
+// view from seq 1 still breaks on a missing acceptance.
 func VerifySensorFrom(recs []*Record, first uint64) error {
 	if first == 0 {
 		return errors.New("audit: a view starts at seq 1 or later")
@@ -543,7 +546,7 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 			switch {
 			case acc != nil:
 				k = revocation{acc: acc.Seq}
-			case !cut || s.DecisionSeq >= low:
+			case !cut:
 				return broken("record %d (%s) names decision %d, which no earlier acceptance of its sensor and payload has", r.Seq, r.Action, s.DecisionSeq)
 			}
 			if prev, ok := revokedBy[k]; ok {

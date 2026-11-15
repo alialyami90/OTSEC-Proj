@@ -729,7 +729,8 @@ func TestVerifySensorFromCut(t *testing.T) {
 		t.Fatalf("from seq 5: %v", err)
 	}
 	// From seq 7: the revocation names decision 12, which is in the view,
-	// and a later revocation names decision 9, below the view's lowest.
+	// and a later revocation names decision 9, which no epoch of the view
+	// holds.
 	late := revokedRec(10, 9, "2", testPinB)
 	if err := VerifySensorFrom(append(cloneSensorChain(recs[5:]), late), 7); err != nil {
 		t.Fatalf("from seq 7: %v", err)
@@ -738,48 +739,83 @@ func TestVerifySensorFromCut(t *testing.T) {
 		t.Fatalf("the same from seq 1: %v, want broken", err)
 	}
 
-	// The bound (D3's B1 on #699, D1's 6896052095). From seq 3 the view's
-	// lowest collector_seq is 10. A record whose decision is at or above it,
-	// with no acceptance in view, breaks: only a decision below it is before
-	// the view. Controls: the mutant that drops "s.DecisionSeq >= low" from
-	// the revocation's case (M1) accepts the first two; the one that drops
-	// "s.DecisionSeq < low" from the enrolment's unknown case (M3) accepts
-	// the third.
+	// A sensor.revoked with no acceptance in the view is unknown, whatever
+	// its decision (D1's ruling 6896234420 on #699, option (a)): its
+	// acceptance may be in an epoch before the view. From seq 3 the view's
+	// lowest collector_seq is 10. Control: the same chains from seq 1 break
+	// (a decision no acceptance has, TestVerifySensorFromBreaks).
 	for name, edit := range map[string]func(recs []*Record){
-		"a revocation at the bound, its acceptance not in view": func(recs []*Record) {
+		"a revocation at the lowest decision, its acceptance not in view": func(recs []*Record) {
 			recs[6].Sensor.DecisionSeq, recs[6].Sensor.PayloadSHA256 = 10, payloadOf(99)
 		},
-		"a revocation above the bound, no acceptance": func(recs []*Record) {
+		"a revocation above the lowest decision, no acceptance": func(recs []*Record) {
 			recs[6].Sensor.DecisionSeq, recs[6].Sensor.PayloadSHA256 = 13, payloadOf(13)
-		},
-		"an enrolment above the bound, no acceptance": func(recs []*Record) {
-			recs[4].Sensor.DecisionSeq, recs[4].Sensor.PayloadSHA256 = 13, payloadOf(13)
 		},
 	} {
 		recs := cloneSensorChain(sensorChain())
 		edit(recs)
-		if err := VerifySensorFrom(recs[1:], 3); !errors.Is(err, ErrChainBroken) {
-			t.Errorf("from seq 3, %s: %v, want broken", name, err)
+		if err := VerifySensorFrom(recs[1:], 3); err != nil {
+			t.Errorf("from seq 3, %s: %v", name, err)
+		}
+		if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
+			t.Errorf("from seq 1, %s: %v, want broken", name, err)
+		}
+	}
+	// An enrolment keeps the bound: its acceptance is in its own epoch, so a
+	// decision at or above the view's lowest would be in the view. Control:
+	// the mutant that drops "s.DecisionSeq < low" from the enrolment's
+	// unknown case (M3) accepts this chain.
+	recs = cloneSensorChain(sensorChain())
+	recs[4].Sensor.DecisionSeq, recs[4].Sensor.PayloadSHA256 = 13, payloadOf(13)
+	if err := VerifySensorFrom(recs[1:], 3); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("from seq 3, an enrolment above the bound, no acceptance: %v, want broken", err)
+	}
+
+	// D6's probe (6896196067): a revocation's acceptance in epoch 0, a
+	// collector reset, another sensor's decision 5 in epoch 1, then the late
+	// sensor.revoked naming decision 300. From seq 7 the acceptance is in an
+	// epoch before the view, numbered by the earlier collector, so the
+	// revocation is unknown. Control: the bound this replaces broke the view
+	// from seq 7.
+	other := sensorAccept(7, 5, authz.KindNodeSensorEnrol, "1", testPinB)
+	other.Target.SensorID = "7c1e0d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
+	probe := []*Record{
+		keysRec(2, "", sensorKeySet),
+		sensorAccept(3, 10, authz.KindNodeSensorEnrol, "1", testPinA),
+		enrolledRec(4, 10, "1", authz.SensorEnrolNew, testPinA),
+		sensorAccept(5, 300, authz.KindNodeSensorRevoke, "1", testPinA),
+		resetRec(6),
+		other,
+		revokedRec(8, 300, "1", testPinA),
+	}
+	for _, r := range probe {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("probe record %d: %v", r.Seq, err)
+		}
+	}
+	for first, i := range map[uint64]int{1: 0, 6: 4, 7: 5} {
+		if err := VerifySensorFrom(probe[i:], first); err != nil {
+			t.Errorf("D6's probe from seq %d: %v", first, err)
 		}
 	}
 
-	// The bound is taken before the view's first collector.seq_reset (§11.2
-	// C8-8). From seq 5, epoch 0's lowest collector_seq is 11, and epoch 1
-	// holds the new collector's decision 1. A late sensor.revoked in epoch 1
-	// naming decision 9 is below epoch 0's bound, so it is unknown. Control:
-	// the mutant that takes the bound across resets (M4) puts it at 1, and
-	// breaks this chain. The epoch-1 cases without a later decision are in
-	// TestVerifySensorFromLateRevoked.
-	other := sensorAccept(8, 1, authz.KindNodeSensorEnrol, "1", testPinB)
+	// The enrolment's bound is taken before the view's first
+	// collector.seq_reset (§11.2 C8-8). From seq 5: the acceptance of
+	// decision 300; a sensor.enrolled in epoch 0 naming decision 10, below
+	// 300, so its acceptance is before the view; a reset; and the new
+	// collector's decision 5 in epoch 1. Control: the mutant that takes the
+	// bound across resets (M4) puts it at 5, and breaks this chain.
+	other = sensorAccept(8, 5, authz.KindNodeSensorEnrol, "1", testPinB)
 	other.Target.SensorID = "7c1e0d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
-	reset := append(cloneSensorChain(sensorChain())[:5], resetRec(7), other, revokedRec(9, 9, "1", testPinA))
-	for _, r := range reset[5:] {
+	m4 := []*Record{sensorAccept(5, 300, authz.KindNodeSensorRevoke, "1", testPinB),
+		enrolledRec(6, 10, "1", authz.SensorEnrolNew, testPinA), resetRec(7), other}
+	for _, r := range m4 {
 		if err := r.Validate(); err != nil {
 			t.Fatalf("record %d: %v", r.Seq, err)
 		}
 	}
-	if err := VerifySensorFrom(reset[3:], 5); err != nil {
-		t.Errorf("from seq 5, a decision in epoch 1 below the late revocation's: %v", err)
+	if err := VerifySensorFrom(m4, 5); err != nil {
+		t.Errorf("from seq 5, an enrolment in epoch 0 below its epoch's lowest decision: %v", err)
 	}
 }
 
@@ -885,9 +921,9 @@ func TestVerifySensorFromLateRevoked(t *testing.T) {
 		t.Errorf("a decision no epoch has: %v, want broken", err)
 	}
 
-	// D3's condition 2: in a view from seq 5, a late sensor.revoked in epoch
-	// 1 naming decision 9, below epoch 0's lowest collector_seq (11), is
-	// unknown, not a break. Control: the same chain from seq 1 breaks.
+	// In a view from seq 5, a late sensor.revoked in epoch 1 naming decision
+	// 9, whose acceptance no epoch of the view holds, is unknown, not a
+	// break. Control: the same chain from seq 1 breaks.
 	whole := append(cloneSensorChain(sensorChain())[:5], resetRec(7), revokedRec(8, 9, "1", testPinA))
 	if err := VerifySensorFrom(whole[3:], 5); err != nil {
 		t.Errorf("a cut view, a revocation in epoch 1 before the view: %v", err)
