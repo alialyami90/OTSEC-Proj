@@ -88,13 +88,23 @@ def cases():
     f.send(True, dnp3.request(1, dnp3.WRITE, dnp3.iin_clear_restart()))
     f.send(False, dnp3.response(1))
     out["d4u-master-start"] = f
-    # Negative: a 129 of 2 application octets from the originator. Under C2
-    # the response parser needs 4 and throws; under C1p the request
-    # parser's default arm takes it. Then a read, which C2 no longer sees.
+    # Negative: a 129 of 2 application octets from the originator, after a
+    # whole one. Under C2 the response parser needs 4 and throws; under C1p
+    # the request parser's default arm takes it. Then a read, which C2 no
+    # longer sees.
+    f = Flow("relay")
+    f.send(False, dnp3.response(0))
+    f.send(False, bytes([0xC1, dnp3.RESPONSE]))
+    f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
+    out["d4u-short-response-orig"] = f
+    # The same 2-octet 129 as the flow's first datagram. Rehearsal run
+    # 43762127425 measured it: under C2 no application header, no
+    # analyzer.log row, and nothing parsed after it, the master's next frame
+    # included, so the stop is silent; C1p goes on. Pinned here as measured.
     f = Flow("relay")
     f.send(False, bytes([0xC0, dnp3.RESPONSE]))
     f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
-    out["d4u-short-response-orig"] = f
+    out["d4u-short-response-first"] = f
     # A master's direct operate with a control block and DIR clear, on a
     # flow the master starts: the code picks the request parser, so the
     # block is parsed under both builds (a selector keyed by DIR would not).
@@ -154,9 +164,12 @@ EXPECT = [
     ("d4u-master-start", "same", "the conforming flow's messages, as the control reads them",
      lambda m, l, v: m == [(True, 1, "req", ("g60v1",)), (False, 129, "resp", ()), (True, 2, "req", ("g80v1",)),
                            (False, 129, "resp", ())] and not v),
-    ("d4u-short-response-orig", "fix-negative", "a 2-octet 129 from the originator throws in the response parser, "
-     "and the read after it is not seen",
+    ("d4u-short-response-orig", "fix-negative", "a 2-octet 129 from the originator, after a whole one, throws in "
+     "the response parser, and the read after it is not seen",
      lambda m, l, v: bool(v) and (False, 1, "req", ("g60v1",)) not in m),
+    ("d4u-short-response-first", "fix-negative", "the same as the first datagram: a silent stop (no header, no "
+     "analyzer.log row, no later link row)",
+     lambda m, l, v: m == [] and not v and len(l) == 1),
     ("d4u-dir-clear-operate", "same", "the direct operate's g12v1 is parsed although DIR is clear",
      lambda m, l, v: (True, 5, "req", ("g12v1",)) in m and (True, False) in l),
 ]
@@ -189,8 +202,9 @@ def check(out):
     for case in dict.fromkeys(failed):
         for cfg in (C2, C1P):
             s = seen(os.path.join(out, case, cfg))
+            w = [r.get("name") for r in rows(os.path.join(out, case, cfg, "weird.log")) or []]
             print(f"\n{case} under {cfg}: " + ("not run" if s is None else
-                  f"headers {s[0]}; link rows {s[1]}; DNP3 violations {s[2]}"))
+                  f"headers {s[0]}; link rows {s[1]}; DNP3 violations {s[2]}; weirds {w}"))
     return 1 if bad else 0
 
 
