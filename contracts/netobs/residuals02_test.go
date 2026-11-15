@@ -48,24 +48,30 @@ func TestHeartbeatInterfacePacketsRequired(t *testing.T) {
 	}
 }
 
-// D3's N1 on #687, C13 §6: on the 0.2 channel a heartbeat without a 0.1
-// count is refused as missing, by key, not read as 0. drops_driver alone
-// may be absent. Controls: the heartbeat without drops_driver decodes, and
-// the old read, the 0.1 channel, still accepts a heartbeat without
-// drops_decoder.
+// D3's N1 on #687, C13 §6: on the 0.2 and 0.3 channels a heartbeat
+// without a 0.1 count is refused as missing, by key, not read as 0 (the
+// 0.3 leg: D5's B1 and D6's B1 on #689). drops_driver alone may be absent.
+// Controls: the heartbeat without drops_driver decodes, and the old read,
+// the 0.1 channel, still accepts a heartbeat without drops_decoder. The
+// mutant c.need == 2 for c.need >= 2 in validateChannel fails the 0.3 leg.
 func TestHeartbeat02CountersRequired(t *testing.T) {
-	for _, name := range []string{
-		"packets", "bytes", "drops_decoder", "drops_channel", "decoder_errors", "sessions_unparsed",
-		"table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed",
-	} {
-		b := encodeWith(t, fxHeartbeat02(), func(m map[string]any) { delete(m["counters"].(map[string]any), name) })
-		if _, err := DecodeFromSensor(b); !hasCode(err, CodeMissing) {
-			t.Errorf("0.2, counters.%s absent: %v, want missing", name, err)
+	for _, conn := range []struct {
+		schema string
+		fx     func() *Heartbeat
+	}{{Identifier02, fxHeartbeat02}, {Identifier03, fxHeartbeat03}} {
+		for _, name := range []string{
+			"packets", "bytes", "drops_decoder", "drops_channel", "decoder_errors", "sessions_unparsed",
+			"table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed",
+		} {
+			b := encodeWith(t, conn.fx(), func(m map[string]any) { delete(m["counters"].(map[string]any), name) })
+			if _, err := DecodeFromSensorIn(b, conn.schema); !hasCode(err, CodeMissing) {
+				t.Errorf("%s, counters.%s absent: %v, want missing", conn.schema, name, err)
+			}
 		}
-	}
-	b := encodeWith(t, fxHeartbeat02(), func(m map[string]any) { delete(m["counters"].(map[string]any), "drops_driver") })
-	if _, err := DecodeFromSensor(b); err != nil {
-		t.Errorf("control, 0.2, drops_driver absent: %v", err)
+		b := encodeWith(t, conn.fx(), func(m map[string]any) { delete(m["counters"].(map[string]any), "drops_driver") })
+		if _, err := DecodeFromSensorIn(b, conn.schema); err != nil {
+			t.Errorf("control, %s, drops_driver absent: %v", conn.schema, err)
+		}
 	}
 	old := encodeWith(t, fxHeartbeat(), func(m map[string]any) { delete(m["counters"].(map[string]any), "drops_decoder") })
 	if _, err := DecodeChannel(old); err != nil {

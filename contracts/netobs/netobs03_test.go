@@ -341,6 +341,47 @@ func TestChannel03Minor(t *testing.T) {
 	if m, err := DecodeFromNode(mustJSON(t, nh)); err == nil || m.Close != CloseNodeHello {
 		t.Errorf("a node-hello at 0.3: %+v, %v", m, err)
 	}
+	// The ack stays 0.2 on a 0.3 connection too (D1's ruling 1 on #689,
+	// 6884729573; D6's N1). Control: Ack.Validate with channelSchema, which
+	// takes the 0.3 ack (D6's M46).
+	if m, err := DecodeFromNode(mustJSON(t, fxAck())); err != nil || m.Ack == nil {
+		t.Errorf("a 0.2 ack: %v", err)
+	}
+	k := fxAck()
+	k.Schema = Identifier03
+	if m, err := DecodeFromNode(mustJSON(t, k)); !hasCode(err, CodeSchema) || m.Close != CloseAck {
+		t.Errorf("an ack at 0.3: %+v, %v", m, err)
+	}
+}
+
+// What 0.2 requires stays required on the 0.3 channel (C13 0.3 §1.1; D5's
+// B1 and D6's B1 on #689): a 0.3 heartbeat without agent or interfaces,
+// and a 0.3 end without made_utc or a 0.2 coverage field, are refused as
+// missing. The 0.1 counts are TestHeartbeat02CountersRequired's. Control:
+// the mutant c.need == minor for c.need >= minor in newAt, under which
+// each is optional on the 0.3 channel.
+func TestChannel03Keeps02Required(t *testing.T) {
+	cases := []struct {
+		field string
+		v     any
+		del   func(m map[string]any)
+	}{
+		{"agent", fxHeartbeat03(), func(m map[string]any) { delete(m, "agent") }},
+		{"interfaces", fxHeartbeat03(), func(m map[string]any) { delete(m, "interfaces") }},
+		{"made_utc", fxEnd03("tcp"), func(m map[string]any) { delete(m, "made_utc") }},
+		{"coverage.config_digest", fxEnd03("tcp"), func(m map[string]any) { delete(m["coverage"].(map[string]any), "config_digest") }},
+		{"coverage.settings.prp_window_ms", fxEnd03("tcp"), func(m map[string]any) {
+			delete(m["coverage"].(map[string]any)["settings"].(map[string]any), "prp_window_ms")
+		}},
+	}
+	for _, tc := range cases {
+		if _, err := DecodeFromSensorIn(encodeWith(t, tc.v, nil), Identifier03); err != nil {
+			t.Fatalf("control, %s present: %v", tc.field, err)
+		}
+		if _, err := DecodeFromSensorIn(encodeWith(t, tc.v, tc.del), Identifier03); !refusedAt(err, CodeMissing, tc.field) {
+			t.Errorf("a 0.3 record without %s: %v, want missing", tc.field, err)
+		}
+	}
 }
 
 // CH-53's three counts in the heartbeat: required at 0.3, refused below,
@@ -592,6 +633,41 @@ func TestCheckpoint02Read(t *testing.T) {
 		k.Windows = append([]DetectorWindow{w}, k.Windows...) // sorted by rule
 		if err := k.Validate(); tc.ok != (err == nil) {
 			t.Errorf("an own-session-mismatch window in %s: %v", tc.schema, err)
+		}
+	}
+}
+
+// DetectorWindow.Alert stamps an own-session-mismatch alert 0.3, the first
+// minor with its rule, whatever its coverage (D6's N3 on #689), so the
+// alert it builds validates, builds the health body the node stores
+// (alertRecord), and reads back as 0.3. With a baseline named, as the
+// detector's k has, and without. Control: the stamp from the coverage
+// alone, 0.1 or 0.2, whose health body is refused (AlarmAlertNotStored on
+// the node).
+func TestWindowAlertMismatchStamp(t *testing.T) {
+	m := fxMismatch()
+	for _, cv := range []Coverage{fxCoverage(), fxCoverage02()} {
+		for _, base := range []bool{false, true} {
+			w := DetectorWindow{Rule: m.Rule, AssetID: m.AssetID, KeyText: m.KeyText, BaselineValue: m.BaselineValue,
+				Observation: m.Observation, AtUTC: m.AtUTC, WindowStartUTC: m.WindowStartUTC, Hits: m.Hits,
+				Sources: []string{"192.0.2.10"}, Related: []uint64{7, 9, 12}, Cites: m.Cites, Coverage: cv}
+			k := fxDetectorCheckpoint()
+			if !base {
+				k.Baseline, k.BaselineVersion = "", 0
+			}
+			a := w.Alert(k, nil)
+			a.Capture = strings.Repeat("0", 63) + "1"
+			if a.Schema != Identifier03 {
+				t.Errorf("digest %q, baseline %v: stamped %s", cv.ConfigDigest, base, a.Schema)
+			}
+			h, err := a.Health()
+			if err != nil {
+				t.Errorf("digest %q, baseline %v: the health body is refused: %v", cv.ConfigDigest, base, err)
+				continue
+			}
+			if back, err := AlertFromHealth(h); err != nil || back.Schema != Identifier03 || back.Rule != RuleOwnSessionMismatch {
+				t.Errorf("digest %q, baseline %v: read back %+v, %v", cv.ConfigDigest, base, back, err)
+			}
 		}
 	}
 }

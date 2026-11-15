@@ -353,9 +353,13 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 		total = 0 // it names a session record, no traffic
 	}
 	// An alert carries its observation's coverage, so one whose coverage
-	// has a field new in 0.2 is a 0.2 alert.
+	// has a field new in 0.2 is a 0.2 alert. An own-session-mismatch alert
+	// is 0.3, the first minor with its rule (CH-51; D6's N3 on #689).
 	schema := Identifier
-	if w.Coverage.ConfigDigest != "" || w.Coverage.Settings.PRPWindowMS != 0 {
+	switch {
+	case w.Rule == RuleOwnSessionMismatch:
+		schema = Identifier03
+	case w.Coverage.ConfigDigest != "" || w.Coverage.Settings.PRPWindowMS != 0:
 		schema = Identifier02
 	}
 	return Alert{Schema: schema, Rule: w.Rule, AssetID: w.AssetID, Baseline: k.Baseline, BaselineVersion: k.BaselineVersion,
