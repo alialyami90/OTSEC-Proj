@@ -39,12 +39,14 @@ corpus's committed labels, D6's engine-pass-conditions.tsv and the held-out
 labels modbus_label.py writes in the run (`sig` below).
 
 Usage: python -I table.py dnp3 OUT GT_PCAP_DIR WORK ROOT   (pipe runs in OUT-pipe)
+       python -I table.py hr23 OUT   (HR-23's readings, section 4.4 of its design)
        python -I table.py fifo OUT OUT-pipe
        python -I table.py public OUT
        python -I table.py sig SIG_DIR ROOT WORK
 """
 import collections
 import glob
+import ipaddress
 import json
 import os
 import re
@@ -63,8 +65,29 @@ LABELS = {
     "suricata": "Suricata (the comparison, not the choice)",
     "suricata-midstream": "Suricata with stream.midstream=true (the comparison, not the choice)",
 }
+# HR-23 (brief P4-4-HR23, stage 3; docs/phase4/D4-hr23-design.md, section
+# 4.1). zeek-probe is C1: the stock image with part (a). zeek-probe-c0 is C0:
+# the stock image with the script as it was before part (a)
+# (OtsecProbe::log_dir=F), whose DNP3 servers are conn.log's responders.
+# zeek-probe-c1p and zeek-probe-c2 are the project's build without and with
+# option (i)'s patch, with part (a); run.sh runs them only when the build's
+# images are given, and a table lists them only when they ran.
+HR23 = ("zeek-probe-c0", "zeek-probe-c1p", "zeek-probe-c2")
+LABELS.update({
+    "zeek-probe": "Zeek with the project's script (zeek-probe; HR-23's C1: the stock image with part (a); "
+                  "otsec_probe.log is not the engine's own log)",
+    "zeek-probe-c0": "Zeek with the project's script before HR-23's part (a) (HR-23's C0, the control: "
+                     "DNP3 servers from conn.log's responder)",
+    "zeek-probe-c1p": "The project's Zeek build without HR-23's patch, with the project's script (HR-23's C1p)",
+    "zeek-probe-c2": "The project's Zeek build with HR-23's patch, option (i), with the project's script (HR-23's C2)",
+})
 # The configurations that load probe.zeek, so read otsec_probe.log.
-PROBED = ("zeek-probe", "zeek-modbus-sig")
+PROBED = ("zeek-probe", "zeek-modbus-sig") + HR23
+# The configurations whose DNP3 servers come from the link rows' DIR bit
+# (part (a); the design's section 3 item 7). Every other configuration keeps
+# conn.log's responder, as before.
+LINKED = ("zeek-probe", "zeek-modbus-sig", "zeek-probe-c1p", "zeek-probe-c2")
+RESPONSE_CODES = (129, 130, 131)
 PENDING = "pending D6's pass conditions"
 # The pipe case (D4-87): these configurations also read each capture from a pipe.
 PIPED = ("zeek", "zeek-probe", "zeek-icsnpp")
@@ -75,6 +98,42 @@ NOT_REQUESTS = (0, 129, 130, 131)
 # modbus-moved-port is modbus.pcap with port 502 moved to 15020
 # (movedport.py's defaults); modbus.pcap is its control (D6's note, section 3).
 MOVED, CONTROL, MOVED_PORT, CONTROL_PORT = "modbus-moved-port", "modbus", "15020", "502"
+
+
+def present(out):
+    """CONFIGS, then each of HR23 that ran on at least one capture in OUT."""
+    caps = [c for c in os.listdir(out) if os.path.isdir(os.path.join(out, c))] if os.path.isdir(out) else []
+    return CONFIGS + tuple(h for h in HR23 if any(os.path.isdir(os.path.join(out, c, h)) for c in caps))
+
+
+def broadcast(addr):
+    """A limited broadcast or multicast address. A directed subnet broadcast
+    is not known here, since no subnet is (a limit of part (a)'s exception)."""
+    try:
+        return addr == "255.255.255.255" or ipaddress.ip_address(addr).is_multicast
+    except ValueError:
+        return False
+
+
+def server_of(o, p, is_orig, dir_set):
+    """The server one DNP3 frame names (part (a); the design's section 3
+    item 3): DIR clear names its sender, an outstation; DIR set names the
+    other end, unless that end is a broadcast or multicast address, when it
+    names none."""
+    sender, other = (o, p) if is_orig else (p, o)
+    if not dir_set:
+        return sender
+    return None if broadcast(other[0]) else other
+
+
+def served(f, s, proto):
+    """The ends a flow record names as servers of proto. Under LINKED, a DNP3
+    flow's servers are the union of those its frames name, 0, 1 or 2 (part
+    (a)); never its responder (CH-49). Otherwise the responder of a flow the
+    engine named, as before."""
+    if proto == "dnp3" and s.linked:
+        return f.get("dnp3_servers", set())
+    return {f["resp"]} if named(f["names"], proto) else set()
 
 
 def lines(path):
@@ -123,6 +182,8 @@ class Logs:
         self.msgs = []  # {"cite", "ts", "proto", "l4", "ends", "sender", "request", "fc", "objs"}
         self.objects_logged = objects_logged
         self.notes = 0
+        self.linked = False  # DNP3 servers from the link rows (LINKED)
+        self.dir_disagree = 0  # frames whose DIR disagrees with their code's class
         self.flow_notes = collections.defaultdict(list)  # (l4, ends) -> ["file:line text"]
 
     def in_content_order(self):
@@ -150,7 +211,8 @@ def zeek(d, cfg, t):
     for i, r in lines(os.path.join(d, "conn.log")):
         o, p = (r["id.orig_h"], str(r["id.orig_p"])), (r["id.resp_h"], str(r["id.resp_p"]))
         conn[r["uid"]] = (r["proto"], o, p)
-        s.flows.append({"cite": f"conn.log:{i}", "l4": r["proto"], "orig": o, "resp": p, "first": (r["ts"], r["uid"]),
+        s.flows.append({"cite": f"conn.log:{i}", "uid": r["uid"], "l4": r["proto"], "orig": o, "resp": p,
+                        "first": (r["ts"], r["uid"]),
                         "names": {x for x in (r.get("service") or "").split(",") if x}})
     # dnp3.log's requests. Its replies are not read: a reply is not a
     # function (D6's note), and dnp3.log stamps it with the request's time.
@@ -168,19 +230,34 @@ def zeek(d, cfg, t):
             l4, o, p = conn[r["uid"]]
             s.msg(f"modbus.log:{i}", r["ts"], "modbus", l4, ends(*o, *p), o[0], True, fc)
     if cfg in PROBED:
-        cur = {}
+        s.linked = cfg in LINKED
+        cur, last_dir, servers = {}, {}, collections.defaultdict(set)
         for i, r in lines(os.path.join(d, "otsec_probe.log")):
-            if r["uid"] not in conn or r["kind"] not in ("fc", "obj"):
+            if r["uid"] not in conn or r["kind"] not in ("fc", "obj", "link"):
                 continue
             l4, o, p = conn[r["uid"]]
             side = (r["uid"], r["is_orig"])
+            if r["kind"] == "link":
+                # dnp3_header_block comes at each fragment's first frame,
+                # before that fragment's application header (section 3 item 1).
+                last_dir[side] = r.get("link_dir")
+                if r.get("link_dir") is not None:
+                    sv = server_of(o, p, r["is_orig"], r["link_dir"])
+                    if sv:
+                        servers[r["uid"]].add(sv)
+                continue
             if r["kind"] == "fc":
+                if last_dir.get(side) is not None and last_dir[side] == (r["fc"] in RESPONSE_CODES):
+                    s.dir_disagree += 1
+                last_dir[side] = None
                 s.msg(f"otsec_probe.log:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
                       r["fc"] not in NOT_REQUESTS, r["fc"])
                 cur[side] = s.msgs[-1]
             elif side in cur:
                 cur[side]["objs"].append(f"g{r['group']}v{r['variation']}")
                 cur[side]["cite"] += f",{i}"
+        for f in s.flows:
+            f["dnp3_servers"] = servers.get(f["uid"], set())
     if cfg == "zeek-icsnpp":
         # ICSNPP's two logs. dnp3_objects.log: object headers of READ requests
         # and RESPONSE replies, named through ICSNPP's dnp3_objects table.
@@ -380,14 +457,16 @@ def judge_flow(row, s, flow_rows, svc_rows):
         # rows' dst: a Protocol row's dst can be a master on a temporary
         # port (dnp3-udp-temp-port), and a service named there must fail
         # (D1 to D4 on #648; D6's note, section 7).
+        # Under LINKED, a DNP3 flow's servers are the ends its frames' DIR
+        # bits name (HR-23 part (a)); served() says which reading applies.
         servers = {(r["dst"], r["dport"]) for r in svc_rows if r["l4"] == l4}
         others = {e for r in flow_rows if r["l4"] == l4 for e in ((r["src"], r["sport"]), (r["dst"], r["dport"]))} - servers
-        wrong = [f for f in s.flows if f["l4"] == l4 and f["resp"] in others and named(f["names"], proto)]
+        wrong = [(f, e) for f in s.flows if f["l4"] == l4 for e in sorted(served(f, s, proto) & others)]
         if wrong:
-            f = wrong[0]
-            return f"fail (service also at {f['resp'][0]} {l4}/{f['resp'][1]})", f["cite"]
+            f, e = wrong[0]
+            return f"fail (service also at {e[0]} {l4}/{e[1]})", f["cite"]
         for f in s.flows:
-            if f["l4"] == l4 and f["resp"] == (row["dst"], row["dport"]) and named(f["names"], proto):
+            if f["l4"] == l4 and (row["dst"], row["dport"]) in served(f, s, proto):
                 return "pass", f["cite"]
         return "fail", ""
     e = ends(row["src"], row["sport"], row["dst"], row["dport"])
@@ -534,6 +613,8 @@ def evaluate(conds, loaded, cfg):
 
 
 def dnp3(out, gt, work, root):
+    global CONFIGS
+    CONFIGS = present(out)
     t = {"zeek_fc": code_table(os.path.join(work, "zeek-dnp3-consts.zeek"), "function_codes"),
          "zeek_modbus_fc": code_table(os.path.join(work, "zeek-modbus-consts.zeek"), "function_codes")}
     icsnpp = os.path.join(work, "pkgs", "icsnpp-dnp3", "scripts", "consts.zeek")
@@ -596,7 +677,7 @@ def dnp3(out, gt, work, root):
             proto = lab["flow"][0]["protocol"] if lab["flow"] else "dnp3"
             keys = {(r["l4"], ends(r["src"], r["sport"], r["dst"], r["dport"])) for r in lab["flow"]}
             flows = sum(1 for k in keys if any(f["l4"] == k[0] and ends(*f["orig"], *f["resp"]) == k[1] and named(f["names"], proto) for f in s.flows))
-            svc = sum(1 for r in lab["service"] if any(f["l4"] == r["l4"] and f["resp"] == (r["dst"], r["dport"]) and named(f["names"], proto) for f in s.flows))
+            svc = sum(1 for r in lab["service"] if any(f["l4"] == r["l4"] and (r["dst"], r["dport"]) in served(f, s, proto) for f in s.flows))
             ports = sorted({f"{r['l4']}/{r['dport']}" for r in lab["flow"]})
             fn_rows = lab["function"]
             fn, ob = match_functions(fn_rows, s)
@@ -741,6 +822,8 @@ def fifo(out, out_pipe):
 
 
 def public(out):
+    global CONFIGS
+    CONFIGS = present(out)
     print("# E-D4-03: public captures\n")
     print("What each configuration logged. MANIFEST.tsv's captures carry no GT-PCAP label; their tshark reading is E-A4-01's "
           "(`ids-coverage/results/coverage.md`, tshark 4.2.2, same SHA-256s). The extra captures carry none. No pass "
@@ -1270,7 +1353,93 @@ def sig(s, root, work):
     return v
 
 
+def hr23_readings(d, cfg):
+    """One configuration's HR-23 readings on one capture (the design's
+    section 4.4): {"weirds": Counter of dnp3_ weird names, "analyzer":
+    Counter of (analyzer, failure_reason), "disagree": count, "flows":
+    [(flow ends, conn.log names DNP3, link-row servers)], "both": flows
+    whose frames name two servers}. analyzer.log's failure_data is never
+    read: it carries payload (D3's N1 on #675)."""
+    out = {"weirds": collections.Counter(), "analyzer": collections.Counter()}
+    for _, r in lines(os.path.join(d, "weird.log")):
+        if str(r.get("name", "")).startswith("dnp3_"):
+            out["weirds"][r["name"]] += 1
+    for _, r in lines(os.path.join(d, "analyzer.log")):
+        out["analyzer"][(r.get("analyzer_name") or "?", r.get("failure_reason") or "?")] += 1
+    s = zeek(d, cfg, {"zeek_fc": {}, "zeek_modbus_fc": {}})
+    out["disagree"] = s.dir_disagree if cfg in LINKED else None
+    out["flows"] = []
+    for f in s.flows:
+        by_conn = named(f["names"], "dnp3")
+        links = f.get("dnp3_servers", set()) if cfg in LINKED else None
+        if by_conn or links:
+            out["flows"].append((f"{f['l4']} {f['orig'][0]}:{f['orig'][1]} > {f['resp'][0]}:{f['resp'][1]}", by_conn, links))
+    out["both"] = sum(1 for _, _, l in out["flows"] if l and len(l) == 2)
+    return out
+
+
+def log_fields(out, cfg):
+    """{(log, field)} over every capture under OUT for one configuration.
+    JSON leaves an unset optional field out, so a field can be missing on
+    one configuration only because no record set it."""
+    seen = set()
+    for c in sorted(os.listdir(out)):
+        d = os.path.join(out, c, cfg)
+        if not os.path.isdir(d) or ran(d):
+            continue
+        for f in os.listdir(d):
+            if f.endswith(".log"):
+                seen.update((f, k) for _, r in lines(os.path.join(d, f)) for k in r)
+    return seen
+
+
+def hr23(out):
+    """The readings that show which DNP3 parser ran, per capture and
+    configuration (the design's section 4.4). The judge reads none of them."""
+    cfgs = [c for c in ("zeek",) + HR23 + ("zeek-probe",) if c in present(out)]
+    print("\n## HR-23's readings (docs/phase4/D4-hr23-design.md, section 4.4)\n")
+    print("Not judged: they show which parser ran. `named by conn.log` is C0's reading of a DNP3 flow (its `service` "
+          "holds dnp3), and `servers from the link rows` is part (a)'s (C1, C1p, C2): the ends the frames' DIR bits "
+          "name. `both ends` counts flows whose frames name two servers, which part (a) logs and never suppresses. "
+          "`DIR against code` counts application headers whose frame's DIR disagrees with the code's class (DIR set "
+          "on 129 to 131, or clear on any other code). analyzer.log is read for the analyzer and `failure_reason` "
+          "only, never `failure_data`.\n")
+    print("| capture | configuration | dnp3_ weirds | analyzer.log (analyzer: reason) | DIR against code | both ends "
+          "| DNP3 flows: named by conn.log; servers from the link rows |")
+    print("| --- | --- | --- | --- | --- | --- | --- |")
+    for c in sorted(x for x in os.listdir(out) if os.path.isdir(os.path.join(out, x))):
+        for cfg in cfgs:
+            d = os.path.join(out, c, cfg)
+            why = ran(d)
+            if why:
+                if os.path.isdir(d):
+                    print(f"| {c} | {cfg} | | | | | {why} |")
+                continue
+            r = hr23_readings(d, cfg)
+            if not (r["weirds"] or r["analyzer"] or r["flows"]):
+                continue
+            fmt = lambda k: ", ".join(f"{x}={n}" for x, n in sorted(k.items())) or "-"
+            flows = "; ".join(f"{e}: {'yes' if b else 'no'}; "
+                              + ("-" if l is None else ", ".join(f"{h}:{p}" for h, p in sorted(l)) or "none")
+                              for e, b, l in r["flows"]) or "-"
+            dis = "-" if r["disagree"] is None else r["disagree"]
+            print(f"| {c} | {cfg} | {fmt(r['weirds'])} | {fmt({f'{a}: {b}': n for (a, b), n in r['analyzer'].items()})} "
+                  f"| {dis} | {r['both'] if cfg in LINKED else '-'} | {flows} |")
+    have = present(out)
+    if "zeek-probe-c2" in have:
+        c2 = log_fields(out, "zeek-probe-c2")
+        print("\n**Records and fields under C2 that C1 and C1p do not emit** (D4-100 item 2; the design's section 4.3): ")
+        for ref in ("zeek-probe", "zeek-probe-c1p"):
+            extra = sorted(c2 - log_fields(out, ref)) if ref in have else None
+            shown = "not run" if extra is None else (", ".join(f"{f}:{k}" for f, k in extra) or "none")
+            print(f"- against {ref}: {shown}")
+        print()
+
+
 if __name__ == "__main__":
+    if sys.argv[1] == "hr23":
+        hr23(sys.argv[2])
+        sys.exit(0)
     if sys.argv[1] == "dnp3":
         dnp3(*sys.argv[2:6])
     elif sys.argv[1] == "fifo":

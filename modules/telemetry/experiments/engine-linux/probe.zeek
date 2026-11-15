@@ -12,6 +12,10 @@ module OtsecProbe;
 export {
 	redef enum Log::ID += { LOG };
 
+	## F gives HR-23's control C0, the script as it was before part (a):
+	## no link_dir on any row (docs/phase4/D4-hr23-design.md, section 4.1).
+	const log_dir = T &redef;
+
 	type Info: record {
 		ts: time &log;
 		uid: string &log;
@@ -23,6 +27,10 @@ export {
 		ev: string &log;
 		link_src: count &log &optional;
 		link_dst: count &log &optional;
+		## The link header's DIR bit (ctrl & 0x80), on "link" rows (HR-23
+		## part (a)): T when the frame's sender says it is a master. The
+		## judge takes a DNP3 flow's servers from it. Not a C13 field.
+		link_dir: bool &log &optional;
 		fc: count &log &optional;
 		group: count &log &optional;
 		variation: count &log &optional;
@@ -50,8 +58,11 @@ event zeek_init()
 
 event dnp3_header_block(c: connection, is_orig: bool, len: count, ctrl: count, dest_addr: count, src_addr: count)
 	{
-	Log::write(LOG, Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="link", $ev="dnp3_header_block",
-	                     $link_src=src_addr, $link_dst=dest_addr));
+	local r = Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="link", $ev="dnp3_header_block",
+	               $link_src=src_addr, $link_dst=dest_addr);
+	if ( log_dir )
+		r$link_dir = ctrl >= 128;
+	Log::write(LOG, r);
 	}
 
 event dnp3_application_request_header(c: connection, is_orig: bool, application: count, fc: count)
