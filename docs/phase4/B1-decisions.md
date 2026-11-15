@@ -2421,7 +2421,7 @@ Evidence class: `desk`, for the rulings and the probes named.
 
 ## D4-107: HR-25's design rulings, C8 0.13's forms, and the session's later risks and open items (D1, 2026-11-15)
 
-Evidence class: `desk`, for the rulings and the probes named.
+Evidence class: `desk`, for the rulings and the probes named; `CI-Windows` for the run times in item 5.4.
 
 - **1. HR-25's design, merged as #690 (`4bcffe88`, P4-4-HR25 deliverable 1).** D1's rulings 6893581874 on #690:
   1. **B1, option (b).** A flow that never confirms writes its `end` row only when one of these causes has a count: `app_parse`, `fragment_limit`, `embedded_header`, `first_chunk_missing` or `gap`. D6, D3 and D2 support this set, and D2 asked for `gap`. So S8's insertion residual and a write lost in a TCP gap at the sensor each leave a row, and the false-positive classes stay rowless.
@@ -2437,21 +2437,25 @@ Evidence class: `desk`, for the rulings and the probes named.
   - every key new in 0.13 refuses `null`;
   - `applied_at` is in the record's microsecond form, with the clamp on truncated values, and a saved `applied_at` joins the node-start clock-step check;
   - F1's map is keyed by typed verdicts, total over `NodeCloseReasons`, with two controls;
-  - D6 lifts C8-1's narrowed old-reader leg with full 0.13 records.
+  - D6 lifts C8-1's narrowed old-reader leg with full 0.13 records;
+  - after a restart `alert_through_seq` can over-mark, never under-mark, and D5 states the bound in its design;
+  - D3 answers in its code PR whether C8-8 compares `sensor.revoked`'s copied body fields with C8-6's;
+  - C8-4's `run-regressed` row gains 5a's `drops_channel` leg in D3's records PR (D4-106 item 1.4.4).
 
   This closes D4-104 item 2 (b). The node's legs are owed (item 4).
 - **3. Rulings and records.**
   1. **#687's D5 N1 (6893988358), an open item:** on the 0.2 channel, a 0.1 counter sent as JSON `null` reads as 0. D3 had judged it and dropped it with its reason (6893464106). The C13 0.2 intake brief refuses it, with a test and its control (item 4).
-  2. **#689's `1c71edc0`:** D4's one-token compile fix after a merge (`c.need02` became `c.need >= 2`) is taken as trivial. #689's reviewers read it.
+  2. **#689's `96b7814e`:** D4's one-token compile fix after the merge `1c71edc0` (`c.need02` became `c.need >= 2`) is taken as trivial. #689's reviewers read it.
   3. **#692's F-028:** its CI citation stays at `bd4fa068`'s run. The tests it names are unchanged since, except D5's two added checks (`471f7d96`), which #692's own CI ran.
   4. **#696's O2 is dropped:** the seams guard matches text, so an alias write passes it. Only code in the repository can do that (D3's 6893612640).
-- **4. P4-4-CC's "Owed" table** gains these rows:
-  - C8 0.13's node legs (item 2): T1's clamp and its step check, K1's count, and F1's map with its two controls, owed by the C13 0.2 intake brief (D5);
-  - D4-106 item 1.6's three legs, owed by the C13 0.2 intake brief;
-  - the `null` 0.1 counter on the 0.2 channel (item 3.1), owed by the C13 0.2 intake brief (D4).
+- **4. P4-4-CC's "Owed" table** gains these rows, consistent with its existing rows, which give the `sensor.link_refused` legs of H-1, H-4 and T-5 and the node's writers of C8-1 to C8-6 to the dialer-and-enrolment brief:
+  - C8 0.13's node legs (item 2): T1's clamp and its step check, K1's count, and F1's map with its two controls, owed by the dialer-and-enrolment brief (D5), which writes those records;
+  - D4-106 item 1.6's `sensor.link_refused` legs stay with the dialer-and-enrolment brief, as the existing row gives them, which corrects D4-106 item 1.6 for those legs. Its other two legs, D3's condition 1 test and the tied leg of D4-104 item 1.3's test, are owed by the C13 0.2 intake brief;
+  - the `null` 0.1 counter on the 0.2 channel (item 3.1), owed by the C13 0.2 intake brief (D4);
+  - #696's open connection (item 5.2), owed by the C13 0.2 intake brief (D5).
 - **5. Risks and open items.**
-  1. **#693, a risk** (D6's N1, 6893427637). `Server.Serve` registers a connection (`wg.Add`) without holding the lock, so a connection accepted just before `Close` can still be decided after `Close` returns. It predates #693. The binary exits when `Serve` returns, which bounds it. **Owner: D3.** The fix takes `Add` under the lock with a closed check. It lands in D3's next collector PR, with a forced-interleaving test.
+  1. **#693, a risk** (D6's N1, 6893427637). `Server.Serve` registers a connection (`wg.Add`) without holding the lock, so a connection accepted just before `Close` can still be decided after `Close` returns. It predates #693. That the binary exits when `Serve` returns, which bounds it, is D1's reading of the collector's callers (`inference`). **Owner: D3.** This entry assigns the fix that D6's N1 names: `Add` under the lock with a closed check, in D3's next collector PR, with a forced-interleaving test.
   2. **#696, an open item** (D6's O1, 6893716403). A sensor connection that is live at a panic stays open and is still read after `sensor-failed`. `docs/phase4/D5-sensor-node.md` §1.9 item 9 says it closes. No product code calls `ServeSensor` today. Owed by the C13 0.2 intake brief (D5), with a test.
-  3. **#697's limits** (D3's PR body; D6's N3, 6894081789). `Register.Request` drops its key handle on every call. Its only caller is test support on the lab-files provider. Any product caller of `Request` frees the handle first.
-  4. **The Windows `platform/node` time.** This session's runs took 797 s, 898 s and 938 s against D4-44's 720 s warning, and 683 s once. The Windows time brief (D4-104 item 4) is due. It names `TestSensorStartupStuckDoesNotHoldStart`.
+  3. **#697's limits** (D3's PR body; D6's N3, 6894081789). `Register.Request` leaks one key handle on every call, and process exit frees it. Its only caller outside the tests is test support on the lab-files provider. #697's `a8aa438d` fixed `Register.Certificate`'s refusal on its validity period. **Owner: D3.** Before any product caller of `Request` is added, `Request` frees its handle.
+  4. **The Windows `platform/node` time** (`CI-Windows`). This session's PR runs took 797 s, 891 s (#682), 898 s and 938 s against D4-44's 720 s warning, and 683 s once. `main`'s runs took 689 s and 671 s (D6 on #696). The Windows time brief (D4-104 item 4) is due. It names `TestSensorStartupStuckDoesNotHoldStart`.
 - **Next decision number:** D4-108.

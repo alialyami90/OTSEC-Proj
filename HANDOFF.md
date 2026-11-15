@@ -26,7 +26,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **CHECKPOINT (D1), 2026-11-15, later (D4-104 to D4-107).** P4-4-CC is in progress. The next steps are D4-102's "Next", in D4-103's order and D4-105 item 8's. D4-106 and D4-107 record this session's rulings.
 - **Merged this session:** #681, #686, #683, #691, #685, #694, #682, #695, #693, #690, #687, #684, #696, #692 and #697.
-- **Open:** #689 (P4-4-CC deliverable 3, C13 0.3), #698 (P4-4-HR25 deliverable 2, the `dnp3-resync-*` cases), and D3's PR for deliverable 5 (C7 0.11 and C8 0.13, in the forms of D4-107 item 2). D6 records the CNG leak's closing in F-027. Each PR's last comments say what it waits on.
+- **Open:** #689 (P4-4-CC deliverable 3), #698 (P4-4-HR25 deliverable 2), #699 (P4-4-CC deliverable 5; D4-107 item 2) and #700 (D4-107). D6 records the CNG leak's closing in F-027 (D4-106 item 3). Each PR's last comments say what it waits on.
 - **Then:** deliverable 6 (D7), D3's records PR (D4-106 items 1.4.4 and 2.3), D6's builder and captures and D4's build for HR-25 (deliverable 3), the Windows `platform/node` time brief (D4-107 item 5.4), and the rest of D4-102's "Next".
 
 **Earlier checkpoint (D1), 2026-11-15, superseded by the checkpoint above (D4-104 to D4-106).** It listed the PRs open in the morning of 2026-11-15.
