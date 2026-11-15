@@ -59,18 +59,21 @@ type Time = event.Received
 // Clock is the node clock's state when the record was written (C4).
 type Clock = event.Clock
 
+// timeUTCPattern is the schema's form of time.utc: UTC with Z, and at most
+// nanoseconds after a '.'. time.Parse also takes a ',' before the fraction,
+// so the form is checked by this pattern, not by the parse, as applied_at's
+// is (D4-108 items 1.4 and 3.1).
+var timeUTCPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$`)
+
 func validateTime(t Time) error {
 	parsed, err := time.Parse(time.RFC3339Nano, t.UTC)
-	if err != nil || parsed.Location() != time.UTC || !strings.HasSuffix(t.UTC, "Z") {
-		return fmt.Errorf("audit: time %q is not RFC 3339 UTC with Z", t.UTC)
+	if err != nil || parsed.Location() != time.UTC || !timeUTCPattern.MatchString(t.UTC) {
+		return fmt.Errorf("audit: time %q is not RFC 3339 UTC with Z, with at most nanoseconds after a '.'", t.UTC)
 	}
 	if t.ResolutionNS <= 0 {
 		return errors.New("audit: resolution_ns must be positive")
 	}
-	digits := 0
-	if i := strings.IndexByte(t.UTC, '.'); i >= 0 {
-		digits = len(t.UTC) - i - 2 // between '.' and 'Z'
-	}
+	digits := fractionDigits(t.UTC)
 	granularity := int64(1_000_000_000)
 	for i := 0; i < digits; i++ {
 		granularity /= 10
@@ -87,6 +90,17 @@ func validateTime(t Time) error {
 		return fmt.Errorf("audit: clock source %q is not valid", t.Clock.Source)
 	}
 	return nil
+}
+
+// fractionDigits counts the digits between the fraction's separator and the
+// closing Z. It takes the ',' that time.Parse also takes as well as the '.',
+// so the precision check counts the digits whichever separator reaches it.
+func fractionDigits(utc string) int {
+	i := strings.IndexAny(utc, ".,")
+	if i < 0 {
+		return 0
+	}
+	return len(utc) - i - 2
 }
 
 // Actor is who acted: a C7 principal, plus the role and session it acted in.
