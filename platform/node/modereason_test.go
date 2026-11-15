@@ -39,6 +39,23 @@ func drainOnlyRecord(t *testing.T, r *Runtime, st *Status, prefix string) {
 	}
 }
 
+// drainOnlyHealth checks that the C4 health event of db's change keeps the
+// C5 spelling: "to" is drain-only while the record's reason_code is
+// drain_only (C8 0.13's and C5's sentences; D3's N1 on #692). Control: "to"
+// mapped as reason_code is, in modeHealth or in recordMode.
+func drainOnlyHealth(t *testing.T, r *Runtime, db c5.DatabaseID) {
+	t.Helper()
+	var to []string
+	for _, h := range healthOf(t, r, c5.HealthModeChanged) {
+		if h.Details["database"] == string(db) {
+			to = append(to, h.Details["to"])
+		}
+	}
+	if len(to) == 0 || to[len(to)-1] != string(c5.ModeDrainOnly) {
+		t.Fatalf("%s's mode-changed health events have to %q; want the last drain-only", db, to)
+	}
+}
+
 // modeChanged (Start's recordStart and Tick's retries): the evidence
 // database's change to drain-only is recorded as drain_only.
 func TestModeChangedRecordsDrainOnly(t *testing.T) {
@@ -47,6 +64,7 @@ func TestModeChangedRecordsDrainOnly(t *testing.T) {
 	defer r.Close()
 	r.modeChanged(bg, r.find(EvidenceDB), c5.ModeChange{From: c5.ModeCollecting, To: c5.ModeDrainOnly, At: r.opt.Now()})
 	drainOnlyRecord(t, r, st, "database evidence: collecting to drain-only")
+	drainOnlyHealth(t, r, EvidenceDB)
 }
 
 // commitDeferred (Tick's retry that opens a busy audit database). It is
@@ -82,4 +100,5 @@ func TestSensorRecordModeRecordsDrainOnly(t *testing.T) {
 		t.Fatalf("network database %s", m)
 	}
 	drainOnlyRecord(t, r, st, "database "+string(NetworkDB)+": none to drain-only")
+	drainOnlyHealth(t, r, NetworkDB)
 }
