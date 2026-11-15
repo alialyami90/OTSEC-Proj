@@ -2266,6 +2266,12 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   | C4 0.4: E4-7's node leg, `TestHeldPoolEventBuiltAtWrite` | the C13 0.2 intake brief |
   | C7-4's node test, C7-5, C8-5 and C8-7 (SL-T13's legs), and the node's writers of C8-1 to C8-6 | the dialer-and-enrolment brief |
   | C7-6 with its import test, and C7-4's agent legs (SL-T4) | the sensor's brief |
+  | C8 0.13's node legs (D4-107 item 2): T1's clamp and its node-start step check, K1's count, and F1's map with its three controls | the dialer-and-enrolment brief (D5) |
+  | D4-106 item 1.6: D3's condition 1 test, and the tied leg of D4-104 item 1.3's test (its `sensor.link_refused` legs are in the row above that names H-1) | the C13 0.2 intake brief |
+  | A sensor connection live at `sensor-failed` is closed (`docs/phase4/D5-sensor-node.md` §1.9 item 9; D4-107 item 5.2) | the C13 0.2 intake brief (D5) |
+  | D4-104 item 1.3's invariant test: a stored record's schema is the minor the node checked strictly on the channel | the C13 0.2 intake brief |
+  | D4-105 item 1.4's reading 2 (the agent merges lost spans that touch) and item 2.1 (a 0.3 agent accepts 0.2-stamped node messages) | the sensor's brief |
+  | C13 0.2: a 0.1 counter sent as `null` on the 0.2 channel is refused (D4-107 item 3.1) | the C13 0.2 intake brief (D4) |
 
 - Explicit exclusions:
   - no product wiring of any path to or from a sensor (F-027's gate);
