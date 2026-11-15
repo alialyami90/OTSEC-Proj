@@ -120,6 +120,28 @@ func TestC81SensorRecordsFoldHoldsNoRun(t *testing.T) {
 				r.Close()
 				t.Fatalf("0.13 reader: run %+v, %d requests, halted %q; want the run sent", rep, sent, why)
 			}
+			// The start's chain check (newEventLife) passes on the same
+			// chain: C8-8's sensor rules are not in it (D5-sensor-node.md
+			// §1.10), and a break there would stop every event baseline.
+			db := r.Store(AuditStream)
+			recs, raw, err := chainRecords(bg, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			anchor, err := db.ChainAnchor(bg, AuditStream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			all := make([]*audit.Record, len(recs))
+			for i, ar := range recs {
+				all[i] = ar.rec
+			}
+			if err := audit.VerifyChain(string(r.cfg.NodeID), raw, &anchor, nil); err != nil {
+				t.Fatalf("VerifyChain: %v", err)
+			}
+			if err := audit.VerifyConfigFrom(all, anchor.Seq+1); err != nil {
+				t.Fatalf("VerifyConfigFrom: %v", err)
+			}
 			// A start without the checkpoint folds the whole stream.
 			r.Close()
 			if err := os.Remove(filepath.Join(c.Store.Dir, SuspensionsFileName)); err != nil {
