@@ -1,0 +1,68 @@
+{
+  "schema": "otsec.event/0.4",
+  "id": {"node_id": "d6-node", "stream": "network-observation/5a3c2e10-7b4d-4c8e-9f1a-2b3c4d5e6f70", "seq": 57},
+  "origin": "platform",
+  "kind": "network-observation",
+  "source": {
+    "asset": {"id": "3f2a1b0c-9d8e-4f7a-a6b5-c4d3e2f1a0b9", "binding": {"method": "observed-address", "confidence": "inferred"}},
+    "origin_auth": "platform"
+  },
+  "received": {"utc": "2026-11-15T10:05:12.345678Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "netobs": {
+    "schema": "otsec.netobs/0.3",
+    "type": "observation",
+    "sensor_id": "5a3c2e10-7b4d-4c8e-9f1a-2b3c4d5e6f70",
+    "run_id": "0d1e2f30-4a5b-4c6d-8e7f-a0b1c2d3e4f5",
+    "seq": "57",
+    "kind": "flow",
+    "first_sight": false,
+    "first_utc": "2026-11-15T09:58:02.123456Z",
+    "last_utc": "2026-11-15T09:58:09.874310Z",
+    "made_utc": "2026-11-15T09:58:10.2Z",
+    "resolution_ns": 1000,
+    "l2": {"src_mac": "02:00:5e:10:00:0e", "dst_mac": "02:00:5e:10:00:14", "ethertype": "0x0800"},
+    "ip": {"src": "192.0.2.14", "dst": "192.0.2.20", "l4": "tcp", "sport": 49812, "dport": 23},
+    "direction": "client-server",
+    "protocol": "telnet",
+    "citation": {
+      "capture_id": "ring:0d1e2f30-4a5b-4c6d-8e7f-a0b1c2d3e4f5:12",
+      "frames": [{"n": 1, "captured_len": 74, "wire_len": 74, "sha256": "9cbad339406feea40d9113c7dd0c675a70f2b327c0713f886e964bed3ad7f6bd"}],
+      "frames_total": 1
+    },
+    "coverage": {
+      "sensor_version": "d6-test-0.3",
+      "engine": {"name": "zeek", "version": "9.0.1"},
+      "interfaces": [{"name": "mon0", "attachment": "tap", "lan": "single"}],
+      "prp": {"lans_seen": [], "duplicates_discarded": false},
+      "hsr": "not-decoded",
+      "vlans_seen": [],
+      "vlans_overflow": false,
+      "untagged_seen": true,
+      "decodes": ["dnp3", "modbus"],
+      "degraded": [],
+      "config_digest": "sha256:2af06c7358938493051accf442b6f5930dde8a1838c87c7f0428564d8ae7e726",
+      "settings": {"sa_reply_timeout_ms": 5000, "max_pending_dnp3": 4096, "flow_idle_s": 60, "prp_window_ms": 400},
+      "since_utc": "2026-11-15T09:00:00Z"
+    },
+    "flow": {
+      "phase": "end",
+      "packets": 38,
+      "bytes": 3728,
+      "end": "fin",
+      "syn_only": false,
+      "orig_payload": 214,
+      "resp_payload": 1462,
+      "orig_pkts": 19,
+      "resp_pkts": 19,
+      "to_device_overlap_octets": 0,
+      "rexmit_inconsistent": 0,
+      "password_lines": 1
+    },
+    "node": {
+      "src_asset": "7c1e5a20-4d3b-4f6a-8b2c-9e0d1f2a3b4c",
+      "dst_asset": "3f2a1b0c-9d8e-4f7a-a6b5-c4d3e2f1a0b9",
+      "resolved_by": "ip",
+      "evidence_class": "simulated"
+    }
+  }
+}

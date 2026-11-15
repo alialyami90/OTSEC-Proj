@@ -1,4 +1,4 @@
-// Package netobs is contract C13, otsec.netobs/0.2 with its 0.1 channel kept (below): what the passive
+// Package netobs is contract C13, otsec.netobs/0.3 with its 0.1 channel kept (below): what the passive
 // network sensor hands the node, and the records the node builds from it.
 // It is owned by D4. The text is docs/phase4/D4-c13-netobs.md, approved in
 // D4-68, with the coding gaps of §14 agreed in D4-69 (#543); the baseline,
@@ -64,9 +64,32 @@
 //     in a record below 0.2, required on the 0.2 channel, and optional in
 //     a stored record.
 //   - The stored readers read 0.1 and 0.2 strictly and a later minor
-//     forward; the bridge's unknown degraded value is read from 0.3 on.
-//   - The checkpoints: CheckpointIdentifier is otsec.netcheckpoint/0.2, and
-//     the decoders read a 0.1 document strictly (CheckpointIdentifier01).
+//     forward.
+//
+// # C13 0.3
+//
+// otsec.netobs/0.3 (docs/phase4/D4-c13-0.3-proposal.md, approved in
+// D4-102; coded under P4-4-CC) adds the counts HR-24's rule reads:
+//
+//   - CH-51: the rule own-session-mismatch, baseline-free with no params,
+//     refused in an alert below 0.3, and its observation matched whole
+//     against the head grammar. The judgement is HR-24's stage 3.
+//   - CH-52 to CH-55: on a flow end, orig_payload, resp_payload, orig_pkts,
+//     resp_pkts, to_device_overlap_octets, incomplete, rexmit_inconsistent
+//     and password_lines, each a pointer so that absent, 0 and false stay
+//     apart. Refused below 0.3, required on the 0.3 channel as §3 to §6
+//     place them, and optional in a stored record.
+//   - CH-53: the heartbeat's frame_stage.overlap_table_full and the agent's
+//     overlap_join_refused and overlap_unjoined, required at 0.3 and never
+//     in counters.
+//   - The channel (CH-36): a hello of 0.2 or 0.3 opens a connection
+//     (DecodeFromSensor), and every later frame must carry its minor
+//     (DecodeFromSensorIn). The node's two messages keep Identifier02.
+//   - The stored readers read 0.1, 0.2 and 0.3 strictly and a later minor
+//     forward; the bridge's unknown degraded value is read from 0.4 on.
+//   - The checkpoints: CheckpointIdentifier is otsec.netcheckpoint/0.3,
+//     which this code always writes, and the decoders read a 0.2 and a 0.1
+//     document strictly (CheckpointIdentifier02, CheckpointIdentifier01).
 //
 // # Bounds
 //
