@@ -1,0 +1,40 @@
+# GT-PCAP labels for dnp3-resync-tcp-gap-data and its twins (D6, brief P4-4-HR25, deliverable 3). The builder's, from how each capture was made (judge-labels); tshark's reading is reported beside them by resync_tshark.py, never used as a label.
+# build: handshake | P R | G[0:12] | G[12:16] lost, ACKed past | G[16:24] | R | W R | Q R
+# m is M1 192.0.2.10, its port in the flow column (link 1); o is O1 192.0.2.20:20000 (link 10). A capture is the case, or <case>--<twin> (section 3.3), or <case>--control.
+# one row per link-layer unit, in the order sent (by unit, then flow, in a capture of many flows). label: valid, or the damage the unit's octets carry. fail: the case's failure the unit belongs to.
+# packets: 1-based packet numbers, a-b for a run and a-b/s for every s-th; - for none. A gap row is a TCP hole left out of the capture: its packet is the peer's ACK past it (judge-r3).
+# state: the builder's record of the message: seen when every frame is whole and valid (over UDP, each in one datagram), contiguous on its end apart from link-only frames and exact retries, and built to parse; lost when an octet is in a hole; absent otherwise, and why. The case's a cell is the expectation under C2A.
+# a row whose unit is a..b, or whose flow is a..b, stands for that run of units or flows, each as the row says.
+capture	flow	end	unit	label	fail	packets	octets	message	code	objects	state	why
+dnp3-resync-tcp-gap-data	41134	m	P	valid	-	4	18	P	1	g60v1	seen	-
+dnp3-resync-tcp-gap-data	41134	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
+dnp3-resync-tcp-gap-data	41134	m	G	valid	-	8,11	24	G	1	g60v2,g60v3,g60v4	lost	an octet of it is in a TCP hole
+dnp3-resync-tcp-gap-data	41134	m	gap	lost(4)	-	10	4	-	-	-	-	the peer's ACK past the hole is this packet; the hole held G[12:16]
+dnp3-resync-tcp-gap-data	41134	o	R(G)	valid	-	13	17	R(G)	129	-	seen	-
+dnp3-resync-tcp-gap-data	41134	m	W	valid	-	15	35	W	5	g12v1	seen	-
+dnp3-resync-tcp-gap-data	41134	o	R(W)	valid	-	17	37	R(W)	129	g12v1	seen	-
+dnp3-resync-tcp-gap-data	41134	m	Q	valid	-	19	24	Q	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data	41134	o	R(Q)	valid	-	21	17	R(Q)	129	-	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	m	P	valid	-	4	18	P	1	g60v1	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	m	G	valid	-	8-12/2	24	G	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	o	R(G)	valid	-	14	17	R(G)	129	-	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	m	W	valid	-	16	35	W	5	g12v1	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	o	R(W)	valid	-	18	37	R(W)	129	g12v1	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	m	Q	valid	-	20	24	Q	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data--nofail	41134	o	R(Q)	valid	-	22	17	R(Q)	129	-	seen	-
+dnp3-resync-tcp-gap-data--nowrite	41134	m	P	valid	-	4	18	P	1	g60v1	seen	-
+dnp3-resync-tcp-gap-data--nowrite	41134	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
+dnp3-resync-tcp-gap-data--nowrite	41134	m	G	valid	-	8-12/2	24	G	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data--nowrite	41134	o	R(G)	valid	-	14	17	R(G)	129	-	seen	-
+dnp3-resync-tcp-gap-data--nowrite	41134	m	Q	valid	-	16	24	Q	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data--nowrite	41134	o	R(Q)	valid	-	18	17	R(Q)	129	-	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	m	P	valid	-	4	18	P	1	g60v1	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	m	G	valid	-	8-12/2	24	G	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	o	R(G)	valid	-	14,17	17	R(G)	129	-	lost	an octet of it is in a TCP hole
+dnp3-resync-tcp-gap-data--otherend	41134	o	gap	lost(4)	-	16	4	-	-	-	-	the peer's ACK past the hole is this packet; the hole held R(G)[12:16]
+dnp3-resync-tcp-gap-data--otherend	41134	m	W	valid	-	19	35	W	5	g12v1	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	o	R(W)	valid	-	21	37	R(W)	129	g12v1	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	m	Q	valid	-	23	24	Q	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-data--otherend	41134	o	R(Q)	valid	-	25	17	R(Q)	129	-	seen	-

@@ -1,0 +1,22 @@
+# GT-PCAP labels for dnp3-resync-udp-report-cap and its twins (D6, brief P4-4-HR25, deliverable 3). The builder's, from how each capture was made (judge-labels); tshark's reading is reported beside them by resync_tshark.py, never used as a label.
+# build: 201 flows m:40000+i, i = 0..200, each confirmed by P R before T0 and polled every 30 s to the end | flows 0..100: X:badchunk at T0 + 0.1 s x i | a fresh flow m:41000: X:badhdr x8 at T0 + 20 s | flows 101..200: X:badchunk at T0 + 60.5 s + 0.1 s x (i - 101) | capture ends at T0 + 125 s
+# m is M5 192.0.2.14:20000 (link 5); o is O1 192.0.2.20:20000 (link 10). A capture is the case, or <case>--<twin> (section 3.3), or <case>--control.
+# one row per link-layer unit, in the order sent (by unit, then flow, in a capture of many flows). label: valid, or the damage the unit's octets carry. fail: the case's failure the unit belongs to.
+# packets: 1-based packet numbers, a-b for a run and a-b/s for every s-th; - for none. A gap row is a TCP hole left out of the capture: its packet is the peer's ACK past it (judge-r3).
+# state: the builder's record of the message: seen when every frame is whole and valid (over UDP, each in one datagram), contiguous on its end apart from link-only frames and exact retries, and built to parse; lost when an octet is in a hole; absent otherwise, and why. The case's a cell is the expectation under C2A.
+# a row whose unit is a..b, or whose flow is a..b, stands for that run of units or flows, each as the row says.
+capture	flow	end	unit	label	fail	packets	octets	message	code	objects	state	why
+dnp3-resync-udp-report-cap	40000..40200	m	P	valid	-	1-401/2	18	P	1	g60v1	seen	-
+dnp3-resync-udp-report-cap	40000..40200	o	R(P)	valid	-	2-402/2	17	R(P)	129	-	seen	-
+dnp3-resync-udp-report-cap	40000..40200	m	X	badchunk	badchunk	403-432,435-498/21,518-854/21,856-905,1316-1340,1343-1637/21,1657-1762/21,1764-1817	18	X	1	g60v1	absent	damaged
+dnp3-resync-udp-report-cap	40000..40200	m	P2	valid	-	433,436-454/2,457-475/2,478-496/2,499-517/2,520-538/2,541-559/2,562-580/2,583-601/2,604-622/2,625-643/2,646-664/2,667-685/2,688-706/2,709-727/2,730-748/2,751-769/2,772-790/2,793-811/2,814-832/2,835-853/2	18	P2	1	g60v1	seen	-
+dnp3-resync-udp-report-cap	40000..40200	o	R(P2)	valid	-	434,437-455/2,458-476/2,479-497/2,500-516/2,519-537/2,540-558/2,561-579/2,582-600/2,603-621/2,624-642/2,645-663/2,666-684/2,687-705/2,708-726/2,729-747/2,750-768/2,771-789/2,792-810/2,813-831/2,834-852/2,855	17	R(P2)	129	-	seen	-
+dnp3-resync-udp-report-cap	41000	m	X1..X8	badhdr	badhdr	906-913	16	-	-	-	-	-
+dnp3-resync-udp-report-cap	40000..40200	m	P3	valid	-	914-1314/2	18	P3	1	g60v1	seen	-
+dnp3-resync-udp-report-cap	40000..40200	o	R(P3)	valid	-	915-1315/2	17	R(P3)	129	-	seen	-
+dnp3-resync-udp-report-cap	40000..40200	m	P4	valid	-	1341,1344-1362/2,1365-1383/2,1386-1404/2,1407-1425/2,1428-1446/2,1449-1467/2,1470-1488/2,1491-1509/2,1512-1530/2,1533-1551/2,1554-1572/2,1575-1593/2,1596-1614/2,1617-1635/2,1638-1656/2,1659-1677/2,1680-1698/2,1701-1719/2,1722-1740/2,1743-1761/2	18	P4	1	g60v1	seen	-
+dnp3-resync-udp-report-cap	40000..40200	o	R(P4)	valid	-	1342,1345-1363/2,1366-1384/2,1387-1405/2,1408-1426/2,1429-1447/2,1450-1468/2,1471-1489/2,1492-1510/2,1513-1531/2,1534-1552/2,1555-1573/2,1576-1594/2,1597-1615/2,1618-1636/2,1639-1655/2,1658-1676/2,1679-1697/2,1700-1718/2,1721-1739/2,1742-1760/2,1763	17	R(P4)	129	-	seen	-
+dnp3-resync-udp-report-cap	40000..40200	m	P5	valid	-	1818-2218/2	18	P5	1	g60v1	seen	-
+dnp3-resync-udp-report-cap	40000..40200	o	R(P5)	valid	-	1819-2219/2	17	R(P5)	129	-	seen	-
+dnp3-resync-udp-report-cap	40000..40200	m	P6	valid	-	2220-2620/2	18	P6	1	g60v1	seen	-
+dnp3-resync-udp-report-cap	40000..40200	o	R(P6)	valid	-	2221-2621/2	17	R(P6)	129	-	seen	-
