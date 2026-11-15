@@ -572,7 +572,7 @@ func (r *Runtime) recordMode(ctx context.Context, d *database, mc c5.ModeChange,
 		detail += fmt.Sprintf("; %d earlier mode changes of this database not recorded (at most one an hour)", m.held)
 		details["not_recorded"] = strconv.Itoa(m.held)
 	}
-	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
+	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, modeReason(mc.To), detail)
 	r.sensorHealthEvent(ctx, c5.HealthModeChanged, details) // under the ceiling (F1)
 	m.at, m.ever, m.to, m.held = r.opt.Mono(), true, mc.To, 0
 }
