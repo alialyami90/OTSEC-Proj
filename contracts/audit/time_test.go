@@ -112,6 +112,54 @@ func TestTimeCommaRefusedEveryAction(t *testing.T) {
 	}
 }
 
+// TestTimeFieldsCommaRefused covers every other C8 time field the schema
+// states in time.utc's form (properties with the pattern
+// `(\.[0-9]{1,9})?Z$` in schema/record.json): each, in a golden that carries
+// it, is refused in the comma form and with ten fraction digits, while the
+// golden as written parses. applied_at, at most six digits, is #699's and is
+// tested in sensor_test.go.
+func TestTimeFieldsCommaRefused(t *testing.T) {
+	for _, c := range []struct{ file, field string }{
+		{"store-retention-moved-wall.json", "wall_utc"},
+		{"store-retention-moved-wall.json", "cutoff_utc"},
+		{"store-retention-moved-wall.json", "previous_cutoff_utc"},
+		{"store-retention-moved-created.json", "wall_utc"},
+		{"store-retention-moved-created.json", "cutoff_utc"},
+		{"config-change-detected-unapproved.json", "unchanged_at"},
+		{"config-change-detected-approved.json", "unchanged_at"},
+		{"config-change-approved.json", "window_start"},
+		{"config-change-approved.json", "window_end"},
+		{"sensor-enrolled-rekey.json", "not_after"},
+		{"sensor-revoked.json", "suspect_from"},
+		{"collector-request-sensor-revoke.json", "suspect_from"},
+	} {
+		b, err := os.ReadFile(filepath.Join("testdata/valid", c.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b = bytes.TrimRight(b, "\n")
+		if _, err := ParseRecord(b); err != nil {
+			t.Fatalf("%s as written: %v", c.file, err)
+		}
+		m := regexp.MustCompile(`"` + c.field + `":"([^"]*)"`).FindSubmatch(b)
+		if m == nil {
+			t.Fatalf("%s: no %s", c.file, c.field)
+		}
+		v := string(m[1])
+		whole := v
+		if i := strings.IndexByte(v, '.'); i >= 0 {
+			whole = v[:i] + "Z"
+		}
+		for _, bad := range []string{toComma(v), strings.TrimSuffix(whole, "Z") + ".1234567890Z"} {
+			rec := bytes.Replace(b, []byte(`"`+c.field+`":"`+v+`"`), []byte(`"`+c.field+`":"`+bad+`"`), 1)
+			_, err := ParseRecord(rec)
+			if !errors.Is(err, ErrRecordRejected) || !strings.Contains(err.Error(), "RFC 3339") {
+				t.Errorf("%s %s %q: got %v, want the form refused", c.file, c.field, bad, err)
+			}
+		}
+	}
+}
+
 // TestTimeOtherFormsRefused pins the rest of the schema's form for time.utc.
 func TestTimeOtherFormsRefused(t *testing.T) {
 	for name, utc := range map[string]string{
@@ -122,6 +170,7 @@ func TestTimeOtherFormsRefused(t *testing.T) {
 		"offset":           "2026-11-15T13:00:00.5+03:00",
 		"zero offset":      "2026-11-15T10:00:00.5+00:00",
 		"comma, no digits": "2026-11-15T10:00:00,Z",
+		"one-digit hour":   "2026-11-15T9:00:00.5Z", // time.Parse takes it
 	} {
 		tm := Time{UTC: utc, ResolutionNS: 1, Clock: Clock{Sync: event.SyncSynchronized}}
 		if err := validateTime(tm); !isTimeFormErr(err) {

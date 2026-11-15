@@ -153,8 +153,8 @@ func (r *Record) validateRetention() error {
 		return fmt.Errorf("audit: store.retention_moved stream is %s<sensor_id>", AlertStreamPrefix)
 	case m.RetentionS < 1:
 		return errors.New("audit: retention_s is 1 or more")
-	case !utcZ(m.WallUTC) || !utcZ(m.CutoffUTC) || (m.PreviousCutoffUTC != "" && !utcZ(m.PreviousCutoffUTC)):
-		return errors.New("audit: retention times are RFC 3339 UTC with Z")
+	case !schemaUTC(m.WallUTC) || !schemaUTC(m.CutoffUTC) || (m.PreviousCutoffUTC != "" && !schemaUTC(m.PreviousCutoffUTC)):
+		return errors.New("audit: retention times are RFC 3339 UTC with Z, with at most nanoseconds after a '.'")
 	}
 	switch m.Bound {
 	case BoundCreated:

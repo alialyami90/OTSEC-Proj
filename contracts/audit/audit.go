@@ -59,11 +59,20 @@ type Time = event.Received
 // Clock is the node clock's state when the record was written (C4).
 type Clock = event.Clock
 
-// timeUTCPattern is the schema's form of time.utc: UTC with Z, and at most
+// timeUTCPattern is the schema's form of time.utc and of the other time
+// fields it states so (retention's wall_utc, cutoff_utc and
+// previous_cutoff_utc; config's unchanged_at): UTC with Z, and at most
 // nanoseconds after a '.'. time.Parse also takes a ',' before the fraction,
-// so the form is checked by this pattern, not by the parse, as applied_at's
-// is (D4-108 items 1.4 and 3.1).
+// and more than nine digits, so the form is checked by this pattern, not by
+// the parse, as applied_at's is (D4-108 items 1.4 and 3.1).
 var timeUTCPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$`)
+
+// schemaUTC reports whether s has timeUTCPattern's form and is a real
+// instant (no 30 February, no hour 24).
+func schemaUTC(s string) bool {
+	_, err := time.Parse(time.RFC3339Nano, s)
+	return err == nil && timeUTCPattern.MatchString(s)
+}
 
 func validateTime(t Time) error {
 	parsed, err := time.Parse(time.RFC3339Nano, t.UTC)

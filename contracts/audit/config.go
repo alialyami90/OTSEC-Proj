@@ -424,8 +424,8 @@ func (r *Record) validateConfig(minor int) error {
 	case c.UnchangedReadSeq >= c.ReadSeq:
 		return errors.New("audit: unchanged_read_seq names a decision before read_seq")
 	}
-	if _, err := parseConfigTime(c.UnchangedAt); err != nil {
-		return fmt.Errorf("audit: config.change_detected unchanged_at: %w", err)
+	if !schemaUTC(c.UnchangedAt) {
+		return fmt.Errorf("audit: config.change_detected unchanged_at %q is not RFC 3339 UTC with Z, with at most nanoseconds after a '.'", c.UnchangedAt)
 	}
 	switch {
 	case r.Outcome == OutcomeWarning && r.ReasonCode == ReasonUnapprovedChange && c.ApprovalSeq == 0:
