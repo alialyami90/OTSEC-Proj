@@ -2418,3 +2418,47 @@ Evidence class: `desk`, for the rulings and the probes named.
   - On #684, D3 had not reviewed D6's tests of its collector seams (6893130787).
   - Neither PR merges until those reviews accept.
 - **Next decision number:** D4-107.
+
+## D4-107: HR-25's design rulings, C8 0.13's forms, and the session's later risks and open items (D1, 2026-11-15)
+
+Evidence class: `desk`, for the rulings and the probes named; `CI-Windows` for the run times in item 5.4.
+
+- **1. HR-25's design, merged as #690 (`4bcffe88`, P4-4-HR25 deliverable 1).** D1's rulings 6893581874 on #690:
+  1. **B1, option (b).** A flow that never confirms writes its `end` row only when one of these causes has a count: `app_parse`, `fragment_limit`, `embedded_header`, `first_chunk_missing` or `gap`. D6, D3 and D2 support this set, and D2 asked for `gap`. So S8's insertion residual and a write lost in a TCP gap at the sensor each leave a row. Of the note's false-positive classes, (3c) writes a row as the note says, and the `gap` rows on non-DNP3 flows are a count that #698 pins; the others stay rowless.
+  2. **B7, option (b):** no interpreter is remade for an end that holds no fragment.
+  3. **Fixes taken:** D6's B6 (the overflow row does not count against K), D3's BM (where the script holds the pending `dnp3_resync_mark`, freed with the connection, with its case in §3; whether Zeek frees the connection record stays `inference`) and D3's N1 (S5's measurement runs with the shipped script).
+  4. **D4's new consequence:** a non-DNP3 TCP flow on a DNP3 port that has a capture gap writes a `gap` row. D2, D6 and D3 accept it with no new bound: there is at most one `end` row per end, under K.
+  5. **Deliverable 2 (#698, D6)** pins 106 `dnp3-resync-*` cases and the conditions file. Owed before the counted run:
+     - D6's builder and captures;
+     - D4's `RESYNC_CASES_SHA256` and `RESYNC_CONDITIONS_SHA256` lines in `pins.env`, and the coverage site map with A's patch;
+     - D4 has since read the three expectations that rested on unread Zeek code, in the pinned tarball (6894466378, `desk`), and #698 cites them. D4's deliverable-3 script writes the last overflow row in `zeek_done`.
+- **2. C8 0.13's and C7 0.11's open forms (P4-4-CC deliverable 5, step 1; D4-104 item 2 (b)).** D1's ruling 6894226253 on #683 takes D3's S1, St1, T1, K1 and F1 (6894080340), with D4's (6894108828), D5's (6894117998) and D6's (6894220276) conditions as the ruling lists them:
+  - `streams` holds `*uint64` values with omitempty, which are the node's C5 stream seqs. Goldens and a contract test keep `{}` apart from both keys at 0. C8 states why `netbaseline/<id>` is left out (D4's St-b);
+  - every key new in 0.13 refuses `null`;
+  - `applied_at` is in the record's microsecond form, with the clamp on truncated values, and a saved `applied_at` joins the node-start clock-step check;
+  - F1's map is keyed by typed verdicts and total over `NodeCloseReasons`, with three controls: a mapper keyed by `CloseTick` alone, one with the `PlaceSensorID` entry dropped, and D3's `ReplaceAll` control;
+  - K1's count is cleared only once its record commits, so a failed write keeps it (D6's K1-b);
+  - D6 lifts C8-1's narrowed old-reader leg with full 0.13 records, written before deliverable 5 merges. The 0.12 reader refuses each new sensor action as an unknown action, and the `collector.request` and `info` records on their new kind (D6's 6894975096), so each record's test names its own refusal reason;
+  - after a restart `alert_through_seq` can over-mark, never under-mark, and D5 states the bound in its design;
+  - D3 answers in its code PR whether C8-8 compares `sensor.revoked`'s copied body fields with C8-6's;
+  - C8-4's `run-regressed` row gains 5a's `drops_channel` leg in D3's records PR (D4-106 item 1.4.4).
+
+  This closes D4-104 item 2 (b). The node's legs are owed (item 4).
+- **3. Rulings and records.**
+  1. **#687's D5 N1 (6893988358), an open item:** on the 0.2 channel, a 0.1 counter sent as JSON `null` reads as 0. D3 had judged it and dropped it with its reason (6893464106). The C13 0.2 intake brief refuses it, with a test and its control (item 4).
+  2. **#689's `96b7814e`:** D4's one-token compile fix after the merge `1c71edc0` (`c.need02` became `c.need >= 2`) is taken as trivial. #689's reviewers read it.
+  3. **#692's F-028:** its CI citation stays at `bd4fa068`'s run. The tests it names are unchanged since, except D5's two added checks (`471f7d96`), which #692's own CI ran.
+  4. **#696's O2 is dropped:** the seams guard matches text, so an alias write passes it. Only code in the repository can do that (D3's 6893612640).
+- **4. P4-4-CC's "Owed" table** gains these rows, consistent with its existing rows, which give the `sensor.link_refused` legs of H-1, H-4 and T-5 and the node's writers of C8-1 to C8-6 to the dialer-and-enrolment brief:
+  - C8 0.13's node legs (item 2): T1's clamp and its step check, K1's count, and F1's map with its three controls, owed by the dialer-and-enrolment brief (D5), which writes those records. This corrects ruling 6894226253, which gave them to the C13 0.2 intake brief;
+  - D4-106 item 1.6's `sensor.link_refused` legs stay with the dialer-and-enrolment brief, as the existing row gives them, which corrects D4-106 item 1.6 for those legs. Its other two legs, D3's condition 1 test and the tied leg of D4-104 item 1.3's test, are owed by the C13 0.2 intake brief;
+  - the `null` 0.1 counter on the 0.2 channel (item 3.1), owed by the C13 0.2 intake brief (D4);
+  - #696's open connection (item 5.2), owed by the C13 0.2 intake brief (D5);
+  - D4-104 item 1.3's invariant test itself, owed by the C13 0.2 intake brief;
+  - D4-105 item 1.4's reading 2 (the agent merges lost spans that touch) and item 2.1 (a 0.3 agent accepts 0.2-stamped node messages), each owed by the sensor's brief.
+- **5. Risks and open items.**
+  1. **#693, a risk** (D6's N1, 6893427637). `Server.Serve` registers a connection (`wg.Add`) without holding the lock, so a connection accepted just before `Close` can still be decided after `Close` returns. It predates #693. That the binary exits when `Serve` returns, which bounds it, is D1's reading of the collector's callers (`inference`). **Owner: D3.** This entry assigns the fix that D6's N1 names: `Add` under the lock with a closed check, in D3's next collector PR, with a forced-interleaving test.
+  2. **#696, an open item** (D6's O1, 6893716403). A sensor connection that is live at a panic stays open and is still read after `sensor-failed`. `docs/phase4/D5-sensor-node.md` §1.9 item 9 says it closes. No product code calls `ServeSensor` today. Owed by the C13 0.2 intake brief (D5), with a test.
+  3. **#697's limits** (D3's PR body; D6's N3, 6894081789). `Register.Request` leaks one key handle on every call, and process exit frees it. Its only caller outside the tests is test support on the lab-files provider. #697's `a8aa438d` fixed `Register.Certificate`'s refusal on its validity period. **Owner: D3.** Before any product caller of `Request` is added, `Request` frees its handle.
+  4. **The Windows `platform/node` time** (`CI-Windows`). This session's PR runs took 797 s (D6 on #692, 6893849256), 898 s (D5 on #692), 938 s (D6 on #696, 6893716403) and 683 s (D6 on #696, 6893966192), against D4-22's 720 s budget, which D4-44 keeps. `main`'s runs took 689 s and 671 s (D6 on #696). **Owner: D5, with D6 for the CI change** (D4-101 item 7.6). **Bound:** D4-44's 30-minute package timeout stays the hard limit, and a run over 720 s is a finding, not a failure. The Windows time brief (D4-104 item 4) is due. It names `TestSensorStartupStuckDoesNotHoldStart`.
+- **Next decision number:** D4-108.

@@ -185,6 +185,7 @@ func TestKeyUseCheckBites(t *testing.T) {
 		{"the Keys interface's Create", `func f(k nodekey.Keys) { k.Create("k") }`, true},
 		{"a method value of Delete", `func f(k nodekey.CNG) { _ = k.Delete }`, true},
 		{"a method expression", `var _ = nodekey.LabFiles.Open`, true},
+		{"OpenPinned", `func f(k nodekey.Keys) { nodekey.OpenPinned(k, "k", nil) }`, true},
 		{"a local interface returning a signer", "type opener interface{ Open(string) (crypto.Signer, error) }\nfunc f(o opener) { o.Open(\"k\") }", true},
 		{"the register's methods", `func f(r *nodekey.Register, k nodekey.Keys) { r.LoadCertificate("nodekey_client01", k) }`, false},
 		{"nodekey's other names", `var _ = nodekey.RefPattern.MatchString("x")`, false},

@@ -50,7 +50,7 @@ func TestLearnerCheckpointRules(t *testing.T) {
 		code Code
 		mut  func(k *LearnerCheckpoint)
 	}{
-		{"schema", CodeSchema, func(k *LearnerCheckpoint) { k.Schema = "otsec.netcheckpoint/0.3" }},
+		{"schema", CodeSchema, func(k *LearnerCheckpoint) { k.Schema = "otsec.netcheckpoint/0.4" }},
 		{"half", CodeForm, func(k *LearnerCheckpoint) { k.Half = HalfDetector }},
 		{"sensor", CodeForm, func(k *LearnerCheckpoint) { k.SensorID = "sensor-1" }},
 		{"other sensor's draft", CodeConflict, func(k *LearnerCheckpoint) { k.SensorID = fxAsset }},

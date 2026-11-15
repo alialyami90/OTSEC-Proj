@@ -132,7 +132,7 @@ const (
 	ActionStorageAlarm         Action = "storage.alarm"               //
 	ActionServiceStart         Action = "service.start"               //
 	ActionServiceStop          Action = "service.stop"                //
-	ActionStoreModeChange      Action = "store.mode_change"           // C5 mode change; reason_code is the new mode
+	ActionStoreModeChange      Action = "store.mode_change"           // C5 mode change; reason_code is the new mode, "-" written as "_"
 	ActionNodePostureChange    Action = "node.posture_change"         // a posture label or standing condition was raised or cleared
 	ActionNodeMigrationDate    Action = "node.migration_date"         // an admin recorded or changed the OS migration date (HR-9)
 	ActionAssetCollectorAssign Action = "asset.collector_assign"      // collection of an asset moved to another node (A1 D1-3)

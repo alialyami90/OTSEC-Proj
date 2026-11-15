@@ -363,9 +363,15 @@ func (r *Runtime) recordStart(ctx context.Context) {
 
 func (r *Runtime) modeChanged(ctx context.Context, d *database, mc c5.ModeChange) {
 	detail := modeDetail(d, mc)
-	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, string(mc.To), detail)
+	r.audit(ctx, audit.ActionStoreModeChange, audit.OutcomeInfo, modeReason(mc.To), detail)
 	r.modeHealth(ctx, d, mc)
 }
+
+// modeReason is a store.mode_change record's reason_code: the new C5 mode
+// with "-" written as "_" (drain_only), because C8's reason_code pattern
+// refuses "-" and a refused record is lost (F-028; D1's ruling on #663).
+// The health event's "to" keeps the C5 mode as it is.
+func modeReason(m c5.Mode) string { return strings.ReplaceAll(string(m), "-", "_") }
 
 // modeDetail is the detail of a store.mode_change record.
 func modeDetail(d *database, mc c5.ModeChange) string {
@@ -735,7 +741,7 @@ func (r *Runtime) commitDeferred(ctx context.Context, d *database, mc c5.ModeCha
 			fmt.Sprintf("%d node records were not recorded while the audit database's open was busy; status holds their alarms", dropped))
 	}
 	if changed {
-		add(audit.ActionStoreModeChange, string(mc.To), modeDetail(d, mc))
+		add(audit.ActionStoreModeChange, modeReason(mc.To), modeDetail(d, mc))
 	}
 	if len(batch) == 0 {
 		return changed

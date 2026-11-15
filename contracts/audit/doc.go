@@ -540,9 +540,20 @@
 // writes both, so they cannot disagree (C8-A4-5):
 //
 //	C8 action            C4 health type                   Source
-//	store.mode_change    store.mode-changed               C5 (reason_code is the new mode)
+//	store.mode_change    store.mode-changed               C5 (reason_code is the new mode, "-" written as "_")
 //	storage.alarm        store.* (names final in C5)      C5
 //	clock.change         time.node-stepped (proposed)     node runtime; moves every event's received.utc
+//
+// store.mode_change's reason_code is the new C5 mode with each "-" written as
+// "_": drain-only is recorded as drain_only, because the reason_code pattern
+// (^[a-z][a-z0-9_]{0,47}$) refuses "-", and a record that fails it is refused
+// and lost (F-028). The other C5 modes (collecting, blocked, failed) are
+// recorded as they are. No C5 mode name contains "_", so a reader recovers the
+// mode by writing "_" back as "-". The record's detail and the C4 health
+// event's "to" keep the C5 spelling (drain-only); with reason_code they state
+// one mode (C8-A4-5). The pattern and the schema do not change, so a 0.12
+// reader accepts the record. A new C5 mode whose name, so mapped, the pattern
+// still refuses needs a C8 change before any writer records it.
 //
 // C4 time.unsynchronized is about a source's clock and has no audit record.
 // A forwarding fault (C4 forward.*) is telemetry, not an audited action. A

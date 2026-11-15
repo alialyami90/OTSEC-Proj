@@ -433,11 +433,12 @@ func TestC13v02R2StoredReader(t *testing.T) {
 	if _, err := netobs.DecodeStored(v2JSON(t, m)); err != nil {
 		t.Errorf("node.lost with 8 spans: %v", err)
 	}
-	// A later minor is read forward: a field it adds is ignored.
+	// A later minor is read forward: a field it adds is ignored. The later
+	// minor is this code's own + 1: 0.4 since C13 0.3 (#689).
 	m = v2Stored(t)
-	m["schema"], m["added_in_0_3"] = "otsec.netobs/0.3", "x"
+	m["schema"], m["added_in_0_4"] = "otsec.netobs/0.4", "x"
 	if _, err := netobs.DecodeStored(v2JSON(t, m)); err != nil {
-		t.Errorf("a stored 0.3 observation with a new field: %v", err)
+		t.Errorf("a stored 0.4 observation with a new field: %v", err)
 	}
 	// At its own minor the reader is strict.
 	m = v2Stored(t)
@@ -706,11 +707,11 @@ func TestC13v02T9Aggregate(t *testing.T) {
 	if _, err := read(d); err != nil {
 		t.Errorf("eight assets, total 8: %v", err)
 	}
-	// A later minor reads the keys forward.
+	// A later minor reads the keys forward: 0.4 since C13 0.3 (#689).
 	d = unseen("sensor-records-late")
-	d["schema"] = "otsec.netobs/0.3"
+	d["schema"] = "otsec.netobs/0.4"
 	if _, err := read(d); err != nil {
-		t.Errorf("a 0.3 alert under an aggregate key: %v", err)
+		t.Errorf("a 0.4 alert under an aggregate key: %v", err)
 	}
 	// A hold-timeout alert, built here from its details and not by the
 	// detector, keeps its assets through the health body and back. The
@@ -790,10 +791,11 @@ func TestC13v02U1U2Forms(t *testing.T) {
 // deliverable 2): the 0.2 DecodeDetectorCheckpoint reads a 0.1 document
 // strictly, with coverage that lacks the two new fields. A 0.1 document
 // whose coverage carries either is refused, as is any key 0.1 does not
-// define, whatever its value. This code writes 0.2.
+// define, whatever its value. Since C13 0.3 (#689) the code that reads it
+// writes 0.3 (C13 0.3 §1.2), and the minor it does not know is 0.4.
 func TestC13v02Checkpoint01(t *testing.T) {
-	if netobs.CheckpointIdentifier != "otsec.netcheckpoint/0.2" || netobs.CheckpointIdentifier01 != "otsec.netcheckpoint/0.1" {
-		t.Fatalf("CheckpointIdentifier %q, CheckpointIdentifier01 %q", netobs.CheckpointIdentifier, netobs.CheckpointIdentifier01)
+	if netobs.CheckpointIdentifier != "otsec.netcheckpoint/0.3" || netobs.CheckpointIdentifier02 != "otsec.netcheckpoint/0.2" || netobs.CheckpointIdentifier01 != "otsec.netcheckpoint/0.1" {
+		t.Fatalf("CheckpointIdentifier %q, CheckpointIdentifier02 %q, CheckpointIdentifier01 %q", netobs.CheckpointIdentifier, netobs.CheckpointIdentifier02, netobs.CheckpointIdentifier01)
 	}
 	cov01 := func() map[string]any {
 		c := v2Coverage()
@@ -858,7 +860,7 @@ func TestC13v02Checkpoint01(t *testing.T) {
 	if _, err := netobs.DecodeDetectorCheckpoint(v2JSON(t, m)); err != nil {
 		t.Errorf("a 0.2 checkpoint whose coverage has them: %v", err)
 	}
-	for _, schema := range []string{"otsec.netcheckpoint/0.3", "otsec.netcheckpoint/1.0", "otsec.netobs/0.2"} {
+	for _, schema := range []string{"otsec.netcheckpoint/0.4", "otsec.netcheckpoint/1.0", "otsec.netobs/0.2"} {
 		if _, err := netobs.DecodeDetectorCheckpoint(v2JSON(t, doc(schema))); !v2Has(err, netobs.CodeSchema) {
 			t.Errorf("a checkpoint stamped %s: %v, want schema", schema, err)
 		}

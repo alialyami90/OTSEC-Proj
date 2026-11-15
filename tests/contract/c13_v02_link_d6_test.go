@@ -959,12 +959,14 @@ func TestC13v02M8CloseSets(t *testing.T) {
 	}
 }
 
-// R-1 and R-6 (CH-35, CH-36): the only channel minor with a hello is 0.2.
-// A 0.1 peer's first frame, and a hello of a minor the node does not know,
-// are refused (the node closes hello); a record of another minor than the
-// hello's is one record refused (schema), the connection open.
+// R-1 and R-6 (CH-35, CH-36): 0.1 has no hello. A 0.1 peer's first frame,
+// and a hello of a minor the node does not know, are refused (the node
+// closes hello); a record of a minor the node does not know is one record
+// refused (schema), the connection open. The minor the node does not know
+// is this code's own + 1, so it moved from 0.3 to 0.4 with C13 0.3 (#689;
+// brief P4-4-CC, "Later-minor legs move with the minor").
 func TestC13v02R1R6Minors(t *testing.T) {
-	for _, schema := range []string{"otsec.netobs/0.1", "otsec.netobs/0.3", "otsec.netobs/1.2"} {
+	for _, schema := range []string{"otsec.netobs/0.1", "otsec.netobs/0.4", "otsec.netobs/1.2"} {
 		m := v2SensorHello()
 		m["schema"] = schema
 		f, err := netobs.DecodeFromSensor(v2JSON(t, m))
