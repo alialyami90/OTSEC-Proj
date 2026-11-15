@@ -72,7 +72,7 @@ var (
 	hexForm        = regexp.MustCompile(`^(?:[0-9a-f]{2})+$`)
 )
 
-var self = version.ID{Name: "event", Major: 0, Minor: 3}
+var self = version.ID{Name: "event", Major: 0, Minor: 4}
 
 // Validate checks every rule of the contract that can be checked on one
 // event. It returns nil or a join of *Error values.
@@ -301,7 +301,10 @@ func checkObservedAddress(c *checker, e *Event) {
 // report; the sensor's and run's IDs; and at least one counter, each as
 // diff.<name>, a decimal difference since the previous report. A total is
 // never carried: a detail named for a counter without diff. is refused,
-// as is any detail 0.3 doesn't define, unless the event is a later minor.
+// as is any detail the event's minor doesn't define, unless the event is
+// of a later minor than this reader's. From 0.4 (C4-0.4-1 to C4-0.4-3) the
+// counters of SensorCounters04 are accepted too, diff.packets is required,
+// and capture_loss names exactly the CaptureLossCounters that rose.
 func checkSensorCounters(c *checker, e *Event) {
 	if e.Kind != KindHealth || e.Health == nil || e.Health.Type != HealthSensorCounters {
 		return
@@ -310,7 +313,12 @@ func checkSensorCounters(c *checker, e *Event) {
 	if err == nil && v.Minor < 3 {
 		c.fail(CodeForbidden, "health.type", "%s is new in otsec.event/0.3; this event is %s", HealthSensorCounters, e.Schema)
 	}
-	later := err == nil && v.Minor > 3
+	at4 := err == nil && v.Minor >= 4
+	later := err == nil && v.Minor > self.Minor
+	counters := SensorCounters
+	if at4 {
+		counters = append(slices.Clip(SensorCounters), SensorCounters04...)
+	}
 	d := e.Health.Details
 	if d["reported_by"] != SensorReported {
 		c.fail(CodeEnum, "health.details.reported_by", "%q: the counts are the sensor's own report, %q", d["reported_by"], SensorReported)
@@ -325,19 +333,40 @@ func checkSensorCounters(c *checker, e *Event) {
 		name, isDiff := strings.CutPrefix(k, "diff.")
 		switch {
 		case k == "reported_by" || k == "sensor_id" || k == "run_id":
-		case isDiff && slices.Contains(SensorCounters, name):
+		case k == DetailCaptureLoss && at4:
+		case isDiff && slices.Contains(counters, name):
 			diffs++
 			if n, err := strconv.ParseUint(val, 10, 64); err != nil || strconv.FormatUint(n, 10) != val {
 				c.fail(CodeEnum, "health.details."+k, "%q is not a decimal difference", val)
 			}
-		case slices.Contains(SensorCounters, k) || slices.Contains(SensorCounters, strings.TrimPrefix(k, "total.")):
+		case slices.Contains(counters, k) || slices.Contains(counters, strings.TrimPrefix(k, "total.")):
 			c.fail(CodeForbidden, "health.details."+k, "a counter's total; sensor.counters carries diff.<name> only")
 		case !later:
-			c.fail(CodeEnum, "health.details."+k, "not a detail of %s in 0.3", HealthSensorCounters)
+			c.fail(CodeEnum, "health.details."+k, "not a detail of %s in %s", HealthSensorCounters, e.Schema)
 		}
 	}
 	if diffs == 0 {
 		c.fail(CodeMissing, "health.details", "no diff.<counter>")
+	}
+	if !at4 {
+		return
+	}
+	if _, ok := d["diff.packets"]; !ok {
+		c.fail(CodeMissing, "health.details.diff.packets", "required from 0.4, as 0 when no frame was read (C4-0.4-3)")
+	}
+	var rose []string
+	for _, n := range CaptureLossCounters {
+		if x, ok := d["diff."+n]; ok && x != "0" {
+			rose = append(rose, n)
+		}
+	}
+	want := strings.Join(rose, " ")
+	got, ok := d[DetailCaptureLoss]
+	switch {
+	case want != "" && !ok:
+		c.fail(CodeMissing, "health.details."+DetailCaptureLoss, "required: %s rose (C4-0.4-2)", want)
+	case ok && (want == "" || got != want):
+		c.fail(CodeEnum, "health.details."+DetailCaptureLoss, "%q: it names, in order, the capture-loss counters that rose, %q (C4-0.4-2)", got, want)
 	}
 }
 

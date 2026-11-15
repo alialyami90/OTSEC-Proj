@@ -12,8 +12,29 @@ import (
 )
 
 // CheckpointIdentifier is the schema of both network checkpoints, the
-// learner's and the detector's, its first field (C13 §8).
-const CheckpointIdentifier = "otsec.netcheckpoint/0.1"
+// learner's and the detector's, its first field (C13 §8): what this code
+// writes. C13 0.2 moves it to 0.2 (C13 0.2 §1, CH-35).
+const CheckpointIdentifier = "otsec.netcheckpoint/0.2"
+
+// CheckpointIdentifier01 is the schema a 0.1 node wrote. The decoders read
+// a 0.1 checkpoint strictly: its coverage statements carry no field new in
+// C13 0.2 (CH-35's table, "Read").
+const CheckpointIdentifier01 = "otsec.netcheckpoint/0.1"
+
+// checkpointChecker starts a checkpoint's validation: the schema one of the
+// two, and the checker's minor that of the C13 records the checkpoint
+// holds, so a 0.1 checkpoint's coverage refuses 0.2's fields.
+func checkpointChecker(schema string) *checker {
+	c := &checker{minor: 2}
+	switch schema {
+	case CheckpointIdentifier:
+	case CheckpointIdentifier01:
+		c.minor = 1
+	default:
+		c.fail(CodeSchema, "schema", "%q is not %s or %s", schema, CheckpointIdentifier, CheckpointIdentifier01)
+	}
+	return c
+}
 
 // The checkpoint halves. Each is its own C5 series (C13 §8): the learner's
 // in netcheckpoint.learner, the detector's in netcheckpoint.detector.
@@ -119,10 +140,7 @@ type LearnerCheckpoint struct {
 // Validate checks the checkpoint: its schema and half, its sensor, and a
 // draft that is a canonical baseline of the same sensor with no writers.
 func (k *LearnerCheckpoint) Validate() error {
-	c := &checker{}
-	if k.Schema != CheckpointIdentifier {
-		c.fail(CodeSchema, "schema", "%q is not %s", k.Schema, CheckpointIdentifier)
-	}
+	c := checkpointChecker(k.Schema)
 	if k.Half != HalfLearner {
 		c.fail(CodeForm, "half", "%q is not %s", k.Half, HalfLearner)
 	}
@@ -325,7 +343,13 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 	if w.Rule == RuleOwnSessionUnseen {
 		total = 0 // it names a session record, no traffic
 	}
-	return Alert{Schema: Identifier, Rule: w.Rule, AssetID: w.AssetID, Baseline: k.Baseline, BaselineVersion: k.BaselineVersion,
+	// An alert carries its observation's coverage, so one whose coverage
+	// has a field new in 0.2 is a 0.2 alert.
+	schema := Identifier
+	if w.Coverage.ConfigDigest != "" || w.Coverage.Settings.PRPWindowMS != 0 {
+		schema = Identifier02
+	}
+	return Alert{Schema: schema, Rule: w.Rule, AssetID: w.AssetID, Baseline: k.Baseline, BaselineVersion: k.BaselineVersion,
 		KeyText: w.KeyText, Params: params, BaselineValue: w.BaselineValue, Observation: w.Observation, Clock: ClockCapture,
 		AtUTC: w.AtUTC, WindowStartUTC: w.WindowStartUTC, Hits: w.Hits, Sources: int64(len(w.Sources)),
 		Related: related, RelatedTotal: total, Cites: w.Cites, Coverage: w.Coverage}
@@ -333,11 +357,13 @@ func (w *DetectorWindow) Alert(k *DetectorCheckpoint, params []Param) Alert {
 
 // Validate checks the checkpoint: its schema, half and sensor, the baseline
 // named or not, the clock, and every window as the alert it would give.
-func (k *DetectorCheckpoint) Validate() error {
-	c := &checker{}
-	if k.Schema != CheckpointIdentifier {
-		c.fail(CodeSchema, "schema", "%q is not %s", k.Schema, CheckpointIdentifier)
-	}
+func (k *DetectorCheckpoint) Validate() error { return k.validate(nil) }
+
+// validate is Validate; keys are the decoded document's key paths, nil for
+// a Go value.
+func (k *DetectorCheckpoint) validate(keys map[string]bool) error {
+	c := checkpointChecker(k.Schema)
+	c.keys = keys
 	if k.Half != HalfDetector {
 		c.fail(CodeForm, "half", "%q is not %s", k.Half, HalfDetector)
 	}
@@ -374,11 +400,27 @@ func (k *DetectorCheckpoint) Validate() error {
 				c.fail(CodeOrder, f, "windows sorted by rule and asset, one per key")
 			}
 		}
+		// The window's coverage is judged inside its alert, from the Go
+		// value, where an empty or zero 0.2 field reads as absent. So a 0.2
+		// key in it is judged here, by its presence: refused in a 0.1
+		// checkpoint, and its value checked in a later one, as the
+		// top-level coverage's is.
+		cv := &w.Coverage
+		if c.new02(f+".coverage.config_digest", cv.ConfigDigest != "") && !baselineHashForm.MatchString(cv.ConfigDigest) {
+			c.fail(CodeForm, f+".coverage.config_digest", "%q is not sha256:<hex>", cv.ConfigDigest)
+		}
+		if ms := cv.Settings.PRPWindowMS; c.new02(f+".coverage.settings.prp_window_ms", ms != 0) && (ms < MinPRPWindowMS || ms > MaxPRPWindowMS) {
+			c.fail(CodeRange, f+".coverage.settings.prp_window_ms", "%d not in [%d, %d]", ms, MinPRPWindowMS, MaxPRPWindowMS)
+		}
 		var params []Param
 		for _, name := range ruleParams[w.Rule] {
 			params = append(params, Param{Name: name, Value: "1"}) // the values are the detector's
 		}
 		a := w.Alert(k, params)
+		// The window is judged as an alert of the checkpoint's minor.
+		if c.minor >= 2 {
+			a.Schema = Identifier02
+		}
 		if w.Rule != RuleOwnSessionUnseen {
 			a.Capture = fmt.Sprintf("%064x", 0)
 		}
@@ -553,5 +595,5 @@ func DecodeDetectorCheckpoint(b []byte) (*DetectorCheckpoint, error) {
 	if err := strictjson.Decode(b, &k); err != nil {
 		return nil, &Error{Code: CodeDecode, Field: "checkpoint", Detail: err.Error()}
 	}
-	return &k, k.Validate()
+	return &k, k.validate(keyPaths(b))
 }
