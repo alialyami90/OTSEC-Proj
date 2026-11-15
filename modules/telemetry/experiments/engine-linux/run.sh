@@ -132,7 +132,7 @@ docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base
     echo "HR-23 C2 image: $HR23_C2_IMAGE"
     # zeek-patch/build.sh's record, if this run has it: the lines that tie
     # each image to its binary and its generated parser.
-    grep -E '^(## |zeek --version|zeek binary|base image|tarball|signature|patch|configure)' "$work/zeek-build.txt" 2> /dev/null || true
+    grep -E '^(## |zeek --version:|zeek binary sha256:|base image:|tarball:|signature:|patch:|configure:)' "$work/zeek-build.txt" 2> /dev/null || true
     grep -A2 '^generated parser:' "$work/zeek-build.txt" 2> /dev/null || true
   fi
 } > "$work/versions.txt"
