@@ -537,7 +537,10 @@ FRAME_TOKENS = {"W1": ("W", 0, "two"), "W2": ("W", 1, "two"), "W6a": ("W6", 0, "
                 "Qa": ("Q", 0, "two"), "Qb": ("Q", 1, "two"), "W1c": ("W", 0, "c"), "W2c": ("W", 1, "c"),
                 "W3c": ("W", 2, "c"), "G3a": ("G", 0, "three"), "G3b": ("G", 1, "three"), "G3c": ("G", 2, "three")}
 LINKS = {"L", "Lo", "Lm", "Ls", "Rst", "A"}
-OTHER_END_LINK = {"L": "Lo", "Lo": "L", "Lm": "Ls"}   # R4's failure from the outstation's side
+# R4's failure from the outstation's side: the master's link-only frames
+# become O1's, and O1's own Lo stays itself, so that in the keep-alive's
+# twin both are O1's (Lo | Ls) and none is on W's end (judge-twins).
+OTHER_END_LINK = {"L": "Lo", "Lm": "Ls"}
 
 
 def parse_part(part):
@@ -845,9 +848,10 @@ def udp_budget_over_10k(cap):
 
 def tcp_gap(split, frames3=False):
     """A TCP hole in G's frame, or with frames3 in G's middle frame; G is
-    answered by R. nofail: nothing lost. otherend: G whole in the same
-    segments, and the hole in R(G), split at the same offsets (judge-twins:
-    an empty response of the same framing)."""
+    answered by R. nofail: nothing lost. nowrite: the case's hole, without W
+    and its response (judge-twins). otherend: G whole in the same segments,
+    and the hole in R(G), split at the same offsets (judge-twins: an empty
+    response of the same framing)."""
     def build(cap):
         f = Flow(cap)
         req(f, "P")
@@ -860,7 +864,7 @@ def tcp_gap(split, frames3=False):
             (u,) = f.frame_units(g)
             parts = [[(u, a, b if b is not None else len(u.data))] for a, b in split]
         for k, p in enumerate(parts):
-            f.send(p, lost=(k == 1 and cap.twin is None))
+            f.send(p, lost=(k == 1 and cap.twin not in ("nofail", "otherend")))
         to = f.answer()
         r = f.response(to, how="three" if frames3 and cap.twin == "otherend" else "one")
         if cap.twin == "otherend":

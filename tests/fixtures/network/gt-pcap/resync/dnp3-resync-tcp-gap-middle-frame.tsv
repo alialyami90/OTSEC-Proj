@@ -29,12 +29,13 @@ dnp3-resync-tcp-gap-middle-frame--nofail	41135	m	Q	valid	-	20	24	Q	1	g60v2,g60v3
 dnp3-resync-tcp-gap-middle-frame--nofail	41135	o	R(Q)	valid	-	22	17	R(Q)	129	-	seen	-
 dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	P	valid	-	4	18	P	1	g60v1	seen	-
 dnp3-resync-tcp-gap-middle-frame--nowrite	41135	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
-dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	G3a	valid	-	8	14	G	1	g60v2,g60v3,g60v4	seen	-
-dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	G3b	valid	-	10	18	G	1	g60v2,g60v3,g60v4	seen	-
-dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	G3c	valid	-	12	18	G	1	g60v2,g60v3,g60v4	seen	-
-dnp3-resync-tcp-gap-middle-frame--nowrite	41135	o	R(G)	valid	-	14	17	R(G)	129	-	seen	-
-dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	Q	valid	-	16	24	Q	1	g60v2,g60v3,g60v4	seen	-
-dnp3-resync-tcp-gap-middle-frame--nowrite	41135	o	R(Q)	valid	-	18	17	R(Q)	129	-	seen	-
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	G3a	valid	-	8	14	G	1	g60v2,g60v3,g60v4	lost	an octet of it is in a TCP hole
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	G3b	valid	-	-	18	G	1	g60v2,g60v3,g60v4	lost	an octet of it is in a TCP hole
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	gap	lost(18)	-	10	18	-	-	-	-	the peer's ACK past the hole is this packet; the hole held G3b[0:18]
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	G3c	valid	-	11	18	G	1	g60v2,g60v3,g60v4	lost	an octet of it is in a TCP hole
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	o	R(G)	valid	-	13	17	R(G)	129	-	seen	-
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	m	Q	valid	-	15	24	Q	1	g60v2,g60v3,g60v4	seen	-
+dnp3-resync-tcp-gap-middle-frame--nowrite	41135	o	R(Q)	valid	-	17	17	R(Q)	129	-	seen	-
 dnp3-resync-tcp-gap-middle-frame--otherend	41135	m	P	valid	-	4	18	P	1	g60v1	seen	-
 dnp3-resync-tcp-gap-middle-frame--otherend	41135	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
 dnp3-resync-tcp-gap-middle-frame--otherend	41135	m	G3a	valid	-	8	14	G	1	g60v2,g60v3,g60v4	seen	-

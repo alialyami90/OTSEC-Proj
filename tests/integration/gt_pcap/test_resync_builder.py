@@ -7,13 +7,15 @@ there, the wire is valid, the solved headers and S5 input (7)'s frame are
 the rows' octets, every failure is made as builder-failures says, the
 application and transport sequences and the endpoints are builder-msgs',
 builder-limit's and builder-join's arithmetic holds, the twins differ from
-their case only as judge-twins says, and the timed cases keep their times.
+their case only as judge-twins says, the timed cases keep their times, and
+the committed list of tshark's expected differences names a cause for each.
 The expected bytes are made here from dnp3.py, not taken from the builder's
 helpers. Each check has a named control: a mutant of the built bytes or of
 the builder that the check must fail. Stdlib only and no tshark, so it runs
 in CI's python job; resync_tshark.py is tshark's half.
 """
 
+import collections
 import hashlib
 import os
 import re
@@ -24,6 +26,7 @@ import pytest
 import dnp3
 import pcapfile
 import resync_cases as rc
+import resync_tshark as rt
 import synth
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "fixtures", "network", "gt-pcap",
@@ -164,7 +167,7 @@ def test_the_committed_hashes_and_labels_are_the_builders(tmp_path):
         digest, name = line.split("  ")
         with open(tmp_path / name, "rb") as f:
             assert hashlib.sha256(f.read()).hexdigest() == digest, name
-    committed = sorted(n for n in os.listdir(FIXTURES) if n.endswith(".tsv"))
+    committed = sorted(n for n in os.listdir(FIXTURES) if n.endswith(".tsv") and n != "tshark-beside.tsv")
     assert committed == sorted(r["case"] + ".tsv" for r in rc.CASES)
     for name in committed:
         with open(os.path.join(FIXTURES, name), "rb") as a, open(tmp_path / name, "rb") as b:
@@ -580,11 +583,18 @@ def check_twins(case, get=None):
         drop = re.compile(r"W([0-9]c?|\[.*\])?|R\(W\)|W[12]")
         assert [(n, e) for n, e, _ in shape(nw)] == [(n, e) for n, e, _ in shape(
             base, lambda u: not drop.fullmatch(u.name))], case
+        # The twin keeps the failure, so a TCP hole is the case's, at the same offsets (D2's B1 on #714).
+        holes = lambda c: [(d.end, [(u.name, a, b) for u, a, b in d.pieces]) for d in c.deliveries if d.lost]
+        assert holes(nw) == holes(base), case
     if "otherend" in twins:
         oe = cap(f"{case}--otherend")
         xb = shape(base, lambda u: FAIL_NAMES.fullmatch(u.name) and u.name not in ("R(I)",))
         xo = shape(oe, lambda u: FAIL_NAMES.fullmatch(u.name) and u.name not in ("R(I)",))
-        assert [{"m": "o", "o": "m"}[e] for _, e, _ in xb] == [e for _, e, _ in xo], case
+        # Every failure unit is built from o's side: one from m moves to o,
+        # and one already o's (the keep-alive's Lo) stays itself, so no
+        # failure unit is left on W's end (D2's B2 and D4's B1 on #714).
+        assert len(xb) == len(xo) and all(e == "o" for _, e, _ in xo), case
+        assert all(ub == uo for ub, uo in zip(xb, xo) if ub[1] == "o"), case
         rest = lambda c: [(n, e) for n, e, _ in shape(c, lambda u: not FAIL_NAMES.fullmatch(u.name))
                           if not n.startswith("R(")]
         assert rest(oe)[:len(rest(base))] == rest(base) or case.startswith("dnp3-resync-tcp-gap-"), case
@@ -640,6 +650,28 @@ def test_the_timed_cases_keep_their_times():
         polls = sorted(d.frame.ns for d in c.deliveries if d.flow.port == port and d.end == "m"
                        and d.pieces[0][0].name.startswith("P"))
         assert polls[0] < t0 and [b - a for a, b in zip(polls, polls[1:])] == [30 * s] * 5
+
+
+# --- tshark's expected differences (D4's N1 on #714) -------------------------
+
+EXPECTED = os.path.join(FIXTURES, "tshark-beside.tsv")
+
+
+def listed(rows):
+    """The committed rows as resync_tshark.py writes its list: without the cause."""
+    return ["\t".join(r[:-1]) for r in rows]
+
+
+def check_tshark_list(produced, rows):
+    assert rt.compare(produced, rows) == []
+
+
+def test_the_expected_tshark_list_names_one_of_four_causes_for_each_row():
+    rows = rt.expected_rows(EXPECTED)
+    check_tshark_list(listed(rows), rows)
+    assert rows[0] == rt.COLUMNS + ["cause"]
+    assert collections.Counter(r[-1] for r in rows[1:]) == {"no-resync": 22, "throw-code": 19, "no-limit": 7,
+                                                            "insert-rebuild": 8}
 
 
 # --- the controls: named mutants that each check must fail -----------------
@@ -783,6 +815,44 @@ def control_nofail_keeps_x(mp):
     return lambda: check_twins("dnp3-resync-udp-chunk-crc", lambda n: nf if n.endswith("--nofail") else cap(n))
 
 
+def control_nowrite_without_the_hole(mp):
+    """gap-header's nowrite twin built with no segment lost (D2's B1 on #714)."""
+    caps()   # the built captures first, so the patch reaches only the mutant
+    orig = rc.Flow.send
+    mp.setattr(rc.Flow, "send", lambda self, pieces, lost=False, at=None: orig(self, pieces, False, at))
+    nw = fresh("dnp3-resync-tcp-gap-header--nowrite")
+    return lambda: check_twins("dnp3-resync-tcp-gap-header", lambda n: nw if n.endswith("--nowrite") else cap(n))
+
+
+def control_keepalive_otherend_l_from_m(mp):
+    """The keep-alive's otherend twin with the master's L for O1's Lo (D2's B2 and D4's B1 on #714)."""
+    caps()
+    mp.setitem(rc.OTHER_END_LINK, "Lo", "L")
+    oe = fresh("dnp3-resync-tcp-keepalive--otherend")
+    return lambda: check_twins("dnp3-resync-tcp-keepalive", lambda n: oe if n.endswith("--otherend") else cap(n))
+
+
+def control_tshark_difference_not_listed(mp):
+    """tshark reads a difference that the committed list does not hold."""
+    rows = rt.expected_rows(EXPECTED)
+    extra = "\t".join(["dnp3-resync-udp-magic", "W", "m", "3", "5", "-", "the builder labels it seen"])
+    return lambda: check_tshark_list(listed(rows) + [extra], rows)
+
+
+def control_tshark_listed_not_read(mp):
+    """tshark no longer reads a difference that the committed list holds."""
+    rows = rt.expected_rows(EXPECTED)
+    return lambda: check_tshark_list(listed(rows)[:-1], rows)
+
+
+def control_tshark_cause_not_named(mp):
+    """A committed row whose cause is none of the four."""
+    rows = rt.expected_rows(EXPECTED)
+    produced = listed(rows)
+    rows[1][-1] = "unknown"
+    return lambda: check_tshark_list(produced, rows)
+
+
 def control_report_cap_end(mp):
     """report-cap's last packet 1 ms after T0 + 125 s."""
     last = cap("dnp3-resync-udp-report-cap").frames()[-1]
@@ -826,8 +896,12 @@ def test_the_controls_pass_unmutated():
     check_sequences(fresh("dnp3-resync-udp-magic"))
     check_twins("dnp3-resync-udp-magic", lambda n: fresh(n))
     check_twins("dnp3-resync-udp-chunk-crc", lambda n: fresh(n))
+    check_twins("dnp3-resync-tcp-gap-header", lambda n: fresh(n))
+    check_twins("dnp3-resync-tcp-keepalive", lambda n: fresh(n))
     check_tcp_stream(fresh("dnp3-resync-tcp-gap-header"))
     check_w1_w2(fresh("dnp3-resync-udp-insert-truncated"))
+    rows = rt.expected_rows(EXPECTED)
+    check_tshark_list(listed(rows), rows)
 
 
 @pytest.mark.parametrize("control", sorted(CONTROLS))

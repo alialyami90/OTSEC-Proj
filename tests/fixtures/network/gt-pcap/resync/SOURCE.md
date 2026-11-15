@@ -6,6 +6,7 @@ These are the captures and labels for HR-25's counted run, owed under row `pin-b
 | --- | --- | --- | --- |
 | `<capture>.pcap` for each name in `resync.sha256`: 302 captures, which are the 112 cases, their 189 twins, and `dnp3-resync-udp-report-mark-state--control` (that case's control capture, flow 0 only) | Written by D6, 2026-11-15, with `tests/integration/gt_pcap/resync_cases.py` (stdlib only: `dnp3.py`, `synth.py`, `pcapfile.py`), from the build cells of `resync-cases.tsv` and the `builder-*` rows of `resync-conditions.tsv` at their pinned SHA-256s | Synthesized frame by frame, never recorded through a kernel and never sent. TEST-NET-1 addresses and locally administered MACs, as in builder-msgs: over UDP, M5 192.0.2.14:20000 (link 5) and O1 192.0.2.20:20000 (link 10); over TCP, M1 192.0.2.10 (link 1), from port 41100 up in the cases' order, to O1:20000 | This project's own. Not committed: `resync_cases.py` rebuilds them byte for byte, and `resync.sha256` pins them |
 | `<case>.tsv`, one per case | The same run of `resync_cases.py` | The builder's labels for the case and its twins, from how each was made (row `judge-labels`): every link-layer unit as `valid` or as the damage it carries, and every message as `seen`, `absent` or `lost`, with the reason. Each file's header lines say what the columns mean | `desk` until D4 (labels) and D2 (protocol reading) review them. The labels hold addresses, ports, counts and packet numbers, and no capture bytes |
+| `tshark-beside.tsv` | The `resync` job's artifact `gt-pcap-resync-tshark` of run 43756742929 (tshark 4.2.2, the pinned reader, at `f30fecff`), with a `cause` column added by D6 as D4 sorted the rows on #714 | The 56 messages where the pinned tshark's DNP3 reading differs from the builder's label, each with its cause; the header lines say what each cause means. A reading beside the labels, never a label (row `judge-labels`) | `CI-Linux` for the reading, `desk` for the causes. It holds capture names, packet numbers and function codes, and no capture bytes |
 
 A capture is named after its case, as `<case>--<twin>` for a twin (`nofail`, `nowrite` or `otherend`, section 3.3 of the note), or as `<case>--control`.
 
@@ -19,11 +20,12 @@ A capture is named after its case, as `<case>--<twin>` for a twin (`nofail`, `no
   - that every failure is made as builder-failures says, from its own bytes, against `dnp3.py`;
   - the application and transport sequences, the responses' echoes and the confirmed frames' FCB;
   - builder-limit's and builder-join's arithmetic;
-  - that each twin differs from its case only as judge-twins says;
+  - that each twin differs from its case only as judge-twins says: a `nowrite` twin keeps the case's TCP holes, and every failure unit of an `otherend` twin is o's;
+  - that `tshark-beside.tsv` names one of the four causes for each of its rows;
   - the times of the timed cases.
 
   Each check has a named control, a mutant that the check must fail. `resync_cases.py` itself refuses a capture in which any offset holds a candidate (`05 64`, a passing header CRC, a link length of 5 to 255) that the case does not name, which is builder-failures' last sentence made exact for the whole capture.
-- **The `resync` job of `.github/workflows/a6-gt-pcap.yml`** rebuilds the captures, checks them against `resync.sha256`, diffs the labels, and has the pinned tshark 4.2.2 check every packet's checksums. It reports tshark's DNP3 reading beside the labels in the artifact `gt-pcap-resync-tshark`, and never uses it as a label (row `judge-labels`).
+- **The `resync` job of `.github/workflows/a6-gt-pcap.yml`** rebuilds the captures, checks them against `resync.sha256`, diffs the labels, and has the pinned tshark 4.2.2 check every packet's checksums. It lists the messages where tshark's DNP3 reading differs from the label, and fails when that list is not `tshark-beside.tsv` without its cause column: a difference not in the file is a regression or a new one to be classed on review, and one in the file that is no longer read is a change too. The list is uploaded as the artifact `gt-pcap-resync-tshark`. tshark's reading is never used as a label (row `judge-labels`).
 
 ## Choices the rows leave open
 
@@ -45,23 +47,23 @@ A capture is named after its case, as `<case>--<twin>` for a twin (`nofail`, `no
 
 ## The other end's twins, where judge-twins leaves it open
 
-These are readings of judge-twins for D2 and D4 to confirm on review.
+These are readings of judge-twins. On #714, D2 and D4 confirmed the readings of nofir, of embed and embedtail, and of R3, and the keep-alive's is now as they both read it there.
 
 - A failure from o that carries a response does so in the sequence of the most recent request.
 - **nofir from o** is the empty response's APDU in a frame with FIN set and FIR clear ("empty responses of the same framing").
 - **embed and embedtail from o** carry the response to a direct operate at index 5, which echoes its g12v1 and is 37 octets, not W5's 35. So embed's frame holds it at octets 20 to 56, and embedtail's after-octets are 33.
 - **R3 from o.** G is sent whole, in the same segments, and the hole moves to G's response R(G), split at the same offsets. R(G) is 17 octets, so in `gap-data` the last piece is 1 octet. In `gap-middle-frame`, R(G) goes in three frames with the middle one lost.
-- **The keep-alive from o's side** is the master's link-status request L (function 9), then O1's link status (function 11). builder-msgs does not name the latter; the labels call it `Ls`.
+- **The keep-alive from o's side** is `Lo | Ls`: O1's link-status request `Lo` (function 9), which is already o's and stays itself, then O1's link status (function 11) in place of the master's `Lm`. builder-msgs does not name the latter; the labels call it `Ls`. So both link-only frames are O1's and none is on W's end, which is what lets the twin meet judge-twins' expectation on R4 under the controls, W seen and the outstation's next delivery lost (D2's B2 and D4's B1 on #714). As D2 notes there, a link layer ignores a secondary frame it did not request, so `Ls` is a valid 10-octet link-only frame and not an exchange.
 
 ## Limits
 
 - **The expectation under C2A is each case's `a` cell, not the label.** A label's `seen` is how the message was built. Where the budget or the bound blinds a whole message, the cell says so.
-- **What tshark reads.** On the owner's PC, tshark 4.2.3 (not the pinned 4.2.2) read 56 messages differently from the labels, through a scratch run of `resync_tshark.py` with its version check bypassed (`desk`). It found no checksum error. Each difference is a known one:
-  - tshark does not resynchronise after a failed header (`crc-magic`, `holds`, `false-magic`, the midstream tail);
-  - it reads a throwing read's function code;
-  - it has no fragment limit;
-  - it rebuilds W across an inserted datagram that it discards, as a device would.
+- **What tshark reads.** The pinned tshark 4.2.2 (run 43756742929, `CI-Linux`) read 56 messages differently from the labels, and found no checksum error. Each difference is a known one, and `tshark-beside.tsv` names its cause (D4 sorted them on #714):
+  - `no-resync`, 22: tshark does not resynchronise after a failed header (`crc-magic`, `holds`, `false-magic`, the midstream tail);
+  - `throw-code`, 19: it reads a throwing read's function code;
+  - `no-limit`, 7: it has no fragment limit;
+  - `insert-rebuild`, 8: it rebuilds W across an inserted datagram that it discards, as a device would.
 
-  The `resync` job reports the pinned tshark's reading.
+  The fixes for D2's B1 and B2 on #714 changed four twins (the three R3 `nowrite` twins and the keep-alive's `otherend` twin). A scratch run of `resync_tshark.py` with tshark 4.2.3 on the owner's PC, its version check bypassed (`desk`), read the same 56 on the rebuilt captures, with no checksum error.
 - **Not built here.** S5's inputs are measurements, not cases: `resync_cases.s5_7_frame` gives input (7)'s frame, and no S5 capture is written. The false-positive set (rows `fp-*`), HR-23's malformed set and the reruns are not built here either.
 - **Real devices.** These captures say nothing about a real relay's traffic, a live capture, or how a SEL device's link layer treats any of these inputs. That is the design's section 6 H-row, which is not run.

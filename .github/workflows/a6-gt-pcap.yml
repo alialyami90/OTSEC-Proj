@@ -153,9 +153,11 @@ jobs:
   # pin-builder of resync-conditions.tsv): resync_cases.py writes every case
   # and twin frame by frame, the hashes pin the bytes, and the builder's
   # labels must equal the committed ones. The labels are the builder's, not
-  # tshark's (row judge-labels): the pinned tshark fails the job only on an
-  # IPv4, UDP or TCP checksum, and its DNP3 reading is reported beside the
-  # labels in an artifact, never used as a label. The captures are rebuilt
+  # tshark's (row judge-labels): the pinned tshark fails the job on an IPv4,
+  # UDP or TCP checksum, and where its DNP3 reading differs from a label, the
+  # list of differences must equal the committed tshark-beside.tsv, which
+  # names each one's cause (D4's N1 on #714). The reading is never used as a
+  # label, and the list is uploaded as an artifact. The captures are rebuilt
   # here, never committed.
   resync:
     runs-on: ubuntu-24.04
@@ -177,10 +179,10 @@ jobs:
       - name: The labels equal the committed ones
         run: |
           cd tests/fixtures/network/gt-pcap/resync
-          for f in *.tsv; do diff -u "$f" "$RUNNER_TEMP/resync/$f"; done
-          ls "$RUNNER_TEMP"/resync/*.tsv | wc -l | grep -qx "$(ls *.tsv | wc -l)"
-      - name: The pinned tshark's checksums, and its reading beside the labels
-        run: python3 tests/integration/gt_pcap/resync_tshark.py "$RUNNER_TEMP/resync"
+          for f in dnp3-resync-*.tsv; do diff -u "$f" "$RUNNER_TEMP/resync/$f"; done
+          ls "$RUNNER_TEMP"/resync/*.tsv | wc -l | grep -qx "$(ls dnp3-resync-*.tsv | wc -l)"
+      - name: The pinned tshark's checksums, and its reading against the expected differences
+        run: python3 tests/integration/gt_pcap/resync_tshark.py "$RUNNER_TEMP/resync" tests/fixtures/network/gt-pcap/resync/tshark-beside.tsv
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,20 +1,25 @@
 """The pinned tshark's reading of the dnp3-resync-* captures, beside the builder's labels (D6, P4-4-HR25).
 
 Row judge-labels: the labels come from how each capture was built, and
-tshark's reading is reported beside them, never used as a label. So this
-file fails on one thing only, which is the builder's and not a DNP3 reading:
-an IPv4, UDP or TCP checksum that tshark does not read as good, since an
-engine that checks checksums would drop the packet. Everything else is
-reported: for each message the builder labels, the function code tshark
-reads in the packet that holds its last frame, from the link direction the
-message was sent in; a difference is listed in tshark-beside.tsv and
-counted on stdout, and the run still passes.
+tshark's reading is reported beside them, never used as a label. This file
+fails on two things. The first is the builder's, not a DNP3 reading: an
+IPv4, UDP or TCP checksum that tshark does not read as good, since an engine
+that checks checksums would drop the packet. The second is a change in
+tshark's reading: for each message the builder labels, the function code
+tshark reads in the packet that holds its last frame, from the link
+direction the message was sent in, is compared with the label, and the list
+of differences must be the committed one (D4's N1 on #714). That list names
+the cause of each row, one of CAUSES, so a reader can tell an expected
+difference from a regression. A difference not in it, or one in it that is
+not read, fails the run and is printed; it is never used as a label.
 
-Usage: python resync_tshark.py DIR   (reads DIR/<case>.tsv and the captures
-they name; writes DIR/tshark-beside.tsv; exits 1 on a checksum or a
-different tshark)
+Usage: python resync_tshark.py DIR EXPECTED   (reads DIR/<case>.tsv and the
+captures they name, and EXPECTED, the committed list; writes
+DIR/tshark-beside.tsv; exits 1 on a checksum, a list that differs from
+EXPECTED, or a different tshark)
 """
 
+import collections
 import csv
 import glob
 import os
@@ -25,6 +30,10 @@ from gtlabel import TSHARK
 
 FIELDS = ["frame.number", "ip.checksum.status", "udp.checksum.status", "tcp.checksum.status", "dnp3.ctl.dir",
           "dnp3.al.func", "_ws.malformed"]
+COLUMNS = ["capture", "message", "end", "packet", "label_code", "tshark_codes", "note"]
+# The causes a committed row may name (D4's sort on #714); the committed
+# list's header lines say what each means.
+CAUSES = {"no-resync", "throw-code", "no-limit", "insert-rebuild"}
 
 
 def tshark(path):
@@ -53,12 +62,30 @@ def labels(path):
     return list(csv.DictReader(lines, delimiter="\t", quoting=csv.QUOTE_NONE))
 
 
-def main(d):
+def expected_rows(path):
+    """The committed list's rows, the header first, each split on tabs."""
+    with open(path, encoding="utf-8") as f:
+        return [ln.split("\t") for ln in f.read().replace("\r\n", "\n").split("\n") if ln and not ln.startswith("#")]
+
+
+def compare(produced, rows):
+    """What keeps the produced list (its lines, the header first) from being
+    the committed one (its rows, whose last column, cause, names one of
+    CAUSES): an empty list when nothing does."""
+    out = [f"a cause not in {sorted(CAUSES)}: {r}" for r in rows[1:] if r[-1] not in CAUSES]
+    want = collections.Counter("\t".join(r[:-1]) for r in rows)
+    got = collections.Counter(produced)
+    out += [f"read, not in the expected list: {x}" for x in (got - want).elements()]
+    out += [f"in the expected list, not read: {x}" for x in (want - got).elements()]
+    return out
+
+
+def main(d, expected):
     version = subprocess.run(["tshark", "-v"], capture_output=True, text=True).stdout.splitlines()[0]
     if version != TSHARK:
         print(f"resync_tshark: tshark is {version!r}; the pinned reader is {TSHARK!r}")
         return 1
-    bad, beside = [], ["\t".join(["capture", "message", "end", "packet", "label_code", "tshark_codes", "note"])]
+    bad, beside = [], ["\t".join(COLUMNS)]
     for path in sorted(glob.glob(os.path.join(d, "dnp3-resync-*.tsv"))):
         rows = labels(path)
         for cap in dict.fromkeys(r["capture"] for r in rows):
@@ -82,11 +109,13 @@ def main(d):
                                              f"the builder labels it {state}"]))
     with open(os.path.join(d, "tshark-beside.tsv"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(beside) + "\n")
-    print(f"resync_tshark: {len(beside) - 1} messages where tshark's reading differs from the label (reported)")
-    for b in bad:
+    diffs = compare(beside, expected_rows(expected))
+    print(f"resync_tshark: {len(beside) - 1} messages where tshark's reading differs from the label; "
+          f"{len(diffs)} differences from the expected list")
+    for b in bad + diffs:
         print(f"resync_tshark: FAIL {b}")
-    return 1 if bad else 0
+    return 1 if bad or diffs else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(sys.argv[1], sys.argv[2]))

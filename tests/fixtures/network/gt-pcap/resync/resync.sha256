@@ -217,15 +217,15 @@ ad8a60fa4a84839850e0d0a57c8bff88197c2ab0eae9067837e1de3dc590ddcf  dnp3-resync-ud
 ddba6d9b28e023c5cbff27544d55e2a5b7ddd2849d2f6ce691c5ab28bd345cad  dnp3-resync-udp-budget-over-10k.pcap
 8ff33d1836de8b3ff0611dfbd70850032c3ee8a8854634e763afdb76f817046e  dnp3-resync-tcp-gap-header.pcap
 2ff179ff78054957b6d6159f1b4077b78fd671a1212ff877b1ea8b88f4bec4bb  dnp3-resync-tcp-gap-header--nofail.pcap
-f1d1150455bc1bbbfc8c5b79660c859712002568a72a7ae6d7d21cc6d2fdad96  dnp3-resync-tcp-gap-header--nowrite.pcap
+e9e63e3ebe2b3a9db9a5ebb058634014c6d01481ac0454aedd254863c085a345  dnp3-resync-tcp-gap-header--nowrite.pcap
 ad289065895cd593cb5763f06479d0fc8c04735a52c8a9bfb73863e1f18a0537  dnp3-resync-tcp-gap-header--otherend.pcap
 6c99e7124812036f3156aadd9444a40cab0bda422646998bebc1b07cf4eb4de8  dnp3-resync-tcp-gap-data.pcap
 e7cf13e60a62c49f0ff2b28aeb040a88754b509dcb85290ca3d380bd5e357800  dnp3-resync-tcp-gap-data--nofail.pcap
-147d73e905d82bea4ea41cd460bf4b165b271f34b4feee78aea683ba152f6d4c  dnp3-resync-tcp-gap-data--nowrite.pcap
+46b40210c8bfd91d0608f3eb84ac34c4bfafafc8d597317ef7dc760271140d2b  dnp3-resync-tcp-gap-data--nowrite.pcap
 704c83671e9585aec102765fc5932ef7527e185a49dc293305d947b378f8f104  dnp3-resync-tcp-gap-data--otherend.pcap
 d71f26622f36fe621980f6ec44fd77e011151153c341adbb937d8a3b4de3f44c  dnp3-resync-tcp-gap-middle-frame.pcap
 c24a7bf96f6ca12b266e77525408e9cb306d5ccb3d8b6aac89b4c29877527b6b  dnp3-resync-tcp-gap-middle-frame--nofail.pcap
-301e4996ab22e33e2e233e31d2e535ccfe9262bf6621b756c831a21a74922d28  dnp3-resync-tcp-gap-middle-frame--nowrite.pcap
+fceb0db8f117b084b16eef97c204f52bb8b68e45e7170d32e61d6f15ae3b27fa  dnp3-resync-tcp-gap-middle-frame--nowrite.pcap
 f4e23df00b0cda57635be8ed0e119a454d546803a05fd60bce90b930d3eab259  dnp3-resync-tcp-gap-middle-frame--otherend.pcap
 648dd1dea316516faa7ab84e86190ee2a8f2b0535fb8539d60fbde426a41c7e7  dnp3-resync-tcp-gap-non-dnp3.pcap
 3b573778a5700bb5a9705b71aa960674d319e5b911a2b114d9d47e74a4c772ee  dnp3-resync-tcp-gap-non-dnp3--nofail.pcap
@@ -246,7 +246,7 @@ ea5a8c8da87346ca3f052c755337cb3d3cac31ba87011acf1688cf4d377c660d  dnp3-resync-tc
 d5b82b83af6020edff9570f2bbed91496e12e5e9ab813cce4712ba612935cd08  dnp3-resync-tcp-keepalive.pcap
 1ab21af3611be3d40db16c21f53d963568b22de5d49f5581d6cc8ebc45455300  dnp3-resync-tcp-keepalive--nofail.pcap
 f5be85b361e5c1b02b24201237e3dac7b2d1df291e9cadf365ebe9db2561280f  dnp3-resync-tcp-keepalive--nowrite.pcap
-40f91bcced463e20455bfa14d14970980caa3f26cf56155e7b9b279d41a65d3d  dnp3-resync-tcp-keepalive--otherend.pcap
+53c6a053375a80ffc9841b3e56f7775f141a677fef895430e565871582f2b072  dnp3-resync-tcp-keepalive--otherend.pcap
 b8e8ea66a6857b91aef077966b19bf9104d723fee2f6eed47e644567d11906d0  dnp3-resync-udp-link-only-mid-fragment.pcap
 71f25f78873152a5adb1fda8745bb9351425a673ea76c5197c7bdce922988777  dnp3-resync-udp-link-only-mid-fragment--nofail.pcap
 8500a06de303e6b658b79cc970a5344ac892009792a3de781623bb9c0bba5fba  dnp3-resync-udp-link-only-mid-fragment--nowrite.pcap

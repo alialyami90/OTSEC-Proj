@@ -28,7 +28,7 @@ dnp3-resync-tcp-keepalive--nowrite	41139	m	Q	valid	-	12	24	Q	1	g60v2,g60v3,g60v4
 dnp3-resync-tcp-keepalive--nowrite	41139	o	R(Q)	valid	-	14	17	R(Q)	129	-	seen	-
 dnp3-resync-tcp-keepalive--otherend	41139	m	P	valid	-	4	18	P	1	g60v1	seen	-
 dnp3-resync-tcp-keepalive--otherend	41139	o	R(P)	valid	-	6	17	R(P)	129	-	seen	-
-dnp3-resync-tcp-keepalive--otherend	41139	m	L	valid	-	8	10	-	-	-	-	-
+dnp3-resync-tcp-keepalive--otherend	41139	o	Lo	valid	-	8	10	-	-	-	-	-
 dnp3-resync-tcp-keepalive--otherend	41139	o	Ls	valid	-	10	10	-	-	-	-	-
 dnp3-resync-tcp-keepalive--otherend	41139	m	W	valid	-	12	35	W	5	g12v1	seen	-
 dnp3-resync-tcp-keepalive--otherend	41139	o	R(W)	valid	-	14	37	R(W)	129	g12v1	seen	-
