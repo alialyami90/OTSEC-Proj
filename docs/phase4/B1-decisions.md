@@ -2507,3 +2507,14 @@ Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the run
 - **4. Controls the owner's PC cannot run.** A test that needs elevation skips on the owner's PC. D6 may then run its controls on a draft PR, as #688 and #706 did, provided the PR is closed and its branch deleted at once. A kill counts only on D4-85's conditions: the unmutated test passes first at the same base; a patch that fails to apply or build is an error, never a kill; and a kill is the named test's own failure. Each control's commit SHA and run are cited in the review. This narrows D4-85's rule against scratch branches to that case.
 - **5. Work paused at the owner's word, 2026-11-15.** No agent is running, and no PR is open after this one. HANDOFF's checkpoint gives the next steps.
 - **Next decision number:** D4-110.
+
+## D4-110: work resumes, and the Windows time brief (D1, 2026-11-15)
+
+Evidence class: `desk`; `CI-Windows` for the run named.
+
+- **1. Work resumes at the owner's word,** in HANDOFF's order of 2026-11-15, night. Item 3's two briefs, the C13 0.2 intake and the dialer and enrolment, are both D5's, and D5 runs one task at a time, so D1 issues them after P4-NODE-WT. Item 4, D6's `relayKinds` probe, is with a second D6 instance.
+  1. P4-4-HR25 deliverable 3's first step, D6's builder and captures (row `pin-builder`), is with a D6 writing instance.
+  2. Brief P4-NODE-WT (D5) is issued in `docs/agent-handoffs.md`, "After D4-109". `platform/node` took 995.9 s on Windows in `main`'s push run 43748784508 at `6b1a27e3`. That is over D4-44's 720 s budget, and the budget stands.
+  3. Briefs P4-COL-2 and P4-C8-T (D3) are issued in the same section, for D4-107 item 5.1 and D4-108 item 3.1. D3 takes them one after the other.
+  4. D6's B1 to B4 and N1 to N4 on #708 (6900141437) are taken into the three briefs: P4-NODE-WT's time is judged on a median of at least three runs, and its stuck-start test has a "slow, not held" control; P4-COL-2's half-fix mutant is recorded, not killed by a test-only hook; and P4-C8-T covers every C8 time field whose schema pattern refuses the comma (D6's R1 to R3, 6900177641, are taken too).
+- **Next decision number:** D4-111.
