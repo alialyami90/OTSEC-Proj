@@ -2419,7 +2419,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - D4-104 item 1.3's invariant: a stored record's schema is the minor the node checked strictly on the channel; its control stores the schema the sensor sent;
   - R-6's node leg: the node passes the hello's schema to `DecodeFromSensorIn`; its control decodes every frame with `DecodeFromSensor` (D4-108 item 4);
   - a 0.1 counter sent as `null` on the 0.2 channel is refused (D4's PR);
-  - **D4-111 item 4.1:** if a PR of this brief is the first to raise `audit.ContractID` to 0.13, the `relayKinds` probe reruns on its head before `relayKinds` is widened, with the collector check firing;
+  - **D4-111 item 4.1:** if a PR of this brief is the first to let the node write an audit record of a sensor kind stamped 0.13 or above, by any means (raising `audit.ContractID` or a node-local constant), the `relayKinds` probe reruns on its head, run by a D6 instance, before `relayKinds` is widened, with the collector check firing;
   - **F-027's gate:** the merge-check greps show no product caller of `ServeSensor`, no `network_sensor` section outside the tests, and no wired intake entry point (D4-96);
   - the self-check list in this file, with the items that apply named.
 - Owed: the rig legs (the sensor's brief and D6's rig brief); N-14 if P4-4-HR24's stage 3 has not merged.
@@ -2444,7 +2444,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - SL-9's asset-address check compares after unmapping an IPv4-mapped IPv6 address on either side (D4-108 item 4);
   - the node records `collector.request` in `collector_seq` order within an epoch; its control is a collector that answers a lower number (D4-108 item 4);
   - the `sensor.revoked` writer checks the chain for its own record before rewriting after a crash (D4-108 item 4);
-  - **D4-111 item 4.1:** if this brief's PR is the first to raise `audit.ContractID` to 0.13, the `relayKinds` probe reruns on its head before `relayKinds` is widened, with the collector check firing;
+  - **D4-111 item 4.1:** if this brief's PR is the first to let the node write an audit record of a sensor kind stamped 0.13 or above, by any means (raising `audit.ContractID` or a node-local constant), the `relayKinds` probe reruns on its head, run by a D6 instance, before `relayKinds` is widened, with the collector check firing;
   - **D4-111 item 4.2:** the node acts on a sensor kind only after a verified acceptance (C8-8); its control is a node that acts on an unverified or refused reply. It replaces the sensor legs of `TestD6SensorKindsNotRelayedByNode` once `relayKinds` is widened;
   - F-027's merge-check greps, until the wiring PR;
   - the self-check list in this file, with the items that apply named.
