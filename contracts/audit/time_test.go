@@ -115,8 +115,8 @@ func TestTimeCommaRefusedEveryAction(t *testing.T) {
 // TestTimeFieldsCommaRefused covers every other C8 time field the schema
 // states in time.utc's form (properties with the pattern
 // `(\.[0-9]{1,9})?Z$` in schema/record.json): each, in a golden that carries
-// it, is refused in the comma form and with ten fraction digits, while the
-// golden as written parses. applied_at, at most six digits, is #699's and is
+// it, is refused in the comma form, with ten fraction digits, on 30 February
+// and at hour 24, while the golden as written parses. applied_at, at most six digits, is #699's and is
 // tested in sensor_test.go.
 func TestTimeFieldsCommaRefused(t *testing.T) {
 	for _, c := range []struct{ file, field string }{
@@ -150,7 +150,10 @@ func TestTimeFieldsCommaRefused(t *testing.T) {
 		if i := strings.IndexByte(v, '.'); i >= 0 {
 			whole = v[:i] + "Z"
 		}
-		for _, bad := range []string{toComma(v), strings.TrimSuffix(whole, "Z") + ".1234567890Z"} {
+		// The comma and ten digits fail the pattern; 30 February and hour 24
+		// pass it and fail only the parse.
+		for _, bad := range []string{toComma(v), strings.TrimSuffix(whole, "Z") + ".1234567890Z",
+			v[:5] + "02-30" + v[10:], v[:11] + "24" + v[13:]} {
 			rec := bytes.Replace(b, []byte(`"`+c.field+`":"`+v+`"`), []byte(`"`+c.field+`":"`+bad+`"`), 1)
 			_, err := ParseRecord(rec)
 			if !errors.Is(err, ErrRecordRejected) || !strings.Contains(err.Error(), "RFC 3339") {
@@ -171,6 +174,9 @@ func TestTimeOtherFormsRefused(t *testing.T) {
 		"zero offset":      "2026-11-15T10:00:00.5+00:00",
 		"comma, no digits": "2026-11-15T10:00:00,Z",
 		"one-digit hour":   "2026-11-15T9:00:00.5Z", // time.Parse takes it
+		// The pattern takes these two; only the parse refuses them.
+		"30 February": "2026-02-30T10:00:00.5Z",
+		"hour 24":     "2026-11-15T24:00:00.5Z",
 	} {
 		tm := Time{UTC: utc, ResolutionNS: 1, Clock: Clock{Sync: event.SyncSynchronized}}
 		if err := validateTime(tm); !isTimeFormErr(err) {
