@@ -230,14 +230,14 @@ A list only. No design is in this brief.
 2. **The SBOM.** None is generated. Proposed format, for D1 to decide: one CycloneDX 1.6 JSON document per release and target, built from `go version -m` of the release binaries, with the non-Go components of option (a) (Npcap, the engine, its decoders) added by hand, and signed with the release.
 3. **The update package's contract.** Not opened. D7 drafts it when D1 opens it, and D1 approves it. D5 builds the node's update verifier.
 4. **The update package's anti-rollback floor.** Not designed. (The register's per-family floor in item 1 is a different floor, and it exists.) AP-10's three refusals (a tampered package, a signed package below the floor, an unsigned package) have no code and no test.
-5. **The record of which versions upgrade and roll back together** (R8.7). No release exists, so it has no rows. One entry is already owed from D4-61: the node's refusal of an `otsec.finding/` minor that `finding.Known` does not name (#507, `3c6b8a7b`) must be in every build a node can roll back to before any node writes C12 0.2 (#511, `a37a5e8c`; `finding.Identifier` is `otsec.finding/0.2` on `main`). No build has ever been released, so no release before `3c6b8a7b` exists. The record must keep any such build out of a rollback set.
+5. **The record of which versions upgrade and roll back together** (R8.7). It is §7. No release exists, so it holds floors and conditions, not released versions.
 6. **A release build.** ADR-0003 names `CGO_ENABLED=0 go build -trimpath` from a pre-installed pinned toolchain. No workflow runs a release build. CI's integration job builds without `-trimpath`, and builds `cmd/otsec` with the test tag `otsec_testclock`, under which the node accepts the advisory test keys as anchors (`platform/node/advisory_testbuild.go`). Neither is a release build.
 7. **What is pinned and what is not.** Facts and open items, not findings:
    - **The toolchain.** ADR-0003 says it is pinned with `go.mod`'s `go` and `toolchain` lines. `go.mod` has `go 1.27.3` and no `toolchain` line. Every workflow's `setup-go` step reads `go-version-file: go.mod`. `go mod tidy` removes a `toolchain` line that equals the `go` line: I checked this with Go 1.27.3 in a scratch module, where `toolchain go1.27.3` beside `go 1.27.3` was dropped. So it is ADR-0003's wording that needs correcting, which is D1's job.
    - **`govulncheck`** runs for `linux/amd64` and `windows/amd64` (`govulncheck.yml`). `linux/arm64` is a target in ADR-0003, but no workflow builds it and nothing checks it.
    - **The module proxy.** A release build should run with `GOPROXY=off`, so that it uses only modules already verified against `go.sum` (D3's review). Nothing sets this today.
    - **GitHub Actions** are pinned by tag (`actions/checkout@v4`, `actions/setup-go@v5`, `actions/setup-python@v5`, `actions/upload-artifact@v4`), not by commit SHA. Runners are named `ubuntu-latest` and `windows-latest` in `ci.yml`, `govulncheck.yml` and several dispatch workflows, so the runner image is not pinned either.
-8. **The project's own licence.** The repository has no `LICENSE` file. It is the owner's decision, and it decides what the notices file says about OTSEC itself.
+8. **The project's own licence.** `LICENSE.md` exists since D4-85: a proprietary notice, all rights reserved, with no licence granted beyond what it states, and material that names another source left to its owners. So the notices file of R-1 says of OTSEC itself only that it is under `LICENSE.md`'s terms, and carries that file beside the third-party texts. It must not suggest that the third-party licences cover OTSEC. No lawyer has read `LICENSE.md` (D4-85, "Limits").
 
 ## 6. How the inventory is kept true
 
@@ -270,6 +270,66 @@ diff recorded.txt generated.txt   # empty when they agree
 - D6 may turn this into a test. This record does not write it.
 
 Every toolchain or dependency bump updates this file in the same PR, and D7 reads the new component's licence (D7's role file).
+
+## 7. Rollback floors, and what rolls back together
+
+Brief P4-4-CC deliverable 6, and P4-D7-2's two floors and release blocker (D4-88). Read on 2026-11-15 at `main` `2ef5639f`.
+
+**Evidence class.** Each rule is `desk`: it is read from the approved texts and the decision log named in its row. Each test named passed in `main`'s push CI at the commit given (`CI-Linux` and `CI-Windows`, with the run). Those tests run in process, over fixtures written from the texts. No release has been built from any commit below, no node has been upgraded or rolled back, and no rollback has been run end to end.
+
+**What a floor is.** A floor is the lowest build a node may be rolled back to once it has run a build that writes the form named. Any build below the floor is kept out of that node's rollback set. Each floor is a merge commit on `main`, and a release built from that commit or a later one carries it. The node and the collector are built from the same commit, so one release carries both sides of a row.
+
+### 7.1 The floors
+
+| Floor | Merge commit on `main` | For a node that has run a build that writes | What the floor build carries | Tests passed at that commit |
+| --- | --- | --- | --- | --- |
+| **C12 0.2** (D4-61) | `3c6b8a7b` (#507) | `otsec.finding/0.2`, from `a37a5e8c` (#511) | The refusal of an `otsec.finding/` minor that `finding.Known` does not name | Not re-checked for this section (`desk`, as recorded at #615) |
+| **C13 0.2: CH-35's bridge** (D4-87; D4-103 ruling 2.1) | `26dce26e2d4f755b1e595a1699c464bb9fd4de59` (#682, deliverable 1) | `otsec.netcheckpoint/0.2`, from `26545062` | CH-35's bridge items 1 to 5, and D4-102 item 5 (d) in `alertsAfter`: skip, count and alarm | Run [43707598076](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43707598076), both `go` jobs: `TestDetectorBridgeLaterCheckpoint` (items 1 and 2, R-4), `TestDetectorBridgeLaterRecords`, `TestBridgeAggregateKeys` and `TestBridgeUnknownDegraded` (items 3 and 4), `TestHoldTieKeepsLaterMinor` (item 5), `TestDetectorAlertUnreadableSkipped` and `TestDetectorAlertUnreadableBounds` ((d), N-13's leg (2)) |
+| **C13 0.3** (C13 0.3 §1.2; D4-105 item 1.2) | `2654506240f86f4843f62aed8a01b766dbda49c6` (#687, deliverable 2) | `otsec.netcheckpoint/0.3`, from `65ad611b` (#689) | Bridge items 1, 2 and 5 for a later minor, (d), and the 0.2 stamp on an alert whose coverage carries a 0.2 field | Run [43711955481](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43711955481), both `go` jobs: `TestDetectorLaterCheckpoint` (R-4 moved to 0.3, N-13's leg (1)), `TestHoldTieKeepsLaterMinor` (a 0.3 body), `TestDetectorAlertUnreadableSkipped`, `TestDetectorAlertUnreadableBounds` |
+| **C8 0.13's reader** (C8-1; D4-88; D4-108 item 1) | `2ef5639f10b5e6610b901626d86a917e3f127373` (#699, deliverable 5) | Any 0.13 audit record: `sensor.enrolled`, `sensor.revoked`, `sensor.link_refused`, or a `collector.request` with a sensor target. No build writes one yet: the node's writers are owed to the dialer-and-enrolment brief | The 0.13 reader in the scheduler's fold | Run [43737404596](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43737404596): `TestC81SensorRecordsFoldHoldsNoRun` passed on `go (ubuntu-latest)`, with its control (the 0.12 reader holds every run). **That job failed** on another test in the same package, `TestLinkKeyAnotherFaultAlarms` (`platform/node`). The `go (windows-latest)` job had not completed when this was read, so this floor has no `CI-Windows` evidence yet. |
+
+What a rollback below each floor costs, and what each floor still costs:
+
+- **Below the bridge,** a node that has written a 0.2 checkpoint restarts its detector silently: no `network-detector-not-restored`, the retained observations' alerts stored a second time, and the 0.2 document never removed, up to 1,354,752 bytes in the configuration class (CH-35, "The rollback").
+- **Below `26545062`,** a node that has written a 0.3 checkpoint gets either a restore failed whole by one `own-session-mismatch` alert, or the same silent restart (C13 0.3 §1.2, "The rollback floor").
+- **At the bridge or the 0.3 floor,** the stated limits stay:
+  - the retained observations' alerts are raised again, with the alarm;
+  - while rolled back from 0.3, no tied flow is judged by CH-51, so HR-24 is again hidden whole;
+  - `hold` matches by position, so a skipped alert shifts the comparisons after it (D4-105 item 5; D4 owes the options).
+- **Below C8 0.13's reader,** a 0.12 build refuses a `sensor.*` record and a `collector.request` with a sensor target. The scheduler takes such a record as a bad record and holds every run (`asset-suspensions-unknown`), so SER collection stops on that node, not only the sensor (C8-1). D6's old-reader leg showed the 0.12 reader's refusal: `TestCCD0C81OldReaderRefuses` passed at `36fabc3a` (#683) in run [43649202635](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43649202635), both `go` jobs, on the narrowed forms of D4-104 item 2 (a).
+- **Readers before writers** (C8-1): the first build that writes a 0.13 record ships no earlier than a release that carries `2ef5639f`.
+- **No floor for the key register** (NK-6): its schema does not change.
+
+### 7.2 What rolls back with the floors
+
+- **The configuration.** The node decodes its configuration strictly (`DisallowUnknownFields`, `platform/node/config.go`), so a rollback restores the configuration shape the floor build accepts (CH-35; `docs/phase4/D5-sensor-node.md` §1.15 item 4; NK-6).
+  - At all three C13 and C8 floors, and on `main` at `2ef5639f`, `NetworkSensor` (`platform/node/netsensor.go`) is the same. Its fields are `sensor_id`, `evidence_class`, `outage_hours`, `alert_retention_days`, `node_addresses`, `node_macs`, `node_vlans` and `link_key_ref`.
+  - A build from before `805e8567` (#685) refuses `link_key_ref`. A floor build refuses the third part's `sensors` list, which no merged build accepts yet.
+  - Outside the tests, no configuration carries a `network_sensor` section while F-027's gate holds (D4-88, D4-96). Under that rule the shape that rolls back is a configuration with no `network_sensor` section.
+- **C2 0.10** (`410a04d5`, #684) rolls back with C13 0.3 (`65ad611b`) and with the node build that reads C2 0.10's Telnet facts (C2 0.10 §4).
+  - That reader is HR-24's stage 3, which is not merged. At `2ef5639f`, `git grep` finds no reader of `TelnetFacts` in `platform/`, `modules/detection/` or `cmd/` outside `_test.go` files.
+  - The cost of each split is fail-closed noise, and no stored data is lost. A collector rolled back to 0.9 under a 0.10 node gives a `comparison M6b reason no-profile` alert for each tied Telnet flow, once that reader exists. A node rolled back to 0.9 ignores the fields.
+  - `410a04d5`'s push runs passed: `ci` [43711989055](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43711989055), `a6-c2-old-reader` [43711989122](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43711989122), in which the last 0.9 `DecodeResult` read every 0.10 golden, and `a6-c2-netns` [43711989091](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43711989091).
+- **C4 0.4** (stamped by every producer from `26545062`) has no floor, on one condition (C4 0.4 §3; `docs/phase4/D5-sensor-node.md` §1.15 item 7).
+  - **Receivers first.** Every forwarded event's `ev` becomes `otsec.event/0.4` at once. Upstream receivers are upgraded before the nodes that write to them (`contracts/syslog/doc.go`, "Versions"). A conforming 0.3 receiver reads 0.4. A receiver that refuses an unknown minor reports every forwarded event as `unsupported version` until it is upgraded.
+  - **The condition: no pending C4 event outlives the process that built it.** A 0.3 build reads every stored 0.4 event, and refuses only a pending one. So a rollback from 0.4 code loses nothing while this condition holds. It holds on `main` by D5's reading (`desk`). Its node test, `TestHeldPoolEventBuiltAtWrite` (E4-7's node leg), is owed to the C13 0.2 intake brief. Any change that holds a built event across a restart, or a second writer of pending events into a node's store, gives C4 0.4 a floor, and this record must name it before that change merges.
+  - **Tests:** `TestCCD0E47StoredEvents` passed at `36fabc3a`, run [43649202635](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43649202635): the 0.3 `Decode` read a stored 0.4 SER, Syslog, node health and network-observation event. `TestEvent04Commits` passed at `26545062`, run [43711955481](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43711955481): the store refuses a pending event of a later minor.
+- **Rules that will add rows.** Each states its floor before D1 approves the later minor:
+  - a later C13 minor that adds a `coverage.degraded` value states what a bridge-floor node writes for it (D4-104 item 1.2);
+  - a later C4 minor that adds a capture-loss counter states its reader floor (D4-105 item 1.4, reading 5).
+
+### 7.3 The order of the first release, open for D1
+
+CH-35 and `docs/phase4/D5-sensor-node.md` §1.15 item 1 say that the bridge build is released on its own, before any build that writes 0.2, and that the 0.2 writer ships no earlier than the release after it. On `main` the bridge, the 0.2 writer and the 0.3 writer were merged in turn, and none has been released. So the rule can be read in two ways:
+
+1. **Taken as written:** the first release is built from a commit between `26dce26e` and `26545062`, and the release after it may carry the writers.
+2. **As a rule about rollback sets:** a node first installed from a release that already writes 0.3 has no earlier release to roll back to. Only releases at or above each floor in §7.1 then exist, and nothing needs to ship before the writer.
+
+D7 reads the rule's purpose as the second: it keeps a node that ran an older build from rolling back below a reader. That reading is not decided. D1 rules on it before the first release is built.
+
+### 7.4 Release blocker
+
+**No release ships while F-027's gate holds** (D4-88, D4-96). F1 to F11 must be closed, and every test owed by a later brief must have passed. F-027 in `docs/verification.md` is the record of its state. This record does not restate it.
 
 ## What this record does not establish
 
