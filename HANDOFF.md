@@ -29,11 +29,11 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 - **Open:** this records PR (D4-108). Each later PR's last comments say what it waits on.
 - **Then:** P4-4-CC deliverable 6 (D7), P4-4-HR25 deliverable 3 (D6's builder and captures, D4's build and counted run), the Windows `platform/node` time brief (D4-107 item 5.4), and the rest of D4-102's "Next".
 
-**Earlier checkpoint (D1), 2026-11-15, later (D4-104 to D4-107), superseded by the checkpoint above.**
+**Earlier checkpoint (D1), 2026-11-15, later (D4-104 to D4-107), superseded by the checkpoint above.** It listed #689, #698, #699 and #700 as open, and named deliverable 6, D3's records PR and HR-25's deliverable 3 as next.
 
-**Earlier checkpoint (D1), 2026-11-15, superseded by the checkpoint above (D4-104 to D4-106).** It listed the PRs open in the morning of 2026-11-15.
+**Earlier checkpoint (D1), 2026-11-15, superseded by the checkpoints above (D4-104 to D4-106).** It listed the PRs open in the morning of 2026-11-15.
 
-**Earlier checkpoint (D1), 2026-11-14, later (D4-102, D4-103), superseded by the checkpoint above.** The next steps were D4-102's "Next". D4-103 issued the first of them, brief P4-4-CC.
+**Earlier checkpoint (D1), 2026-11-14, later (D4-102, D4-103), superseded by the checkpoints above.** The next steps were D4-102's "Next". D4-103 issued the first of them, brief P4-4-CC.
 
 **Earlier checkpoint (D1), 2026-11-14, work paused at the owner's word (D4-101), superseded by the checkpoints above.** No agent was running.
 - **Merged this session:** #670, #671 (C2 0.10, a proposal, not yet approved), #674, #678, #676 (P4-4-F27 (3)) and #672 (P4-4-F27 (4), the link-key reader).

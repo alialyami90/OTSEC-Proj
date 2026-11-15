@@ -2467,25 +2467,26 @@ Evidence class: `desk`, for the rulings and the probes named; `CI-Windows` for t
 
 Evidence class: `desk`, for the rulings and the probes named.
 
-- **1. C8-8 on #699 (P4-4-CC deliverable 5, merged as `2ef5639f`, C8 0.13's reader floor).** D1's rulings on #699, in order:
+- **1. C8-8 on #699 (P4-4-CC deliverable 5, merged as `2ef5639f`, C8 0.13's reader floor).** D1's rulings on #699:
   1. **6894951825:** C8-8 compares `sensor.revoked`'s copied body fields with C8-6's acceptance (option (a) of D3's question).
   2. **6895174039, choice 4, option (c):** a late `sensor.revoked` is judged by the key set and collector epoch in force at its acceptance. `sensor.enrolled` keeps 0.12's rule and fails closed when the keys change before it is applied (D5's dispute 6895040655; D3's 6895161358). C8-8's match also checks the acceptance's kind.
   3. **6896234420, the cut view, option (a):** in a cut view, a `sensor.revoked` with no acceptance found is unknown, whatever its `decision_seq`. The D6 reviewer's probe (6896196067) showed the bound breaks a valid late revocation when a collector reset precedes the view, and D3 reproduced it (6896226737). This replaces the revocation part of 6896052095.
-     - The enrolment bound stays. It rests on the node recording `collector.request` in `collector_seq` order within an epoch. D5 confirmed it holds by structure, from `Scheduler.Run`'s one goroutine (6896250789). No test pins the order (item 4).
-  4. **N1 to N4 of 6896196067:**
+     - The enrolment bound stays. It rests on the node recording `collector.request` in `collector_seq` order within an epoch. D5 confirmed it holds by structure, from `Scheduler.Run`'s one goroutine, while the collector numbers each decision higher than the last (6896250789). A restored collector, whose numbering goes back, can be recorded out of order; the node then holds every request as `collector-restored`. No test pins the order (item 4).
+  4. **N1 to N4 of 6896196067, as D1 ruled in 6896234420:**
      - C8-8 checks `previous_*` and `previous_state` against the acceptance;
      - `applied_at` refuses the comma form;
      - `decideAdmin`'s comment is reworded, so F-027's grep prints nothing;
      - the six surviving mutants each have a test.
-  5. **A new 0.13 key written as `""` or 0** is refused in the `sensor` object, as `null` is, so S1's "exactly its keys" holds (6896052095). A `streams` value of 0 stays valid, for St1.
-  6. **The second D6 reviewer's A1 to A4 (6897036493):** two tests for surviving mutants; §11.2's "not yet merged" phrases; and `Validate` checking that a succeeded `sensor.enrolled`'s `generation` is `previous_generation` + 1.
+  5. **A new 0.13 key written as `""` or 0** is refused in the `sensor` object, as `null` is, so S1's "exactly its keys" holds (6896052095). In `streams`, one key alone at 0 is refused, and both keys at 0 stay valid, as St1 needs for "ended, both empty".
+  6. **The second D6 reviewer's A1 to A4 (6897036493), taken by D1 with this entry as the record:** two tests for surviving mutants; §11.2's "not yet merged" phrases; and A4, `Validate` checking that a succeeded `sensor.enrolled`'s `generation` is `previous_generation` + 1. D3 wrote them (6897120512).
 - **2. HR-25's cases, merged as #698 (`5f88510f`, P4-4-HR25 deliverable 2).**
-  - D2's B1 (6895823733), option (a): the inserted I is a read and always draws a response, so the `fir_restart` insertion cases carry R(I), and the `-no-reply` pair is dropped.
+  - D2's B1 (6895823733), with D1's ruling 6895864530, option (a): the inserted I is a read and always draws a response, so the `fir_restart` insertion cases carry R(I), and the `-no-reply` pair is dropped.
   - **Erratum, D4-107 item 1.5:** #698 pins 112 `dnp3-resync-*` cases, 189 twins and 101 condition rows, not 106 cases.
 - **3. Open items.**
   1. **`time.utc`'s comma form** passes `ParseRecord` on `main`, though the schema refuses it, which is the gap N2 closed for `applied_at`. **Owner: D3,** in its next C8 change.
   2. **The `relayKinds` probe** of `tests/security/sensor_kinds_no_path_d6_test.go`'s node leg was not run, because the leg needs elevation. D3 and D5 read it as killing the mutant. It runs in an elevated session, the owner's or CI's, before F-027's gate lifts.
 - **4. P4-4-CC's "Owed" table** gains these rows:
+  - The node's SL-9 asset-address check compares after unmapping an IPv4-mapped IPv6 address, because C7-2 accepts the mapped form (D3's risk on #699; D1's 6894951825; SL-9 in `docs/phase4/D3-sensor-link.md` since #702). Owed by the dialer-and-enrolment brief.
   - R-6's node leg: the node passes the hello's schema to `DecodeFromSensorIn`, so the per-connection minor check applies. Its control is a node that decodes every frame with `DecodeFromSensor` (D3's R1 on #689, 6895063752). Owed by the C13 0.2 intake brief.
   - A test that the node records `collector.request` in `collector_seq` order within an epoch, with its control (item 1.3; D5's 6896250789). Owed by the dialer-and-enrolment brief.
   - The node's `sensor.revoked` writer checks the chain for its own record before rewriting after a crash, because a duplicate breaks the chain (D5's ask on #699, 6895040655 and 6895273814). Owed by the dialer-and-enrolment brief, with the node writers.
