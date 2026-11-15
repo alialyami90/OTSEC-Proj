@@ -1,0 +1,124 @@
+package netobs
+
+import (
+	"slices"
+	"strings"
+	"testing"
+)
+
+// later02 is the identifier of the next minor, C13 0.2.
+const later02 = "otsec.netobs/0.2"
+
+// refusedAt reports whether err refuses field with code.
+func refusedAt(err error, code Code, field string) bool {
+	return slices.Contains(Codes(err), code) && strings.Contains(err.Error(), field)
+}
+
+// TestBridgeAggregateKeys is CH-35 item 3: a stored alert of a later minor
+// whose asset_id is one of C13 0.2's three aggregate keys is read; at 0.1
+// the same alert is still refused.
+func TestBridgeAggregateKeys(t *testing.T) {
+	for _, key := range []string{"clock-skew", "sensor-records-late", "hold-timeout"} {
+		a := fxUnseen()
+		a.Schema, a.AssetID = later02, key
+		h, err := a.Health()
+		if err != nil {
+			t.Fatalf("%s at 0.2: %v", key, err)
+		}
+		h.Details["assets"] = fxAsset
+		h.Details["assets_total"] = "1"
+		back, err := AlertFromHealth(h)
+		if err != nil {
+			t.Errorf("%s at 0.2, read from its health body: %v", key, err)
+		} else if back.AssetID != key {
+			t.Errorf("%s at 0.2 read back as %q", key, back.AssetID)
+		}
+
+		a.Schema = Identifier
+		if err := a.Validate(); !refusedAt(err, CodeForm, "asset_id") {
+			t.Errorf("%s at 0.1: got %v, want a form refusal of asset_id", key, err)
+		}
+		h.Details["schema"] = Identifier
+		delete(h.Details, "assets")
+		delete(h.Details, "assets_total")
+		if _, err := AlertFromHealth(h); !refusedAt(err, CodeForm, "asset_id") {
+			t.Errorf("%s at 0.1, read from its health body: got %v", key, err)
+		}
+	}
+	// Only the three keys: another word is still refused at a later minor.
+	a := fxUnseen()
+	a.Schema, a.AssetID = later02, "clock-skewed"
+	if err := a.Validate(); !refusedAt(err, CodeForm, "asset_id") {
+		t.Errorf("an unknown asset_id at 0.2: got %v", err)
+	}
+}
+
+// TestBridgeUnknownDegraded is CH-35 item 4: an unknown coverage.degraded
+// value of a later minor is kept and read as degraded, in a stored
+// observation and in an alert; at 0.1, and on the channel, it is refused.
+func TestBridgeUnknownDegraded(t *testing.T) {
+	const added = "prp-late"
+	degraded := []string{"drops-driver", added}
+
+	o := fxStored()
+	o.Schema, o.Coverage.Degraded = later02, degraded
+	got, err := DecodeStored(mustJSON(t, o))
+	if err != nil {
+		t.Fatalf("stored observation at 0.2: %v", err)
+	}
+	if !slices.Equal(got.Coverage.Degraded, degraded) {
+		t.Errorf("stored observation at 0.2 read degraded as %q, want %q", got.Coverage.Degraded, degraded)
+	}
+
+	o.Schema = Identifier
+	if _, err := DecodeStored(mustJSON(t, o)); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
+		t.Errorf("stored observation at 0.1: got %v", err)
+	}
+
+	a := fxAlert()
+	a.Schema, a.Coverage.Degraded = later02, degraded
+	h, err := a.Health()
+	if err != nil {
+		t.Fatalf("alert at 0.2: %v", err)
+	}
+	back, err := AlertFromHealth(h)
+	if err != nil {
+		t.Errorf("alert at 0.2, read from its health body: %v", err)
+	} else if !slices.Equal(back.Coverage.Degraded, degraded) {
+		t.Errorf("alert at 0.2 read degraded as %q", back.Coverage.Degraded)
+	}
+	h.Details["schema"] = Identifier
+	if _, err := AlertFromHealth(h); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
+		t.Errorf("alert at 0.1: got %v", err)
+	}
+
+	// The channel is strict: a channel record is 0.1 only.
+	f := fxFunction()
+	f.Coverage.Degraded = degraded
+	if err := f.Validate(); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
+		t.Errorf("channel observation: got %v", err)
+	}
+	hb := fxHeartbeat()
+	hb.Coverage.Degraded = degraded
+	if err := hb.Validate(); !refusedAt(err, CodeForm, "coverage.degraded[1]") {
+		t.Errorf("heartbeat: got %v", err)
+	}
+
+	// At a later minor the value must still be a token, and not repeated.
+	for _, tc := range []struct {
+		name     string
+		degraded []string
+		code     Code
+		field    string
+	}{
+		{"not a token", []string{"prp late"}, CodeForm, "coverage.degraded[0]"},
+		{"empty", []string{""}, CodeForm, "coverage.degraded[0]"},
+		{"repeated", []string{added, added}, CodeOrder, "coverage.degraded"},
+	} {
+		o := fxStored()
+		o.Schema, o.Coverage.Degraded = later02, tc.degraded
+		if _, err := DecodeStored(mustJSON(t, o)); !refusedAt(err, tc.code, tc.field) {
+			t.Errorf("%s at 0.2: got %v, want %s at %s", tc.name, err, tc.code, tc.field)
+		}
+	}
+}

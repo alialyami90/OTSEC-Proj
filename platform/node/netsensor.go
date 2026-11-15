@@ -45,6 +45,11 @@ type NetworkSensor struct {
 	// NodeVLANs are VLAN IDs, 1 to 4094, as numbers, or the string
 	// "untagged".
 	NodeVLANs []NodeVLAN `json:"node_vlans"`
+	// LinkKeyRef is the node's link key, the reference of the entry in
+	// the link key file beside the key register, never an entry of the
+	// register (section 1.2, NK-1). It is not checked at load: any fault
+	// in it holds back the sensor links only (linkkey.go, NK-5).
+	LinkKeyRef string `json:"link_key_ref,omitempty"`
 }
 
 // NodeVLAN is one entry of node_vlans: a VLAN ID, or 0 for "untagged".

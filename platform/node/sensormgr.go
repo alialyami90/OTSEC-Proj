@@ -11,6 +11,7 @@ import (
 
 	"otsec.local/otsec/contracts/audit"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/sensorlink"
 )
 
 // The sensor store set and its manager (docs/phase4/D5-sensor-node.md
@@ -149,6 +150,11 @@ type sensorManager struct {
 	modes map[c5.DatabaseID]*modeCap
 	// intakeDown: AlarmSensorIntakeNotStarted is raised (sensor.go).
 	intakeDown bool
+	// linkKey is the link key once it has loaded, kept until a restart;
+	// linkFault is the fault AlarmSensorLinkKey was last raised for, ""
+	// when none stands (linkkey.go).
+	linkKey   *sensorlink.LinkKey
+	linkFault string
 }
 
 // modeCap is when a database's last mode change was recorded and to which
@@ -345,6 +351,7 @@ func (r *Runtime) managerStep(ctx context.Context, full bool) (ok bool) {
 		return false
 	}
 	r.startIntake(ctx)
+	r.stepLinkKey()
 	r.flushModeChanges(ctx)
 	r.tickRetention(ctx)
 	r.pruneSensorStores(ctx)
