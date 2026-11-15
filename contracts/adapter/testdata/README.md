@@ -25,7 +25,7 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/failed.transport_closed.json`: The SER reply stops part-way and the connection closes. No QUI is possible.
 - `results/valid/failed.unexpected_access_level.json`: The password gave `=>>` (Level 2), not `=>`. QUI, then close.
 - `results/valid/failed.unexpected_password_prompt.json`: 0.2 (D2-14). At Level 1, after SHO P 1, the SER reply ends in `Password: ?`. Nothing more is sent, not even QUI, which would be a password attempt (C-19). The asset is suspended and the credential is not.
-- `results/valid/failed.unknown.json`: A 0.10 result with a code 0.9 does not know: read as `failed.unknown`. It carries the connection, as every connected result from 0.9 does.
+- `results/valid/failed.unknown.json`: A 0.11 result with a code 0.10 does not know: read as `failed.unknown`. It carries the connection, as every connected result from 0.9 does, and no `session.telnet`, which a 0.10 reader does not require of a later minor (C2 0.10 §2 rule 1, §5).
 - `results/valid/failed.timeout-probe-unanswered.json`: No reply to the `QUI` probe before the step timeout (0.4, A6 on V-S12): `language_probe` unanswered, nothing more sent, nothing suspended.
 - `results/valid/failed.transport_closed-probe-unanswered.json`: Only the echo of the `QUI` probe, then the connection closed: as above.
 - `results/valid/probe-rejected-at-level1.json`: 0.2 (D2-14). The probe reply is rejected but prints `=>`. Nothing is sent after a rejected probe (D16), so a session that reached Level 1 ends without QUI.
@@ -38,6 +38,11 @@ Each `results/valid/<code>.json` carries that code, so every code in the taxonom
 - `results/valid/partial.parse_errors-date-misfit.json`: 0.5. `DATE_F := DMY`, but the rows print `10/24/2026`, which is no calendar date in DMY: each such row is unparsed, its bytes kept.
 - `results/valid/refused.endpoint_path.json`: 0.5. The C1 endpoint's path is not direct (no path, a port server, or unknown): nothing sent, nothing suspended (D2-16, H-13).
 - `results/valid/ok-0.9.json`: 0.9 (D4-68). The `ok` session at 0.9: every observation carries its read (0.7), and the session carries `local_addr`, from RFC 5737's documentation range, and `connected_at`, the first segment's time.
+- `results/valid/ok-0.10.json`: 0.10 (D4-102). The `ok-0.9` session at 0.10, with `session.telnet`: two refusals, nine command octets received (invented), `read_to_eof` false and `rexmit_octets` 0.
+- `results/valid/ok-0.10-read-to-eof.json`: 0.10. As `ok-0.10`, with `read_to_eof` true: the relay closed after the half-close.
+- `results/valid/ok-0.10-rexmit-in-flight.json`: 0.10. As `ok-0.10`, with `rexmit_unknown` `in-flight` in place of `rexmit_octets`.
+- `results/valid/ok-0.10-rexmit-call-failed.json`: 0.10. As `ok-0.10`, with `rexmit_unknown` `call-failed`.
+- `results/valid/ok-0.10-rexmit-unsupported.json`: 0.10. As `ok-0.10`, with `rexmit_unknown` `unsupported`.
 - `results/valid/ok.json`: 0.5. Full session: wake (the device printed nothing on connect), `=`, QUI probe accepted, `ID` FID check, `ACC`, password (redacted), `SHO P 1` with `MAXACC := 2` (warning), `SHO G` with `DATE_F := MDY`, `SER` with two rows, QUI. Identity match on FID and serial. `DATE_F` is reported in `settings`, its span selecting exactly the value (D2-20, D3-2). The `SHO G` layout is modelled on the global block of S22 Figure 10.3 and is approximate (documented-untested): S22 prints no `SHO G` reply. Every SER-run example reads `SHO G` between `SHO P 1` and `SER`, as register revision 4 names it (C3 0.2 context).
 - `results/valid/partial.parse_errors.json`: As `ok`, with a third SER row the parser cannot read: `parse_ok` false, bytes kept (EP-1).
 - `results/valid/partial.read_rows_exceeded.json`: The SER reply has 1,025 invented rows, more than the profile's `max_read_rows` of 1,024 (D1-12). The bytes are kept and no record is parsed. S22 Table 7.63 says the relay holds 1,024 rows, so on a real SEL-751 this would mean the far end is not behaving as the manual says.

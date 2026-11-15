@@ -241,6 +241,9 @@ func normal(r adapter.Result, keepDetail bool) adapter.Result {
 	// Nor do they carry 0.9's connection. check() validates it, and
 	// TestConnection checks its value.
 	r.Session.LocalAddr, r.Session.ConnectedAt = "", ""
+	// Nor 0.10's session.telnet. check() validates it, and the tests in
+	// close_test.go check its values.
+	r.Session.Telnet = nil
 	return r
 }
 
@@ -469,8 +472,13 @@ func diff(got, want string) string {
 // Every golden in the directory is either replayed above or listed here
 // with the reason Run does not produce it.
 var notReplayed = map[string]string{
-	"failed.unknown":                     "a 0.10 result read by a 0.9 reader; no 0.9 adapter writes it",
+	"failed.unknown":                     "a 0.11 result read by a 0.10 reader; no 0.10 adapter writes it",
 	"ok-0.9":                             "the ok session at 0.9, which ok's replay already runs: normal() leaves out what 0.9 adds",
+	"ok-0.10":                            "the ok session at 0.10, which ok's replay already runs: normal() leaves out session.telnet",
+	"ok-0.10-read-to-eof":                "as ok-0.10; close_test.go runs the read to EOF",
+	"ok-0.10-rexmit-in-flight":           "as ok-0.10; the token is the collector's Rexmit seam's, which close_test.go stubs",
+	"ok-0.10-rexmit-call-failed":         "as ok-0.10; the token is the collector's Rexmit seam's, which close_test.go stubs",
+	"ok-0.10-rexmit-unsupported":         "as ok-0.10; close_test.go checks that a nil Rexmit gives it",
 	"refused.session_busy":               "decided by the collector (D9), before Run",
 	"refused.rate_limited":               "decided by the collector (min_interval_ms), before Run",
 	"refused.plaintext_not_acknowledged": "decided by the collector from the C1 endpoint, before Run",

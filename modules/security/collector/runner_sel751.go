@@ -36,6 +36,9 @@ func (r *SEL751Runner) Run(ctx context.Context, plan RunPlan) RunReport {
 	cfg := sel751.Config{
 		Asset: plan.Asset, Profile: plan.Profile, Register: plan.Register,
 		Endpoint: plan.Endpoint.ID, Dial: plan.Dial, Now: r.Now,
+		// C2 0.10's two seams come from the collector alone, never from
+		// the plan or the request (§3.3).
+		HalfClose: halfClose, Rexmit: rexmit,
 	}
 	// A nil *SecretHandle stored in the interface is not a nil interface,
 	// and Run would refuse every Level 0 run (A2 on #97): set the slot and

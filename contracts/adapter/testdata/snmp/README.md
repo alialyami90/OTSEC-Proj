@@ -31,6 +31,7 @@ The session has three phases. `probe` is discovery: an unauthenticated request, 
 - `results/valid/failed.timeout.json`: the first authenticated request has no answer.
 - `results/valid/refused.credential_unavailable.json`: refused before anything is sent: no transcript, no engine ID.
 - `results/valid/ok-0.9.json`: 0.9 (D4-68). As `ok`, with the session's `local_addr` and `connected_at`, the `at` of the first datagram sent.
+- `results/valid/ok-0.10.json`: 0.10 (D4-102). As `ok-0.9`, at 0.10. An SNMPv3 result carries no `session.telnet`.
 - `results/valid/failed.snmp_varbinds_mismatch.json`: 0.9 (D4-60). The Get of `sysDescr.0` and `sysName.0` is answered, authenticated and `noError`, with one binding. No binding of that Response gives a value.
 
 ## Invalid results

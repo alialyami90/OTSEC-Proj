@@ -34,6 +34,7 @@ import generate as g  # noqa: E402  (a module of this directory, run with -I fro
 SCHEMA_0_7 = "otsec.adapter/0.7"
 SCHEMA_0_8 = "otsec.adapter/0.8"  # the two codes D4-54 added
 SCHEMA_0_9 = "otsec.adapter/0.9"  # the session's connection and failed.snmp_varbinds_mismatch
+SCHEMA_0_10 = "otsec.adapter/0.10"  # session.telnet, which an SNMP result never carries
 RUN = "sel27x1.snmp.identity"
 SYSTEM = "sel27x1.snmp.system"
 ENTITY = "sel27x1.snmp.entity"
@@ -336,6 +337,8 @@ def results():
     s.entity()
     s.connection()
     out["ok-0.9"] = s.result("ok", schema=SCHEMA_0_9)
+    # 0.10 (D4-102): the same run at 0.10, still without session.telnet.
+    out["ok-0.10"] = s.result("ok", schema=SCHEMA_0_10)
 
     # 0.9 (D4-60, D1 on #541): the Get of two OIDs answered with one binding.
     # No binding of that Response gives a value.
