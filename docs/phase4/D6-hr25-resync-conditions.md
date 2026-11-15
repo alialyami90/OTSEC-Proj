@@ -8,7 +8,7 @@ D6, 2026-11-15. Brief P4-4-HR25 (`docs/agent-handoffs.md`), deliverable 2: the `
   - `test_resync_conditions.py` pins both by SHA-256 (LF line endings, as Git stores them), and checks the rules in section 10 against them. The cases file's SHA-256 is `2cc2cd0c979d284b9cad01f448fd47626f4a6aff4930f448698d461547b72c0b`, and the conditions file's is `92115208781ac125bd9ceeffd8913d7fcf9abf35b1e6c394f75eaed0b07eb5dd`.
 - **Where they are pinned for the run** (row `pin-files`): D4 adds `RESYNC_CASES_SHA256` and `RESYNC_CONDITIONS_SHA256` to `modules/telemetry/experiments/engine-linux/pins.env` in deliverable 3, with the values the test holds. D6 does not edit D4's files. A run with other files is a rehearsal (row `judge-counted`).
 - **Evidence class: `desk`.** Nothing was built, captured or run against any engine. No device or network was contacted, and no session content was read.
-- **Zeek's code** is read from GitHub at the tag `v9.0.1`, by file, with these SHA-256s. The first five match the HR-23 note's table, and `FuzzBuffer.h` matches the HR-25 note's.
+- **Zeek's code** is read from GitHub at the tag `v9.0.1`, by file, with these SHA-256s. The first six match the HR-23 note's table, and `FuzzBuffer.h` matches the HR-25 note's.
 
   | File | SHA-256 | Read for |
   | --- | --- | --- |
