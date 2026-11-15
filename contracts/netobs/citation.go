@@ -228,8 +228,14 @@ func (cv *Coverage) check(c *checker, field string) {
 		}
 	}
 	for i, d := range cv.Degraded {
-		if !contains(Degraded, d) {
-			c.fail(CodeForm, fmt.Sprintf("%s.degraded[%d]", field, i), "%q is not a degraded condition", d)
+		// A later minor may add a condition. Its record keeps the value, so it
+		// reads as degraded, not as a refusal (CH-35 item 4); the value must
+		// still be a token, since an alert flattens the list space-separated.
+		f := fmt.Sprintf("%s.degraded[%d]", field, i)
+		if c.later {
+			c.token(f, d)
+		} else if !contains(Degraded, d) {
+			c.fail(CodeForm, f, "%q is not a degraded condition", d)
 		}
 		if slices.Index(cv.Degraded, d) != i {
 			c.fail(CodeOrder, field+".degraded", "%q repeated", d)
