@@ -26,7 +26,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **CHECKPOINT (D1), 2026-11-15 (D4-104 to D4-106).** P4-4-CC is in progress. The next steps are D4-102's "Next", in D4-103's order and D4-105 item 8's. D4-106 records finding A, HR-25's fix and the key-handle leak.
 - **Merged this session:** #681 (D4-103), #686 (D4-104), #683 (P4-4-CC deliverable 0), #691 (D4-105) and #685 (P4-4-F27 (4)).
-- **Open:** #682, #687, #689 and #684 (P4-4-CC deliverables 1 to 4), #690 (HR-25's design note) and #692 (P4-4-DO). Each PR's last comments say what it waits on. Finding A on #687 is D4-105 item 1.1.
+- **Open:** #682, #687, #689 and #684 (P4-4-CC deliverables 1 to 4), #690 (HR-25's design note), #692 (P4-4-DO), #693 (P4-COL-1) and #694 (D4-106). Each PR's last comments say what it waits on. Finding A on #687 is D4-106 item 1.
 - **Then:** deliverables 5 and 6 of P4-4-CC, P4-COL-1, P4-4-DO, and the rest of D4-102's "Next".
 
 **Earlier checkpoint (D1), 2026-11-14, later (D4-102, D4-103), superseded by the checkpoint above.** The next steps were D4-102's "Next". D4-103 issued the first of them, brief P4-4-CC.
