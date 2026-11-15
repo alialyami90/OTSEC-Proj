@@ -198,10 +198,9 @@ func TestCCD0R3Alert(t *testing.T) {
 		}
 	}
 	// Stamped 0.1, the alert without them is valid, and with either one it
-	// is refused by name: the 0.2 reader reads an earlier minor strictly
-	// (CH-35), so a key 0.1 does not have is an unknown key (decode), as in
-	// TestCCD0R3StoredObservation. The 0.1 reader on main refused it as an
-	// unknown detail (conflict).
+	// is refused, naming the key: the 0.2 reader reads an earlier minor
+	// strictly (CH-35). CH-35 states no code, so none is asserted (the 0.1
+	// reader on main gave conflict, this code gives decode).
 	at01 := func(keep string) event.Health {
 		h := event.Health{Type: e.Health.Type, Related: e.Health.Related, Details: maps.Clone(d)}
 		h.Details["schema"] = "otsec.netobs/0.1"
@@ -217,8 +216,8 @@ func TestCCD0R3Alert(t *testing.T) {
 	}
 	for _, k := range added {
 		_, err := netobs.AlertFromHealth(at01(k))
-		if !slices.Contains(netobs.Codes(err), netobs.CodeDecode) || !strings.Contains(fmt.Sprint(err), k) {
-			t.Errorf("stamped 0.1 with %s: %v, want it refused by name", k, err)
+		if err == nil || !strings.Contains(fmt.Sprint(err), k) {
+			t.Errorf("stamped 0.1 with %s: %v, want it refused, naming the key", k, err)
 		}
 	}
 }

@@ -166,7 +166,8 @@ func TestC4v04E45Totals(t *testing.T) {
 }
 
 // E4-8: diff.<name> of each new counter at 2^64 - 1 accepted; at 2^64, with
-// a leading zero, or negative, refused.
+// a leading zero, or negative, refused, naming the field. C4 0.4 §2 and C4
+// 0.3 §5 say "refused" and state no code, so none is asserted.
 func TestC4v04E48Bounds(t *testing.T) {
 	for _, n := range c4v4New {
 		d := map[string]string{"diff.packets": "1", "diff." + n: "18446744073709551615"}
@@ -179,8 +180,8 @@ func TestC4v04E48Bounds(t *testing.T) {
 		for _, v := range []string{"18446744073709551616", "99999999999999999999", "05", "00", "-1", "+1", "1.0", "1e3", "", " 1"} {
 			d := map[string]string{"diff.packets": "1", "diff." + n: v}
 			_, err := event.Decode(c4v4Counters(t, "otsec.event/0.4", d))
-			if !c4v4Refused(err, "health.details.diff."+n, event.CodeEnum) {
-				t.Errorf("diff.%s %q: %v, want enum", n, v, err)
+			if err == nil || !strings.Contains(fmt.Sprint(err), "health.details.diff."+n+":") {
+				t.Errorf("diff.%s %q: %v, want it refused, naming the field", n, v, err)
 			}
 		}
 	}

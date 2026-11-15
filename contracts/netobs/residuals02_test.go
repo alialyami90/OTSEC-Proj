@@ -48,6 +48,31 @@ func TestHeartbeatInterfacePacketsRequired(t *testing.T) {
 	}
 }
 
+// D3's N1 on #687, C13 §6: on the 0.2 channel a heartbeat without a 0.1
+// count is refused as missing, by key, not read as 0. drops_driver alone
+// may be absent. Controls: the heartbeat without drops_driver decodes, and
+// the old read, the 0.1 channel, still accepts a heartbeat without
+// drops_decoder.
+func TestHeartbeat02CountersRequired(t *testing.T) {
+	for _, name := range []string{
+		"packets", "bytes", "drops_decoder", "drops_channel", "decoder_errors", "sessions_unparsed",
+		"table_evictions", "dnp3_pending_overflows", "dnp3_seq_reused", "prp_discards", "redactions", "logins_not_placed",
+	} {
+		b := encodeWith(t, fxHeartbeat02(), func(m map[string]any) { delete(m["counters"].(map[string]any), name) })
+		if _, err := DecodeFromSensor(b); !hasCode(err, CodeMissing) {
+			t.Errorf("0.2, counters.%s absent: %v, want missing", name, err)
+		}
+	}
+	b := encodeWith(t, fxHeartbeat02(), func(m map[string]any) { delete(m["counters"].(map[string]any), "drops_driver") })
+	if _, err := DecodeFromSensor(b); err != nil {
+		t.Errorf("control, 0.2, drops_driver absent: %v", err)
+	}
+	old := encodeWith(t, fxHeartbeat(), func(m map[string]any) { delete(m["counters"].(map[string]any), "drops_decoder") })
+	if _, err := DecodeChannel(old); err != nil {
+		t.Errorf("control, 0.1 channel, drops_decoder absent: %v", err)
+	}
+}
+
 // N1 (d) on #687: a 0.2 detector checkpoint's window coverage with
 // config_digest "" or settings.prp_window_ms 0 is refused, as the same
 // keys in the top-level coverage are (form, range). Control: the document

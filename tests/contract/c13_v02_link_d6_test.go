@@ -16,8 +16,11 @@ package contract
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -184,8 +187,20 @@ func TestC13v02M2FrameCaps(t *testing.T) {
 	if f, err := netobs.DecodeFromSensor(pad(tick, 64<<10)); err != nil || f.Tick == nil {
 		t.Errorf("a tick of exactly 64 KiB: %v", err)
 	}
-	if _, err := netobs.DecodeFromSensor(pad(tick, 64<<10+1)); !slices.Contains(netobs.Codes(err), netobs.CodeRange) {
-		t.Errorf("a sensor frame of 64 KiB + 1: %v, want range", err)
+	// The node's close point is ReadFrame (CH-2: "a 4-byte big-endian
+	// length, then one JSON document"): a length of 64 KiB is read, and 64
+	// KiB + 1 is ErrFrameTooLarge (frame-too-large), with its whole body
+	// there to be read.
+	frame := func(body []byte) io.Reader {
+		var hdr [4]byte
+		binary.BigEndian.PutUint32(hdr[:], uint32(len(body)))
+		return io.MultiReader(bytes.NewReader(hdr[:]), bytes.NewReader(body))
+	}
+	if b, err := netobs.ReadFrame(frame(pad(tick, 64<<10))); err != nil || len(b) != 64<<10 {
+		t.Errorf("ReadFrame, a length of 64 KiB: %d bytes, %v", len(b), err)
+	}
+	if b, err := netobs.ReadFrame(frame(pad(tick, 64<<10+1))); !errors.Is(err, netobs.ErrFrameTooLarge) {
+		t.Errorf("ReadFrame, a length of 64 KiB + 1: %d bytes, %v; want ErrFrameTooLarge", len(b), err)
 	}
 	var w bytes.Buffer
 	if err := netobs.WriteFrame(&w, pad(tick, 64<<10+1)); err != netobs.ErrFrameTooLarge {
@@ -408,7 +423,10 @@ func TestC13v02H1Row1Form(t *testing.T) {
 }
 
 // H-1 (CH-13): every row in order, the first failure deciding; with H-7's
-// and H-4's contract legs (rows 5b and 5a) and G-4's (row 7, CH-33).
+// and H-4's contract legs (rows 5b and 5a) and G-4's (row 7, CH-33). The
+// order is CH-13 as amended by D1's ruling on finding A (option 2 with
+// N1-b, D4-106): rows 1 to 4, then row 7, then row 5 with 5a first, or row
+// 6, then rows 8 and 9.
 func TestC13v02H1HelloRows(t *testing.T) {
 	type tc struct {
 		name   string
@@ -427,8 +445,8 @@ func TestC13v02H1HelloRows(t *testing.T) {
 		{"row 4 before row 7", func(m v2Msg) { m["run_id"] = v2RunB; m["pinned_by"] = "console" }, nil, netobs.CloseRunForked, ""},
 		{"row 5: a resume", nil, nil, "", netobs.HelloResume},
 		{"row 5: prior on a resume", func(m v2Msg) { m["prior"] = v2Prior("0") }, nil, netobs.CloseHello, ""},
-		{"row 5: drops_channel below D", func(m v2Msg) { m["drops_channel"] = "2" }, nil, netobs.CloseHello, ""},
-		{"row 5 before row 7", func(m v2Msg) { m["drops_channel"] = "2"; m["pinned_by"] = "console" }, nil, netobs.CloseHello, ""},
+		{"row 5a: drops_channel below D (N1-b)", func(m v2Msg) { m["drops_channel"] = "2" }, nil, netobs.CloseRunRegressed, ""},
+		{"row 7 before row 5", func(m v2Msg) { m["drops_channel"] = "2"; m["pinned_by"] = "console" }, nil, netobs.CloseBinding, ""},
 		{"row 5a: newest_seq below T", func(m v2Msg) { m["first_seq"] = "10"; m["newest_seq"] = "9" }, nil, netobs.CloseRunRegressed, ""},
 		{"row 5a: newest_seq at T", func(m v2Msg) { m["first_seq"] = "11"; m["newest_seq"] = "10" }, nil, "", netobs.HelloResume},
 		{"row 5b: a renew's resume", nil, func(s *netobs.HelloState) { s.Position.Generation = 1 }, "", netobs.HelloResumeRenewed},
@@ -438,7 +456,7 @@ func TestC13v02H1HelloRows(t *testing.T) {
 		{"no position: run 1 is a new run", func(m v2Msg) { m["run_counter"] = "1"; m["prior"] = v2Prior("0") }, func(s *netobs.HelloState) { s.Position = nil }, "", netobs.HelloNewRun},
 		{"row 6: a new run", func(m v2Msg) { m["run_counter"] = "6"; m["prior"] = v2Prior("0") }, nil, "", netobs.HelloNewRun},
 		{"row 6: a new run without prior", func(m v2Msg) { m["run_counter"] = "6" }, nil, netobs.CloseHello, ""},
-		{"row 6 before row 7", func(m v2Msg) { m["run_counter"] = "6"; m["pinned_by"] = "console" }, nil, netobs.CloseHello, ""},
+		{"row 7 before row 6", func(m v2Msg) { m["run_counter"] = "6"; m["pinned_by"] = "console" }, nil, netobs.CloseBinding, ""},
 		{"row 7: pinned_by changed in the generation", func(m v2Msg) { m["pinned_by"] = "console" }, nil, netobs.CloseBinding, ""},
 		{"row 7: the first pinned_by of the generation", func(m v2Msg) { m["pinned_by"] = "console" }, func(s *netobs.HelloState) { s.PinnedBy = "" }, "", netobs.HelloResume},
 		{"row 7 before row 8", func(m v2Msg) { m["pinned_by"] = "console"; m["config_digest"] = v2DigestB }, nil, netobs.CloseBinding, ""},
@@ -477,32 +495,129 @@ func TestC13v02H1HelloRows(t *testing.T) {
 	}
 }
 
-// CH-13 row 1 checks "every span in lost and prior.lost passing CH-40's
-// checks", and the first failure decides. CH-40's checks include the
-// widening check ("A span that widens with no rise closes the connection
-// the same way", as hello in a hello). So a hello that also fails row 2, 3
-// or 4 closes as hello when it states a span with drops_channel 0, which no
-// Ds can pay for (Ds is 0 for a run with no span accepted, CH-40). D4's
-// #687 reads it otherwise (the widening check at rows 5 and 6, its first
-// stated reading); this test is the text's reading, for D1 to rule.
-func TestC13v02H1Row1SpansFirst(t *testing.T) {
-	unpaid := func(m v2Msg) {
-		m["lost"] = []any{v2Span("2026-11-15T09:00:00Z", "2026-11-15T09:01:00Z")}
-		m["drops_channel"] = "0"
+// v2HeldState is v2State with span a held for run 5 at Ds 3 (CH-40). A
+// resume that states a and the new span b with drops_channel 3, which is D,
+// pays for nothing: b is new and 3 is not above Ds. So the span is unpaid
+// and no 5a check is touched.
+func v2HeldState() netobs.HelloState {
+	s := v2State()
+	s.Spans, s.Ds = []netobs.Span{{FromUTC: "2026-11-15T09:00:00Z", ToUTC: "2026-11-15T09:01:00Z"}}, 3
+	return s
+}
+
+var (
+	v2SpanA = v2Span("2026-11-15T09:00:00Z", "2026-11-15T09:01:00Z")
+	v2SpanB = v2Span("2026-11-15T09:05:00Z", "2026-11-15T09:06:00Z")
+)
+
+// v2Unpaid states an unpaid span: on a resume against v2HeldState, the new
+// span b with drops_channel at D; on a new run (no span held, Ds 0), span b
+// with drops_channel 0.
+func v2Unpaid(m v2Msg) {
+	if m["run_counter"] == "5" {
+		m["lost"], m["drops_channel"] = []any{v2SpanA, v2SpanB}, "3"
+		return
 	}
-	for _, c := range []struct {
-		name string
-		f    func(v2Msg)
-	}{
-		{"row 1 before row 2", func(m v2Msg) { m["generation"] = "3" }},
-		{"row 1 before row 3", func(m v2Msg) { m["run_counter"] = "4" }},
-		{"row 1 before row 4", func(m v2Msg) { m["run_id"] = v2RunB }},
+	m["lost"], m["drops_channel"] = []any{v2SpanB}, "0"
+}
+
+// CH-13 as amended by D1's ruling on finding A (option 2, D4-106; it
+// replaces this test's earlier reading, the text's order, which D1 did not
+// take). Row 1 checks only the spans' form (CH-40: from_utc at or before
+// to_utc, at most MaxLostSpans, disjoint, oldest first). CH-40's widening
+// check needs the run's held spans and Ds, so it is applied at row 5 or 6
+// and still closes as hello. Rows 2, 3, 4 and 7 decide before it, so an
+// unpaid span cannot turn an audited close into hello (D6's B1, D3's
+// judgement on #687). An unpaid span in a hello no earlier row closes still
+// closes as hello.
+func TestC13v02H1Row1SpansFirst(t *testing.T) {
+	// Row 1's form decides before identity: a fork, or another generation,
+	// whose span runs from after to is refused at its strict decode, which
+	// the node closes as hello.
+	for name, f := range map[string]func(v2Msg){
+		"row 1's form before row 2": func(m v2Msg) { m["generation"] = "3" },
+		"row 1's form before row 4": func(m v2Msg) { m["run_id"] = v2RunB },
 	} {
 		m := v2SensorHello()
-		unpaid(m)
+		f(m)
+		m["lost"] = []any{v2Span("2026-11-15T09:00:01Z", "2026-11-15T09:00:00Z")}
+		if d, err := netobs.DecodeFromSensor(v2JSON(t, m)); err == nil || d.Type != netobs.TypeSensorHello {
+			t.Errorf("%s: %v, want the hello refused (the node closes hello)", name, err)
+		}
+	}
+	newRun := func(m v2Msg) { m["run_counter"], m["prior"] = "6", v2Prior("0") }
+	for _, c := range []struct {
+		name  string
+		f     func(v2Msg)
+		close string
+	}{
+		// Rows 2, 3, 4 and 7 before the widening check.
+		{"row 2 before the widening check", func(m v2Msg) { v2Unpaid(m); m["generation"] = "3" }, netobs.CloseBinding},
+		{"row 3 before the widening check", func(m v2Msg) { v2Unpaid(m); m["run_counter"] = "4" }, netobs.CloseRunRegressed},
+		{"row 4 before the widening check", func(m v2Msg) { v2Unpaid(m); m["run_id"] = v2RunB }, netobs.CloseRunForked},
+		{"row 7 before row 5's widening check", func(m v2Msg) { v2Unpaid(m); m["pinned_by"] = "console" }, netobs.CloseBinding},
+		{"row 7 before row 6's widening check", func(m v2Msg) { newRun(m); v2Unpaid(m); m["pinned_by"] = "console" }, netobs.CloseBinding},
+		// No earlier row closes: the unpaid span closes as hello.
+		{"a resume with an unpaid span", v2Unpaid, netobs.CloseHello},
+		{"a new run with an unpaid span", func(m v2Msg) { newRun(m); v2Unpaid(m) }, netobs.CloseHello},
+		{"a new run with prior.lost and records_lost 0", func(m v2Msg) { newRun(m); v2Set(m, "prior.lost", []any{v2SpanA}) }, netobs.CloseHello},
+	} {
+		m := v2SensorHello()
 		c.f(m)
-		if v := netobs.JudgeHello(v2State(), v2Hello(t, m)); v.Close != netobs.CloseHello {
-			t.Errorf("%s: a span with drops_channel 0 closes %q, want hello (CH-13 row 1, CH-40)", c.name, v.Close)
+		if v := netobs.JudgeHello(v2HeldState(), v2Hello(t, m)); v.Close != c.close {
+			t.Errorf("%s: close %q, want %q (CH-13 as amended, CH-40)", c.name, v.Close, c.close)
+		}
+	}
+}
+
+// H-1 and H-4's contract legs under the amended order (D1's ruling on
+// finding A, option 2 with N1-b, D4-106): every close that writes
+// sensor.link_refused (C8-4) is decided before any of the sensor's
+// declarations (prior, drops_channel, lost, prior.lost) is judged. Row 7
+// runs after row 4 and before row 5 or 6; row 5 runs 5a first, and 5a is
+// newest_seq below T or drops_channel below D (N1-b; CH-15 as amended, D3's
+// condition 2). Each close here is one of C8-4's six reasons, so the node
+// writes its record; the record itself is the node intake's leg (owed).
+func TestC13v02H1OrderAudited(t *testing.T) {
+	regressed := func(m v2Msg) { m["first_seq"], m["newest_seq"] = "10", "9" } // T is 10
+	for _, c := range []struct {
+		name  string
+		f     func(v2Msg)
+		state func(*netobs.HelloState)
+		close string
+	}{
+		// 5a before row 5's declarations.
+		{"5a before prior", func(m v2Msg) { regressed(m); m["prior"] = v2Prior("0") }, nil, netobs.CloseRunRegressed},
+		{"5a: newest_seq below T, with a falling drops_channel", func(m v2Msg) { regressed(m); m["drops_channel"] = "2" }, nil, netobs.CloseRunRegressed},
+		{"5a before the widening check", func(m v2Msg) { v2Unpaid(m); regressed(m) }, nil, netobs.CloseRunRegressed},
+		// N1-b: drops_channel below D is 5a with newest_seq at T.
+		{"N1-b: newest_seq at T, drops_channel below D", func(m v2Msg) { m["first_seq"], m["newest_seq"], m["drops_channel"] = "11", "10", "2" }, nil, netobs.CloseRunRegressed},
+		{"N1-b, with prior", func(m v2Msg) { m["drops_channel"] = "2"; m["prior"] = v2Prior("0") }, nil, netobs.CloseRunRegressed},
+		{"N1-b on a renew's resume (5b), with an unpaid span", func(m v2Msg) { v2Unpaid(m); m["drops_channel"] = "2" }, func(s *netobs.HelloState) { s.Position.Generation = 1 }, netobs.CloseRunRegressed},
+		// Row 7 before row 5 (5a included) and row 6.
+		{"row 7 before prior", func(m v2Msg) { m["pinned_by"] = "console"; m["prior"] = v2Prior("0") }, nil, netobs.CloseBinding},
+		{"row 7 before an unpaid span", func(m v2Msg) { v2Unpaid(m); m["pinned_by"] = "console" }, nil, netobs.CloseBinding},
+		{"row 7 before 5a's drops_channel", func(m v2Msg) { m["pinned_by"] = "console"; m["drops_channel"] = "2" }, nil, netobs.CloseBinding},
+		{"row 7 before 5a's newest_seq", func(m v2Msg) { regressed(m); m["pinned_by"] = "console" }, nil, netobs.CloseBinding},
+		{"row 7 before row 6's prior", func(m v2Msg) { m["run_counter"], m["pinned_by"] = "6", "console" }, nil, netobs.CloseBinding},
+		// Row 4 before row 7: a fork is held whatever it declares (SL-16).
+		{"row 4 before row 7, with prior and an unpaid span", func(m v2Msg) {
+			v2Unpaid(m)
+			m["run_id"], m["pinned_by"], m["prior"] = v2RunB, "console", v2Prior("0")
+		}, nil, netobs.CloseRunForked},
+	} {
+		m := v2SensorHello()
+		c.f(m)
+		s := v2HeldState()
+		if c.state != nil {
+			c.state(&s)
+		}
+		v := netobs.JudgeHello(s, v2Hello(t, m))
+		if v.Close != c.close {
+			t.Errorf("%s: close %q, want %q (CH-13 as amended)", c.name, v.Close, c.close)
+		}
+		if !slices.Contains(ccD0LinkRefusedReasons, v.Close) {
+			t.Errorf("%s: close %q is not one of C8-4's six, so no sensor.link_refused is written", c.name, v.Close)
 		}
 	}
 }
@@ -579,12 +694,13 @@ func TestC13v02T5Ticks(t *testing.T) {
 	}
 }
 
-// S-2 (CH-15): a falling drops_channel closes in a tick and in a hello
-// (above), and is refused as order in a heartbeat (Follows); the heartbeat
-// leg is in c13_v02_records_d6_test.go. Here, the hello's: a resume whose
-// drops_channel is below D closes as hello, at D it is accepted.
+// S-2 (CH-15): a falling drops_channel closes in a tick (above), and is
+// refused as order in a heartbeat (Follows); the heartbeat leg is in
+// c13_v02_records_d6_test.go. Here, the hello's: a resume whose
+// drops_channel is below D closes as run-regressed (5a, N1-b; CH-15 as
+// amended, D3's condition 2 on #687), at D it is accepted.
 func TestC13v02S2HelloDrops(t *testing.T) {
-	for drops, want := range map[string]string{"2": netobs.CloseHello, "3": "", "4": ""} {
+	for drops, want := range map[string]string{"2": netobs.CloseRunRegressed, "3": "", "4": ""} {
 		m := v2SensorHello()
 		m["drops_channel"] = drops
 		if v := netobs.JudgeHello(v2State(), v2Hello(t, m)); v.Close != want {
