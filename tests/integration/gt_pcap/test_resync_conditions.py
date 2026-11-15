@@ -20,8 +20,8 @@ import dnp3
 HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "resync-cases.tsv")
 CONDITIONS = os.path.join(HERE, "resync-conditions.tsv")
-CASES_SHA256 = "3d1d976aa99c42a8dabbf506157efc62e2d7ebced3dc535531350dc8172039fc"
-CONDITIONS_SHA256 = "f09eca8fd699bb7676335a2f364a9b474c9feb8e1470d63d079861ae8020ba22"
+CASES_SHA256 = "05b52c6a27e308b6ffe95df97ec919d8c0027760ad6f4fc894ddd39c0babb809"
+CONDITIONS_SHA256 = "d5bc7bee4959dc7a65b0cece8fdff82ff145b18e176aed158ccd2f67a4a3beb1"
 
 # The closed set of causes and their weirds (design section 2.8).
 WEIRDS = {
