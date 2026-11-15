@@ -92,3 +92,7 @@ GT-PCAP is the labelled capture set for V-M6 and R6.1 to R6.5. The plan is `docs
 **`dnp3-unauthorized-operate-no-response`** removes the response and its ACK, and renumbers every later frame: the outstation's sequence numbers and the master's acknowledgements come down by the 37 octets removed, and the TCP checksums are recomputed. So the request reads as unanswered, not as a capture gap (D1 on #548). A capture-gap case, if one is wanted, gets its own row and label.
 
 `.github/workflows/a6-gt-pcap.yml`'s `dnp3` job rebuilds the captures, checks the hashes, relabels them with the pinned tshark, and fails on any difference from the committed labels. `test_dnp3_gt.py` checks the writer without tshark: determinism, checksums, a bitwise CRC, TEST-NET addresses, the case rows, the removed response, the g120 headers and the TCP sequence numbers.
+
+## HR-25's dnp3-resync-* captures (brief P4-4-HR25, deliverable 3)
+
+`resync/` holds the SHA-256s and the builder's labels of the 302 captures that `tests/integration/gt_pcap/resync_cases.py` writes for `resync-cases.tsv`. `resync/SOURCE.md` describes them.

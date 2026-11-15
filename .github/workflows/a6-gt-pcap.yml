@@ -149,3 +149,43 @@ jobs:
           name: gt-pcap-modbus-moved-port
           path: ${{ runner.temp }}/modbus/modbus-moved-port.tsv
           if-no-files-found: warn
+  # HR-25's dnp3-resync-* cases (brief P4-4-HR25, deliverable 3; row
+  # pin-builder of resync-conditions.tsv): resync_cases.py writes every case
+  # and twin frame by frame, the hashes pin the bytes, and the builder's
+  # labels must equal the committed ones. The labels are the builder's, not
+  # tshark's (row judge-labels): the pinned tshark fails the job on an IPv4,
+  # UDP or TCP checksum, and where its DNP3 reading differs from a label, the
+  # list of differences must equal the committed tshark-beside.tsv, which
+  # names each one's cause (D4's N1 on #714). The reading is never used as a
+  # label, and the list is uploaded as an artifact. The captures are rebuilt
+  # here, never committed.
+  resync:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tshark
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Write the dnp3-resync-* captures
+        run: python3 tests/integration/gt_pcap/resync_cases.py "$RUNNER_TEMP/resync"
+      - name: Check them against the committed hashes
+        run: |
+          cd "$RUNNER_TEMP/resync" && sha256sum -c "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/resync/resync.sha256"
+          ls *.pcap | wc -l | grep -qx "$(wc -l < "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/resync/resync.sha256")"
+      - name: The labels equal the committed ones
+        run: |
+          cd tests/fixtures/network/gt-pcap/resync
+          for f in dnp3-resync-*.tsv; do diff -u "$f" "$RUNNER_TEMP/resync/$f"; done
+          ls "$RUNNER_TEMP"/resync/*.tsv | wc -l | grep -qx "$(ls dnp3-resync-*.tsv | wc -l)"
+      - name: The pinned tshark's checksums, and its reading against the expected differences
+        run: python3 tests/integration/gt_pcap/resync_tshark.py "$RUNNER_TEMP/resync" tests/fixtures/network/gt-pcap/resync/tshark-beside.tsv
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gt-pcap-resync-tshark
+          path: ${{ runner.temp }}/resync/tshark-beside.tsv
+          if-no-files-found: warn
