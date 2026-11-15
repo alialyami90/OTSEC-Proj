@@ -62,3 +62,43 @@ func d6Probe705(t *testing.T, fenced bool) {
 
 func TestD6Probe705Fenced(t *testing.T)   { d6Probe705(t, true) }
 func TestD6Probe705Unfenced(t *testing.T) { d6Probe705(t, false) }
+
+// The same probe on TestLinkKeyFaultNodeStarts/missing's tail, where the
+// file is put in place after the start: a step asked for while tls_dir is
+// unlocked. Unfenced it must fail with a second alarm; fenced it must pass.
+func d6Probe705Missing(t *testing.T, fenced bool) {
+	nc, _, _, dir := linkKeyConfig(t, true)
+	lockTLS(t, nc)
+	r, st := startSeams(t, parse(t, nc), dir, SensorSeams{})
+	defer r.Close()
+	resolveKeys(t, r)
+	if got := linkKeyAlarms(st); len(got) != 1 || !strings.Contains(got[0], "the link key file is missing") {
+		t.Fatalf("sensor-link-key alarms %q; want one naming the missing file", got)
+	}
+	sensorStep(t, r)
+	var want string
+	change := func() {
+		if err := nc.UnlockTLS(); err != nil {
+			t.Fatal(err)
+		}
+		r.kickSensorManager()
+		time.Sleep(300 * time.Millisecond)
+		want = writeLinkKeyFile(t, nc, newLinkKey(t, nc))
+		lockTLS(t, nc)
+	}
+	if fenced {
+		heldManager(r, change)
+	} else {
+		change()
+	}
+	sensorStep(t, r)
+	if pin := linkPin(st); pin != want {
+		t.Fatalf("pin %q after the file was put in place; want %q", pin, want)
+	}
+	if n := len(linkKeyAlarms(st)); n != 1 {
+		t.Fatalf("%d sensor-link-key alarms after the key loaded (%q); want 1", n, linkKeyAlarms(st))
+	}
+}
+
+func TestD6Probe705MissingFenced(t *testing.T)   { d6Probe705Missing(t, true) }
+func TestD6Probe705MissingUnfenced(t *testing.T) { d6Probe705Missing(t, false) }
