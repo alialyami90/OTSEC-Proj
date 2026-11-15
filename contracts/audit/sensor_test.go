@@ -570,6 +570,32 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 			recs[2].Sensor.PayloadSHA256 = payloadOf(99)
 			return recs
 		},
+		// The copied body fields (D1's ruling 6894951825, option (a)): each
+		// edits the acceptance's copy only, so no other rule breaks.
+		"an enrolment's generation not its acceptance's": func(recs []*Record) []*Record {
+			recs[3].Sensor.Generation = "3"
+			return recs
+		},
+		"an enrolment's pin not its acceptance's": func(recs []*Record) []*Record {
+			recs[3].Sensor.SensorSPKI = testPinA
+			return recs
+		},
+		"a revocation's generation not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.Generation = "2"
+			return recs
+		},
+		"a revocation's pin not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.SensorSPKI = testPinB
+			return recs
+		},
+		"a revocation's reason not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.Reason = string(authz.SensorRevokeLost)
+			return recs
+		},
+		"a revocation's suspect_from not its acceptance's": func(recs []*Record) []*Record {
+			recs[5].Sensor.SuspectFrom = "2026-11-10T11:00:00Z"
+			return recs
+		},
 		"another sensor's acceptance": func(recs []*Record) []*Record {
 			recs[5].Target.SensorID = "7c1e0d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f"
 			return recs
@@ -598,9 +624,22 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 			}
 			return recs
 		},
-		"a decision from before a reset": func(recs []*Record) []*Record {
-			reset := netRec(8, ActionCollectorSeqReset, "")
-			return append(append(recs[:6:6], reset), recs[6:]...)
+		// An enrolment keeps the same-epoch rule; a late revocation's is
+		// TestVerifySensorFromLateRevoked's.
+		"an enrolment's decision from before a reset": func(recs []*Record) []*Record {
+			return append(append(recs[:4:4], resetRec(6)), recs[4:]...)
+		},
+		// The kind (D1's ruling 6895174039): an enrolment naming a
+		// revocation's acceptance with the same generation and pin.
+		"an enrolment naming a revocation's acceptance": func(recs []*Record) []*Record {
+			recs[1] = sensorAccept(3, 10, authz.KindNodeSensorRevoke, "1", testPinA)
+			return recs
+		},
+		// A revocation naming an enrolment's acceptance. It breaks on reason
+		// as well, since a valid enrolment's acceptance carries none.
+		"a revocation naming an enrolment's acceptance": func(recs []*Record) []*Record {
+			recs[5] = sensorAccept(7, 12, authz.KindNodeSensorEnrol, "1", testPinA)
+			return recs
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -617,6 +656,13 @@ func TestVerifySensorFromBreaks(t *testing.T) {
 	recs[4].Sensor.PreviousGeneration, recs[4].Sensor.PreviousSPKI, recs[4].Sensor.PreviousState = "", "", PreviousStateUnknown
 	if err := VerifySensorFrom(recs, 1); err != nil {
 		t.Fatalf("previous_state: %v", err)
+	}
+	// suspect_from on both copies is accepted. Control for "a revocation's
+	// suspect_from not its acceptance's".
+	recs = cloneSensorChain(sensorChain())
+	recs[5].Sensor.SuspectFrom, recs[6].Sensor.SuspectFrom = "2026-11-10T11:00:00Z", "2026-11-10T11:00:00Z"
+	if err := VerifySensorFrom(recs, 1); err != nil {
+		t.Fatalf("suspect_from on both: %v", err)
 	}
 }
 
@@ -658,6 +704,101 @@ func TestVerifySensorFromRepeat(t *testing.T) {
 	cut := []*Record{recs[0], repeat, revokedRec(9, 12, "1", testPinA)}
 	if err := VerifySensorFrom(cut, 2); err != nil {
 		t.Fatalf("a revocation naming the first acceptance: %v", err)
+	}
+}
+
+// resetRec is the node's collector.seq_reset at seq.
+func resetRec(seq uint64) *Record {
+	return &Record{Contract: ReaderID, NodeID: "site-a-node-1", Seq: seq, PrevHash: strings.Repeat("6", 64),
+		Time: at("2026-11-10T12:00:00Z"), Actor: nodeActor, Action: ActionCollectorSeqReset, Outcome: OutcomeInfo,
+		PreviousHigh: u64(12), InstallKeyID: "collector-2"}
+}
+
+// C8-8 under D1's ruling 6895174039 on #699, option (c): a sensor.revoked,
+// which C8-3 lets the node write late, is judged by the key set and the
+// collector epoch in force at its acceptance; a sensor.enrolled keeps the
+// same-epoch rule and the latest key set before it. Each chain is
+// sensorChain() through the revocation's acceptance (decision 12, seq 7),
+// then what comes between, then the record.
+func TestVerifySensorFromLateRevoked(t *testing.T) {
+	// D5's two probes (6895040655): an admin_keys change adding one kind
+	// with the key still active, and a collector reset.
+	wider := testKeyEntries(authz.KindNodeSensorEnrol, authz.KindNodeSensorRevoke, authz.KindNodeBaselineAck)
+	rotate := keysRec(8, authz.AdminKeysDigest(sensorKeySet), wider)
+	// After the reset the collector reuses decision 12 for another sensor.
+	reused := sensorAccept(9, 12, authz.KindNodeSensorEnrol, "1", testPinB)
+	reused.Target.SensorID, reused.Verified.PayloadSHA256 = "7c1e0d2f-3a4b-4c5d-8e6f-7a8b9c0d1e2f", payloadOf(99)
+	late := func(seq uint64) *Record { return revokedRec(seq, 12, "1", testPinA) }
+	upTo := func() []*Record { return cloneSensorChain(sensorChain())[:6] }
+	for name, between := range map[string][]*Record{
+		"written at once":                       nil,
+		"an admin_keys change between":          {rotate},
+		"a collector reset between":             {resetRec(8)},
+		"a reset, and decision 12 reused":       {resetRec(8), reused},
+		"a reset, then an admin_keys change":    {resetRec(8), keysRec(9, authz.AdminKeysDigest(sensorKeySet), wider)},
+		"an admin_keys change, then two resets": {rotate, resetRec(9), resetRec(10)},
+	} {
+		recs := append(upTo(), between...)
+		recs = append(recs, late(20))
+		for _, r := range recs {
+			if err := r.Validate(); err != nil {
+				t.Fatalf("%s: record %d: %v", name, r.Seq, err)
+			}
+		}
+		if err := VerifySensorFrom(recs, 1); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	// The same changes before a sensor.enrolled still break: an enrolment
+	// adds trust, and one whose keys or epoch changed before it was applied
+	// is not applied. The rekey (decision 11, seq 6) is the late record, and
+	// the chain ends with it, so no later record breaks in its place.
+	for name, between := range map[string]*Record{
+		"an admin_keys change before an enrolment": keysRec(6, authz.AdminKeysDigest(sensorKeySet), wider),
+		"a collector reset before an enrolment":    resetRec(6),
+	} {
+		recs := cloneSensorChain(sensorChain())
+		recs = append(recs[:4:4], between, recs[4])
+		if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
+			t.Errorf("%s: %v, want broken", name, err)
+		}
+	}
+
+	// A revocation whose acceptance-time key set lacks the kind breaks,
+	// though a later key set holds it: 0.12's rule holds at the acceptance.
+	enrolOnly := testKeyEntries(authz.KindNodeSensorEnrol)
+	recs := upTo()
+	recs[0] = keysRec(2, "", enrolOnly)
+	for _, i := range []int{1, 3, 5} {
+		recs[i].Verified.KeysDigest = authz.AdminKeysDigest(enrolOnly)
+	}
+	recs = append(recs, keysRec(8, authz.AdminKeysDigest(enrolOnly), sensorKeySet), late(9))
+	if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("a key set at the acceptance without the kind: %v, want broken", err)
+	}
+
+	// D3's condition 1: at most one sensor.revoked names one acceptance,
+	// across a reset.
+	recs = append(upTo(), late(8), resetRec(9), late(10))
+	if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("two revocations of one decision across a reset: %v, want broken", err)
+	}
+	// And a revocation whose acceptance is in no epoch still breaks.
+	recs = append(upTo(), resetRec(8), revokedRec(9, 15, "1", testPinA))
+	if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("a decision no epoch has: %v, want broken", err)
+	}
+
+	// D3's condition 2: in a view from seq 5, a late sensor.revoked in epoch
+	// 1 naming decision 9, below epoch 0's lowest collector_seq (11), is
+	// unknown, not a break. Control: the same chain from seq 1 breaks.
+	whole := append(cloneSensorChain(sensorChain())[:5], resetRec(7), revokedRec(8, 9, "1", testPinA))
+	if err := VerifySensorFrom(whole[3:], 5); err != nil {
+		t.Errorf("a cut view, a revocation in epoch 1 before the view: %v", err)
+	}
+	if err := VerifySensorFrom(whole, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("the same from seq 1: %v, want broken", err)
 	}
 }
 

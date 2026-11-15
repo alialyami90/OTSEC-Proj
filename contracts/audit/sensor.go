@@ -396,22 +396,37 @@ func refuseSensorNull(b []byte) error {
 //     carries previous_state.
 //   - After a sensor.revoked, no later sensor.enrolled succeeds with its pin,
 //     under any sensor_id.
-//   - A succeeded sensor.enrolled, and a sensor.revoked, follows an allowed,
-//     verified collector.request earlier in the same collector epoch whose
+//   - A succeeded sensor.enrolled follows an allowed, verified
+//     collector.request earlier in the same collector epoch whose
 //     collector_seq (or, for a repeat answer, repeat_of) is the record's
 //     decision_seq, for the same sensor and payload_sha256 (C8-6). A
-//     repeat's own collector_seq names no decision. At most one
-//     sensor.revoked names one decision.
+//     sensor.revoked, which C8-3 lets the node write late, follows such an
+//     acceptance in its own epoch or an earlier one: the latest epoch's
+//     acceptance of that decision_seq with the same sensor and
+//     payload_sha256 (D1's ruling 6895174039 on #699, option (c)). The
+//     acceptance is of the record's kind: node.sensor_enrol for a
+//     sensor.enrolled, node.sensor_revoke for a sensor.revoked. The
+//     record's copies of the verified body equal the acceptance's:
+//     generation and sensor_spki, and on a sensor.revoked reason and
+//     suspect_from too. A repeat's own collector_seq names no decision. At
+//     most one sensor.revoked names one acceptance, across collector resets.
 //   - Where previous_spki is present, a succeeded renew carries a pin equal
 //     to it, and a rekey or a replace a different one (C7-4).
-//   - C8 0.12's key-set rule: the decision was accepted under the key set
-//     that the latest policy.apply admin_keys before the record names, which
-//     lists the verified key as active and allowed the kind.
+//   - C8 0.12's key-set rule: the decision was accepted under a key set that
+//     lists the verified key as active and allowed the kind. For a
+//     sensor.enrolled that is the latest policy.apply admin_keys before the
+//     record, so a key-set change between the acceptance and the record
+//     breaks the chain, and the node does not apply it. For a
+//     sensor.revoked it is the latest one before the acceptance: a
+//     revocation only takes trust away, and a key rotation after it is
+//     accepted must not break a valid chain.
 //
 // In a view that starts after seq 1, a reference to what came before first
 // is unknown, not a break, as in VerifyConfigFrom: a decision below the
 // lowest collector_seq the view records before its first
-// collector.seq_reset, a sensor's last enrolment, and the key set.
+// collector.seq_reset (for a sensor.revoked in any epoch of the view, when
+// no epoch holds its acceptance), a sensor's last enrolment, and the key
+// set.
 func VerifySensorFrom(recs []*Record, first uint64) error {
 	if first == 0 {
 		return errors.New("audit: a view starts at seq 1 or later")
@@ -435,24 +450,34 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 		epoch int
 		seq   uint64
 	}
+	// revocation is what at most one sensor.revoked names: the acceptance
+	// found (its audit seq), or, when it is before the view, the decision and
+	// payload, since its epoch is unknown.
+	type revocation struct {
+		acc      uint64
+		decision uint64
+		payload  string
+	}
 	epoch := 0
 	accepted := map[num]*Record{}
-	revokedBy := map[num]uint64{}   // the sensor.revoked that names each decision
-	lastGen := map[string]uint64{}  // each sensor's last succeeded enrolment
-	revokedPin := map[string]bool{} // every pin a sensor.revoked names
+	keysAt := map[*Record]*Record{}      // the latest admin_keys record before each acceptance
+	revokedBy := map[revocation]uint64{} // the sensor.revoked that names each acceptance
+	lastGen := map[string]uint64{}       // each sensor's last succeeded enrolment
+	revokedPin := map[string]bool{}      // every pin a sensor.revoked names
 	net := newNetworkChain(recs, cut)
-	decision := func(r *Record) (*Record, error) {
+	// match checks that acc, the acceptance r names, is for r's sensor,
+	// payload and kind, and that r copies its body.
+	match := func(r, acc *Record) error {
 		s := r.Sensor
-		acc := accepted[num{epoch, s.DecisionSeq}]
 		switch {
-		case acc == nil && cut && epoch == 0 && s.DecisionSeq < low:
-			return nil, nil
-		case acc == nil:
-			return nil, broken("record %d (%s) names decision %d, which no earlier acceptance in its epoch has", r.Seq, r.Action, s.DecisionSeq)
 		case acc.Target == nil || acc.Target.SensorID != r.Target.SensorID || acc.Verified.PayloadSHA256 != s.PayloadSHA256:
-			return nil, broken("record %d (%s) does not match the acceptance of decision %d", r.Seq, r.Action, s.DecisionSeq)
+			return broken("record %d (%s) does not match the acceptance of decision %d", r.Seq, r.Action, s.DecisionSeq)
+		case acc.Verified.Kind != sensorRecordKind[r.Action]:
+			return broken("record %d (%s) names decision %d, an acceptance of %s", r.Seq, r.Action, s.DecisionSeq, acc.Verified.Kind)
+		case acc.Sensor == nil || !copiesAcceptance(r.Action, s, acc.Sensor):
+			return broken("record %d (%s) copies a body field that differs from the acceptance of decision %d (C8-6)", r.Seq, r.Action, s.DecisionSeq)
 		}
-		return acc, net.granted(r, acc)
+		return nil
 	}
 	for _, r := range recs {
 		switch {
@@ -465,6 +490,7 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 			}
 			if _, ok := accepted[k]; !ok {
 				accepted[k] = r
+				keysAt[r] = net.keys
 			}
 		case r.Action == ActionPolicyApply && r.AdminKeys != nil:
 			if err := net.adminKeys(r); err != nil {
@@ -472,8 +498,18 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 			}
 		case r.Action == ActionSensorEnrolled && r.Outcome == OutcomeSucceeded:
 			s, sensor := r.Sensor, r.Target.SensorID
-			if _, err := decision(r); err != nil {
-				return err
+			acc := accepted[num{epoch, s.DecisionSeq}]
+			switch {
+			case acc == nil && cut && epoch == 0 && s.DecisionSeq < low:
+			case acc == nil:
+				return broken("record %d (%s) names decision %d, which no earlier acceptance in its epoch has", r.Seq, r.Action, s.DecisionSeq)
+			default:
+				if err := match(r, acc); err != nil {
+					return err
+				}
+				if err := net.granted(r, acc); err != nil {
+					return err
+				}
 			}
 			gen, _ := strconv.ParseUint(s.Generation, 10, 64) // checked by Validate
 			if last, ok := lastGen[sensor]; s.PreviousState == "" && (ok || !cut) && gen != last+1 {
@@ -487,18 +523,58 @@ func VerifySensorFrom(recs []*Record, first uint64) error {
 			}
 			lastGen[sensor] = gen
 		case r.Action == ActionSensorRevoked:
-			k := num{epoch, r.Sensor.DecisionSeq}
+			s := r.Sensor
+			var acc *Record
+			for e := epoch; e >= 0 && acc == nil; e-- {
+				if a := accepted[num{e, s.DecisionSeq}]; a != nil && a.Target != nil &&
+					a.Target.SensorID == r.Target.SensorID && a.Verified.PayloadSHA256 == s.PayloadSHA256 {
+					acc = a
+				}
+			}
+			k := revocation{decision: s.DecisionSeq, payload: s.PayloadSHA256}
+			switch {
+			case acc != nil:
+				k = revocation{acc: acc.Seq}
+			case !cut || s.DecisionSeq >= low:
+				return broken("record %d (%s) names decision %d, which no earlier acceptance of its sensor and payload has", r.Seq, r.Action, s.DecisionSeq)
+			}
 			if prev, ok := revokedBy[k]; ok {
-				return broken("record %d revokes under decision %d, which record %d already applied", r.Seq, k.seq, prev)
+				return broken("record %d revokes under decision %d, which record %d already applied", r.Seq, s.DecisionSeq, prev)
 			}
 			revokedBy[k] = r.Seq
-			if _, err := decision(r); err != nil {
-				return err
+			if acc != nil {
+				if err := match(r, acc); err != nil {
+					return err
+				}
+				if err := net.grantedUnder(r, acc, keysAt[acc]); err != nil {
+					return err
+				}
 			}
-			revokedPin[r.Sensor.SensorSPKI] = true
+			revokedPin[s.SensorSPKI] = true
 		}
 	}
 	return nil
+}
+
+// sensorRecordKind is the request kind whose acceptance each applied sensor
+// record names.
+var sensorRecordKind = map[Action]authz.RequestKind{
+	ActionSensorEnrolled: authz.KindNodeSensorEnrol,
+	ActionSensorRevoked:  authz.KindNodeSensorRevoke,
+}
+
+// copiesAcceptance reports whether a sensor record's copies of the verified
+// body equal C8-6's copy on its acceptance: generation and sensor_spki, and
+// on a sensor.revoked reason and suspect_from too (D1's ruling 6894951825,
+// option (a)). The payload hash is over bytes the chain does not hold, so
+// without this a writer fault could show one pin revoked while the node
+// revoked another, and a later enrolment of that one would pass C8-8.
+func copiesAcceptance(action Action, rec, acc *Sensor) bool {
+	same := rec.Generation == acc.Generation && rec.SensorSPKI == acc.SensorSPKI
+	if action == ActionSensorRevoked {
+		same = same && rec.Reason == acc.Reason && rec.SuspectFrom == acc.SuspectFrom
+	}
+	return same
 }
 
 // NetworkAckInForce reports whether ack, a record in recs, is a succeeded
