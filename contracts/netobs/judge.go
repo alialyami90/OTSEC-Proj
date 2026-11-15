@@ -75,8 +75,9 @@ type HelloVerdict struct {
 // first failure deciding, in CH-13's order: rows 2 to 4, then row 7, then
 // row 5 (5a first) or row 6, then rows 8 and 9. Identity and regression
 // (rows 2 to 4, 7 and 5a) are decided before any of the sensor's
-// declarations (prior, drops_channel, lost, prior.lost) is judged, so no
-// declaration can turn an audited close into hello (D1's ruling on #687).
+// declarations (prior, and lost and prior.lost with the rise that pays for
+// them) can close the hello as hello, so no declaration can turn an audited
+// close into hello (D1's ruling on #687).
 // CH-40's widening check needs the run's held spans, so it is applied at
 // row 5 or 6, still closing as hello.
 func JudgeHello(s HelloState, h *SensorHello) HelloVerdict {
