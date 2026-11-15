@@ -2491,3 +2491,19 @@ Evidence class: `desk`, for the rulings and the probes named.
   - A test that the node records `collector.request` in `collector_seq` order within an epoch; its control is a collector that answers a lower number (item 1.3; D5's 6896250789). If the dialer-and-enrolment brief gives the sensor manager its own path to the collector, that brief keeps one caller at a time. Owed by the dialer-and-enrolment brief.
   - The node's `sensor.revoked` writer checks the chain for its own record before rewriting after a crash, because a duplicate breaks the chain (D5's ask on #699, 6895040655 and 6895273814). Owed by the dialer-and-enrolment brief, with the node writers.
 - **Next decision number:** D4-109.
+
+## D4-109: the first release's order, a test defect on `main`, and a pause (D1, 2026-11-15)
+
+Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the runs named.
+
+- **1. P4-4-CC is complete.** Deliverables 0 to 6 are merged. Each deliverable's own merge commit on `main` is its floor: the bridge `26dce26e` (#682), C13 0.2 and C4 0.4 `26545062` (#687), C13 0.3 `65ad611b` (#689), C2 0.10 `410a04d5` (#684), and C7 0.11 and C8 0.13 `2ef5639f` (#699). `docs/release.md` §7 records them (#704, `1d82fcc3`).
+- **2. The order of the first release (D1's ruling 6897989367 on #704; `docs/release.md` §7.3).** CH-35's rule is read as a rule about rollback sets.
+  - No OTSEC build has been released, so a node first installed from a release at or above every §7.1 floor has no earlier release to roll back to. Nothing needs to ship before the writer.
+  - **Condition:** this holds only while no build below a floor has been released to any site. "Released" means installed at a site, and each release checks its commit against every floor with `git merge-base --is-ancestor` (D3 on #704). If any build below a floor ever ships, CH-35's rule as written applies to that floor, and a bridge release goes first.
+  - Nothing on a node enforces the floors yet: AP-10's anti-rollback floor is not designed. When it is, the signed floor is at or above every §7.1 floor.
+- **3. A test defect on `main`, fixed by #705 (`6b1a27e3`).**
+  - `main`'s push run 43737404596 at `2ef5639f` failed `go (ubuntu-latest)` on `TestLinkKeyAnotherFaultAlarms`. The node's manager step read the link-key file and the `tls` directory while the test was rewriting them, and raised an intermediate alarm before the one the test asserts. The product behaved correctly.
+  - The failed job's rerun passed. #705 (D5) runs the test's file changes under `heldManager`, the lock every full step holds. It does the same for `TestLinkKeyFaultNodeStarts/missing` (D6's N1). The assertions are unchanged, and the K7 control fails in CI (D6, run 43743679645).
+- **4. Controls the owner's PC cannot run.** A test that needs elevation skips on the owner's PC. D6 may then run its controls on a draft PR, as #688 and #706 did, provided the PR is closed and its branch deleted at once. This narrows D4-85's rule against scratch branches to that case.
+- **5. Work paused at the owner's word, 2026-11-15.** No agent is running, and no PR is open after this one. HANDOFF's checkpoint gives the next steps.
+- **Next decision number:** D4-110.
