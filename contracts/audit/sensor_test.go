@@ -354,7 +354,11 @@ func TestSensorRevokedRules(t *testing.T) {
 		"applied_at later, half a second": func(r *Record) { r.Sensor.AppliedAt = "2026-11-10T12:00:00.5Z" },
 		"an unknown reason":               func(r *Record) { r.Sensor.Reason = "rotated" },
 		"baseline_digest bare":            func(r *Record) { r.Sensor.BaselineDigest = strings.Repeat("c", 64) },
-		"suspect_from an offset":          func(r *Record) { r.Sensor.SuspectFrom = "2026-11-09T03:00:00+03:00" },
+		// D6's Q17 (6896196067): the mutant that skips the pattern accepts it.
+		"payload_sha256 an uppercase hex digit": func(r *Record) {
+			r.Sensor.PayloadSHA256 = "A" + r.Sensor.PayloadSHA256[1:]
+		},
+		"suspect_from an offset": func(r *Record) { r.Sensor.SuspectFrom = "2026-11-09T03:00:00+03:00" },
 	} {
 		r := revokedRec(8, 12, "1", testPinA)
 		edit(r)
@@ -844,6 +848,14 @@ func TestVerifySensorFromCut(t *testing.T) {
 	if err := VerifySensorFrom(append(cloneSensorChain(recs), late), 1); !errors.Is(err, ErrChainBroken) {
 		t.Fatalf("the same from seq 1: %v, want broken", err)
 	}
+	// D6's Q8 (6896196067): an unknown revocation still counts for "at most
+	// one", by its decision and payload, so two of decision 9 break. The
+	// mutant that counts only a revocation whose acceptance is found accepts
+	// this view.
+	again := revokedRec(11, 9, "2", testPinB)
+	if err := VerifySensorFrom(append(cloneSensorChain(recs[5:]), late, again), 7); !errors.Is(err, ErrChainBroken) {
+		t.Fatalf("from seq 7, two late revocations of decision 9: %v, want broken", err)
+	}
 
 	// A sensor.revoked with no acceptance in the view is unknown, whatever
 	// its decision (D1's ruling 6896234420 on #699, option (a)): its
@@ -1021,6 +1033,37 @@ func TestVerifySensorFromLateRevoked(t *testing.T) {
 	if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
 		t.Errorf("two revocations of one decision across a reset: %v, want broken", err)
 	}
+	// D6's Q7 (6896196067): the first acceptance of a decision is the one a
+	// revocation names, so a repeat answer after the first revocation does
+	// not open a second. The mutant that keeps the latest acceptance accepts
+	// this chain.
+	repeat := sensorAccept(9, 13, authz.KindNodeSensorRevoke, "1", testPinA)
+	repeat.RepeatOf, repeat.Verified.PayloadSHA256 = 12, payloadOf(12)
+	recs = append(upTo(), late(8), repeat, late(10))
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
+		t.Errorf("two revocations of one decision around a repeat answer: %v, want broken", err)
+	}
+	// D6's Q5: after a reset the collector reuses decision 12 for the same
+	// sensor with another payload; the late revocation is epoch 0's, found
+	// by its payload. The mutant whose search ignores the payload finds
+	// epoch 1's acceptance, and breaks this chain.
+	reusedSame := sensorAccept(9, 12, authz.KindNodeSensorRevoke, "1", testPinA)
+	reusedSame.Verified.PayloadSHA256 = payloadOf(99)
+	recs = append(upTo(), resetRec(8), reusedSame, late(10))
+	for _, r := range recs {
+		if err := r.Validate(); err != nil {
+			t.Fatalf("record %d: %v", r.Seq, err)
+		}
+	}
+	if err := VerifySensorFrom(recs, 1); err != nil {
+		t.Errorf("decision 12 reused for the same sensor after a reset: %v", err)
+	}
+
 	// And a revocation whose acceptance is in no epoch still breaks.
 	recs = append(upTo(), resetRec(8), revokedRec(9, 15, "1", testPinA))
 	if err := VerifySensorFrom(recs, 1); !errors.Is(err, ErrChainBroken) {
@@ -1085,5 +1128,15 @@ func TestNetworkAckInForce(t *testing.T) {
 	denied.Outcome, denied.ReasonCode = OutcomeDenied, "digest_mismatch"
 	if NetworkAckInForce([]*Record{&denied}, &denied) {
 		t.Error("a denied acknowledgement is in force")
+	}
+	// D6's Q10 (6896196067): an acknowledgement of kind configuration is
+	// not a network one, with no revocation after it. The mutant without
+	// the kind check reports it in force.
+	config := ackRun(testAsset, 30, authz.BaselineConfiguration, testBaseline, "", OutcomeSucceeded)[1]
+	if err := config.Validate(); err != nil {
+		t.Fatalf("control: %v", err)
+	}
+	if NetworkAckInForce([]*Record{config}, config) {
+		t.Error("a configuration-kind acknowledgement is in force")
 	}
 }
