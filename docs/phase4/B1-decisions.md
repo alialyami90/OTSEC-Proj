@@ -2613,3 +2613,22 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
 
   P4-4-INT's PRs may run beside these, after D4 agrees the split. Its D4 PR then waits on D4's one-instance queue (D4-89), behind D4's work above.
 - **Next decision number:** D4-113.
+
+## D4-113: HR-23's build and cases merged, P4-4-INT's split, and a pause (D1, 2026-11-16)
+
+Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs named on each PR; `simulated` for the engine rehearsals.
+
+- **1. Merged:** #719 (P4-4-INT's split, `77546293`), #715 (HR-23's stage-3 build, `81005b3c`) and #718 (P4-4-HR2325S deliverable 1, `b977a527`).
+- **2. #715, option (B') as built** (D1's 6907928324; D4's 6909471124 and 6910182089). D2, D3, D6 and D7 accept `b1490522`.
+  1. On UDP, the patch's catch raises the DNP3 violation and does not rethrow. TCP is unchanged.
+  2. The judge reads parsed on, recorded stop and silent stop, and a fourth state for another analyzer's row. A stop counts only when the parsed rows are, in order, the case's named messages up to the stop. Each control names the state it must read, and a crash fails it (D6's N12 and N13).
+  3. **For HR-25's row (D3's records PR, D4-112 item 6):** on TCP, stock Zeek's stop is not clean. On C0, C1p and C2 alike, the master's next message is decoded and a second violation raised. The rows after a TCP stop are partial, and count as neither coverage nor blinding. The TCP twins pass only when C2 reads exactly as C2 without (B').
+  4. §4.6 of `docs/phase4/D4-hr23-design.md` states that coverage cannot show which caller reached the patched catch. Rows 4.1 and 4.2 are the replay path's evidence (D6's N14).
+- **3. #718, D1's slip and what follows** (D1's 6910729374).
+  1. Ruling 6907176282 item 3 took D3's M3 under the name "M2". D3's actual M2, the two mid-flow stops of design §4.7 "Both directions", goes in **P4-4-HR2325S PR 1b (D6)**, written from the design text. It merges before HR-23's counted run.
+  2. Before HR-23's counted run, D4's `table.py` judges the new tokens `reqhdr`, `svc` and `X=code` with the HR-23 rows (D4's 6910749947).
+- **4. P4-4-INT's split, #719** (D1's 6909558363; D4's 6909550043; D6's 6909792762). There are four PRs, in order: INT-D4a, INT-D5, INT-D4b and INT-D5b.
+  - **G4, an open item. Owner: D4, who drafts the proposal; D5 and D6 review it, and D1 approves it before INT-D4b merges.** The checkpoint `netcheckpoint` gains, at its next minor, the window's `assets` and `assets_total` and the pending session's cause, so that a restored aggregated alert is not refused. Option (b), clearing such windows at restore, is rejected under P5.
+  - N-14 is owed by P4-4-INT once P4-4-HR24's stage 3 merges.
+- **5. Work paused at the owner's word, 2026-11-16.** No PR is open, and no agent is running. HANDOFF's checkpoint gives the next steps in order.
+- **Next decision number:** D4-114.

@@ -24,7 +24,22 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-16 (D4-112).** Merged since the checkpoint below was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
+**CHECKPOINT (D1), 2026-11-16, paused at the owner's word (D4-112, D4-113).** No PR is open, and no agent is running. Merged this session, after D4-109: #708, #710 to #720. P4-NODE-WT is complete. HR-23's build (#715) and its stage-2 cases (#718) are on `main`.
+- **The owner owes** "Waiting on the owner" items 3 and 18 (D4-112 item 1). When convenient, a GitHub Support purge of one PR commit, which D1 named to the owner directly.
+- **Next, in order, each waiting on the step named** (D4-112 item 8; D4-113):
+  1. D4's fuzz-workflow PR (D4-112 item 4.2).
+  2. P4-4-HR2325S PR 1b, D3's M2 (D4-113 item 3.1).
+  3. D4's `table.py`: the HR-23 rows and the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2).
+  4. D7's P1 and finding 1's open item (D4-112 items 4.5 and 4.6).
+  5. HR-23's counted run, after steps 1 to 4.
+  6. D3's records PR, the HR-25 and R-1 rows (D4-112 item 6; D4-113 item 2.3), before step 7.
+  7. D4's HR-25 design PR for option (a) (D4-112 item 3).
+  8. P4-4-HR2325S PRs 2 and 3 (D4-112 item 3.5).
+  9. HR-25's build.
+
+  Beside these: P4-4-INT's four PRs, in #719's order, with G4 before INT-D4b (D4-113 item 4); then P4-4-DE. D4's PRs wait on D4's one-instance queue.
+
+**Earlier checkpoint (D1), 2026-11-16 (D4-112), superseded by the checkpoint above.** Merged since the checkpoint below was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
 - #715 (HR-23's build, D4): D2, D3 and D7 accept earlier heads. A fresh D4 is building option (B') for D3's M1, under D1's 6907928324. Then D2, D3 and D6 re-read the diff, and D7 confirms the new pin.
 - #718 (P4-4-HR2325S PR 1, D6): two blocking findings, on the short-129 rows and on `dnp3-mal-udp-limit`. A fresh D6 writer restates the rows from #715's amended design note once it is pushed (D1's 6907176282).
 - #719 (P4-4-INT's split, D5): G1 to G3 ruled. The order waits for D4's agreement.
