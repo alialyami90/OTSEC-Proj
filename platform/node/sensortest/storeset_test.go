@@ -431,20 +431,79 @@ func TestSensorRetryAlarmsOnce(t *testing.T) {
 // that never returns does not hold the node's start. Start returns within
 // 2 s, every collecting stream commits, and the manager's first step has
 // not ended. Control: the first step back in Start.
+//
+// A failure says which it was (D4-104 item 4): a Start that returned late
+// with the startup still stuck was slow, or held for less than 32 s, and one that returned only once
+// the startup was let go was held. A control Start of the same rig's
+// configuration, with no stuck startup, is timed first for comparison.
+// Every cleanup is registered before the timed wait, so a failure in it
+// still lets the startup go and closes the runtime.
 func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
+	control := newRig(t)
+	from := time.Now()
+	cr, err := node.Start(bg, control.c, control.options(node.SensorSeams{}))
+	plain := time.Since(from)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cr.Close()
+
 	g := newRig(t)
 	stuck := newGate()
-	var r *node.Runtime
-	within(t, 2*time.Second, "Start", func() error {
-		r, _ = g.startNoWait(node.SensorSeams{Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
+	type started struct {
+		r    *node.Runtime
+		err  error
+		took time.Duration
+	}
+	done := make(chan started, 1)
+	from = time.Now()
+	go func() {
+		r, err := node.Start(bg, g.c, g.options(node.SensorSeams{Startup: func(ctx context.Context, env c5.StartupEnv, p c5.StartupPolicy) c5.Report {
 			stuck.wait()
 			return c5.RunStartup(ctx, env, p)
-		}})
-		return nil
+		}}))
+		done <- started{r, err, time.Since(from)}
+	}()
+	// Cleanups run last first: the gate opens, then Start's return is
+	// awaited and the runtime closed, so the manager stops within its bound.
+	var s started
+	got := false
+	t.Cleanup(func() {
+		if !got {
+			s, got = <-done, true
+		}
+		if s.r != nil {
+			s.r.Close()
+		}
 	})
-	// The gate opens before Close, so the manager stops within its bound.
-	t.Cleanup(func() { r.Close() })
 	t.Cleanup(stuck.open)
+	select {
+	case s = <-done:
+		got = true
+	case <-time.After(2 * time.Second):
+		// Wait on with the startup still stuck: a Start that returns now
+		// was slow, or held for less than 32 s; one that does not returns only once the startup is let go.
+		select {
+		case s = <-done:
+			got = true
+			t.Fatalf("Start did not return within 2s: it was slow, or held for less than 32 s; it took %s with the startup still stuck, and the control Start took %s", s.took, plain)
+		case <-time.After(30 * time.Second):
+		}
+		stuck.open()
+		released := time.Since(from)
+		select {
+		case s = <-done:
+			got = true
+		case <-time.After(30 * time.Second):
+			got = true // nothing to close; the cleanup does not wait on
+			t.Fatalf("Start did not return within 2s, nor within 30 s after the startup was let go; the control Start took %s", plain)
+		}
+		t.Fatalf("Start did not return within 2s: it was held by the stuck startup; it had not returned %s after it began, and returned %s after the startup was let go; the control Start took %s", released, s.took-released, plain)
+	}
+	if s.err != nil {
+		t.Fatal(s.err)
+	}
+	r := s.r
 	stuck.entered(t, "the sensor database's startup")
 	collecting(t, r, 1)
 	select {

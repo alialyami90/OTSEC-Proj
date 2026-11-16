@@ -202,17 +202,28 @@ func heldResume() (SensorSeams, chan struct{}, func()) {
 
 // runSent runs one scheduled run through the test collector and checks
 // that it is sent within 2 s and stores its SER rows.
+//
+// A failure says which it was (D4-111 item 6.4): a run that returns within
+// 30 s more was slow, or held for less than 32 s; one that has not returned by then is held.
+// The 2 s is the test's wait for a run that nothing holds; RunOnce itself
+// has no deadline.
 func runSent(t *testing.T, r *Runtime) {
 	t.Helper()
 	var seq uint64
 	s := newScheduler(t, r, wireCollector(t, func(*authz.CollectorRequest) {}, &seq))
 	done := make(chan Report, 1)
+	from := time.Now()
 	go func() { done <- s.RunOnce(bg, 0) }()
 	var rep Report
 	select {
 	case rep = <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("the run did not return within 2 s")
+		select {
+		case <-done:
+			t.Fatalf("the run did not return within 2 s: it was slow, or held for less than 32 s; it took %s", time.Since(from))
+		case <-time.After(30 * time.Second):
+			t.Fatalf("the run did not return within 2 s: it was held; it had not returned %s after it began", time.Since(from))
+		}
 	}
 	if !rep.Sent || rep.Outcome != "ok" || rep.Events == 0 {
 		t.Fatalf("run: %+v", rep)
