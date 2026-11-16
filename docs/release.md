@@ -347,11 +347,13 @@ CH-35 and `docs/phase4/D5-sensor-node.md` §1.15 item 1 say that the bridge buil
 
 Brief P4-D7-P1, for D4-112 item 4.6. Read on 2026-11-16 at `main` `b315695`.
 
-**Evidence class: `desk`.** Every statement here was read from one of three sources, each named where it is used:
+**Evidence class: `desk`,** except the run named below, which is `CI-Linux`. Every statement here was read from one of these sources, each named where it is used:
 
-- the files in `modules/telemetry/experiments/engine-linux/` at `b315695`;
+- the files in `modules/telemetry/experiments/engine-linux/` and `.github/workflows/d4-engine-linux-eval.yml` at `b315695`;
 - the Zeek 9.0.1 tarball, downloaded from the release URL in `zeek-patch/build.env`, whose SHA-256 equals the pin `fbee2eb5…97f2`;
-- the base image's one layer, fetched from Docker Hub by the digest in `build.env`.
+- the base image's one layer, fetched from Docker Hub by the digest in `build.env`;
+- the GitHub Actions API's metadata for run [43820030979](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43820030979) (`CI-Linux`, `ubuntu-24.04`): its head, jobs and steps, and its artifacts' names, ids and expiry dates. The artifacts' contents were not read (§8.1);
+- the decision log (D4-112 items 1 and 4.6, D4-113 item 2), AP-30, AP-31 and AP-32 in `docs/threat-model.md`, O-7 in `docs/phase4/D1-sensor-host-recommendation.md`, and `docs/phase4/D4-hr23-design.md` §4.5.
 
 No image was built or run for this section: the machine that read it has no Docker daemon. Nothing here is built, released or distributed.
 
@@ -365,8 +367,8 @@ The image the HR-23 build makes as C2 (`zeek-patch/Dockerfile`, targets `runtime
   - The layer is Debian 13.7 (`/etc/debian_version`).
   - It holds 78 packages from 55 source packages (`/var/lib/dpkg/status`, SHA-256 `0702973f302c065dec7bb21d5c611e5b4d7718afafa7a7e3b9ec139b87e0b77d`). §8.5 lists them.
 - **The runtime stage** installs five packages by name: `libmaxminddb0 libpcap0.8 libssl3 libuv1 libz1`. They are installed by name, not version, after an `apt-get update` at build time, so each build takes the versions the mirror serves that day.
-  - Their versions and dependencies are in the build record's `runtime-packages.txt` (`build.sh`, the record step).
-  - **Not read:** the run's artifact `d4-engine-linux-eval-hr23` (id 14205108829). This session's egress refused the storage host it is served from. So the versions, the dependencies and the licences of what this stage adds are `unknown`.
+  - The build record's `runtime-packages.txt` (the Dockerfile's `c1p` and `c2` targets; `build.sh`, the record step) lists every package in the image by name and version (`dpkg-query -W`). It does not record dependencies, and it does not mark which packages this stage added. Those follow only by comparing it with §8.5.
+  - **Not read:** the run's artifact `d4-engine-linux-eval-hr23` (id 14205108829). This session's egress refused the storage host it is served from. So which packages this stage adds, with their versions and licences, is `unknown`.
   - `libssl3t64` (3.5.7-1~deb13u3) and `zlib1g` (1:1.3.dfsg+really1.3.1-1+b1) are already in the base. Whether the stage upgraded them is `unknown` for the same reason.
 - **The Zeek tree.** C2 copies the whole `DESTDIR` install of the configure line into `/usr/local/zeek`. By the CMake files in the pinned tarball, that install holds, beside `bin/zeek` and the scripts under `share/zeek`:
   - **The Spicy and HILTI toolchain:** `spicyc`, `spicyz`, `spicy-build`, `spicy-config`, `spicy-driver`, `spicy-dump`, `spicy-precompile-headers`, `hiltic`, `hilti-config` and `hilti-cxx-driver`, with their runtime archives (`auxil/spicy/`, the `install` rules; `src/spicy/spicyz/CMakeLists.txt`). Spicy stays on (the Dockerfile's header; D7's C6).
@@ -377,7 +379,11 @@ The image the HR-23 build makes as C2 (`zeek-patch/Dockerfile`, targets `runtime
 
   This is the "full install, with toolchain and test tools" of D4-112 item 4.6.
 - **Records and notices** under `/usr/local/zeek/share/otsec-build/`: the build and runtime package lists, `generated.sha256`, `binpac.txt`, and `notices/`. `notices/` holds Zeek's `COPYING`, the patch, and every `COPYING*` and `LICENSE*` file of the tree outside test folders.
-- **Not in the image:** the project's script and ICSNPP. `run.sh` (`zeek_run`) mounts `/exp`, which holds `probe.zeek`, and `/pkgs` read-only at run time. It runs `sh /exp/in-container.sh` inside the image, so the harness needs the base's `sh` and coreutils.
+- **Not in the image:** the project's script and ICSNPP. `run.sh` (`zeek_run`) mounts two folders read-only at run time:
+  - `/exp`, which is the whole `engine-linux/` folder (`here` in `run.sh`). Zeek loads `probe.zeek` from it, and other files there in other configurations (`modbus-sig.zeek`, for example);
+  - `/pkgs`.
+
+  It runs `sh /exp/in-container.sh` inside the image, so the harness needs the base's `sh` and coreutils. Its pipe modes also run `cat … | zeek -r -` inside the container.
 
 ### 8.2 What the shipped engine image carries
 
@@ -397,7 +403,7 @@ Three options:
 **D7's recommendation: (C) is the image that ships and that the counted run measures. (B) is the fallback if D3 keeps the userland, or if D4 cannot change the harness before the counted run. For D3 (AP-30, AP-31).** The reasons:
 
 1. An exploit in the engine finds no shell, `apt`, `dpkg` or Perl in its container, and no program the sensor does not run. A Zeek script that calls `system` fails, and the sensor needs none.
-2. Under (C), the copyleft code in the image is the libraries `zeek` loads (§8.3 A). Under (B) or (A), it is most of the Debian base too, and the source the release must carry with the image grows to match (§8.3 F).
+2. Under (C), the only copyleft code in the image is what the libraries `zeek` loads carry. Which libraries those are is `unknown` until `ldd` is read from the record (§8.3 A; §8.4 item 6). Under (B) or (A), most of the Debian base comes as well, and the source the release must carry with the image grows to match (§8.3 F).
 3. **(C) costs a harness change.** `in-container.sh` needs `sh`, so the run must call `zeek` as the entrypoint, one capture per container (owed by D4, §8.4 item 2).
 4. **Neither option removes the GPL from a sensor release.** Under O-7 (the project ships a signed host image with the base system; `docs/phase4/D1-sensor-host-recommendation.md`), the host image carries a Linux kernel and a userland, whatever the engine image holds. §8.3 settles the route for both.
 
@@ -421,9 +427,10 @@ Each licence statement below cites the file it was read from. This is not legal 
   - GPL-2.0-only: `mawk`;
   - GPL-1+ or Artistic: `perl-base`;
   - the `util-linux` family, `tar`, `findutils`, `diffutils`, `apt`, `sysvinit-utils` and `hostname`, whose copyright files name GPL for some of their files.
-- **What `zeek` loads from the base,** under any option:
+- **What `zeek` loads from the base is `unknown`,** because the record's `ldd zeek` was not read (§8.4 item 6). The likely candidates are listed here as the base's copyright files state their licences, not as what `zeek` loads:
   - `libc6`: LGPL-2.1+ for its main parts, with other licences for some files (`/usr/share/doc/libc6/copyright`, SHA-256 `f5788886…850d`);
-  - `libstdc++6` and `libgcc-s1`: GPL-3+ with the GCC Runtime Library Exception. Their doc folders link to `gcc-14-base`, whose copyright file (SHA-256 `20390f8a…2f79`) carries the exception. The exception covers programs compiled with GCC. It does not lift the GPL's duties for the libraries themselves when they are shipped.
+  - `libstdc++6` and `libgcc-s1`: GPL-3+ with the GCC Runtime Library Exception. Their doc folders link to `gcc-14-base`, whose copyright file (SHA-256 `20390f8a…2f79`) carries the exception. The exception covers programs compiled with GCC. It does not lift the GPL's duties for the libraries themselves when they are shipped;
+  - `libssl3t64`: Apache-2.0, with Artistic or GPL-1+ named for some files (`/usr/share/doc/libssl3t64/copyright`, §8.5), at the base's version or the version the runtime stage installed (§8.1).
 
 **B. Static linking.** `sqv` is a Rust program. Its `Static-Built-Using` field (`/var/lib/dpkg/status`) names the crates compiled into it, and their source is part of its corresponding source. Any such field among the runtime stage's packages counts the same way. Under (C), `sqv` is not shipped.
 
@@ -432,7 +439,7 @@ Each licence statement below cites the file it was read from. This is not legal 
 **D. Zeek and its tree.**
 
 - `COPYING` is BSD-3-Clause. Its SHA-256 `1f984adb…333aa` equals the pin `COPYING_SHA256` and §4's row.
-- `COPYING-3rdparty`, SHA-256 `b815419a…8a4a` (§4), adds the following:
+- `COPYING-3rdparty` adds the following. §4's SHA-256 `b815419a…8a4a` is of the file on `zeek/zeek` `master` at `5a6529c8`, read on 2026-11-11, not of the tarball. For this section the file was read from the 9.0.1 tarball at its pin, and that copy hashed on 2026-11-16 to the same `b815419a9ec7c307d49983dc5cead5e411ace082a638a2d7bbd4d3deb1ac8a4a`. The tarball's `COPYING` hashed to `1f984adb…333aa`.
   - **MPL-2.0 for `scripts/base/protocols/ssl/mozilla-ca-list.zeek`** (SHA-256 `2af43b238928818e2263b95f0e1b6ea51d9f8c5006fc51528c11d156998a8794`). It is installed with the scripts, so it ships in its own source form. Its header names the MPL and the address of its text. D7 reads that as meeting MPL-2.0 §3.1's duty to inform recipients and to say how to get the licence (`/usr/share/common-licenses/MPL-2.0` in the base, SHA-256 `fab3dd6b…3e85`). Under (C), that copy of the licence is gone, and the header's address remains.
   - **Multifast:** LGPL-3.0-or-later, with its author's "explicit permission" to use it in Zeek under BSD.
   - **The JSON licence** ("used for Good, not Evil") covers only RapidJSON's `bin/jsonchecker/` (its section of `COPYING-3rdparty`), which is test data the build does not use.
@@ -462,18 +469,31 @@ Each licence statement below cites the file it was read from. This is not legal 
 
 D7 edits none of these files. Each item is a check D4 can run.
 
-1. **The shipped image's target, and its check.** D4 builds the image that §8.2 settles, in the same build and from the same tree. C1p and the controls take the same shape, so that the record check's "one tree" comparison still compares like with like. D4 updates that check's list of the files that differ, which today includes two headers under `include/`. The record check also fails if the shipped image's files under `/usr/local/zeek`:
+1. **The shipped image's target, and its check.** D4 builds the image that §8.2 settles, in the same build and from the same tree. C1p and the controls take the same shape, so that the record check's "one tree" comparison still compares like with like. D4 updates that check's list of the files that differ, which today includes two `.pac` files under `include/` (`dnp3-analyzer.pac`, `dnp3-protocol.pac`). The record check also fails if the shipped image's files under `/usr/local/zeek`:
    - hold anything outside the kept list;
    - hold any of `rst`, `zkg`, `zeekctl`, `btest*`, `zeek-client`, `spicyc`, `hiltic`, `binpac`, `bifcl` or `include/`.
-2. **Under (C): the harness.** The run calls `zeek` as the container's entrypoint, one capture per container, with no `sh` in the image. The checks that `in-container.sh` makes today (exit code, the per-capture output folder, "not run") move to the host side.
+2. **Under (C): the harness.** The run calls `zeek` as the container's entrypoint, one capture per container, with no `sh` in the image. The checks that `in-container.sh` makes today (exit code, the per-capture output folder, "not run") move to the host side. The pipe modes, which today run `cat … | zeek -r -` inside the container, feed the container's stdin from the host instead.
 3. **The counted run names what it measured.** It runs C2 from the shipped image by its image ID. It logs that ID and the `zeek` binary's SHA-256 (design §4.5), and the SHA-256 of each script it loads from `/exp`. The project's script is not in the image, so the release carries it by that hash.
-4. **Keep the measured image.** In the counted run's own job, `docker save` the shipped image by its ID and log the archive's SHA-256. An archive kept that way is the only route from a hosted runner that keeps the measured bytes. Two choices are D1's:
-   - **(i) The archive goes in the job's artifact with the §8.3 F source bundle beside it,** and the owner keeps both offline before the artifact expires. That is 90 days for this workflow: run 43820030979's artifact expires on 2027-02-14. **D7 recommends (i).**
+4. **Keep the measured image.** In the counted run's own job, `docker save` the shipped image by its ID and log the archive's SHA-256. An archive kept that way is the only route from a hosted runner that keeps the measured bytes.
+
+   An Actions artifact expires. The workflow sets no `retention-days`, so the repository's default applies: run 43820030979's artifacts expire on 2027-02-14, 90 days after the run. On its own, an artifact does not meet design §4.5's "kept beyond GitHub's artifact retention" (ruling 8). D1 chooses one of the following, together with a durable home:
+   - **(i) The archive goes in the job's artifact with the §8.3 F source bundle beside it (item 7).** Before the artifact expires, both move to a durable home, which D1 names. Candidates:
+     - a GitHub Release asset on this repository holding the saved image and the source bundle together. This publishes both, so it is a distribution, and the bundle must be complete first (§8.3 F.3). A release asset is not a release of OTSEC, and F-027's gate (§7.4) still bars any release that a node installs;
+     - the owner's offline storage, which publishes nothing.
+
+     **D7 recommends (i).**
    - **(ii) No archive is uploaded,** and the shipped image is a rebuild shown to be bit-identical (design §4.5). That needs every package pinned by version and a reproducible build, which nothing yet shows.
 5. **The package record of the shipped image,** so that D7 can complete §8.5 and §8.3 C:
    - for each package: `dpkg-query -W -f '${Package} ${Version} ${source:Package} ${source:Version}\n'`, with its `Built-Using` and `Static-Built-Using` fields;
    - the SHA-256 of each `/usr/share/doc/<package>/copyright`;
    - under (C), `dpkg -S` of each file copied into the image.
+6. **`ldd` of the shipped `zeek`.** It is in today's record (`build.sh`, "ldd zeek"), but nobody has read it. D4 quotes it for the shipped image in the PR that builds that image. D7 then names, in §8.3 A, the libraries `zeek` loads and their licences.
+7. **The source bundle (§8.3 F.1). Owner: D4,** in the counted run's own job, from the package record of item 5. D7 checks the bundle against that record, and D3 and D6 review it. The bundle holds:
+   - the Debian source package for each source version in the record;
+   - each source named in a `Built-Using` or `Static-Built-Using` field;
+   - the Zeek tarball and its `.asc`, the patch, and the build files.
+
+   Debian's archive or its snapshot archive may serve these sources, and fetching them happens at build time, never on a sensor (AP-31 (1)). The bundle's own SHA-256 is logged beside the image archive's. This item is owed under (i), and before any distribution of the image.
 
 After the counted run, D7 records the measured image's ID and archive hash here (design §4.5), with the run.
 
@@ -579,6 +599,7 @@ zlib1g 1:1.3.dfsg+really1.3.1-1+b1 zlib 1:1.3.dfsg+really1.3.1-1 9e5b96d63773a5d
 - For the engine image (§8):
   - the versions, dependencies and licences of the runtime stage's packages are `unknown`;
   - whether C2 holds `bin/rst` is `unknown`;
+  - which shared libraries `zeek` loads is `unknown` (its `ldd` was not read);
   - the Debian packages were not mapped file by file, only flagged from their copyright files;
   - GitHub's terms on who can download a public repository's artifacts were not read;
   - no source bundle exists, and no image has been kept from a run.
