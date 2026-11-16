@@ -2548,3 +2548,68 @@ Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the run
      - D3 corrects HR-25's row in its next records PR.
   2. **The cases.** F1's residual case (for example `dnp3-resync-udp-insert-valid-middle`) and cases for D3's N1 to N4 (o dropped while m's write is open; the scan locking onto a planted frame whose chunk CRC fails; candidates at the edges of the embedded check; a link-only frame or a failed header inside a fragment near the limit) are added to the pinned TSVs by brief P4-4-HR2325S, after item 8.1's ruling and before any counted run. The pins change before a run and never after one. D4 and D2 review the labels.
 - **Next decision number:** D4-112.
+
+## D4-112: the owner's disclosure decision, the Windows budget met, HR-25's sequence rule, and HR-23's build rulings (D1, 2026-11-16)
+
+Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs named on each PR; `simulated` for the engine rehearsals.
+
+- **1. Disclosure of finding 1, the owner's decision (2026-11-16): trim and hold.** Finding 1 is a stock Zeek 9.0.1 behaviour that #715's review found; it is named here by number only. The owner applies the rule of D1's 6866095230 item 3 to it.
+  1. D1 replaced two comments on #715 with trimmed copies and deleted the originals: 6902439202 became 6907019858, and 6902500775 (D2's review) became 6907020513, then 6908384381 after a second trim (records-auditor on #720). The full text is kept in `reference/`, which is never committed.
+  2. One trace of the detail is outside the API's reach. D1 has told the owner where it is, and removing it is the owner's step ("Waiting on the owner").
+  3. No agent posts the mechanism. The counted run judges inside its job the rows whose per-row result would show it, and does not publish them row by row until the owner decides (D1's 6907176282 item 7).
+  4. Whether to report it to the Zeek project is the owner's decision, and item 1.3's per-row publication waits on it.
+- **2. P4-NODE-WT is complete:** #717 (`a070dcd8`) and #711 (`c8a9b783`).
+  1. #717 runs `platform/node` alone in the Windows `go` job, after the other packages, and raises that job's `timeout-minutes` from 45 to 60. The 30-minute package timeout (D4-44) is unchanged, and the stack dump of a hang now prints about 39 minutes in. Run alone, `platform/node` took 373.5 to 389.8 s, against 805.9 to 995.9 s beside the other packages on `main`. The 373.5 s run's job failed at its first step, on the finding in item 2.4, while `platform/node`'s own step passed. **Times before and after #717 are not comparable** (D5 on #717, 6901726383).
+  2. #711, narrowed by D1's 6902614046, changes the failure text of `TestSensorStartupStuckDoesNotHoldStart` and `TestLinkKeyFaultNodeStarts/missing`, not their bounds. Each now tells a start held for 32 s or more from one that is "slow, or held for less than 32 s". No test was made parallel. Three green Windows runs at `f65b64d7` took 440.6, 404.3 and 437.0 s, a median of 437.0 s against 720 s.
+  3. **D4-111 item 6.3, answered:** the 2 s bound of `TestLinkKeyFaultNodeStarts/missing` is the test's own wait in `runSent`, not a product property. `RunOnce` sets no deadline, and no requirement names 2 s (D5; D6's 6907197478).
+  4. **A finding, made diagnosable by #711, not closed:** `TestSensorStartupStuckDoesNotHoldStart` failed again on `main`'s code in #717's attempt 2 (job 132966047668), and that failure's cause stays `unknown`. The test is in `platform/node/sensortest`, which still runs beside the other packages, so its 2 s bound can fail again. Its failure now says which case it is. **Owner: D5.**
+  5. **Process.** D1's brief to D5 permitted a force-push of #711's branch for its rebase only. D5 also pushed control heads to the branch and force-pushed it back (#711's body; 6902689624). D5's role file says never to force-push. **Ruling:** D4-109 item 4 narrowed D4-85's rule against scratch branches, for D6's controls only, to a draft PR. That draft-PR route now extends to an implementer's controls on the same terms. The draft PR is closed and its branch deleted at once, and the implementer's own branch is never force-pushed for a control.
+- **3. HR-25: D3's F1, option (a)** (D1's 6902589450 on #714; D4 6902505417, D2 6902526389, D3 6902584812).
+  1. A checks the transport sequence on every frame without FIR. A wrong sequence drops the fragment in progress under a new cause, `transport_seq`. An identical retry, compared as the whole segment, FIN and the sequence included, is discarded and not counted.
+  2. F1 becomes counted, not seen, in D4's wider form too: a master that splits its own write.
+  3. **The quiet residuals named in HR-25's row:**
+     - substitution of a segment the capture never saw, pinned "missed";
+     - the duplicate rule's over-report, which can log a write the device rejected but cannot hide one.
+  4. **Conditions.** The receive rule is labelled `inference` until IEEE 1815's text is held ("Waiting on the owner" item 3). Any SEL check is read-only, records the sequence on multi-frame responses, and needs the owner's authorization. No out-of-sequence request is ever sent to a device.
+  5. **The cases these rulings add, for P4-4-HR2325S** (deliverable 2, and deliverable 3 after D4's HR-25 design PR for option (a) merges; the brief is amended in this PR):
+     - from 6902589450 item 3.2: F1 over UDP, and its TCP twin from the master's own stream; the wrap from 63 to 0; D2's FCB-repeat and wrong-destination middle segments; D3's C2 per-end case over UDP and TCP; C3's substitution case as "missed"; and the audit of the 112 rows;
+     - from 6902589450 item 3.1: S5 input (8);
+     - from 6907176282 item 5: D3's M3 to M7;
+     - from 6907019858 item 4: the stock truncated-READ first datagram;
+     - D3's N1 to N4 of 6901282906 (D4-111 item 8.2).
+  6. **Order:** D4's HR-25 design PR, then deliverable 3's cases, then A's patch and pins. A case that misses that order misses HR-25's counted run (D4-111 item 5.4).
+- **4. HR-23's build, #715: rulings so far.**
+  1. CH-53's and CH-57's script requirements are in #715 (D1's 6907019858 item 1). A 60 s `tcp_inactivity_timeout` splits a TCP flow that is quiet for longer, so results under the old 5-minute cut are not comparable. Whoever pins conditions from now on works with the 60 s cut. **A requirement:** the sensor's script sets `tcp_inactivity_timeout` from `flow_idle_s` itself, because the `redef` binds when the script loads (D6's 6907141838).
+  2. The fuzz workflow goes in D4's own PR, after #715 and before HR-23's counted run.
+  3. **Finding 2, measured** (D4's 6903332827):
+     - a truncated READ as a UDP flow's first datagram stops C0, C1p and C2 silently. That is stock Zeek's replay path, for HR-25's row (D3);
+     - a 2-octet 129 stopped only C2. D2's (A) fixes it: the response parser only for 4 or more octets and a code from 129 to 131.
+  4. **D3's M1, measured:** on UDP, a 129 of 4 or more octets whose objects the response parser rejects stopped only C2, silently. Over TCP, C2 recorded a violation (6907878981). D1's 6907928324 rules **option (B')**: the patch's catch raises the DNP3 violation itself on UDP. The ruling sets its seven conditions, the three-state judge among them. Under (B'), C2 records the stock truncated-READ route too.
+  5. **Finding 1, an open item. Owner: D4, with D2. Due before HR-23's counted run.** Its row stays a residual in #715. Its description, and a second point that goes with it, are held with the owner's disclosure decision (item 1).
+  6. **D7's P1, an open item before HR-23's counted run. Owners: D7, with D3 (AP-31).** The test image is a full install, with toolchain and test tools, and its Debian base carries GPL programs. What the shipped image carries, and the source offer and licence text that ADR-0009 requires, are settled before the counted run. The image measured is the one shipped.
+- **5. #718, P4-4-HR2325S deliverable 1** (D1's 6907176282). The short-129 rows are restated from the amended design text by a fresh D6 writer, never from a rehearsal. D6's N11 (D1's 6907928324 item 6): #718 may cite the design's measured statements about the stock engine, with their run, but never takes a C2 expectation from a run.
+- **6. D3's records PR owes these rows,** and merges before D4's HR-25 design PR, so that each row is true at every head (D3's C4 in 6902584812):
+  - **in HR-25:**
+    - the stock UDP first-datagram route;
+    - one malformed datagram stopping parsing for the whole UDP 5-tuple, now recorded under (B');
+    - a DNP3 TCP session quiet for over 60 s split in two;
+    - F1's route as quiet today, replacing the L-3 sentence that D4-111 item 8.1 found wrong. Under (a) it is counted once D4's design PR merges;
+  - **in HR-23's R-1:** the production mapping fails closed for a confirmed DNP3 flow on which part (a) names no server (D3's N2 in 6902539934).
+- **7. P4-4-INT's split, #719** (D1's 6908172734).
+  1. `platform/sensorlink/` joins D5's paths.
+  2. The legs of M-10, H-10 and V-9 that need the dialer or a re-arm, and H-7's `renew` legs, move to P4-4-DE.
+  3. P4-4-CC's table governs the `sensor.link_refused` legs, which go to P4-4-DE.
+     - **The bound:** INT-D5's audited connection closes write no audit record. That is safe only while F-027's gate holds, because no product path reaches the intake until P4-4-DE's wiring PR, which brings the records.
+  4. The split's order waits for D4's agreement.
+- **8. The order of the next steps** (HANDOFF's checkpoint). Each step waits on the step named:
+  - #715's merge;
+  - the fuzz PR (after #715);
+  - #718's restatement (after #715's design note);
+  - HR-23's counted run (after #718, the fuzz run, item 4.5 and item 4.6);
+  - D3's records PR (before D4's HR-25 design PR);
+  - D4's HR-25 design PR;
+  - P4-4-HR2325S's deliverables 2 and 3 (after that design PR);
+  - HR-25's build (after them).
+
+  P4-4-INT's PRs may run beside these, after D4 agrees the split. Its D4 PR then waits on D4's one-instance queue (D4-89), behind D4's work above.
+- **Next decision number:** D4-113.
