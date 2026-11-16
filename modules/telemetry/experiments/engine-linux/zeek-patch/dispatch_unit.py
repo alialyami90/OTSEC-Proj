@@ -25,7 +25,8 @@ are read by a judge with three states, `parsed on`, `recorded stop` and
 that names another analyzer (`judge`). Each stop case is followed by whole
 messages that the builder names (Flow.send's `bad`), so a silent stop is
 told apart from nothing more to parse. Three controls, C2 with one control
-patch each (controls/), must each fail the rows named for them.
+patch each (controls/), must each read the state named for them on their
+rows.
 
 D1's experiment on #715 (6902545944): the `*-first` cases, over UDP and
 TCP, also run under C0 (`zeek-probe-c0`, the stock image), and `check`
@@ -324,6 +325,12 @@ FLOW_DIRECTION = "dnp3_unexpected_flow_direction"
 STATES = ("parsed on", "recorded stop", "silent stop", "recorded elsewhere")
 
 
+def unrecorded_stop(n):
+    """The judge's state for a stop that is neither recorded once nor
+    silent, with the number of DNP3 violations raised."""
+    return f"unclassified (a stop that is neither recorded once nor silent; {n} DNP3 violations raised)"
+
+
 def judge(d, flow):
     """One configuration's state on a stop case, from its logs and the
     builder's names for the flow (`flow.msgs`, `flow.bad`). Returns (state,
@@ -336,11 +343,14 @@ def judge(d, flow):
       analyzer other than DNP3's (the sensor keys on the DNP3 analyzer);
     - `parsed on`: the probe's last `fc` rows are the builder's trailing
       messages, in order, and no DNP3 violation was raised or logged;
-    - `recorded stop`: no `fc` row after the stop's message, exactly one
+    - stopped: the `fc` rows are, in order, a prefix of the builder's
+      messages up to and including the stop's (D6's N12 on #715), so a
+      trailing message parsed in the stop's place is never read as a stop;
+    - `recorded stop`: stopped, exactly one
       DNP3 violation raised (otsec_viol.log, viol.zeek), exactly one DNP3
       analyzer.log row with a failure_reason, and conn.log's service no
       longer names DNP3;
-    - `silent stop`: no `fc` row after the stop's message, and no DNP3
+    - `silent stop`: stopped, and no DNP3
       violation raised, no DNP3 analyzer.log row, no dnp3_ weird other than
       FLOW_DIRECTION and no reporter.log row.
     analyzer.log's failure_data is never read."""
@@ -378,12 +388,12 @@ def judge(d, flow):
         raise ValueError("a stop case needs two or more whole messages after its stop")
     if fc[-len(tail):] == tail and len(fc) >= lead - 1 + len(tail) and not dviol and not reasons:
         return "parsed on", detail
-    if len(fc) <= lead:
+    if len(fc) <= lead and fc == flow.msgs[:len(fc)]:
         if len(dviol) == 1 and len(reasons) == 1 and reasons[0] and "dnp3" not in service:
             return "recorded stop", detail
         if not dviol and not reasons and not weird and not rep:
             return "silent stop", detail
-        return "unclassified (a stop that is neither recorded once nor silent)", detail
+        return unrecorded_stop(len(dviol)), detail
     return "unclassified (neither parsed on nor stopped)", detail
 
 
@@ -422,16 +432,18 @@ STOPS = [
 
 # (B')'s controls (condition 4.5; D3's condition 3 in 6907898087): C2 with
 # one control patch each (controls/). A control passes, that is the mutant is
-# killed, when each row named for it reads other than C2's state there.
-# By the rules: the stock catch rethrows with no violation, so a replayed
+# killed, when each row named for it reads the state named for it there
+# (D6's N13 on #715): a crash, a run that did not happen, or any other
+# reading fails it. By the rules: the stock catch rethrows with no violation, so a replayed
 # stop is silent (4.1, 4.2); a catch that raises and rethrows raises a second
 # violation in Analyzer::NextPacket on the ordinary path (4.3); a catch with
 # no violation and no rethrow records nothing on either path.
 M_STOCK, M_RERAISE, M_NOVIOL = "zeek-probe-m-stock-catch", "zeek-probe-m-raise-rethrow", "zeek-probe-m-no-violation"
 CONTROLS = [
-    (M_STOCK, ("4.1", "4.2"), "the stock catch: no violation there, and a rethrow"),
-    (M_RERAISE, ("4.3",), "the catch raises the violation and rethrows"),
-    (M_NOVIOL, ("4.1", "4.2", "4.3"), "the catch raises no violation and does not rethrow"),
+    (M_STOCK, {"4.1": "silent stop", "4.2": "silent stop"}, "the stock catch: no violation there, and a rethrow"),
+    (M_RERAISE, {"4.3": unrecorded_stop(2)}, "the catch raises the violation and rethrows"),
+    (M_NOVIOL, {"4.1": "silent stop", "4.2": "silent stop", "4.3": "silent stop"},
+     "the catch raises no violation and does not rethrow"),
 ]
 
 
@@ -463,12 +475,10 @@ def unchanged_verdict(c2, stock, c1, want1):
 
 
 def control_verdict(states, want):
-    """A control's result: `killed` when every named row reads other than
-    C2's state there, `unknown (not run)` when one did not run, else
-    `fail (survived)`."""
-    if any(states[r] == "not run" for r in want):
-        return "unknown (not run)"
-    return "killed" if all(states[r] != want[r] for r in want) else "fail (survived)"
+    """A control's result: `killed` when every named row reads exactly the
+    state named for it, else `fail` (D6's N13 on #715): `exit N`, `not run`
+    and any other reading are never a kill."""
+    return "killed" if all(states.get(r) == w for r, w in want.items()) else "fail"
 
 
 def quote(out, case):
@@ -528,18 +538,17 @@ def check(out):
         print(f"| {rid} | {case} | {kind} | {what} (C2: {want2}; C1p: {want1}) | {st[C2][0]} | {st[C1P][0]} | "
               f"{st[C0][0]} | {res} |")
         details += [f"- {rid} {case} under {cfg}: {st[cfg][0]}; {st[cfg][1]}" for cfg in cfgs]
-    print("\n| control | what it changes | rows it must fail | its states there | result |")
+    print("\n| control | what it changes | the state each row must read | its states there | result |")
     print("| --- | --- | --- | --- | --- |")
-    want = {rid: w2 for rid, _, _, _, w2, _, _ in STOPS}
     for cfg, rids, what in CONTROLS:
         st = {}
         for rid, case, *_ in STOPS:
             if rid in rids:
                 st[rid], det = judge(os.path.join(out, case, cfg), flows[case])
                 details.append(f"- {rid} {case} under {cfg}: {st[rid]}; {det}")
-        res = control_verdict(st, {r: want[r] for r in rids})
+        res = control_verdict(st, rids)
         bad |= res != "killed"
-        print(f"| {cfg} | {what} | {', '.join(rids)} | {'; '.join(f'{r}: {st[r]}' for r in rids)} | {res} |")
+        print(f"| {cfg} | {what} | {'; '.join(f'{r}: {w}' for r, w in rids.items())} | {'; '.join(f'{r}: {st[r]}' for r in rids)} | {res} |")
     print("\nWhat the judge read (failure_data is never read):\n")
     print("\n".join(details))
     print("\n### D1's experiment on #715: measured, not judged")

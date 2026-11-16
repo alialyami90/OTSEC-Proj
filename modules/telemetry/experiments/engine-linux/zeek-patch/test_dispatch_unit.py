@@ -59,10 +59,12 @@ FLOW = du.cases()["d4u-short-request-second"]
 UID = "Ctest"
 
 
-def logs(tmp_path, name, fc=5, pkts=5, service="dnp3_udp", analyzer=(), raised=(), weird=(), reporter=0, rc="0"):
-    """A configuration's logs: the first `fc` builder messages as `fc` rows,
-    conn.log with `pkts` packets, analyzer.log rows (name, reason),
-    otsec_viol.log rows (analyzer names), weird names, reporter rows."""
+def logs(tmp_path, name, fc=5, pkts=5, service="dnp3_udp", analyzer=(), raised=(), weird=(), reporter=0, rc="0",
+         msgs=None):
+    """A configuration's logs: the first `fc` builder messages as `fc` rows
+    (or `msgs`, as (is_orig, fc), when given), conn.log with `pkts` packets,
+    analyzer.log rows (name, reason), otsec_viol.log rows (analyzer names),
+    weird names, reporter rows."""
     d = tmp_path / name
     d.mkdir()
     (d / "exit-code").write_text(rc + "\n")
@@ -71,7 +73,7 @@ def logs(tmp_path, name, fc=5, pkts=5, service="dnp3_udp", analyzer=(), raised=(
         (d / log).write_text("".join(json.dumps(r) + "\n" for r in rs))
     put("otsec_probe.log", [{"kind": "fc", "is_orig": o, "fc": c, "uid": UID,
                              "ev": "dnp3_application_request_header" if o else "dnp3_application_response_header"}
-                            for o, c in FLOW.msgs[:fc]])
+                            for o, c in (FLOW.msgs[:fc] if msgs is None else msgs)])
     put("conn.log", [{"uid": UID, "orig_pkts": pkts - 2, "resp_pkts": 2, "service": service}])
     put("analyzer.log", [{"uid": UID, "analyzer_name": n, "failure_reason": r, "failure_data": "never read"}
                          for n, r in analyzer])
@@ -159,10 +161,51 @@ def test_stop_and_control_verdicts():
         == "fail (reasons differ)"
     assert du.stop_verdict("recorded stop", "parsed on", "not run", "parsed on", True) == "unknown (not run)"
     assert du.stop_verdict("recorded stop", "parsed on", "exit 134", "parsed on", True) == "fail"
-    want = {"4.1": "recorded stop", "4.2": "recorded stop"}
+
+
+# D6's N13 on #715: a control is killed only when each of its rows reads the
+# state named for it; a crash, a run that did not happen, or any other
+# reading fails it.
+def test_a_control_is_killed_only_by_the_state_named_for_it():
+    want = {"4.1": "silent stop", "4.2": "silent stop"}
     assert du.control_verdict({"4.1": "silent stop", "4.2": "silent stop"}, want) == "killed"
-    assert du.control_verdict({"4.1": "silent stop", "4.2": "recorded stop"}, want) == "fail (survived)"
-    assert du.control_verdict({"4.1": "not run", "4.2": "silent stop"}, want) == "unknown (not run)"
+    assert du.control_verdict({"4.1": "silent stop", "4.2": "recorded stop"}, want) == "fail"
+    assert du.control_verdict({"4.1": "silent stop", "4.2": "exit 134"}, want) == "fail"
+    assert du.control_verdict({"4.1": "not run", "4.2": "silent stop"}, want) == "fail"
+    assert du.control_verdict({"4.1": "silent stop", "4.2": "unclassified (1 conn.log rows)"}, want) == "fail"
+    assert du.control_verdict({"4.1": "silent stop"}, want) == "fail"
+    twice = {"4.3": du.unrecorded_stop(2)}
+    assert du.control_verdict({"4.3": du.unrecorded_stop(2)}, twice) == "killed"
+    assert du.control_verdict({"4.3": du.unrecorded_stop(3)}, twice) == "fail"
+    assert du.control_verdict({"4.3": "unclassified (neither parsed on nor stopped)"}, twice) == "fail"
+    assert du.control_verdict({"4.3": "exit 134"}, twice) == "fail"
+
+
+def test_the_controls_name_the_states_the_rules_give_them():
+    named = {cfg: rids for cfg, rids, _ in du.CONTROLS}
+    assert named[du.M_STOCK] == {"4.1": "silent stop", "4.2": "silent stop"}
+    assert named[du.M_NOVIOL] == {"4.1": "silent stop", "4.2": "silent stop", "4.3": "silent stop"}
+    assert named[du.M_RERAISE] == {"4.3": du.unrecorded_stop(2)}
+
+
+def test_a_raise_and_rethrow_reads_its_own_state(tmp_path):
+    assert state_of(tmp_path, "a", **dict(REC, raised=["DNP3_UDP", "DNP3_UDP"])) == du.unrecorded_stop(2)
+
+
+# D6's N12 on #715: a stop is read from which messages the `fc` rows are,
+# not how many. D6's probe: the stop's message leaves no `fc` row and the
+# first trailing message (the relay's 129) is parsed.
+PROBE = [(True, 1), (False, 129)]
+
+
+def test_a_trailing_message_parsed_in_the_stops_place_is_no_stop(tmp_path):
+    assert state_of(tmp_path, "a", **dict(REC, msgs=PROBE)) not in ("recorded stop", "silent stop")
+    assert state_of(tmp_path, "b", fc=2, msgs=PROBE) not in ("recorded stop", "silent stop")
+    # Controls: the builder's own prefixes still read as stops.
+    assert state_of(tmp_path, "c", **dict(REC, msgs=FLOW.msgs[:2])) == "recorded stop"
+    assert state_of(tmp_path, "d", fc=2, msgs=FLOW.msgs[:1]) == "silent stop"
+    # A row out of order, or on the wrong side, is no prefix.
+    assert state_of(tmp_path, "e", fc=2, msgs=[(False, 1)]) not in ("recorded stop", "silent stop")
 
 
 def test_every_stop_row_names_a_built_stop_case_and_each_control_a_stop_row():
