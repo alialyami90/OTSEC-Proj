@@ -2554,7 +2554,7 @@ Evidence class: `desk`, for the rulings; `CI-Linux` and `CI-Windows` for the run
 Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs named on each PR; `simulated` for the engine rehearsals.
 
 - **1. Disclosure of finding 1, the owner's decision (2026-11-16): trim and hold.** Finding 1 is a stock Zeek 9.0.1 behaviour that #715's review found; it is named here by number only. The owner applies the rule of D1's 6866095230 item 3 to it.
-  1. D1 replaced two comments on #715 with trimmed copies and deleted the originals: 6902439202 became 6907019858, and 6902500775 (D2's review) became 6907020513. The full text is kept in `reference/`, which is never committed.
+  1. D1 replaced two comments on #715 with trimmed copies and deleted the originals: 6902439202 became 6907019858, and 6902500775 (D2's review) became 6907020513, and then 6908384381 after a second trim that removed the area of finding 1 (records-auditor on #720). The full text is kept in `reference/`, which is never committed.
   2. One earlier revision of #715's description holds the detail. The API cannot delete it, so it is the owner's to delete in GitHub's interface.
   3. No agent posts the mechanism. The counted run judges inside its job the rows whose per-row result would show it, and does not publish them row by row until the owner decides (D1's 6907176282 item 7).
   4. Whether to report it to the Zeek project is the owner's decision.
