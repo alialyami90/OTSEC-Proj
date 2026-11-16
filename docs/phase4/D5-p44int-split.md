@@ -105,7 +105,7 @@ Rows with no node leg: M-6 (dialer: P4-4-DE), A-1 (the agent judges an `ack`), T
 | N-9's node half: the three counts are absent from `counters` and `sensor.counters`; control, a node that maps `overlap_table_full` to `diff.overlap_table_full` | *`TestOverlapCountsNotInSensorCounters`* |
 | N-18's node legs (W-7's case 4, and D6's variant) | *`TestQuietSpellOwnRunsNoAlert`* |
 | Item 5 (c)'s code: the open table expires only after a later flow `start`; the arriving record is matched before the expiry check; an entry past its bound at a restart waits for the next `start` taken after it | *`TestOpenExpiryAfterLaterStart`*, *`TestOpenExpiryMatchFirst`*, *`TestOpenExpiryWaitsAfterRestart`* |
-| N-14 | **owed by P4-4-HR24's stage 3** (D4's rule, D5's node legs), unless that stage merges before INT-D5 opens; then D5 adds N-14's node legs (1) to (4) to INT-D5. Not merged at `c8a9b783` (no detector code judges CH-51). D1 to confirm the owing brief |
+| N-14 | **owed by P4-4-INT**, written after P4-4-HR24's stage 3 merges, which brings D4's CH-51 rule (D1's 6909754276). D5's node legs (1) to (4) go in INT-D5 if that stage has merged before INT-D5 opens, otherwise in a later INT PR. Not merged at `c8a9b783` (no detector code judges CH-51) |
 
 **C4 0.4, and the decision log's rows:**
 
@@ -173,4 +173,4 @@ The wiring comes only in P4-4-DE's PR that passes the last owed test (D4-96).
 
 ## 7. Still owed after the four PRs
 
-The rig legs (the sensor's brief and D6's rig brief), U-3's two-flow `cite` control among them; N-14, owed by P4-4-HR24's stage 3 if it has not merged before INT-D5 opens (D1 to confirm); §3's legs (P4-4-DE).
+The rig legs (the sensor's brief and D6's rig brief), U-3's two-flow `cite` control among them; N-14, owed by P4-4-INT after P4-4-HR24's stage 3 merges: in INT-D5 if that stage has merged before INT-D5 opens, otherwise in a later INT PR (D1's 6909754276); §3's legs (P4-4-DE).
