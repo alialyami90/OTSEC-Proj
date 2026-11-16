@@ -170,7 +170,27 @@ def test_every_stop_row_names_a_built_stop_case_and_each_control_a_stop_row():
     ids = {r[0] for r in du.STOPS}
     for rid, case, kind, _, want2, want1, _ in du.STOPS:
         assert flows[case].bad is not None and len(flows[case].trailing()) >= 2
+        if kind == "unchanged":
+            assert want2 == du.SAME_AS_STOCK and (want1 in du.STATES or want1 == du.SAME_AS_C2)
+            continue
         assert want2 in du.STATES and want1 in du.STATES
         assert (kind == "fix") == (want2 != want1)
     for _, rids, _ in du.CONTROLS:
         assert set(rids) <= ids
+
+
+def test_unchanged_rows_read_c2_against_c2_with_the_stock_catch():
+    rec = ("unclassified (neither parsed on nor stopped)", "fc rows [...]; violations raised ['DNP3_TCP']")
+    other = ("recorded stop", "fc rows [...]")
+    assert du.unchanged_verdict(rec, rec, ("parsed on", "x"), "parsed on") == "pass"
+    # Control: (B') changed TCP, in its state or only in what the judge read.
+    assert du.unchanged_verdict(other, rec, ("parsed on", "x"), "parsed on") == "fail (changed by (B'))"
+    assert du.unchanged_verdict((rec[0], "other detail"), rec, ("parsed on", "x"), "parsed on") \
+        == "fail (changed by (B'))"
+    # C1p is read too.
+    assert du.unchanged_verdict(rec, rec, ("silent stop", "x"), "parsed on") == "fail"
+    assert du.unchanged_verdict(rec, rec, rec, du.SAME_AS_C2) == "pass"
+    assert du.unchanged_verdict(rec, rec, (rec[0], "other"), du.SAME_AS_C2) == "fail"
+    # A crash in both is never "unchanged".
+    assert du.unchanged_verdict(("exit 134", ""), ("exit 134", ""), ("parsed on", "x"), "parsed on") == "fail"
+    assert du.unchanged_verdict(rec, ("not run", ""), ("parsed on", "x"), "parsed on") == "unknown (not run)"

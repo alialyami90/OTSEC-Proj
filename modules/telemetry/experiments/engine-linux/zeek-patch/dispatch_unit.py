@@ -400,6 +400,12 @@ def reasons_of(d):
 # (C1p, a different state, is the control); "same" when both read the
 # state. same_reason also asks for one identical failure_reason under C2 and
 # C1p. The states come from the rules, (A) and (B'), never from a run.
+#
+# "unchanged" (condition 4.4, the TCP twins): (B') does not touch TCP, so C2
+# must read exactly as C2 with the stock catch (M_STOCK), state and all the
+# judge read; C1p must read its state, or exactly as C2 (SAME_AS_C2) where
+# (A) leaves the input's parser as C1p's. No state is expected for C2 here.
+SAME_AS_STOCK, SAME_AS_C2 = "as C2 with the stock catch", "as C2"
 STOPS = [
     ("4.1", "d4u-bad-objects-response-first", "fix", "M1 over UDP: a 129 of 5 application octets as the flow's "
      "first datagram (the PIA's replay); C2's response parser throws, C1p's request parser takes it",
@@ -408,10 +414,10 @@ STOPS = [
      "replay): stock Zeek's silent stop, recorded under C2", "recorded stop", "silent stop", False),
     ("4.3", "d4u-short-request-second", "same", "the same truncated READ as a UDP flow's second datagram "
      "(Analyzer::NextPacket): one DNP3 violation, the same reason text", "recorded stop", "recorded stop", True),
-    ("4.4a", "d4u-bad-objects-response-first-tcp", "fix", "4.1's TCP twin, unchanged by (B')",
-     "recorded stop", "parsed on", False),
-    ("4.4b", "d4u-short-request-first-tcp", "same", "4.2's TCP twin, unchanged by (B')",
-     "recorded stop", "recorded stop", False),
+    ("4.4a", "d4u-bad-objects-response-first-tcp", "unchanged", "4.1's TCP twin, unchanged by (B'); C1p's "
+     "request parser takes the 129", SAME_AS_STOCK, "parsed on", False),
+    ("4.4b", "d4u-short-request-first-tcp", "unchanged", "4.2's TCP twin, unchanged by (B'); its code agrees "
+     "with its side", SAME_AS_STOCK, SAME_AS_C2, False),
 ]
 
 # (B')'s controls (condition 4.5; D3's condition 3 in 6907898087): C2 with
@@ -439,6 +445,21 @@ def stop_verdict(want2, want1, c2, c1, same_reason):
     if not same_reason:
         return "fail (reasons differ)"
     return "pass"
+
+
+def unchanged_verdict(c2, stock, c1, want1):
+    """An "unchanged" row's result from (state, detail) pairs: C2 reads
+    exactly as C2 with the stock catch, and C1p reads want1 (or exactly as
+    C2, for SAME_AS_C2). A configuration that did not run makes it unknown;
+    one that exited non-zero fails it."""
+    states = (c2[0], stock[0], c1[0])
+    if "not run" in states:
+        return "unknown (not run)"
+    if any(x.startswith("exit") for x in states):
+        return "fail"
+    if c2 != stock:
+        return "fail (changed by (B'))"
+    return "pass" if (c1 == c2 if want1 == SAME_AS_C2 else c1[0] == want1) else "fail"
 
 
 def control_verdict(states, want):
@@ -495,14 +516,18 @@ def check(out):
     print("| --- | --- | --- | --- | --- | --- | --- | --- |")
     details = []
     for rid, case, kind, what, want2, want1, same in STOPS:
-        st = {cfg: judge(os.path.join(out, case, cfg), flows[case]) for cfg in (C2, C1P, C0)}
-        same_ok = not same or (reasons_of(os.path.join(out, case, C2)) == reasons_of(os.path.join(out, case, C1P))
-                               and len(reasons_of(os.path.join(out, case, C2))) == 1)
-        res = stop_verdict(want2, want1, st[C2][0], st[C1P][0], same_ok)
+        cfgs = (C2, C1P, C0, M_STOCK) if kind == "unchanged" else (C2, C1P, C0)
+        st = {cfg: judge(os.path.join(out, case, cfg), flows[case]) for cfg in cfgs}
+        if kind == "unchanged":
+            res = unchanged_verdict(st[C2], st[M_STOCK], st[C1P], want1)
+        else:
+            same_ok = not same or (reasons_of(os.path.join(out, case, C2)) == reasons_of(os.path.join(out, case, C1P))
+                                   and len(reasons_of(os.path.join(out, case, C2))) == 1)
+            res = stop_verdict(want2, want1, st[C2][0], st[C1P][0], same_ok)
         bad |= res != "pass"
         print(f"| {rid} | {case} | {kind} | {what} (C2: {want2}; C1p: {want1}) | {st[C2][0]} | {st[C1P][0]} | "
               f"{st[C0][0]} | {res} |")
-        details += [f"- {rid} {case} under {cfg}: {st[cfg][0]}; {st[cfg][1]}" for cfg in (C2, C1P, C0)]
+        details += [f"- {rid} {case} under {cfg}: {st[cfg][0]}; {st[cfg][1]}" for cfg in cfgs]
     print("\n| control | what it changes | rows it must fail | its states there | result |")
     print("| --- | --- | --- | --- | --- |")
     want = {rid: w2 for rid, _, _, _, w2, _, _ in STOPS}
