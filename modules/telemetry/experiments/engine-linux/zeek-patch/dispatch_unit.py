@@ -18,6 +18,15 @@ fails the row, so a crash, which leaves partial logs, is never read as a
 silent stop (D6's N3 on #715). It prints a table and exits 1 on any row
 that is not `pass`.
 
+(B') (D1's ruling on #715, 6907928324): the patch's catch in
+DNP3_UDP_Analyzer::DeliverPacket raises the DNP3 violation itself. Its rows
+are read by a judge with three states, `parsed on`, `recorded stop` and
+`silent stop`, and a fourth, `recorded elsewhere`, for an analyzer.log row
+that names another analyzer (`judge`). Each stop case is followed by whole
+messages that the builder names (Flow.send's `bad`), so a silent stop is
+told apart from nothing more to parse. Three controls, C2 with one control
+patch each (controls/), must each fail the rows named for them.
+
 D1's experiment on #715 (6902545944): the `*-first` cases, over UDP and
 TCP, also run under C0 (`zeek-probe-c0`, the stock image), and `check`
 quotes, for each configuration, the exit code, conn.log's rows, every
@@ -75,13 +84,26 @@ class Flow:
             self.conv = synth.UDPConv(a, b, self.clock)
         self.relay_first = first == "relay"
         self.tseq = {True: 0, False: 0}
+        # The builder's names for what the flow carries, read by `judge`:
+        # each message as (is_orig, function code), and the index of the
+        # one the case stops on, if any.
+        self.msgs = []
+        self.bad = None
 
-    def send(self, from_master, apdu, dir_set=None):
+    def send(self, from_master, apdu, dir_set=None, bad=False):
         seg = dnp3.tpdu(self.tseq[from_master], apdu)
         self.tseq[from_master] = (self.tseq[from_master] + 1) & 0x3F
         dest, src = (R_LINK, M_LINK) if from_master else (M_LINK, R_LINK)
         frame = link(dest, src, from_master if dir_set is None else dir_set, seg)
-        self.conv.send(from_master != self.relay_first, frame)
+        is_orig = from_master != self.relay_first
+        self.conv.send(is_orig, frame)
+        self.msgs.append((is_orig, apdu[1] if len(apdu) > 1 else None))
+        if bad:
+            self.bad = len(self.msgs) - 1
+
+    def trailing(self):
+        """The whole messages after the stop, as the builder names them."""
+        return self.msgs[self.bad + 1:]
 
 
 def cases():
@@ -137,7 +159,7 @@ def cases():
     # every build. D2's case: a 2-octet 129 from the originator.
     for tcp, sfx in ((False, ""), (True, "-tcp")):
         f = Flow("master", tcp)
-        f.send(True, bytes([0xC0, dnp3.READ, 60]))
+        f.send(True, bytes([0xC0, dnp3.READ, 60]), bad=True)
         f.send(False, dnp3.response(0))
         f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(1))
@@ -153,10 +175,21 @@ def cases():
         # datagram. C1p's request parser takes it in its `default` arm;
         # C2's response parser throws on it.
         f = Flow("relay", tcp)
-        f.send(False, dnp3.response(0, objects=b""))
+        f.send(False, dnp3.response(0, objects=b"\x01"), bad=True)
         f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(0))
         out["d4u-bad-objects-response-first" + sfx] = f
+    # (B')'s ordinary path (D6's row 3 on #715): the same truncated READ as a
+    # UDP flow's second datagram, which reaches the analyzer through
+    # Analyzer::NextPacket, not the PIA's replay (dpd_dnp3_server_udp
+    # matches the first datagram, dpd.sig).
+    f = Flow("master")
+    f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
+    f.send(True, bytes([0xC1, dnp3.READ, 60]), bad=True)
+    f.send(False, dnp3.response(1))
+    f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
+    f.send(False, dnp3.response(2))
+    out["d4u-short-request-second"] = f
     # A master's direct operate with a control block and DIR clear, on a
     # flow the master starts: the code picks the request parser, so the
     # block is parsed under both builds (a selector keyed by DIR would not).
@@ -213,8 +246,7 @@ def seen(d):
 # Expectations. Each is (case, what, test), where test takes one build's
 # (msgs, links, violations) and returns True when met. `kind` says how C2
 # and C1p are read: "fix" passes when C2 meets it and C1p does not (C1p is
-# the control); "same" passes when both meet it; "residual" is printed as
-# measured and never judged.
+# the control); "same" passes when both meet it.
 RELAY_ALL = [(True, 129, "resp", ()), (False, 2, "req", ("g80v1",)), (True, 129, "resp", ()),
              (False, 0, "req", ()), (False, 13, "req", ()), (False, 2, "req", ("g80v1",)), (True, 129, "resp", ())]
 EXPECT = [
@@ -245,19 +277,6 @@ EXPECT = [
      lambda m, l, v: m[:1] == [(True, 129, "req", ())] and any(x[:2] == (False, 1) for x in m) and not v),
     ("d4u-short-response-first-tcp", "same", "the same over TCP",
      lambda m, l, v: m[:1] == [(True, 129, "req", ())] and any(x[:2] == (False, 1) for x in m) and not v),
-    ("d4u-short-request-first-tcp", "same", "a truncated READ as a TCP flow's first segment: a recorded violation",
-     lambda m, l, v: m[:1] == [(True, 1, "req", ())] and bool(v)),
-    # A residual (D1's experiment on #715): a truncated READ as a UDP flow's
-    # first datagram stops stock Zeek with no record (the flow is named
-    # dnp3_udp, nothing after the throw is parsed, and no analyzer.log row
-    # is written), C1p and C2 alike. HR-25's row holds it. Printed, never a
-    # pass, and a fail when C2's state differs from C1p's (D6's N7 on
-    # #715): the input's code agrees with its side, so the patch must not
-    # change it. A fix that records the stop under both changes the
-    # reading, not the job.
-    ("d4u-short-request-first", "residual", "a truncated READ as a UDP flow's first datagram: the silent stop "
-     "(the READ's header only, one link row, no DNP3 analyzer.log row)",
-     lambda m, l, v: m == [(True, 1, "req", ())] and len(l) == 1 and not v),
     ("d4u-dir-clear-operate", "same", "the direct operate's g12v1 is parsed although DIR is clear",
      lambda m, l, v: (True, 5, "req", ("g12v1",)) in m and (True, False) in l),
 ]
@@ -267,7 +286,8 @@ EXPECT = [
 EXPERIMENT = ["d4u-short-request-first", "d4u-short-response-first",
               "d4u-short-request-first-tcp", "d4u-short-response-first-tcp",
               # D3's M1 on #718, at D1's request on #715.
-              "d4u-bad-objects-response-first", "d4u-bad-objects-response-first-tcp"]
+              "d4u-bad-objects-response-first", "d4u-bad-objects-response-first-tcp",
+              "d4u-short-request-second"]
 
 
 def state(d, test):
@@ -290,15 +310,144 @@ def verdict(kind, c2, c1):
         return "unknown (not run)"
     if c2 not in ("met", "not met") or c1 not in ("met", "not met"):
         return "fail"
-    if kind == "residual":
-        # A known stop of stock Zeek's, never a pass, so that a fix which
-        # records it under both builds does not fail the job; but C2 must
-        # equal its control (D6's N7 on #715).
-        return "residual (measured, not judged)" if c2 == c1 else "fail"
     if kind == "same":
         return "pass" if c2 == c1 == "met" else "fail"
     # "fix" and "fix-negative": C2 meets it and the control does not.
     return "pass" if c2 == "met" and c1 == "not met" else "fail"
+
+
+# (B')'s judge (D1's ruling on #715, condition 2; D6's 6907920954). The
+# weird `dnp3_unexpected_flow_direction` is left out of the silent-stop test:
+# ProcessData raises it on a frame's DIR against its side, before any parse,
+# never on a stop (DNP3.cc), and C0, C1p and C2 raise it alike.
+FLOW_DIRECTION = "dnp3_unexpected_flow_direction"
+STATES = ("parsed on", "recorded stop", "silent stop", "recorded elsewhere")
+
+
+def judge(d, flow):
+    """One configuration's state on a stop case, from its logs and the
+    builder's names for the flow (`flow.msgs`, `flow.bad`). Returns (state,
+    detail). The state is one of STATES, or `not run`, `exit N`, or
+    `unclassified (why)`, which no row accepts.
+
+    - frames: conn.log has one row, whose orig_pkts + resp_pkts is the
+      number of frames the builder wrote, so the trailing frames arrived;
+    - `recorded elsewhere`: an analyzer.log row for the flow names an
+      analyzer other than DNP3's (the sensor keys on the DNP3 analyzer);
+    - `parsed on`: the probe's last `fc` rows are the builder's trailing
+      messages, in order, and no DNP3 violation was raised or logged;
+    - `recorded stop`: no `fc` row after the stop's message, exactly one
+      DNP3 violation raised (otsec_viol.log, viol.zeek), exactly one DNP3
+      analyzer.log row with a failure_reason, and conn.log's service no
+      longer names DNP3;
+    - `silent stop`: no `fc` row after the stop's message, and no DNP3
+      violation raised, no DNP3 analyzer.log row, no dnp3_ weird other than
+      FLOW_DIRECTION and no reporter.log row.
+    analyzer.log's failure_data is never read."""
+    rc = exit_code(d)
+    s = seen(d)
+    if rc is None or s is None:
+        return "not run", ""
+    if rc != "0":
+        return f"exit {rc}", ""
+    conns = rows(os.path.join(d, "conn.log")) or []
+    if len(conns) != 1:
+        return f"unclassified ({len(conns)} conn.log rows)", ""
+    c = conns[0]
+    uid = c.get("uid")
+    pkts = c.get("orig_pkts", 0) + c.get("resp_pkts", 0)
+    if pkts != len(flow.conv.frames):
+        return f"unclassified ({pkts} of {len(flow.conv.frames)} frames in conn.log)", ""
+    an = [r for r in rows(os.path.join(d, "analyzer.log")) or [] if r.get("uid") == uid]
+    named = [str(r.get("analyzer_name", "")) for r in an]
+    reasons = [r.get("failure_reason") for r in an if "DNP3" in str(r.get("analyzer_name", ""))]
+    raised = [r.get("analyzer") for r in rows(os.path.join(d, "otsec_viol.log")) or [] if r.get("uid") == uid]
+    dviol = [a for a in raised if "DNP3" in str(a)]
+    weird = [r.get("name") for r in rows(os.path.join(d, "weird.log")) or []
+             if r.get("uid") == uid and str(r.get("name", "")).startswith("dnp3_") and r.get("name") != FLOW_DIRECTION]
+    rep = rows(os.path.join(d, "reporter.log")) or []
+    service = str(c.get("service", "")).lower()
+    detail = (f"fc rows {[m[:2] for m in s[0]]}; violations raised {raised}; analyzer.log {named} "
+              f"{reasons}; dnp3 weirds {weird}; reporter rows {len(rep)}; service {service or '-'}")
+    if any("DNP3" not in n for n in named):
+        return "recorded elsewhere", detail
+    fc = [(m[0], m[1]) for m in s[0]]
+    tail = flow.trailing()
+    lead = flow.bad + 1
+    if len(tail) < 2:
+        raise ValueError("a stop case needs two or more whole messages after its stop")
+    if fc[-len(tail):] == tail and len(fc) >= lead - 1 + len(tail) and not dviol and not reasons:
+        return "parsed on", detail
+    if len(fc) <= lead:
+        if len(dviol) == 1 and len(reasons) == 1 and reasons[0] and "dnp3" not in service:
+            return "recorded stop", detail
+        if not dviol and not reasons and not weird and not rep:
+            return "silent stop", detail
+        return "unclassified (a stop that is neither recorded once nor silent)", detail
+    return "unclassified (neither parsed on nor stopped)", detail
+
+
+def reasons_of(d):
+    """analyzer.log's DNP3 failure_reasons for one configuration (never
+    failure_data)."""
+    return [r.get("failure_reason") for r in rows(os.path.join(d, "analyzer.log")) or []
+            if "DNP3" in str(r.get("analyzer_name", ""))]
+
+
+# The rows that prove (B') (D1's ruling on #715, condition 4), each read as
+# C2 against C1p, with C0 quoted. Each is (id, case, kind, what, C2's state,
+# C1p's state, same_reason). "fix" passes when C2 and C1p read their states
+# (C1p, a different state, is the control); "same" when both read the
+# state. same_reason also asks for one identical failure_reason under C2 and
+# C1p. The states come from the rules, (A) and (B'), never from a run.
+STOPS = [
+    ("4.1", "d4u-bad-objects-response-first", "fix", "M1 over UDP: a 129 of 5 application octets as the flow's "
+     "first datagram (the PIA's replay); C2's response parser throws, C1p's request parser takes it",
+     "recorded stop", "parsed on", False),
+    ("4.2", "d4u-short-request-first", "fix", "a truncated READ as a UDP flow's first datagram (the PIA's "
+     "replay): stock Zeek's silent stop, recorded under C2", "recorded stop", "silent stop", False),
+    ("4.3", "d4u-short-request-second", "same", "the same truncated READ as a UDP flow's second datagram "
+     "(Analyzer::NextPacket): one DNP3 violation, the same reason text", "recorded stop", "recorded stop", True),
+    ("4.4a", "d4u-bad-objects-response-first-tcp", "fix", "4.1's TCP twin, unchanged by (B')",
+     "recorded stop", "parsed on", False),
+    ("4.4b", "d4u-short-request-first-tcp", "same", "4.2's TCP twin, unchanged by (B')",
+     "recorded stop", "recorded stop", False),
+]
+
+# (B')'s controls (condition 4.5; D3's condition 3 in 6907898087): C2 with
+# one control patch each (controls/). A control passes, that is the mutant is
+# killed, when each row named for it reads other than C2's state there.
+# By the rules: the stock catch rethrows with no violation, so a replayed
+# stop is silent (4.1, 4.2); a catch that raises and rethrows raises a second
+# violation in Analyzer::NextPacket on the ordinary path (4.3); a catch with
+# no violation and no rethrow records nothing on either path.
+M_STOCK, M_RERAISE, M_NOVIOL = "zeek-probe-m-stock-catch", "zeek-probe-m-raise-rethrow", "zeek-probe-m-no-violation"
+CONTROLS = [
+    (M_STOCK, ("4.1", "4.2"), "the stock catch: no violation there, and a rethrow"),
+    (M_RERAISE, ("4.3",), "the catch raises the violation and rethrows"),
+    (M_NOVIOL, ("4.1", "4.2", "4.3"), "the catch raises no violation and does not rethrow"),
+]
+
+
+def stop_verdict(want2, want1, c2, c1, same_reason):
+    """A stop row's result from C2's and C1p's judged states. A
+    configuration that did not run makes it unknown."""
+    if "not run" in (c2, c1):
+        return "unknown (not run)"
+    if c2 != want2 or c1 != want1:
+        return "fail"
+    if not same_reason:
+        return "fail (reasons differ)"
+    return "pass"
+
+
+def control_verdict(states, want):
+    """A control's result: `killed` when every named row reads other than
+    C2's state there, `unknown (not run)` when one did not run, else
+    `fail (survived)`."""
+    if any(states[r] == "not run" for r in want):
+        return "unknown (not run)"
+    return "killed" if all(states[r] != want[r] for r in want) else "fail (survived)"
 
 
 def quote(out, case):
@@ -309,7 +458,7 @@ def quote(out, case):
         d = os.path.join(out, case, cfg)
         print(f"\n#### {case} under {cfg}\n")
         print(f"- exit code: {exit_code(d)}")
-        for log in ("conn", "analyzer", "weird", "reporter"):
+        for log in ("conn", "analyzer", "otsec_viol", "weird", "reporter"):
             rs = rows(os.path.join(d, log + ".log"))
             print(f"- {log}.log: " + ("no file" if rs is None else f"{len(rs)} row(s)"))
             for r in rs or []:
@@ -325,7 +474,7 @@ def check(out):
     for case, kind, what, test in EXPECT:
         c2, c1 = (state(os.path.join(out, case, cfg), test) for cfg in (C2, C1P))
         res = verdict(kind, c2, c1)
-        ok = res == "pass" or res.startswith("residual")
+        ok = res == "pass"
         bad |= not ok
         print(f"| {case} | {kind} | {what} | {c2} | {c1} | {res} |")
         if not ok:
@@ -340,6 +489,34 @@ def check(out):
             w = [r.get("name") for r in rows(os.path.join(d, "weird.log")) or []]
             print(f"\n{case} under {cfg}: exit code {exit_code(d)}; " + (
                   "not run" if s is None else f"headers {s[0]}; link rows {s[1]}; DNP3 violations {s[2]}; weirds {w}"))
+    flows = cases()
+    print("\n### (B'): the three-state judge (D1's ruling on #715, conditions 2 to 4)\n")
+    print("| row | case | kind | expectation | C2 | C1p | C0 (quoted) | result |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    details = []
+    for rid, case, kind, what, want2, want1, same in STOPS:
+        st = {cfg: judge(os.path.join(out, case, cfg), flows[case]) for cfg in (C2, C1P, C0)}
+        same_ok = not same or (reasons_of(os.path.join(out, case, C2)) == reasons_of(os.path.join(out, case, C1P))
+                               and len(reasons_of(os.path.join(out, case, C2))) == 1)
+        res = stop_verdict(want2, want1, st[C2][0], st[C1P][0], same_ok)
+        bad |= res != "pass"
+        print(f"| {rid} | {case} | {kind} | {what} (C2: {want2}; C1p: {want1}) | {st[C2][0]} | {st[C1P][0]} | "
+              f"{st[C0][0]} | {res} |")
+        details += [f"- {rid} {case} under {cfg}: {st[cfg][0]}; {st[cfg][1]}" for cfg in (C2, C1P, C0)]
+    print("\n| control | what it changes | rows it must fail | its states there | result |")
+    print("| --- | --- | --- | --- | --- |")
+    want = {rid: w2 for rid, _, _, _, w2, _, _ in STOPS}
+    for cfg, rids, what in CONTROLS:
+        st = {}
+        for rid, case, *_ in STOPS:
+            if rid in rids:
+                st[rid], det = judge(os.path.join(out, case, cfg), flows[case])
+                details.append(f"- {rid} {case} under {cfg}: {st[rid]}; {det}")
+        res = control_verdict(st, {r: want[r] for r in rids})
+        bad |= res != "killed"
+        print(f"| {cfg} | {what} | {', '.join(rids)} | {'; '.join(f'{r}: {st[r]}' for r in rids)} | {res} |")
+    print("\nWhat the judge read (failure_data is never read):\n")
+    print("\n".join(details))
     print("\n### D1's experiment on #715: measured, not judged")
     for case in EXPERIMENT:
         quote(out, case)

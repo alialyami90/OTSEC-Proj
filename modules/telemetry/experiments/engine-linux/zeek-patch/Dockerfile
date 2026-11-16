@@ -75,6 +75,20 @@ COPY --from=build /stage/notices/zeek-9.0.1 /usr/local/zeek/share/otsec-build/no
 COPY COPYING hr23-fc-dispatch.patch /usr/local/zeek/share/otsec-build/notices/
 RUN dpkg-query -W -f '${Package} ${Version}\n' > /usr/local/zeek/share/otsec-build/runtime-packages.txt
 
+# (B')'s three controls (D1's ruling on #715, condition 4.5), never shipped:
+# the patched tree, with one control patch from controls/ applied at a time,
+# rebuilt (DNP3.cc only, then the link) and installed apart. Each control
+# image is C2 with only bin/zeek replaced. No target ships them.
+FROM build AS controls
+COPY controls /src/controls
+RUN --network=none for m in stock-catch raise-rethrow no-violation; do \
+      patch -p1 --fuzz=0 --no-backup-if-mismatch < /src/controls/$m.patch \
+      && ninja -C build \
+      && DESTDIR=/stage/m-$m ninja -C build install \
+      && patch -R -p1 --fuzz=0 --no-backup-if-mismatch < /src/controls/$m.patch \
+      || exit 1; \
+    done
+
 FROM runtime AS c2
 COPY --from=build /stage/c2/usr/local/zeek /usr/local/zeek
 COPY --from=build /stage/c2/record /usr/local/zeek/share/otsec-build
@@ -82,3 +96,12 @@ COPY --from=build /stage/binpac.txt /build-packages.txt /usr/local/zeek/share/ot
 COPY --from=build /stage/notices/zeek-9.0.1 /usr/local/zeek/share/otsec-build/notices/zeek-9.0.1
 COPY COPYING hr23-fc-dispatch.patch /usr/local/zeek/share/otsec-build/notices/
 RUN dpkg-query -W -f '${Package} ${Version}\n' > /usr/local/zeek/share/otsec-build/runtime-packages.txt
+
+FROM c2 AS m-stock-catch
+COPY --from=controls /stage/m-stock-catch/usr/local/zeek/bin/zeek /usr/local/zeek/bin/zeek
+
+FROM c2 AS m-raise-rethrow
+COPY --from=controls /stage/m-raise-rethrow/usr/local/zeek/bin/zeek /usr/local/zeek/bin/zeek
+
+FROM c2 AS m-no-violation
+COPY --from=controls /stage/m-no-violation/usr/local/zeek/bin/zeek /usr/local/zeek/bin/zeek

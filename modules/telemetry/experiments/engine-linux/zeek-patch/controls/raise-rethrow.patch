@@ -1,0 +1,14 @@
+HR-23 (B')'s control `raise-rethrow` (D1's ruling on #715, condition 4.5): applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch, never shipped.
+In DNP3_UDP_Analyzer::DeliverPacket, the catch raises the violation and still rethrows it.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -443,6 +443,7 @@
+         // PIA::ReplayPacketBuffer calls DeliverPacket, not NextPacket, so a
+         // rethrow there left no DNP3 violation. UDP only; TCP is unchanged.
+         AnalyzerViolation(util::fmt("Binpac exception: %s", e.what()));
++        throw;
+     }
+ }
+ 

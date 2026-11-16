@@ -8,7 +8,9 @@
 #                               applies with no fuzz; builds nothing
 #        build.sh build WORK    the same, then both images, and writes
 #                               WORK/images.env (HR23_C1P_IMAGE and
-#                               HR23_C2_IMAGE, each an image ID) and
+#                               HR23_C2_IMAGE, each an image ID, and
+#                               HR23_M_*_IMAGE for (B')'s three
+#                               controls) and
 #                               WORK/zeek-build.txt (the build record),
 #                               then the record checks below
 #        build.sh record-check WORK   the record checks alone, on
@@ -129,10 +131,12 @@ rm -rf "$ctx"
 mkdir -p "$ctx"
 tar xzf "$tarball" -C "$ctx"
 cp "$here/hr23-fc-dispatch.patch" "$here/COPYING" "$ctx/"
+cp -R "$here/controls" "$ctx/"
 
 # 5. Both images from one build stage, which BuildKit builds once and
-# reuses for the second target.
-for v in c1p c2; do
+# reuses for the second target; then (B')'s three controls, each C2 with
+# one control patch's bin/zeek (the Dockerfile's `controls` stage).
+for v in c1p c2 m-stock-catch m-raise-rethrow m-no-violation; do
   docker build --progress=plain --target "$v" --build-arg "BASE_IMAGE=$BASE_IMAGE" -t "otsec-zeek:$v" -f "$here/Dockerfile" "$ctx"
 done
 
@@ -173,6 +177,18 @@ for v in c1p c2; do
     docker run --rm --network none "$id" cat /usr/local/zeek/share/otsec-build/runtime-packages.txt
     echo "files under /usr/local/zeek (sha256):"
     cat "$work/files-$v.txt"
+  } >> "$rec"
+done
+# The controls: never shipped, recorded by image, control patch and binary.
+for m in stock-catch raise-rethrow no-violation; do
+  id=$(docker image inspect -f '{{.Id}}' "otsec-zeek:m-$m")
+  V=$(echo "$m" | tr a-z- A-Z_)
+  echo "HR23_M_${V}_IMAGE=$id" >> "$work/images.env"
+  {
+    echo
+    echo "## control m-$m (C2 with controls/$m.patch; never shipped): image $id"
+    echo "control patch sha256: $(sha256sum < "$here/controls/$m.patch" | cut -c1-64)"
+    echo "zeek binary sha256: $(docker run --rm --network none "$id" sha256sum /usr/local/zeek/bin/zeek | cut -c1-64)"
   } >> "$rec"
 done
 # Not in a pipe: a failed check must stop this script.

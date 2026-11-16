@@ -6,10 +6,15 @@ response; every other code, and a fragment of fewer than 4 application
 octets, a response header's length, as a request (D2's (A) on #715, after
 D1's experiment there).
 
+The UDP analyzer's catch in DNP3.cc raises the DNP3 violation itself and
+does not rethrow, so that a throw on the datagram the PIA replays is
+recorded as on any other datagram ((B'), D1's ruling on #715, 6907928324).
+The TCP analyzer is unchanged.
+
 Against: Zeek 9.0.1, zeek-9.0.1.tar.gz (its SHA-256 is in build.env).
 Applied from the top of the unpacked tree with `patch -p1 --fuzz=0`.
 
-The two files changed are Zeek 9.0.1's, under the BSD-3-Clause licence in
+The three files changed are Zeek 9.0.1's, under the BSD-3-Clause licence in
 Zeek 9.0.1's COPYING, copied verbatim beside this patch as COPYING. The
 lines this patch adds are the project's own (LICENSE.md). No grant to offer
 them upstream exists (D7's N1 on #675; D4-101 item 8).
@@ -96,3 +101,18 @@ them upstream exists (D7's N1 on #675; D4-101 item 8).
  
  type DNP3_Application_Request_Header = record {
  	empty: bytestring &length = 0; # Work-around BinPAC problem.
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -438,7 +438,11 @@
+     catch ( const binpac::Exception& e ) {
+         DiscardFlowBuffer(orig);
+         SetSkip(true);
+-        throw;
++        // OTSEC patch (HR-23, (B')): the violation is raised here, with
++        // Analyzer::NextPacket's text, and the exception is not rethrown.
++        // PIA::ReplayPacketBuffer calls DeliverPacket, not NextPacket, so a
++        // rethrow there left no DNP3 violation. UDP only; TCP is unchanged.
++        AnalyzerViolation(util::fmt("Binpac exception: %s", e.what()));
+     }
+ }
+ 
