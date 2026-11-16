@@ -1,0 +1,9 @@
+# GT-PCAP labels for dnp3-mal-udp-short-13-resp (D6, brief P4-4-HR2325S, deliverable 1): HR-23's malformed set. The builder's, from how the capture was made; tshark's reading is reported beside them by hr23_tshark.py, never used as a label.
+# one row per link-layer unit, in the order sent. flow: the 5-tuple, its first sender first. end: m, the master's end, or o, the outstation's. role: whose the unit is, from the builder, whatever its DIR bit says (design section 4, opening). dir: the DIR bit as built, - for octets that are no frame.
+# side: the side Zeek gives that end, orig or resp (design section 1 items 1 and 2, with C0's likely_server_ports from run 43373373987). label: valid, or the damage the unit's octets carry.
+# packets: the 1-based packet that holds the unit. message, code, objects, app: the APDU the unit carries and its application octets. state: seen when the message is whole, valid and built to parse; absent otherwise, and why. The expectation under each configuration is the pin's (hr23-cases.tsv, hr23-malformed.tsv), not the label.
+capture	flow	end	role	dir	side	unit	label	packets	octets	message	code	objects	app	state	why
+dnp3-mal-udp-short-13-resp	udp 192.0.2.20:20000>192.0.2.14:20000	o	outstation	0	orig	R0	valid	1	17	R0	129	-	4	seen	-
+dnp3-mal-udp-short-13-resp	udp 192.0.2.20:20000>192.0.2.14:20000	m	master	1	resp	X	valid	2	15	X	13	-	2	seen	-
+dnp3-mal-udp-short-13-resp	udp 192.0.2.20:20000>192.0.2.14:20000	m	master	1	resp	Q	valid	3	24	Q	1	g60v2,g60v3,g60v4	11	seen	-
+dnp3-mal-udp-short-13-resp	udp 192.0.2.20:20000>192.0.2.14:20000	o	outstation	0	orig	R(Q)	valid	4	17	R(Q)	129	-	4	seen	-

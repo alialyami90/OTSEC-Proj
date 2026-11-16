@@ -45,6 +45,10 @@ jobs:
         run: cd "$RUNNER_TEMP/prp" && sha256sum -c "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/prp-derived.sha256"
       - name: Read every trailer with tshark, and write the labels
         run: python3 tests/integration/gt_pcap/prp_check.py "$RUNNER_TEMP/prp" "$RUNNER_TEMP/labels"
+      # HR-23's rerun sort (hr23-conditions.tsv, rerun-sides): each public DNP3
+      # capture's flows, and its PRP pairs', by the side Zeek gives each end.
+      - name: Sort the public DNP3 captures' flows by side, against the committed sort
+        run: python3 tests/integration/gt_pcap/hr23_tshark.py sides "$RUNNER_TEMP/labels/sides-public.tsv" tests/fixtures/network/gt-pcap/hr23/sides.tsv "$RUNNER_TEMP"/caps/dnp3-*.pcap "$RUNNER_TEMP"/prp/dnp3-*.pcap
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -188,4 +192,63 @@ jobs:
         with:
           name: gt-pcap-resync-tshark
           path: ${{ runner.temp }}/resync/tshark-beside.tsv
+          if-no-files-found: warn
+  # HR-23's stage-2 cases and malformed set, and the false-positive set built
+  # once for HR-23 and HR-25 (brief P4-4-HR2325S, deliverable 1;
+  # hr23-conditions.tsv, pin-builder): hr23_cases.py and fp_set.py write every
+  # capture frame by frame, the hashes pin the bytes, and the builders' labels
+  # must equal the committed ones. The labels are the builders', not tshark's
+  # (judge-labels): the pinned tshark fails the job on an IPv4, UDP or TCP
+  # checksum, and where its DNP3 reading differs from a label, the list must
+  # equal the committed one, which names each row's cause. The sort of the
+  # local rerun captures' flows by side must equal the committed sort. The
+  # lists are uploaded as an artifact; the captures are rebuilt here, never
+  # committed.
+  hr23:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tshark
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Write HR-23's captures and the false-positive set
+        run: |
+          python3 tests/integration/gt_pcap/hr23_cases.py "$RUNNER_TEMP/hr23"
+          python3 tests/integration/gt_pcap/fp_set.py "$RUNNER_TEMP/fp"
+      - name: Check them against the committed hashes
+        run: |
+          for d in hr23 fp; do
+            cd "$RUNNER_TEMP/$d"
+            sha256sum -c "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/$d/$d.sha256"
+            ls *.pcap | wc -l | grep -qx "$(wc -l < "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/$d/$d.sha256")"
+          done
+      - name: The labels equal the committed ones
+        run: |
+          for d in hr23 fp; do
+            cd "$GITHUB_WORKSPACE/tests/fixtures/network/gt-pcap/$d"
+            labels=$(ls *.tsv | grep -v -e '^tshark-' -e '^sides')
+            for f in $labels; do diff -u "$f" "$RUNNER_TEMP/$d/$f"; done
+            ls "$RUNNER_TEMP/$d"/*.tsv | wc -l | grep -qx "$(echo "$labels" | wc -l)"
+          done
+      - name: The pinned tshark's checksums, and its reading against the expected differences
+        run: |
+          python3 tests/integration/gt_pcap/hr23_tshark.py labels "$RUNNER_TEMP/hr23" tests/fixtures/network/gt-pcap/hr23/tshark-beside-labels.tsv
+          python3 tests/integration/gt_pcap/hr23_tshark.py fp "$RUNNER_TEMP/fp" tests/fixtures/network/gt-pcap/fp/tshark-beside-fp.tsv
+      - name: Sort the local rerun captures' flows by side, against the committed sort
+        run: |
+          python3 tests/integration/gt_pcap/dnp3_cases.py "$RUNNER_TEMP/dnp3"
+          python3 tests/integration/gt_pcap/prp_pairs.py "$RUNNER_TEMP/pairs"
+          python3 tests/integration/gt_pcap/hr23_tshark.py sides "$RUNNER_TEMP/sides-local.tsv" tests/fixtures/network/gt-pcap/hr23/sides.tsv "$RUNNER_TEMP"/dnp3/*.pcap "$RUNNER_TEMP"/pairs/*.pcap "$RUNNER_TEMP"/hr23/dnp3-udp-*.pcap "$RUNNER_TEMP"/hr23/dnp3-tcp-*.pcap
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gt-pcap-hr23-tshark
+          path: |
+            ${{ runner.temp }}/hr23/tshark-beside-labels.tsv
+            ${{ runner.temp }}/fp/tshark-beside-fp.tsv
+            ${{ runner.temp }}/sides-local.tsv
           if-no-files-found: warn

@@ -1,0 +1,3 @@
+# The pinned tshark's DNP3 reading of the false-positive set, where it differs from the builder's label (D6, brief P4-4-HR2325S, deliverable 1). hr23_tshark.py fp writes the same list without the cause column, and the hr23 job of a6-gt-pcap.yml fails when the two differ.
+# tshark is told to read the set's own UDP ports of classes (1) to (3c) and (5)'s random items as DNP3, and reads tcp/20000 as DNP3 by default. It reads each (3b-data) and (3c) item's built code and no other, so the list is empty.
+capture	item	packets	label_code	tshark_codes	note	cause
