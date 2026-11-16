@@ -70,14 +70,14 @@ U-3's other control, "a node that refuses an alert whose `cite` spans two flows"
 | T-8, the intake leg | *`TestBacklogTieInBreak`* |
 | T-10, without its alert-key leg (§2.4): the observations committed carry `node.skewed`, `sensor-clock-skew` is not raised, status counts `skew_latest_windows` and `skew_samples_after_hold`; control, no mark | `TestSkewLatestSampleMarks` |
 | T-13, without (a)'s alert-key leg (§2.4): (a)'s session committed untied with `node.skewed: true`, and the other cases' marks, ties and counts | `TestTieStoredTimeAfterNodeStep`, `TestTieRecordBeforeSensorStep`, `TestTieNodeMovedSinceSample`, and `TestSkewCountPrecedence` for (r) |
-
-**The rule for any other INT-D5 test that asserts an aggregate key** (for example `docs/phase4/D5-sensor-node.md` §1.6's `TestBreakOverBoundNoTie`, under `sensor-records-late`): INT-D5 keeps its mark, tie and commit legs, and its alert-key leg goes to INT-D5b (§2.4).
 | W-8 | `TestTransmittedAfterNodeRestart`, `TestTransmittedFirstHeartbeatEvicted`, `TestEgressDroppedAfterNodeRestart`, `TestEgressNeverCarriedNoAlarm`, `TestCaptureLossAcrossRestart` |
 | K-5 | `TestPoolPerNameCap` |
 | K-6 | `TestPoolWaitOrder` |
 | M-10, the legs other than those in §3 | *`TestStateUnreadClosesConnections`* |
 | R-5, the cursor leg in `Record.Bytes`: a cursor at `MaxLinkCursorBytes` (4,096) saved, one byte over refused | *`TestCursorAtMaxLinkCursorBytes`* |
 | Gap legs V-1 to V-10, V-13, V-14, V-16, V-17 (in `platform/node/sensortest`) | `TestGapNodeAndSensorStopped`, `TestGapLinkCutCovered`, `TestGapQuietLinkCovered`, `TestGapHostStoppedStaysOpen`, `TestGapRestartInLongBreak`, `TestGapLostOwnBudget` and `TestLostGapNotBehindOtherGaps`, `TestGapSilentEngineStaysOpen`, `TestGapChainCount`, `TestGapLostDatabaseReachesBack` (without V-9's re-arm leg, §3), `TestGapNeverBackOpen`, `TestGapSensorFailedOpen`, `TestGapHeldInW`, `TestGapHeartbeatSilence`, `TestGapFlatCountsCarrierUp` |
+
+**The rule for any other INT-D5 test that asserts an aggregate key** (for example `docs/phase4/D5-sensor-node.md` §1.6's `TestBreakOverBoundNoTie`, under `sensor-records-late`): INT-D5 keeps its mark, tie and commit legs, and its alert-key leg goes to INT-D5b (§2.4).
 
 **The intake legs of §15's Contract rows** (confirmed by D4, with A2). P4-4-CC coded the pure checks in `contracts/netobs`; the leg owed here is that the node applies each verdict as the row states (closes, refuses with the connection open, counts, raises). One test per row, in *`TestIntake<Row>`* form (for example *`TestIntakeM1ClosedSet`*):
 
