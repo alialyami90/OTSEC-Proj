@@ -4,7 +4,7 @@ Owner: D7 (brief P4-D7-1, in PR #614, not yet on `main`). Reviewers: D3 (the upd
 
 This file records what the two binaries contain and under which licences, and what a release still lacks. It is an inventory, not a release. Nothing here is compliant, certified or release-ready. No release of OTSEC has ever been built for distribution or shipped to a node.
 
-**Evidence class: `desk`.** Every row of §1 to §6 was read on 2026-11-11 from `main` at `b383a242` (#611), from the Go toolchain's own output (Go 1.27.3, `windows/amd64` host), from the licence files in the Go module cache and the Go distribution, and, for the third-party programs, from upstream files downloaded on the same day. No test was run for those sections. §7 was read on 2026-11-15, at the commits it names, and states its own evidence.
+**Evidence class: `desk`.** Every row of §1 to §6 was read on 2026-11-11 from `main` at `b383a242` (#611), from the Go toolchain's own output (Go 1.27.3, `windows/amd64` host), from the licence files in the Go module cache and the Go distribution, and, for the third-party programs, from upstream files downloaded on the same day. No test was run for those sections. §7 was read on 2026-11-15, at the commits it names, and states its own evidence. §8 was read on 2026-11-16, and states its own evidence.
 
 Paths below are relative to the module cache (`$(go env GOMODCACHE)`) or to the Go distribution (`$(go env GOROOT)`).
 
@@ -343,6 +343,232 @@ CH-35 and `docs/phase4/D5-sensor-node.md` §1.15 item 1 say that the bridge buil
 
 **No release ships while F-027's gate holds** (D4-88, D4-96). F1 to F11 must be closed, and every test owed by a later brief must have passed. F-027 in `docs/verification.md` is the record of its state. This record does not restate it.
 
+## 8. The sensor's engine image: what ships (P4-D7-P1)
+
+Brief P4-D7-P1, for D4-112 item 4.6. Read on 2026-11-16 at `main` `b315695`.
+
+**Evidence class: `desk`.** Every statement here was read from one of three sources, each named where it is used:
+
+- the files in `modules/telemetry/experiments/engine-linux/` at `b315695`;
+- the Zeek 9.0.1 tarball, downloaded from the release URL in `zeek-patch/build.env`, whose SHA-256 equals the pin `fbee2eb5…97f2`;
+- the base image's one layer, fetched from Docker Hub by the digest in `build.env`.
+
+No image was built or run for this section: the machine that read it has no Docker daemon. Nothing here is built, released or distributed.
+
+**Marks.** **For D3 (AP-30, AP-31)** marks a choice that waits for D3's agreement in the PR's comments. **Owed by D4** marks a change to D4's files, which D7 does not edit.
+
+### 8.1 What the image built today carries
+
+The image the HR-23 build makes as C2 (`zeek-patch/Dockerfile`, targets `runtime` and `c2`). The files under `engine-linux/` at `b315695` equal those at `b1490522` (`git diff` prints nothing). D2, D3, D6 and D7 accepted that head (D4-113 item 2), and its dispatch run [43820030979](https://github.com/alialyami90/OTSEC-Proj/actions/runs/43820030979) built it.
+
+- **The base.** `debian@sha256:7378260c0a098d27ac206225db5e7d92b8c7c84ea7afccc86eeb513756bbd392` (`BASE_IMAGE` in `build.env`). The manifest fetched by that digest hashes to the digest. It names one layer, `sha256:37fb86c2a767b88d500c6872195f88078f64765fe0d2f9cc375cc2efbd4c0a41` (29,856,132 bytes), and the layer fetched hashes to it.
+  - The layer is Debian 13.7 (`/etc/debian_version`).
+  - It holds 78 packages from 55 source packages (`/var/lib/dpkg/status`, SHA-256 `0702973f302c065dec7bb21d5c611e5b4d7718afafa7a7e3b9ec139b87e0b77d`). §8.5 lists them.
+- **The runtime stage** installs five packages by name: `libmaxminddb0 libpcap0.8 libssl3 libuv1 libz1`. They are installed by name, not version, after an `apt-get update` at build time, so each build takes the versions the mirror serves that day.
+  - Their versions and dependencies are in the build record's `runtime-packages.txt` (`build.sh`, the record step).
+  - **Not read:** the run's artifact `d4-engine-linux-eval-hr23` (id 14205108829). This session's egress refused the storage host it is served from. So the versions, the dependencies and the licences of what this stage adds are `unknown`.
+  - `libssl3t64` (3.5.7-1~deb13u3) and `zlib1g` (1:1.3.dfsg+really1.3.1-1+b1) are already in the base. Whether the stage upgraded them is `unknown` for the same reason.
+- **The Zeek tree.** C2 copies the whole `DESTDIR` install of the configure line into `/usr/local/zeek`. By the CMake files in the pinned tarball, that install holds, beside `bin/zeek` and the scripts under `share/zeek`:
+  - **The Spicy and HILTI toolchain:** `spicyc`, `spicyz`, `spicy-build`, `spicy-config`, `spicy-driver`, `spicy-dump`, `spicy-precompile-headers`, `hiltic`, `hilti-config` and `hilti-cxx-driver`, with their runtime archives (`auxil/spicy/`, the `install` rules; `src/spicy/spicyz/CMakeLists.txt`). Spicy stays on (the Dockerfile's header; D7's C6).
+  - **Zeek's own build tools and development files:** `binpac`, `bifcl`, `zeek-config`, `zeek-cut`, `paraglob-test`, the headers under `include/`, and the CMake package files.
+  - **Test and operator tools**, which the configure line leaves on. In `CMakeLists.txt` ("On UNIX, install additional Zeek tools by default"), `INSTALL_BTEST`, `INSTALL_ZEEK_CLIENT` and `INSTALL_AUX_TOOLS` default to on outside Windows. The line passes `--disable-btest-pcaps`, but not `--disable-btest`, `--disable-zeek-client` or `--disable-auxtools`. So BTest, `zeek-client` and `zeek-archiver` are installed.
+  - **`adtrace` and `rst`** are installed only in binary-packaging mode or when `zeek-aux` is the top-level project (`auxil/zeek-aux/CMakeLists.txt`, `AddAuxInstallTarget`). `rst` forges TCP RST packets on a raw socket (`auxil/zeek-aux/README`; `rst/rst.c` opens `SOCK_RAW` with `IP_HDRINCL` and calls `sendto`). **Whether C2 holds `bin/rst` is not shown either way:** the record's `files-c2.txt` says, and it was not read.
+  - BTest and `zeek-client` are Python programs, and the runtime stage installs no Python. The Spicy toolchain compiles through a C++ compiler, and the runtime stage has none. By these readings, none of them can run in this image, but all of them ship in it.
+
+  This is the "full install, with toolchain and test tools" of D4-112 item 4.6.
+- **Records and notices** under `/usr/local/zeek/share/otsec-build/`: the build and runtime package lists, `generated.sha256`, `binpac.txt`, and `notices/`. `notices/` holds Zeek's `COPYING`, the patch, and every `COPYING*` and `LICENSE*` file of the tree outside test folders.
+- **Not in the image:** the project's script and ICSNPP. `run.sh` (`zeek_run`) mounts `/exp`, which holds `probe.zeek`, and `/pkgs` read-only at run time. It runs `sh /exp/in-container.sh` inside the image, so the harness needs the base's `sh` and coreutils.
+
+### 8.2 What the shipped engine image carries
+
+Three options:
+
+- **(A) Ship C2 as built.** The measured image is trivially the shipped one. But it ships the toolchain, the test tools, the headers, and possibly `rst`. Each is more for an engine exploit to find on the sensor host (AP-30), and more to inventory, patch and give source for.
+- **(B) A runtime-only engine image on the Debian base.** It is built in the same build, from the same tree, and measured. `/usr/local/zeek` holds only:
+  - `bin/zeek`;
+  - the shared libraries it loads from the tree, as `ldd` in the record names them;
+  - `share/zeek`, the scripts;
+  - any plugin directory the record shows Zeek loading;
+  - `share/otsec-build`, the records and notices.
+
+  The base and the five runtime packages stay as they are.
+- **(C) As (B), without the Debian userland.** The image holds `zeek`, its scripts and records, the shared objects `ldd` names, and the copyright and licence files for each. It has no shell, package manager or Perl.
+
+**D7's recommendation: (C) is the image that ships and that the counted run measures. (B) is the fallback if D3 keeps the userland, or if D4 cannot change the harness before the counted run. For D3 (AP-30, AP-31).** The reasons:
+
+1. An exploit in the engine finds no shell, `apt`, `dpkg` or Perl in its container, and no program the sensor does not run. A Zeek script that calls `system` fails, and the sensor needs none.
+2. Under (C), the copyleft code in the image is the libraries `zeek` loads (§8.3 A). Under (B) or (A), it is most of the Debian base too, and the source the release must carry with the image grows to match (§8.3 F).
+3. **(C) costs a harness change.** `in-container.sh` needs `sh`, so the run must call `zeek` as the entrypoint, one capture per container (owed by D4, §8.4 item 2).
+4. **Neither option removes the GPL from a sensor release.** Under O-7 (the project ships a signed host image with the base system; `docs/phase4/D1-sensor-host-recommendation.md`), the host image carries a Linux kernel and a userland, whatever the engine image holds. §8.3 settles the route for both.
+
+**For D3 (AP-31 (3), AP-32):** whichever option is chosen, the shipped image holds no `rst`, and no other program of the tree that opens a raw socket to send. The ship check (§8.4 item 1) fails on one.
+
+**What this does to "the image measured is the one shipped" (D4-112 item 4.6; `docs/phase4/D4-hr23-design.md` §4.5):**
+
+- It holds only if the counted run runs C2 from the chosen image itself, by its image ID, and the release carries those bytes, not a rebuild.
+- Each dispatch builds again, `apt-get update` takes the day's versions, and nothing shows the build to be reproducible. So the counted run's own job must keep the image (§8.4 item 4).
+- If the image changes after the counted run (for example, from (B) to (C)), it is a new engine for this purpose. HR-23's result reaches it only by its own counted run or a shown reproducible build (design §4.5; D7's N2).
+
+### 8.3 Copyleft components, source and licence texts
+
+Each licence statement below cites the file it was read from. This is not legal advice.
+
+**A. The Debian base (§8.5).** For 69 of the 78 packages, the copyright file names GPL, LGPL or MPL for at least one file. That flag is a coarse reading of each file's `License:` fields, or of its text where it has none (`debian-archive-keyring`, `libcrypt1`, `gcc-14-base`). It is not a per-file mapping.
+
+- **Programs:**
+  - GPL-3+: `bash`, `coreutils`, `grep`, `sed`, `gzip`;
+  - GPL-2+: `dpkg`;
+  - GPL-2.0-only: `mawk`;
+  - GPL-1+ or Artistic: `perl-base`;
+  - the `util-linux` family, `tar`, `findutils`, `diffutils`, `apt`, `sysvinit-utils` and `hostname`, whose copyright files name GPL for some of their files.
+- **What `zeek` loads from the base,** under any option:
+  - `libc6`: LGPL-2.1+ for its main parts, with other licences for some files (`/usr/share/doc/libc6/copyright`, SHA-256 `f5788886…850d`);
+  - `libstdc++6` and `libgcc-s1`: GPL-3+ with the GCC Runtime Library Exception. Their doc folders link to `gcc-14-base`, whose copyright file (SHA-256 `20390f8a…2f79`) carries the exception. The exception covers programs compiled with GCC. It does not lift the GPL's duties for the libraries themselves when they are shipped.
+
+**B. Static linking.** `sqv` is a Rust program. Its `Static-Built-Using` field (`/var/lib/dpkg/status`) names the crates compiled into it, and their source is part of its corresponding source. Any such field among the runtime stage's packages counts the same way. Under (C), `sqv` is not shipped.
+
+**C. The runtime stage's packages.** `unknown` (§8.1).
+
+**D. Zeek and its tree.**
+
+- `COPYING` is BSD-3-Clause. Its SHA-256 `1f984adb…333aa` equals the pin `COPYING_SHA256` and §4's row.
+- `COPYING-3rdparty`, SHA-256 `b815419a…8a4a` (§4), adds the following:
+  - **MPL-2.0 for `scripts/base/protocols/ssl/mozilla-ca-list.zeek`** (SHA-256 `2af43b238928818e2263b95f0e1b6ea51d9f8c5006fc51528c11d156998a8794`). It is installed with the scripts, so it ships in its own source form. Its header names the MPL and the address of its text. D7 reads that as meeting MPL-2.0 §3.1's duty to inform recipients and to say how to get the licence (`/usr/share/common-licenses/MPL-2.0` in the base, SHA-256 `fab3dd6b…3e85`). Under (C), that copy of the licence is gone, and the header's address remains.
+  - **Multifast:** LGPL-3.0-or-later, with its author's "explicit permission" to use it in Zeek under BSD.
+  - **The JSON licence** ("used for Good, not Evil") covers only RapidJSON's `bin/jsonchecker/` (its section of `COPYING-3rdparty`), which is test data the build does not use.
+- **The notices are wider than what ships.** The Dockerfile's `find` also copies the licence files of `auxil/vcpkg/ports/` (for example `ffnvcodec`, `vulkan-sdk-components`), which are Windows packaging and are not built here. That copy states no duty. R-1's notices file must not present them as parts of the image.
+- `zeek` itself is BSD. It is a separate program that links the LGPL `libc6` dynamically. No GPL term reaches `zeek` or OTSEC's binaries from these readings.
+
+**E. The project's patch.** `hr23-fc-dispatch.patch` is OTSEC's own (`LICENSE.md`), changes BSD code, and ships in `notices/`.
+
+**F. The settlement, for D1 to approve with this PR:**
+
+1. **The source goes with the image, and no written offer is made.** Every distribution of the engine image carries, in the same package or from the same place, a source bundle (GPL-2 §3(a); GPL-3 §6(a), or §6(d) for a download). The bundle holds:
+   - for each Debian binary package that any file in the image comes from: the Debian source package at the image's source version (the `.dsc` and the files it names), and each source named in its `Built-Using` and `Static-Built-Using` fields;
+   - the Zeek tarball and its `.asc` at the pins, the patch, the `Dockerfile`, `build.env` and `build.sh`. These are "the scripts used to control compilation and installation" that GPL-2 §3 asks for where a GPL part is built. For Zeek they are a convenience.
+
+   **Why not a written offer.** A written offer (GPL-2 §3(b); GPL-3 §6(b)) binds whoever makes it, for at least three years, to answer any third party. GPL-3 §6(b) also adds "as long as you offer spare parts or customer support". No one holds that role, and the owner has not named one. §6(d) also keeps the source "available for as long as needed". Source in the same package ends the duty at each distribution.
+
+   The texts read: `/usr/share/common-licenses/GPL-2` (SHA-256 `edaef632…33f6`) and `GPL-3` (`3972dc97…6986`) in the base layer.
+2. **The licence texts in the image.**
+   - Under (B), the image keeps `/usr/share/doc/*/copyright`: the slim variant excludes `/usr/share/doc/*` but includes the copyright files (`/etc/dpkg/dpkg.cfg.d/docker`). It also keeps `/usr/share/common-licenses/` (`base-files`), to which the copyright files point.
+   - Under (C), the build copies into the image the copyright file of each package any shipped file comes from, and the licence texts those files point to.
+   - Either way, Zeek's notices stay in `share/otsec-build/notices/`, and R-1's notices file names the engine image and points to them.
+3. **When the bundle is owed.** Before the image is first distributed, which can be earlier than a release. A copy reaching anyone outside the project is a distribution: a release, a registry push, or an artifact of this public repository. D7 did not read GitHub's terms on who can download a public repository's artifacts, so until they are read, an uploaded image counts as distributed.
+   - Today no workflow uploads an image: `d4-engine-linux-eval.yml` uploads records and tables only.
+   - §8.4 item 4 keeps it so unless the bundle travels with the image.
+
+### 8.4 Owed by D4 before HR-23's counted run
+
+D7 edits none of these files. Each item is a check D4 can run.
+
+1. **The shipped image's target, and its check.** D4 builds the image that §8.2 settles, in the same build and from the same tree. C1p and the controls take the same shape, so that the record check's "one tree" comparison still compares like with like. D4 updates that check's list of the files that differ, which today includes two headers under `include/`. The record check also fails if the shipped image's files under `/usr/local/zeek`:
+   - hold anything outside the kept list;
+   - hold any of `rst`, `zkg`, `zeekctl`, `btest*`, `zeek-client`, `spicyc`, `hiltic`, `binpac`, `bifcl` or `include/`.
+2. **Under (C): the harness.** The run calls `zeek` as the container's entrypoint, one capture per container, with no `sh` in the image. The checks that `in-container.sh` makes today (exit code, the per-capture output folder, "not run") move to the host side.
+3. **The counted run names what it measured.** It runs C2 from the shipped image by its image ID. It logs that ID and the `zeek` binary's SHA-256 (design §4.5), and the SHA-256 of each script it loads from `/exp`. The project's script is not in the image, so the release carries it by that hash.
+4. **Keep the measured image.** In the counted run's own job, `docker save` the shipped image by its ID and log the archive's SHA-256. An archive kept that way is the only route from a hosted runner that keeps the measured bytes. Two choices are D1's:
+   - **(i) The archive goes in the job's artifact with the §8.3 F source bundle beside it,** and the owner keeps both offline before the artifact expires. That is 90 days for this workflow: run 43820030979's artifact expires on 2027-02-14. **D7 recommends (i).**
+   - **(ii) No archive is uploaded,** and the shipped image is a rebuild shown to be bit-identical (design §4.5). That needs every package pinned by version and a reproducible build, which nothing yet shows.
+5. **The package record of the shipped image,** so that D7 can complete §8.5 and §8.3 C:
+   - for each package: `dpkg-query -W -f '${Package} ${Version} ${source:Package} ${source:Version}\n'`, with its `Built-Using` and `Static-Built-Using` fields;
+   - the SHA-256 of each `/usr/share/doc/<package>/copyright`;
+   - under (C), `dpkg -S` of each file copied into the image.
+
+After the counted run, D7 records the measured image's ID and archive hash here (design §4.5), with the run.
+
+### 8.5 The base image's packages
+
+One line per package from the base layer's `/var/lib/dpkg/status`. The fields are:
+
+- the binary package and its version;
+- the source package and its version;
+- the SHA-256 of `/usr/share/doc/<package>/copyright`, following the doc folder's link where there is one;
+- `copyleft` where that file names GPL, LGPL or MPL for any file (§8.3 A), and `-` otherwise.
+
+The runtime stage's packages are not here (§8.1).
+
+```text
+apt 3.0.4 apt 3.0.4 77ab918ade9bce20b07524572fc8eab3f8c0cab4d246f282043892aaa9538803 copyleft
+base-files 13.8+deb13u7 base-files 13.8+deb13u7 c84c664bce3a83eaa327bb9e354c0df588bc535b5e95474aab7ca3cce74937cd copyleft
+base-passwd 3.6.7 base-passwd 3.6.7 0f1cde79bd80a75f9029ae9a8c252b642223027ef36f6989c63a8230aae576a7 copyleft
+bash 5.2.37-2+b10 bash 5.2.37-2 06319d84c3e5ed096036f6a9310a030c7e84e50dff2b8a6792285c83ec0ada73 copyleft
+bsdutils 1:2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+coreutils 9.7-3 coreutils 9.7-3 3a63d4b11a7ba4c1c17175072ea28e07b0f80c7bc1ca042b27431fe65a14755b copyleft
+dash 0.5.12-12 dash 0.5.12-12 d98c53f281321baad38164aa9ae6e368a9253be6ec51bd26a759b5e72b326f4a copyleft
+debconf 1.5.91 debconf 1.5.91 57163c71bd8a5289660892827dd0dfaa7fef47f89deedc9dc6711ced7d0a28d7 -
+debian-archive-keyring 2025.1 debian-archive-keyring 2025.1 8f918c0bebd1454a084698a95c09d9a03cec8453dad1fc6eab9e6427da9d33a9 copyleft
+debianutils 5.23.2 debianutils 5.23.2 aeb68ea374f488431b8963df24f05482692edfa70d7556d7e528dd06d255461c copyleft
+diffutils 1:3.10-4 diffutils 1:3.10-4 ac6fcf18142bab7569188ae75b204a9e1c73c050c0f9467adaf080759e516123 copyleft
+dpkg 1.22.22 dpkg 1.22.22 3376ec6f7bebf6b1e55da9d5dc591c73e752b45dccb0488e8365d2cf216a1746 copyleft
+findutils 4.10.0-3 findutils 4.10.0-3 f51541fbdfe15c01cd3fd3a06ad3b74478902d36a958d95b1756434979d97ed5 copyleft
+gcc-14-base 14.2.0-19 gcc-14 14.2.0-19 20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79 copyleft
+grep 3.11-4 grep 3.11-4 42d9b4d610396b1e8d1303dcb9487af3f5a2d2709623cf03a04cf76acdf6c5e3 copyleft
+gzip 1.13-1+deb13u1 gzip 1.13-1+deb13u1 02c197fa26ad056ed2382bb8c3e6323d47edfda4539f727b4ab3f4dbf64ac413 copyleft
+hostname 3.25 hostname 3.25 94189fc5a9a7b7224d96e1a0cfdfe9be0df2018b04bf21d591627ab96b30cad1 copyleft
+init-system-helpers 1.69~deb13u1 init-system-helpers 1.69~deb13u1 7534601cc4fa513804d16490359f5831e7b6a1212da3bbf948bebdd4c8799783 copyleft
+libacl1 2.3.2-2+b1 acl 2.3.2-2 9a2dfb4a5abc7e84be2cc41f1089be665519c9409549296f6c19de57ab1d37c2 copyleft
+libapt-pkg7.0 3.0.4 apt 3.0.4 77ab918ade9bce20b07524572fc8eab3f8c0cab4d246f282043892aaa9538803 copyleft
+libattr1 1:2.5.2-3 attr 1:2.5.2-3 0cbec745d85ea775450b2d54fac55277197f429e52d611f72852ed420450620e copyleft
+libaudit-common 1:4.0.2-2+deb13u1 audit 1:4.0.2-2+deb13u1 6c7011e93f643b112c4cc3622131e28a30477afad6c4f5efe466b13aa7f603cc copyleft
+libaudit1 1:4.0.2-2+deb13u1 audit 1:4.0.2-2+deb13u1 6c7011e93f643b112c4cc3622131e28a30477afad6c4f5efe466b13aa7f603cc copyleft
+libblkid1 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+libbsd0 0.12.2-2 libbsd 0.12.2-2 47eaa031b1741a33a93e7cc8909bfe153acaec7ddff12e4dc7377d0e2ec10e91 -
+libbz2-1.0 1.0.8-6 bzip2 1.0.8-6 832ed535ff3c3d025a8d2348eb1b697b89addcf2eaadbc17650262040b9145e2 copyleft
+libc-bin 2.41-12+deb13u4 glibc 2.41-12+deb13u4 f5788886720a2605a946e81d571e6c8162b09f58d2e2ceb8d36e5768fccd850d copyleft
+libc6 2.41-12+deb13u4 glibc 2.41-12+deb13u4 f5788886720a2605a946e81d571e6c8162b09f58d2e2ceb8d36e5768fccd850d copyleft
+libcap-ng0 0.8.5-4+b1 libcap-ng 0.8.5-4 567997de097e3738564c90e6fe13343b2daae21a7926d6fb161df41322c1840b copyleft
+libcap2 1:2.75-10+deb13u1+b3 libcap2 1:2.75-10+deb13u1 04f9fb974e10f6ca0cd226811f72b3855f8383daad0e5de7adac8d5b0b7796c3 copyleft
+libcrypt1 1:4.4.38-1 libxcrypt 1:4.4.38-1 5a5e7ca0e9f3f9679977e3a3e9ede45ad92885a3297ea78e766979f9866c5a16 copyleft
+libdb5.3t64 5.3.28+dfsg2-9 db5.3 5.3.28+dfsg2-9 8b53da37d73289d9df7317b3a2dbe16491f1fa9fec8b77b86d69704b40ce2c26 copyleft
+libdebconfclient0 0.280 cdebconf 0.280 cf63099896d1c0f6529c41b8d95738e6fea342ffba609187d339c4f38ce36ecc copyleft
+libgcc-s1 14.2.0-19 gcc-14 14.2.0-19 20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79 copyleft
+libgmp10 2:6.3.0+dfsg-3 gmp 2:6.3.0+dfsg-3 7d366aef5ba325150246de1d7820c4c9926cd27ca61a69948492b26cd3b61601 copyleft
+libhogweed6t64 3.10.1-1 nettle 3.10.1-1 344396197142cd506468b20029ea5722d507c980129bb3db4af02424ed6f39c6 copyleft
+liblastlog2-2 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+liblz4-1 1.10.0-4 lz4 1.10.0-4 8dce0cb8c5a4486e4aac00466e4dd4b0b5b28d70efe3b3256ea4594099a8509c copyleft
+liblzma5 5.8.1-1+deb13u2 xz-utils 5.8.1-1+deb13u2 d755588e2d89d7845d0d4e718ac45d49ae9fc53cec4540af105963c20598f9d7 copyleft
+libmd0 1.1.0-2+b1 libmd 1.1.0-2 4365ef6255ad553fce69dd4bc0e093472c5d0e41b8ea493a545cc926ce171aa6 -
+libmount1 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+libnettle8t64 3.10.1-1 nettle 3.10.1-1 344396197142cd506468b20029ea5722d507c980129bb3db4af02424ed6f39c6 copyleft
+libpam-modules 1.7.0-5 pam 1.7.0-5 6b11ef9ab5429d9618cc72e8dfd4efefde363165ef174be0549918e0c44f5dcb copyleft
+libpam-modules-bin 1.7.0-5 pam 1.7.0-5 6b11ef9ab5429d9618cc72e8dfd4efefde363165ef174be0549918e0c44f5dcb copyleft
+libpam-runtime 1.7.0-5 pam 1.7.0-5 6b11ef9ab5429d9618cc72e8dfd4efefde363165ef174be0549918e0c44f5dcb copyleft
+libpam0g 1.7.0-5 pam 1.7.0-5 6b11ef9ab5429d9618cc72e8dfd4efefde363165ef174be0549918e0c44f5dcb copyleft
+libpcre2-8-0 10.46-1~deb13u3 pcre2 10.46-1~deb13u3 e915cde4251f96ec6af107ecd2e194440a4e69440893b0c982802f8a1e4ae40a -
+libseccomp2 2.6.0-2 libseccomp 2.6.0-2 6da0653a365b80ab31478dbfe9e7c358e80d58b6d2b52b4e16b4dbb42d7d9f5c copyleft
+libselinux1 3.8.1-1 libselinux 3.8.1-1 864f1bb189f609075d580b8c4aada16d85a44546884f1687989e1cacc8c56751 copyleft
+libsemanage-common 3.8.1-1 libsemanage 3.8.1-1 fe5876a94047cafbeb8b164fd98304912d94b6028e19415f08b7a8a2f90645fe copyleft
+libsemanage2 3.8.1-1 libsemanage 3.8.1-1 fe5876a94047cafbeb8b164fd98304912d94b6028e19415f08b7a8a2f90645fe copyleft
+libsepol2 3.8.1-1 libsepol 3.8.1-1 78d2a34606a0302057ec499a3b3c07bcbc43ca334064ce4c80891a0f69c8f6c6 copyleft
+libsmartcols1 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+libsqlite3-0 3.46.1-7+deb13u2 sqlite3 3.46.1-7+deb13u2 7b1679aaa97e6e49ec12460eefa85a82b432053bc468dd89dbdb50f2326589f3 copyleft
+libssl3t64 3.5.7-1~deb13u3 openssl 3.5.7-1~deb13u3 6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35 copyleft
+libstdc++6 14.2.0-19 gcc-14 14.2.0-19 20390f8a6f3b1e4d7cb45dd8652dabb259bbef688cbad839bcdb0b9ba7252f79 copyleft
+libsystemd0 257.13-1~deb13u1 systemd 257.13-1~deb13u1 a79e4b379cabbd960bb44f6cc1a069081a3778c59a25ee529b68df5a2cb7d27d copyleft
+libtinfo6 6.5+20250216-2 ncurses 6.5+20250216-2 f838d6048fbc59356b7e56c207a7cb32dc6bf4adea95514a002596bde8f6e1e7 -
+libudev1 257.13-1~deb13u1 systemd 257.13-1~deb13u1 a79e4b379cabbd960bb44f6cc1a069081a3778c59a25ee529b68df5a2cb7d27d copyleft
+libuuid1 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+libxxhash0 0.8.3-2 xxhash 0.8.3-2 81affefe3047c8a88a9e4c94c8c698f51a7e0787e75b58e901bf1f8fcd433f58 copyleft
+libzstd1 1.5.7+dfsg-1 libzstd 1.5.7+dfsg-1 5cec9fef4d3fa7e0371fbef4ec3fc416e0105dc2a9922117f84e825cb11f50f8 copyleft
+login 1:4.16.0-2+really2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+login.defs 1:4.17.4-2 shadow 1:4.17.4-2 305494b6f5f6bb65ead9160077d4fdf45ccdf06de7c958ff96f27a632b8729a3 copyleft
+mawk 1.3.4.20250131-1 mawk 1.3.4.20250131-1 f6b94f461b09398ef192207356d89d7bf59833fe03082a14b910b3c740f2a318 copyleft
+mount 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+ncurses-base 6.5+20250216-2 ncurses 6.5+20250216-2 f838d6048fbc59356b7e56c207a7cb32dc6bf4adea95514a002596bde8f6e1e7 -
+ncurses-bin 6.5+20250216-2 ncurses 6.5+20250216-2 f838d6048fbc59356b7e56c207a7cb32dc6bf4adea95514a002596bde8f6e1e7 -
+openssl-provider-legacy 3.5.7-1~deb13u3 openssl 3.5.7-1~deb13u3 6a7da622fe0637a334d2a8fc470852d2ffb77d9a2b2f930f854e32a41ad6ef35 copyleft
+passwd 1:4.17.4-2 shadow 1:4.17.4-2 305494b6f5f6bb65ead9160077d4fdf45ccdf06de7c958ff96f27a632b8729a3 copyleft
+perl-base 5.40.1-6+deb13u1 perl 5.40.1-6+deb13u1 8adf04cb72ca0719dee8fdb8d711768548d10373905eac21e8a640881c230257 copyleft
+sed 4.9-2+deb13u1 sed 4.9-2+deb13u1 719320e425e8e6da53a55e0fcfa2f2ed9b1332cea16abd65321bd651b2a88568 copyleft
+sqv 1.3.0-3+b2 rust-sequoia-sqv 1.3.0-3 b7ae2cde83ad585eae83cded853d125b034fcef480f6c4cee6d9ddd63327181a copyleft
+sysvinit-utils 3.14-4 sysvinit 3.14-4 53c7ef3839f64b24cc25a0937d11ce228517a48be0cc794f0d67b7e209b2a9ba copyleft
+tar 1.35+dfsg-3.1 tar 1.35+dfsg-3.1 a0a44d41b2a045eb5946a8952487151cfa6ff0cd080bbf4b2eec220751d23024 copyleft
+tzdata 2026f-0+deb13u1 tzdata 2026f-0+deb13u1 cb61132bc0fc7b26ef5a82ee18b2fb644a1362f4f286ed980ff22e408471f59a -
+util-linux 2.41.5-0+deb13u1 util-linux 2.41.5-0+deb13u1 56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6 copyleft
+zlib1g 1:1.3.dfsg+really1.3.1-1+b1 zlib 1:1.3.dfsg+really1.3.1-1 9e5b96d63773a5d177ba264254390f792be07e41748ebd94730981c6cac31cc6 -
+```
+
 ## What this record does not establish
 
 - It is not legal advice, and it does not say that any duty is met.
@@ -350,3 +576,9 @@ CH-35 and `docs/phase4/D5-sensor-node.md` §1.15 item 1 say that the bridge buil
 - Licences of the 15 unlinked modules (§1.3) were not read.
 - For option (a): the Npcap OEM price and terms, Npcap's third-party PDF, Suricata's bundled components, and which of Zeek's third-party parts reach a Windows build are all `unknown`.
 - Fetching the inventory downloaded `github.com/google/uuid` and the 15 unlinked modules into the module cache on the machine that ran it. `go mod verify` passed afterwards.
+- For the engine image (§8):
+  - the versions, dependencies and licences of the runtime stage's packages are `unknown`;
+  - whether C2 holds `bin/rst` is `unknown`;
+  - the Debian packages were not mapped file by file, only flagged from their copyright files;
+  - GitHub's terms on who can download a public repository's artifacts were not read;
+  - no source bundle exists, and no image has been kept from a run.
