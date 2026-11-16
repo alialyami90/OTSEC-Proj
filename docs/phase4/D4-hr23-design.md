@@ -1,6 +1,6 @@
 # D4: HR-23's fix, the design (P4-4-HR23, stage 1)
 
-D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's rulings on them, again for the re-reviews of `9919fd24` and D1's ruling 6866095230, and again for D6's re-review of `52c7592c` under D1's ruling 6866534402, which narrows this PR to option (i). Revised again for D6's re-review of `542a42cf` (6866817721): P1, P2 and N-A. Revised again (round 6) for the re-reviews of `be6b8cea` under D1's ruling 6879529451, items 1 to 7. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. This PR is documents only: nothing here is built or run.
+D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's rulings on them, again for the re-reviews of `9919fd24` and D1's ruling 6866095230, and again for D6's re-review of `52c7592c` under D1's ruling 6866534402, which narrows this PR to option (i). Revised again for D6's re-review of `542a42cf` (6866817721): P1, P2 and N-A. Revised again (round 6) for the re-reviews of `be6b8cea` under D1's ruling 6879529451, items 1 to 7. Brief P4-4-HR23 (`docs/agent-handoffs.md`, "After D4-100"), under D4-100 items 1 to 3. This PR is documents only: nothing here is built or run. Amended on 2026-11-16 in #715 (stage 3) for rule (A), D2's B1 there under D1's ruling 4, at D6's B2 (6907141838): sections 2.3, 4, 4.3, 4.4 and 4.7. The amendment states rules, not results.
 
 - **Evidence class: `desk`.** Every statement below about Zeek's code comes from reading its source, and stage 3's counted run measures it. The earlier results this note cites (section 1 item 5, and section 4.2's Basis column) were measured, `CI-Linux`, `simulated`, and each is named with its run. Every statement about IEEE 1815 is `inference`, because the project holds no text of it (D2 on #675).
 - **What was read.** The release tarball `https://github.com/zeek/zeek/releases/download/v9.0.1/zeek-9.0.1.tar.gz`, fetched over HTTPS on 2026-11-13, SHA-256 `fbee2eb5ee6ebd64ef0db830fbb9fa1d702d58807643c719e8338a59329197f2`. It was unpacked in D4's scratch folder, outside the repository. Its signature file `zeek-9.0.1.tar.gz.asc` has SHA-256 `269e266a0b473b4621448034b98a9f8aafe39f0e53f026ad03bff5312e5bffce`. The tarball matches the pin in `docs/phase4/D4-engine-linux-eval.md` §3 (tag `v9.0.1`): its `DNP3.cc`, `dnp3-protocol.pac`, `dnp3-objects.pac`, `events.bif`, `base/protocols/dnp3/main.zeek` and `dpd.sig` have the SHA-256s that §3 records.
@@ -56,6 +56,7 @@ D4, 2026-11-13. Revised on 2026-11-14 for the four reviews on #675 and D1's ruli
 - **The re-reviews of `9919fd24`:** D7 6865821469, D2 6865838202, D3 6865838688 and D6 6866085736. **D1's rulings on them** are 6865138996 (ids, paths, HR-25) and 6866095230.
 - **The re-reviews of `52c7592c`:** D7 6866209008, D2 6866220392, D3 6866236602 and D6 6866520537. **D1's rulings** are 6866203475 and 6866534402. The second moves HR-25's resync design to its own brief, P4-4-HR25 (section 5.2).
 - **D6's re-review of `542a42cf`:** 6866817721.
+- **On #715 (stage 3):** D1's rulings 6907019858; D2's B1 on `568b5146` (6907020513) and re-review 6907047224; D3's re-review 6907054338; D6's re-review 6907141838 (B2, N8, N9 and the 60 s cut); D3's M1 on #718 (6907164763).
 - **The re-reviews of `be6b8cea`:** D2 6879378145, D7 6879361218, D3 6879466063 and D6 6879522761. **D1's ruling** is 6879529451, items 1 to 7.
 - Section 7 maps each finding to the place where it is answered.
 
@@ -116,7 +117,16 @@ The options were proposed in comment 6862045681 and agreed in comments (D4-99). 
 
 ### 2.3 Option (i): the parser is picked by the function code (ruling 1)
 
-- **The rule.** Each application fragment is parsed by its function code: codes 129, 130 and 131 by `DNP3_Response`, and every other code by `DNP3_Request`. It is not picked by DIR, because a sender sets DIR frame by frame, under a CRC it computes itself (D3's B2; D2's note on Q3).
+- **The rule** (rule (A): D2's B1 on #715, under D1's ruling 4 there). Each application fragment is parsed by its function code and its length:
+  - a fragment of 4 or more application octets whose code is 129, 130 or 131 goes to `DNP3_Response`;
+  - every other fragment goes to `DNP3_Request`: every other code, at any length, and a fragment of 129 to 131 shorter than 4 octets, the length of a response header (control, code and IIN).
+
+  It is not picked by DIR, because a sender sets DIR frame by frame, under a CRC it computes itself (D3's B2; D2's note on Q3). It is not picked by side either, at any length.
+- **(A)'s edges.**
+  - **Exactly 4 octets** with code 129 to 131 is a whole response header with no object, and goes to `DNP3_Response`. The bound is "4 or more", not "more than 4".
+  - **3 octets or fewer** with code 129 to 131 goes to `DNP3_Request`, from either side. Its 2-octet request header parses, and the rest takes the request parser's `default` arm, `unknown: bytestring &restofdata`. A fragment of 0 or 1 octets has no code (below).
+  - **131 (AUTHENTICATE_RESP) of 4 octets or more** goes to `DNP3_Response`, as 129 and 130 do. For the project its header is `documented-untested`, since the SA text is not held (D4-68), and the rule rests on Zeek's own arm for it.
+  - **The length is the reassembled fragment's** as binpac receives it (`app_data`), after the link header. For a fragment of more than one frame, what binpac holds when the bound is read depends on the rewritten unit's buffering, so that case is section 4.7 item 2's `unknown`.
 - **What stays the same.**
   - The buffers stay one per end: `upflow` and `downflow`, chosen by `orig`.
   - Events keep `is_orig` as the connection's side, so no record or field changes.
@@ -135,10 +145,17 @@ The options were proposed in comment 6862045681 and agreed in comments (D4-99). 
   - SAv5: codes 32 and 33 take the request parser, and 131 the response parser, as Zeek's arms already expect.
 - **Two cases with no usable code:**
   - A fragment of 0 or 1 application octets has no code. Both parsers throw on it today (C0 and C1p). Under C2 its result is `unknown`, because `&length` decides it (section 4.7, item 2).
-  - A fragment of 2 or 3 octets with code 129 to 131 throws in the response parser, from either side.
+  - A fragment of 2 or 3 octets with code 129 to 131 has a code but no IIN. Under (A) it goes to the request parser, from either side. From the originator that is the parser C0 and C1p use, so C2 equals C1p. From the responder, C0 and C1p throw in the 4-octet response header, and C2 parses it; that is (A)'s cost (section 4.7, "Both directions").
 
   Both are in the malformed set (section 4.3).
-- **TCP changes too** (ruling 4). The dispatch is in the shared grammar (section 1, item 4). On TCP, it changes the parser only where the code's class disagrees with the side: a response code from the originator, or a request code from the responder. DIR plays no part in it. A connection whose originator is the outstation is one such case. GT-PCAP's TCP cases all have the master open the connection, so stage 2 adds `dnp3-tcp-master-short`, which reaches the changed path, and the TCP inputs of the malformed set (section 4.3).
+- **Where C2's parser differs from C1p's.** C1p picks by side: the response parser for the responder, the request parser for the originator. C2 picks by (A). They differ exactly on:
+  - a fragment of 4 or more octets with code 129 to 131 from the originator;
+  - a fragment with any other code from the responder, at any length;
+  - a fragment of 2 or 3 octets with code 129 to 131 from the responder.
+
+  An originator's 129 to 131 of 2 or 3 octets is not on this list. Section 4.7 sorts expectations by this list, not by whether the code's class disagrees with the side.
+- **A stop that (A) does not remove: a fragment its parser rejects, as a UDP flow's first datagram.** Stock Zeek has this route. A READ whose object header is cut short, sent as a UDP flow's first datagram, stops the analyzer under C0, C1p and C2 alike, and leaves no `analyzer.log`, `weird.log` or `reporter.log` row. The flow stays named `dnp3_udp`, and nothing after that datagram is parsed. It is stock Zeek's residual, in HR-25's row (D3), and a case for P4-4-HR2325S deliverable 3. The patch does not fix it. Which fragments reach that route depends on the parser, so where C2's parser differs from C1p's (the list above), a fragment that C2's parser rejects and C1p's accepts reaches it under C2 alone. Section 4.7, "Both directions", lists those inputs.
+- **TCP changes too** (ruling 4). The dispatch is in the shared grammar (section 1, item 4). On TCP, it changes the parser only on the inputs of the list above: a response code of 4 or more octets from the originator, a request code from the responder, or a short 129 to 131 from the responder. DIR plays no part in it. A connection whose originator is the outstation is one such case. GT-PCAP's TCP cases all have the master open the connection, so stage 2 adds `dnp3-tcp-master-short`, which reaches the changed path, and the TCP inputs of the malformed set (section 4.3).
 
 ## 3. Part (a): the server taken from DIR
 
@@ -169,6 +186,12 @@ The rule, in the project's script. It is CH-49 (C13 0.2), and it applies to DNP3
 D6 writes the cases and the conditions, and pins them before the counted run. Labels come from how each case was built, never from an engine. **A case with a forged DIR takes its labels from the builder's role, not from tshark's `dnp3.ctl.dir`,** since that bit is the one being forged (D2's Q4). This section states what the measurement needs, and the results that section 1 predicts (`desk`; the run settles them).
 
 **Case ids name their transport** (D1 6866534402, point 3; D6's N7 on `52c7592c`). None ends in `-udp` or contains `moved-port`, because `table.py`'s summary columns tag a capture by those strings (`endswith("-udp")`, `"moved-port" in`). The new ids here are `dnp3-udp-relay-write`, `dnp3-udp-relay-restart`, `dnp3-udp-master-short`, `dnp3-udp-dir-spoof`, `dnp3-udp-swap-control`, `dnp3-tcp-master-short` and `dnp3-tcp-dir-spoof`, and each meets the rule. The `dnp3-resync-*` ids go to P4-4-HR25.
+
+**The engine cuts a flow after 60 s of quiet** (CH-53; D4-102 item 6; D1's ruling 1 on #715). The project's script sets `tcp_inactivity_timeout` to `flow_idle`, 60 s (C13 0.1 section 10's `flow_idle_s`), and Zeek's `udp_inactivity_timeout` is 1 minute. Stage 2 writes its cases and conditions for that cut:
+- a flow with a gap of more than 60 s is logged as two connections. The second starts with whichever end sends first after the gap, and on UDP that end is its originator (section 1, item 1);
+- on TCP the second connection has no handshake. How Zeek 9.0.1 attaches `DNP3_TCP` to it, and what it parses there, is not read;
+- results made under Zeek's default 5-minute TCP cut are not comparable with results under this cut;
+- `redef tcp_inactivity_timeout = flow_idle` binds the value when the script loads. So a site's `flow_idle_s` must set `tcp_inactivity_timeout` itself in the sensor's script.
 
 ### 4.1 The configurations, the port arrangement and the control cases
 
@@ -272,7 +295,7 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
 - **In the malformed set,** see "How each input is judged" below.
 - **Part (b)'s new cases** (section 4.2) are judged as C2 against C1p.
 
-**TCP cases that reach the changed path** (ruling 4; D6's B1 on `9919fd24`). The parser changes only where the function code's class disagrees with the side: a code of 129 to 131 from the originator, or any other code from the responder. DIR plays no part (section 2.3). These cases are:
+**TCP cases that reach the changed path** (ruling 4; D6's B1 on `9919fd24`). The parser changes only on section 2.3's list: a code of 129 to 131 with 4 or more application octets from the originator, any other code from the responder, or a 129 to 131 of 2 or 3 octets from the responder. DIR plays no part (section 2.3). These cases are:
 - `dnp3-tcp-master-short` (section 4.2), a connection whose originator is the outstation;
 - the malformed set's TCP inputs below, on a connection the master opens.
 
@@ -318,7 +341,7 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
   - a length of 5 with trailing bytes. **Expected under every configuration: the trailing bytes are dropped, with no weird and no violation** (D6's B2 on `9919fd24`);
   - a length of 6: a transport octet and no application octet;
   - 1 application octet (a control octet and no function code), from each side (section 2.3);
-  - a code of 129 to 131 with 2 or 3 application octets, from each side (section 2.3);
+  - a code of 129 to 131 with 2 or 3 application octets, from each side (section 2.3; under C2 the request parser takes it from either side);
   - bad header and chunk CRCs;
   - a datagram longer than its frame, and two frames in one datagram;
   - a frame of the largest length, 255, whose target is 292 octets, against `MAX_BUFFER_SIZE` 300. **Expected: no `AnalyzerError`.** `AddToBuffer` never copies more than its target, and 292 is the largest target `ProcessData` computes, so the buffer-exceeded error cannot be reached (D6's B2 on `9919fd24`);
@@ -326,7 +349,7 @@ C1p is expected to equal C1 on every row. A row where it does not shows the buil
   - DIR set from both ends, and DIR changing within one flow;
   - **DIR disagreeing with the function code's class** (ruling 3; D2's Q3; D3's B2). One is a master's direct operate (code 5) with a control block (g12v1) and DIR clear, on a UDP flow the master starts and on a TCP connection the master opens. C0 is expected to parse its objects. C2 is expected to parse them too, and a selector keyed by DIR would show here as a regression;
   - the master's 2- and 3-octet messages on each side of the flow;
-  - **the TCP inputs, on a connection the master opens, restated by code and side** (D6's B1 on `9919fd24`; D3's N5). They are a 129 from the originator with 2, 3, and 4 or more application octets, and codes 0, 13 and 2 (with objects) from the responder. Each is sent with DIR set and with DIR clear. Stage 2 pins the expectations for each configuration. Under C0, the 129 from the originator takes the request parser, and the codes from the responder take the response parser. Under C2, each takes its own code's parser. The 2- and 3-octet 129s throw under C2.
+  - **the TCP inputs, on a connection the master opens, restated by code and side** (D6's B1 on `9919fd24`; D3's N5). They are a 129 from the originator with 2, 3, and 4 or more application octets, and codes 0, 13 and 2 (with objects) from the responder. Each is sent with DIR set and with DIR clear. Stage 2 pins the expectations for each configuration. Under C0, the 129 from the originator takes the request parser, and the codes from the responder take the response parser. Under C2, each takes the parser rule (A) gives it (section 2.3): the 129 of 4 or more octets the response parser, the 2- and 3-octet 129s the request parser, as under C0, and the codes from the responder the request parser.
   - **TCP inputs that leave a header held when the connection ends** (D3's B1 and D6's N1 on `be6b8cea`; D1 6879529451, item 1). Each is on a connection the master opens, on its own 5-tuple. They reach the end-of-connection parse of section 4.7 item 1, which runs outside the analyzer's `binpac::Exception` handlers. The four, which cover both of D6's endings (closed by a TCP FIN, which calls `EndpointEOF`; left open until the capture ends, when `Done` runs):
     - a fragment with FIR and without the DNP3 FIN bit, then a TCP FIN from that end;
     - the same fragment with no TCP FIN segment, so that it is still held at the end of the capture, when `Done` runs;
@@ -341,6 +364,7 @@ For each case and configuration, the harness reports:
 - `weird.log`'s count of `dnp3_unexpected_flow_direction`, and of every other `dnp3_` weird by name;
 - `analyzer.log`'s rows, read for `failure_reason` and the analyzer's name only. **It does not read `failure_data`,** which in Zeek 9.0.1 carries up to `Analyzer::Logging::failure_data_max_size` (40) octets of the payload that caused the violation. That is session content beyond the script's (D3's N1, `base/frameworks/analyzer/logging.zeek`);
 - the count of frames whose DIR disagrees with their code's class (section 2.3), from the probe log;
+- the count of application headers with code 129 to 131 raised as a request header (`dnp3_application_request_header`), from either side, from the probe log (D6's N9 on #715). Under C2 these are the fragments of 2 or 3 octets that rule (A) sends to the request parser. An outstation's has DIR clear, so the count above does not show it;
 - the both-ends field (section 3 item 4);
 - both "named" readings (section 4.1);
 - the SHA-256 of the `zeek` binary inside the image (section 4.5).
@@ -408,21 +432,29 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
 ### 4.7 Every expectation that option (i) changes
 
 This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) changes it, judged as C2 against C1p (`desk`). Option (i) changes two things (section 2.2; D6's P1 on `542a42cf`):
-- which binpac parser reads a reassembled fragment, chosen by its code instead of by `is_orig` (section 2.3);
+- which binpac parser reads a reassembled fragment, chosen by its code and length under rule (A) instead of by `is_orig` (section 2.3);
 - the generated code of the top-level unit, `DNP3_PDU`, which reads the header before the dispatch and carries the record-level `&length` that moves.
 
 `ProcessData`, `ParseAppLayer`, the CRC checks, the 11-octet header stage, `AddToBuffer` and `SetSkip` are C++ in `DNP3.cc`, and are unchanged. The lists below sort every expectation into three: what the code rule changes, what depends on the rewritten generated code, and what does not change.
 
-**What changes by the code rule.** A fragment changes its result only when its code's class disagrees with its side: a code of 129 to 131 from the originator, or any other code from the responder.
-- **The twin rule** (D6's P2.1 on `542a42cf`, in place of per-arm results). Under C2, a fragment gives the binpac result that C1p gives for the same bytes from the side its code belongs to, and `is_orig` is the only difference in binpac's events. Stage 2 pins each changed-path input's binpac result from that twin.
+**What changes by the code rule.** A fragment changes its result only when C2's parser differs from C1p's (section 2.3, "Where C2's parser differs from C1p's"):
+- a code of 129 to 131 with 4 or more application octets from the originator;
+- any other code from the responder, at any length;
+- a code of 129 to 131 with 2 or 3 application octets from the responder.
+
+A code of 129 to 131 with 2 or 3 octets from the originator is not changed: C1p and C2 both take the request parser.
+
+- **The twin rule** (D6's P2.1 on `542a42cf`, in place of per-arm results). Under C2, a fragment gives the binpac result that C1p gives for the same bytes from the side whose parser rule (A) picks: the responder's for a 129 to 131 of 4 or more octets, the originator's for every other fragment. `is_orig` is the only difference in binpac's events. Stage 2 pins each changed-path input's binpac result from that twin.
+  - **So the twin of a 2- or 3-octet 129 to 131 from the responder is the same bytes from the originator** under C1p, which the request parser takes: not the side its code's class belongs to. Below 4 octets every code's twin is the originator's.
   - **The twin covers binpac's result only** (D6's N4 (b) on `be6b8cea`). The weirds that `ProcessData`, `AddToBuffer` and `ParseAppLayer` raise, `dnp3_unexpected_flow_direction` among them, and the reporter errors those functions raise, stay those of the input on its own side (section 2.3; "What (i) does not change"). So no weird count and no reporter error is pinned from the twin. Two examples of what the twin gives, both from `dnp3-protocol.pac`:
   - a request code from the responder, with 3 application octets: if its arm is `empty` (codes 0, 13, 14, 15, 19, 23 and 24), it parses. If its arm parses objects (codes 1, 2 and 5, among others), the one octet left is shorter than `Object_Header`'s first two fields (`object_type_field`, 2 octets, and `qualifier_field`, 1 octet), so it throws under C2, as the same bytes do from the originator under C1p;
   - a response code from the originator, with 4 octets or more: its IIN and objects are parsed only as far as the response parser accepts them.
 - **Both directions** (D6's P2.2 on `542a42cf`):
-  - where C1p's violation set `skip` and C2's parser does not throw, C2 goes on parsing the flow, so every later row on that flow changes with it;
-  - where C2's parser throws and C1p's did not, C2 stops the flow where C1p went on. Three inputs do this (D6's N2 on `be6b8cea`):
-    - a code of 129 to 131 with 2 or 3 application octets from the originator. C1p takes the request parser's `default` arm, `unknown: bytestring &restofdata`;
-    - a response from the originator whose objects the response parser rejects. C1p takes the same `default` arm;
+  - where C1p's violation set `skip` and C2's parser does not throw, C2 goes on parsing the flow, so every later row on that flow changes with it. Two kinds of input do this:
+    - a master's message on the responder's side that the response header rejects, the relay-started flow's fault (below);
+    - **a code of 129 to 131 with 2 or 3 application octets from the responder: (A)'s cost.** C1p throws in the 4-octet response header and stops the flow, a recorded violation. C2 takes the request parser, whose `default` arm accepts it, and goes on. The frame stays visible as an `fc` row with code 129 to 131 raised by `dnp3_application_request_header`; section 4.4 counts those rows. Its DIR is clear when an outstation sends it, which agrees with the code's class, so the DIR-against-code count does not show it;
+  - where C2's parser throws and C1p's did not, C2 stops the flow where C1p went on. Two inputs do this (D6's N2 on `be6b8cea`; under (A), an originator's 2- or 3-octet 129 to 131 is no longer one of them):
+    - a code of 129 to 131 with 4 or more application octets from the originator, whose objects the response parser rejects (for example IIN followed by fewer octets than an object header). C1p takes the request parser's `default` arm, `unknown: bytestring &restofdata`. This holds in mid-flow and as a flow's first datagram; on UDP the first datagram is the route of section 2.3, "A stop that (A) does not remove";
     - a request code (any but 129 to 131) from the responder, of 4 octets or more, whose objects the request parser rejects. C1p takes the response parser's `default` arm, `Debug_Byte` (`bytestring &restofdata`), which accepts any bytes. C2 throws in `Request_Objects`.
   - **So every relay-started flow's C2 `pass` depends on two things:** the relay's responses parsing in the response parser, and the master's requests parsing in the request parser. Under C1p the relay's responses take the request parser's `default` arm, which accepts any bytes. The master's requests of 4 octets or more take the response parser's; its 2- and 3-octet requests throw in the 4-octet response header, `DNP3_Application_Response_Header`, which comes before that arm (HR-23's own fault; "What changes", D2's note 6879662396). That holds for section 4.2's C2 column on `dnp3-udp-unsolicited` (the relay's 130), `dnp3-udp-relay-write` and `dnp3-udp-relay-restart` (the relay's first 129), `dnp3-tcp-master-short` (the outstation's 129s), and `dnp3-udp-temp-port`'s second flow (below).
 - **The events.** Under C2, `dnp3_application_request_header` can be raised with `is_orig` false, and `dnp3_application_response_header` with `is_orig` true. The probe's `fc` rows keep the code and `is_orig`, and the judge classes a message by its code (`NOT_REQUESTS`, `table.py`), so its reading does not change. `dnp3.log`'s rows change where these combinations occur (`base/protocols/dnp3/main.zeek`). Those are values in its existing fields, not new fields.
@@ -430,10 +462,10 @@ This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) cha
 **Where it shows:**
 - in section 4.2: the C2 column where it differs from C1, on `dnp3-udp-unsolicited`, `dnp3-udp-relay-write`, `dnp3-udp-relay-restart` and `dnp3-tcp-master-short`;
 - **`dnp3-udp-temp-port`'s second flow** (D6's P2.3 on `542a42cf`). By its labels, the relay starts it: 192.0.2.20:20000 to 192.0.2.14:20000, both ends on 20000, frames 2 and 4. Under C2 its two responses reach the response parser for the first time. Its rows are expected unchanged: section 4.2's C2 `pass` holds if both parse as the responses on `dnp3-udp-req-port` do, where they come from the responder. Its parse path and the probe's `obj` rows change;
-- in section 4.3's malformed set: the 129 to 131 fragments of 2 or 3 octets from the originator, the master's 2- and 3-octet messages on the responder's side, and the TCP inputs restated by code and side;
-- in classes (3b-data) and (3c) of the false-positive set (D6's P2.4 on `542a42cf`). (3b-data) carries a whole fragment with FIN, so binpac parses it, as it parses (3c)'s. Each changes only where its code's class disagrees with its side. So stage 2 states the code and side of each (3b-data) and (3c) item, and pins its result for each;
-- **`dnp3-malformed` and its PRP pair, `dnp3-malformed-prp-a` and `dnp3-malformed-prp-ab`** (`prp-derived.sha256`; D6's P2.5 on `542a42cf`). Section 4.3 reruns both. They are judged per flow, by the rule of the last bullet of "What does not change". In stage 2, D6 labels from the bytes which of their flows hold a fragment whose code disagrees with its side: tshark, with Zeek's sides taken from `conn.log`;
-- **every other capture that section 4.3 reruns** (D6's N3 on `be6b8cea`): the GT-PCAP DNP3 cases, the other PRP pairs (`dnp3-digitalbond-part1` and `-part2` among them, `prp-derived.sha256`), the public captures and E2's corpus rows. Stage 2 sorts the DNP3 flows of every rerun capture the same way, by tshark's codes with Zeek's sides from `conn.log`. A flow on which every fragment's code agrees with its side falls under the last bullet of "What does not change". A flow on which any fragment's code disagrees with its side is pinned by the twin rule.
+- in section 4.3's malformed set: the 129 to 131 fragments of 2 or 3 octets from the responder ((A)'s cost; those from the originator are unchanged against C1p), the master's 2- and 3-octet messages on the responder's side, and the TCP inputs restated by code and side, sorted by section 2.3's list;
+- in classes (3b-data) and (3c) of the false-positive set (D6's P2.4 on `542a42cf`). (3b-data) carries a whole fragment with FIN, so binpac parses it, as it parses (3c)'s. Each changes only where it is on section 2.3's list. So stage 2 states the code, side and application length of each (3b-data) and (3c) item, and pins its result for each;
+- **`dnp3-malformed` and its PRP pair, `dnp3-malformed-prp-a` and `dnp3-malformed-prp-ab`** (`prp-derived.sha256`; D6's P2.5 on `542a42cf`). Section 4.3 reruns both. They are judged per flow, by the rule of the last bullet of "What does not change". In stage 2, D6 labels from the bytes which of their flows hold a fragment on section 2.3's list: tshark's codes and application lengths, with Zeek's sides taken from `conn.log`;
+- **every other capture that section 4.3 reruns** (D6's N3 on `be6b8cea`): the GT-PCAP DNP3 cases, the other PRP pairs (`dnp3-digitalbond-part1` and `-part2` among them, `prp-derived.sha256`), the public captures and E2's corpus rows. Stage 2 sorts the DNP3 flows of every rerun capture the same way, by tshark's codes and application lengths with Zeek's sides from `conn.log`. A flow with no fragment on section 2.3's list falls under the last bullet of "What does not change". A flow with any fragment on that list is pinned by the twin rule.
 
 **What depends on the rewritten generated code** (D6's P1 on `542a42cf`). These rows are `unknown` for C2 against C1p, and the run pins them. A difference on one of them is reported, and judged against section 4.3's bounds and its control for each judgement. It is not called a regression by the last sentence of this section.
 1. **Whether a `link` row is written for a header that binpac holds when its fragment then fails or never completes.** At a fragment's first frame, `ProcessData` hands the 8 header octets to `interp->NewData` before three checks: the length-0 weird, `AddToBuffer`'s target check, and any chunk CRC (`DNP3.cc`). When `dnp3_header_block` is raised for that held header depends on generated code that the patch rewrites (section 4.1; section 5.1). The inputs are:
@@ -465,7 +497,7 @@ This is the complete list that D6's B2 on `52c7592c` asks for, as far as (i) cha
 - the weirds, the reporter errors and `skip` of link lengths 0 to 4, of a fragment without FIR, and of the fragment-size limit, which `ProcessData`, `AddToBuffer` and `ParseAppLayer` raise. Their `link` rows, and the result of a length of 4 with FIR and FIN, are in the list above;
 - classes (1), (2), (3b-link), (4) and (5) of the false-positive set, and (3a)'s weird and `skip`. (3a)'s Service rows are in the list above;
 - `dpd.zeek`'s 10 KiB bound;
-- **every flow on which each fragment's code agrees with its side, judged per flow, not per case** (D6's P2.3 on `542a42cf`). That covers every flow of the GT-PCAP DNP3 cases that the master starts, over TCP and over UDP; the first flow of `dnp3-udp-temp-port`, but not its second, which the relay starts; and every flow of the PRP pairs, the public captures and E2's corpus rows by the same rule. Their multi-frame fragments are in the list above.
+- **every flow with no fragment on section 2.3's list (C2's parser is C1p's for each of its fragments), judged per flow, not per case** (D6's P2.3 on `542a42cf`). That covers every flow of the GT-PCAP DNP3 cases that the master starts, over TCP and over UDP; the first flow of `dnp3-udp-temp-port`, but not its second, which the relay starts; and every flow of the PRP pairs, the public captures and E2's corpus rows by the same rule. Their multi-frame fragments are in the list above.
 
 A difference on any of these is a regression, or a difference in the build when C1p differs from C1 as well (section 4.1).
 
