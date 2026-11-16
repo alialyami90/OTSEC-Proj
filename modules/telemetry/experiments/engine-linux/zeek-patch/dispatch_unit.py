@@ -114,6 +114,22 @@ def cases():
     f.send(False, bytes([0xC1, dnp3.RESPONSE]))
     f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
     out["d4u-short-response-orig"] = f
+    # D3's N3 on #715: (A)'s bound at 3 octets, from the originator (a `< 3`
+    # bound would send it to the response parser, which needs 4).
+    f = Flow("relay")
+    f.send(False, dnp3.response(0))
+    f.send(False, bytes([0xC1, dnp3.RESPONSE, 0x00]))
+    f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
+    out["d4u-short3-response-orig"] = f
+    # D3's N3 and D6's N9 on #715: (A)'s cost, measured. A 2-octet 129 from
+    # the responder on a flow the master starts: C1p's response parser
+    # needs 4 octets and throws; under C2 the request parser takes it, and
+    # the master's next READ is seen.
+    f = Flow("master")
+    f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
+    f.send(False, bytes([0xC0, dnp3.RESPONSE]))
+    f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
+    out["d4u-short-response-resp"] = f
     # D1's experiment (6902545944): two inputs as a flow's first datagram,
     # each followed by whole messages from both ends, over UDP and over TCP.
     # D3's stock control: a READ whose object header is cut after its group
@@ -131,6 +147,16 @@ def cases():
         f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(0))
         out["d4u-short-response-first" + sfx] = f
+        # D3's M1 on #718 (6907164763), at D1's request: a 129 of 4 octets
+        # or more whose objects the response parser rejects (IIN, then one
+        # object octet, shorter than an object header), as the flow's first
+        # datagram. C1p's request parser takes it in its `default` arm;
+        # C2's response parser throws on it.
+        f = Flow("relay", tcp)
+        f.send(False, dnp3.response(0, objects=b""))
+        f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
+        f.send(False, dnp3.response(0))
+        out["d4u-bad-objects-response-first" + sfx] = f
     # A master's direct operate with a control block and DIR clear, on a
     # flow the master starts: the code picks the request parser, so the
     # block is parsed under both builds (a selector keyed by DIR would not).
@@ -208,6 +234,12 @@ EXPECT = [
     ("d4u-short-response-orig", "same", "a 2-octet 129 from the originator, after a whole one, is parsed by the "
      "request parser, and the read after it is seen",
      lambda m, l, v: (True, 129, "req", ()) in m and any(x[:2] == (False, 1) for x in m) and not v),
+    ("d4u-short3-response-orig", "same", "a 3-octet 129 from the originator, after a whole one, is parsed by "
+     "the request parser, and the read after it is seen",
+     lambda m, l, v: (True, 129, "req", ()) in m and any(x[:2] == (False, 1) for x in m) and not v),
+    ("d4u-short-response-resp", "fix", "a 2-octet 129 from the responder is parsed by the request parser, and "
+     "the master's READ after it is seen, with no violation ((A)'s cost: C1p throws on it)",
+     lambda m, l, v: (False, 129, "req", ()) in m and m[-1][:2] == (True, 1) and not v),
     ("d4u-short-response-first", "same", "the same 129 as a UDP flow's first datagram: parsed by the request "
      "parser, and the master's READ after it is seen, with no violation",
      lambda m, l, v: m[:1] == [(True, 129, "req", ())] and any(x[:2] == (False, 1) for x in m) and not v),
@@ -218,8 +250,10 @@ EXPECT = [
     # A residual (D1's experiment on #715): a truncated READ as a UDP flow's
     # first datagram stops stock Zeek with no record (the flow is named
     # dnp3_udp, nothing after the throw is parsed, and no analyzer.log row
-    # is written), C1p and C2 alike. HR-25's row holds it. Measured and
-    # printed, never a pass: a fix that records the stop changes the
+    # is written), C1p and C2 alike. HR-25's row holds it. Printed, never a
+    # pass, and a fail when C2's state differs from C1p's (D6's N7 on
+    # #715): the input's code agrees with its side, so the patch must not
+    # change it. A fix that records the stop under both changes the
     # reading, not the job.
     ("d4u-short-request-first", "residual", "a truncated READ as a UDP flow's first datagram: the silent stop "
      "(the READ's header only, one link row, no DNP3 analyzer.log row)",
@@ -228,10 +262,12 @@ EXPECT = [
      lambda m, l, v: (True, 5, "req", ("g12v1",)) in m and (True, False) in l),
 ]
 
-# D1's experiment (6902545944): measured, not judged. `check` quotes what
-# each of C0, C1p and C2 logged on them.
+# D1's experiment (6902545944), and D3's M1 on #718: measured, not judged.
+# `check` quotes what each of C0, C1p and C2 logged on them.
 EXPERIMENT = ["d4u-short-request-first", "d4u-short-response-first",
-              "d4u-short-request-first-tcp", "d4u-short-response-first-tcp"]
+              "d4u-short-request-first-tcp", "d4u-short-response-first-tcp",
+              # D3's M1 on #718, at D1's request on #715.
+              "d4u-bad-objects-response-first", "d4u-bad-objects-response-first-tcp"]
 
 
 def state(d, test):
@@ -255,9 +291,10 @@ def verdict(kind, c2, c1):
     if c2 not in ("met", "not met") or c1 not in ("met", "not met"):
         return "fail"
     if kind == "residual":
-        # A known stop of stock Zeek's, printed as measured and never a
-        # pass, so that a fix which records it does not fail the job.
-        return "residual (measured, not judged)"
+        # A known stop of stock Zeek's, never a pass, so that a fix which
+        # records it under both builds does not fail the job; but C2 must
+        # equal its control (D6's N7 on #715).
+        return "residual (measured, not judged)" if c2 == c1 else "fail"
     if kind == "same":
         return "pass" if c2 == c1 == "met" else "fail"
     # "fix" and "fix-negative": C2 meets it and the control does not.

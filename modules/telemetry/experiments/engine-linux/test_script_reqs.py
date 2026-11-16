@@ -37,11 +37,15 @@ def test_timer_cap_reading_needs_every_removal_before_the_new_flow():
     assert not sr.all_removed_first(late, [])
 
 
-def test_idle_cut_reading_needs_the_removal_at_the_other_flows_frame():
-    t = [row(1, "new", "A", 40100, 0.001), row(2, "new", "O", 5001, 120.005), row(3, "remove", "A", 40100, 120.005)]
+def test_idle_cut_reading_needs_the_removal_at_the_frame_at_60_010_s():
+    t = [row(1, "new", "A", 40100, 0.001), row(2, "new", "O", 5001, 59.995), row(3, "remove", "A", 40100, 60.015)]
     assert sr.cut_at_flow_idle(t, [])
-    t[2] = row(3, "remove", "A", 40100, 130.005)  # removed only at the end, as at 5 min
+    t[2] = row(3, "remove", "A", 40100, 70.005)  # removed only at its next segment, as at 5 min
     assert not sr.cut_at_flow_idle(t, [])
+    # Removed at the frame at 59.990 s, before the other flow starts, as at
+    # any bound below 59.990 s (D6's N8 on #715).
+    early = [row(1, "new", "A", 40100, 0.001), row(2, "remove", "A", 40100, 59.995), row(3, "new", "O", 5001, 59.995)]
+    assert not sr.cut_at_flow_idle(early, [])
 
 
 def test_timeout_reading_needs_the_first_frame_at_or_after_the_bound():

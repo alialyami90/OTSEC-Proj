@@ -208,6 +208,28 @@ def test_reporter_rows_are_read_by_level_and_message(tmp_path):
     assert table.hr23_readings(d, "zeek-probe-c2")["reporter"] == {"Reporter::ERROR: m": 1}
 
 
+# D6's N9 on #715: a 129 to 131 raised as a request header (D2's (A) under
+# C2) is counted from either side. An outstation's has DIR clear, which
+# agrees with the code, so DIR against code does not count it.
+def test_response_codes_raised_as_request_headers_are_counted_from_either_side(tmp_path):
+    probe = [("link", False, False), ("fc", False, 129), ("link", True, True), ("fc", True, 130)]
+    d = logs(tmp_path, "zeek-probe-c2", probe)
+    p = os.path.join(d, "otsec_probe.log")
+    with open(p) as fh:
+        rows = [json.loads(x) for x in fh if x.strip()]
+    for r in rows:
+        if r["kind"] == "fc":
+            r["ev"] = "dnp3_application_request_header"
+    with open(p, "w") as fh:
+        fh.write("".join(json.dumps(r) + "\n" for r in rows))
+    r = table.hr23_readings(d, "zeek-probe-c2")
+    assert r["resp_as_request"] == 2
+    assert r["disagree"] == 1  # only the originator's, whose DIR is set
+    # Control: the same codes from the response header are not counted.
+    ctl = logs(tmp_path / "ctl", "zeek-probe-c2", probe)
+    assert table.hr23_readings(ctl, "zeek-probe-c2")["resp_as_request"] == 0
+
+
 # D6's held item on #715: the regression C2 against C1p, and C1 against C0,
 # by reg-rows' rule.
 def test_hr23_regression_names_a_row_the_reference_passes_and_the_new_one_fails(monkeypatch, capsys):

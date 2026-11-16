@@ -43,9 +43,16 @@ def test_same_passes_only_when_both_meet_it():
 
 
 def test_a_residual_is_never_a_pass_and_still_fails_on_a_crash():
-    for c2, c1 in (("met", "met"), ("not met", "met"), ("met", "not met")):
-        assert du.verdict("residual", c2, c1) == "residual (measured, not judged)"
+    for c in ("met", "not met"):
+        assert du.verdict("residual", c, c) == "residual (measured, not judged)"
     assert du.verdict("residual", "exit 139", "met") == "fail"
+
+
+def test_a_residual_fails_when_c2_differs_from_its_control():
+    # D6's N7 on #715: the residual input's code agrees with its side, so
+    # the patch must leave its result as C1p's.
+    assert du.verdict("residual", "not met", "met") == "fail"
+    assert du.verdict("residual", "met", "not met") == "fail"
 
 
 def test_not_run_is_unknown_and_a_non_zero_exit_fails():

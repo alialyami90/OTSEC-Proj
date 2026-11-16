@@ -184,6 +184,7 @@ class Logs:
         self.notes = 0
         self.linked = False  # DNP3 servers from the link rows (LINKED)
         self.dir_disagree = 0  # frames whose DIR disagrees with their code's class
+        self.resp_as_request = 0  # fc rows with code 129 to 131 from the request header
         self.flow_notes = collections.defaultdict(list)  # (l4, ends) -> ["file:line text"]
 
     def in_content_order(self):
@@ -249,6 +250,11 @@ def zeek(d, cfg, t):
             if r["kind"] == "fc":
                 if last_dir.get(side) is not None and last_dir[side] == (r["fc"] in RESPONSE_CODES):
                     s.dir_disagree += 1
+                # A response code raised as a request header, from either
+                # side: under C2, a fragment of 129 to 131 shorter than a
+                # response header (D2's (A); D6's N9 on #715).
+                if r["fc"] in RESPONSE_CODES and str(r.get("ev", "")).endswith("request_header"):
+                    s.resp_as_request += 1
                 last_dir[side] = None
                 s.msg(f"otsec_probe.log:{i}", r["ts"], "dnp3", l4, ends(*o, *p), (o if r["is_orig"] else p)[0],
                       r["fc"] not in NOT_REQUESTS, r["fc"])
@@ -1391,6 +1397,7 @@ def hr23_readings(d, cfg):
         out["reporter"][f"{r.get('level') or '?'}: {r.get('message') or '?'}"] += 1
     s = zeek(d, cfg, {"zeek_fc": {}, "zeek_modbus_fc": {}})
     out["disagree"] = s.dir_disagree if cfg in LINKED else None
+    out["resp_as_request"] = s.resp_as_request if cfg in PROBED else None
     out["flows"] = []
     for f in s.flows:
         by_conn = named(f["names"], "dnp3")
@@ -1425,19 +1432,22 @@ def hr23(out):
           "holds dnp3), and `servers from the link rows` is part (a)'s (C1, C1p, C2): the ends the frames' DIR bits "
           "name. `both ends` counts flows whose frames name two servers, which part (a) logs and never suppresses. "
           "`DIR against code` counts application headers whose frame's DIR disagrees with the code's class (DIR set "
-          "on 129 to 131, or clear on any other code). analyzer.log is read for the analyzer and `failure_reason` "
+          "on 129 to 131, or clear on any other code). `129-131 as request` counts application headers with code 129 "
+          "to 131 raised as a request header, from either side: under C2, a fragment shorter than a response header "
+          "(D2's (A) on #715). An outstation's such frame has DIR clear, so `DIR against code` does not count it. "
+          "analyzer.log is read for the analyzer and `failure_reason` "
           "only, never `failure_data`. reporter.log is read for each row's level and message (D4-100 item 2: no "
           "reporter or analyzer error that the control lacks).\n")
     print("| capture | configuration | dnp3_ weirds | analyzer.log (analyzer: reason) | reporter.log (level: message) "
-          "| DIR against code | both ends | DNP3 flows: named by conn.log; servers from the link rows |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+          "| DIR against code | 129-131 as request | both ends | DNP3 flows: named by conn.log; servers from the link rows |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for c in sorted(x for x in os.listdir(out) if os.path.isdir(os.path.join(out, x))):
         for cfg in cfgs:
             d = os.path.join(out, c, cfg)
             why = ran(d)
             if why:
                 if os.path.isdir(d):
-                    print(f"| {c} | {cfg} | | | | | | {why} |")
+                    print(f"| {c} | {cfg} | | | | | | | {why} |")
                 continue
             r = hr23_readings(d, cfg)
             if not (r["weirds"] or r["analyzer"] or r["reporter"] or r["flows"]):
@@ -1447,8 +1457,9 @@ def hr23(out):
                               + ("-" if l is None else ", ".join(f"{h}:{p}" for h, p in sorted(l)) or "none")
                               for e, b, l in r["flows"]) or "-"
             dis = "-" if r["disagree"] is None else r["disagree"]
+            rar = "-" if r["resp_as_request"] is None else r["resp_as_request"]
             print(f"| {c} | {cfg} | {fmt(r['weirds'])} | {fmt({f'{a}: {b}': n for (a, b), n in r['analyzer'].items()})} "
-                  f"| {fmt(r['reporter'])} | {dis} | {r['both'] if cfg in LINKED else '-'} | {flows} |")
+                  f"| {fmt(r['reporter'])} | {dis} | {rar} | {r['both'] if cfg in LINKED else '-'} | {flows} |")
     have = present(out)
     if "zeek-probe-c2" in have:
         c2 = log_fields(out, "zeek-probe-c2")

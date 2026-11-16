@@ -96,16 +96,20 @@ def cases():
     c.udp(h(32, 5000), dst).send(True, b"x", gap_ns=c.at(600 * MS + 120 * S))
     out["req-timer-cap"] = c
     # CH-53 (ii), tcp_inactivity_timeout = flow_idle (60 s): a TCP flow,
-    # then 120 s with no frame on it, then a frame on another flow, then the
-    # TCP flow's next segment. The first connection is removed at the other
-    # flow's frame; at 5 min, it is not.
+    # then frames on another flow at 59.990 s and 60.010 s after the TCP
+    # flow's last frame, then the TCP flow's next segment at 70 s. The
+    # first connection is still there at the frame at 59.990 s and is
+    # removed at the frame at 60.010 s (D6's N8 on #715); at 5 min, it is
+    # not removed there.
     c = Cap()
     t = c.tcp(h(40, 40100), h(41, 8080))
     t.handshake()
     t.send(True, b"hello")
     last = c.clock.ns - c.t0
-    c.udp(h(42, 5001), h(41, 9)).send(True, b"x", gap_ns=c.at(last + 120 * S))
-    t.send(True, b"again", gap_ns=c.at(last + 130 * S))
+    o = c.udp(h(42, 5001), h(41, 9))
+    for t_ns in (last + 59990 * MS, last + 60010 * MS):
+        o.send(True, b"x", gap_ns=c.at(t_ns))
+    t.send(True, b"again", gap_ns=c.at(last + 70 * S))
     out["req-idle"] = c
     # CH-57 (i), the DNP3 timeout on network time: a READ with no response
     # at 0, then frames on another flow at 4.990 s and 5.010 s, and at 60 s.
@@ -194,7 +198,10 @@ def cut_at_flow_idle(t, done):
     if not first or len(other) != 1:
         return False
     gone = [r for r in t if r["ev"] == "remove" and r["uid"] == first[0]["uid"]]
-    return len(gone) == 1 and near(gone[0]["ts"], other[0]["ts"])
+    # The other flow starts at the frame at 59.990 s; its next frame is
+    # 20 ms later, at 60.010 s. Removed there, and not before.
+    return (len(gone) == 1 and gone[0]["n"] > other[0]["n"]
+            and near(gone[0]["ts"], other[0]["ts"] + 0.020))
 
 
 def timeout_at_frame_after_bound(t, done):
@@ -225,7 +232,8 @@ ROWS = [
      "all 600 idle UDP flows are removed before the new flow at the first frame after the spell starts",
      all_removed_first),
     ("CH-53: tcp_inactivity_timeout is flow_idle", "req-idle", "req", "req-ctl-idle",
-     "the TCP flow is removed at the first frame 120 s after its last (flow_idle 60 s)", cut_at_flow_idle),
+     "the TCP flow is still there at a frame 59.990 s after its last, and is removed at the frame at 60.010 s "
+     "(flow_idle 60 s)", cut_at_flow_idle),
     ("CH-57: the DNP3 timeout is an engine timer on network time", "req-dnp3-timeout", "req", "req-ctl-late",
      "the READ with no response completes as `timeout` at the frame at 5.010 s, not at 4.990 s", timeout_at_frame_after_bound),
     ("CH-57: an idle cut does not discard a pending request", "req-dnp3-idle", "req-short", "req-short-ctl-discard",
