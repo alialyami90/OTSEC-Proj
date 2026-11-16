@@ -21,7 +21,7 @@ configuration (mal-reqhdr); a frame whose DIR disagrees with its side names
 the weird (design 1 item 4); each cell reads as one of mal-states' states;
 (B') sets the record of a stop on a flow's first datagram (mal-bprime); and
 every input on which C2's parser throws where C1p's parses on reads so,
-with D3's M2 in mid-flow from each side (mal-midflow).
+with D3's M2 in mid-flow from each side, its stop at X (mal-midflow).
 """
 
 import csv
@@ -374,7 +374,13 @@ def check_bprime(ms, caps):
 RESPONSE_HEADER, REQUEST_HEADER = 4, 2   # control, code and IIN; control and code (design 1 item 4)
 OBJECT_HEADER = 3                        # Object_Header's object_type_field (2) and qualifier_field (1), design 4.7
 RESPONSE_OBJECTS = {129, 130}            # response codes whose arm reads objects; 131's is not read (design 2.3)
-REQUEST_OBJECTS = {1, 2, 5}              # request codes whose arm reads objects (design 4.7's twin rule)
+# The request codes whose arm reads objects that the current inputs reach: every
+# request of 4 or more octets from the responder in the built captures has code 1,
+# 2 or 5, which design 4.7's twin rule names among others. It is not every arm that
+# reads objects: SELECT (3) and OPERATE (4) are among those left out, so check_midflow
+# would not find a later input with one of them until its code is added here (D2's
+# N1 on #724).
+REQUEST_OBJECTS = {1, 2, 5}
 
 
 def c1p_takes_any(code, n, side):
@@ -409,11 +415,27 @@ def check_stops_rule():
     assert [stops_c2_only(c, n, s) for c, n, s, _ in STOPS] == [w for _, _, _, w in STOPS]
 
 
+def check_stop_at_x(m, cap):
+    """D3's N1 on #724: a stop in mid-flow is at X. In both cells, every
+    message the cell names before X reads seen, and it names at least one;
+    the C0 cell names X code, since C0, C1 and C1p read the code of a
+    fragment on design 2.3's list and none of its objects (mal-seen; design
+    1 item 5). The cells name requests and X, never a response, so R(P) is
+    not among them."""
+    order = order_of(cap)
+    before = order[:order.index("X")]
+    for config, t in cells(m):
+        named = [n for n in before if n in t]
+        assert named and all(t[n] == "seen" for n in named), ("a stop before X", m["input"], config)
+    assert tokens(m["c0"]).get("X") == "code", ("X not code under C0", m["input"])
+
+
 def check_midflow(ms, caps):
     """mal-midflow: every input with a fragment on which C2's parser throws
     where C1p's parses on reads parsed on under C0, C1 and C1p and a recorded
     stop under C2; those whose X is not the flow's first data include one
-    from each side over UDP (D3's M2)."""
+    from each side over UDP (D3's M2), and each reads its stop at X (D3's N1
+    on #724)."""
     mid = set()
     for m in ms:
         cap = caps[m["input"]]
@@ -424,6 +446,7 @@ def check_midflow(ms, caps):
         assert got == {"c0": "on", "c2": "recorded"}, (m["input"], got)
         if not x_first(cap):
             mid.update((m["l4"], side) for side in hits)
+            check_stop_at_x(m, cap)
     assert {("udp", "orig"), ("udp", "resp")} <= mid, mid
 
 
@@ -726,3 +749,16 @@ def test_each_check_fails_its_named_control(control, monkeypatch):
     check = CONTROLS[control](monkeypatch)
     with pytest.raises(AssertionError):
         check()
+
+
+def test_the_stop_at_x_fails_a_midflow_cell_the_states_pass(monkeypatch):
+    """D3's N1 on #724, its mutant A: fc1-badobj-mid's C2 cell with P=absent,
+    a stop before X. It still reads a recorded stop, so check_midflow's old,
+    looser form (the states alone, as at 633c53cf) passes it; the stop-at-X
+    check fails it."""
+    ms, caps = malformed_edited("dnp3-mal-udp-fc1-badobj-mid", c2="viol=1; svc=removed; P=absent; Q=absent"), built()
+    with monkeypatch.context() as mp:
+        mp.setitem(globals(), "check_stop_at_x", lambda m, cap: None)
+        check_midflow(ms, caps)
+    with pytest.raises(AssertionError, match="a stop before X"):
+        check_midflow(ms, caps)
