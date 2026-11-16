@@ -29,7 +29,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 - Step 2, PR 1b: #724 (item 3.4).
 - Step 4, D7's P1: #723, to a fresh D7 with D1's rulings (item 4).
 - Step 6, the HR-25 rows: #722 (item 3.2).
-- **D4's queue, in order:** the fuzz PR; reviews of #722 and #724; step 3; finding 1's open item; the HR-25 design PR (with item 5).
+- **D4's queue, in order:** the fuzz PR; reviews of #722 and #724; the TSV hashes in `pins.env` after #724 merges; step 3; finding 1's open item; §8.4's items after #723 merges, before the counted run; the HR-25 design PR (with item 5).
 
 **Earlier checkpoint (D1), 2026-11-16, paused at the owner's word (D4-112, D4-113), superseded by the checkpoint above for what is open; its order stands.** No PR is open, and no agent is running. Merged this session, after D4-109: #708, #710 to #720. P4-NODE-WT is complete. HR-23's build (#715) and its stage-2 cases (#718) are on `main`.
 - **The owner owes** "Waiting on the owner" item 3 (D4-112 item 3.4) and item 18 (D4-112 item 1), including the steps D1 described to the owner directly.

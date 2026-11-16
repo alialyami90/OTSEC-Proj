@@ -2457,7 +2457,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 
 ### P4-4-HR23-FUZZ (D4; D6 reviews, runs and judges; D3 the parse surface; D7 the pins): the sanitizer fuzz workflow
 - Objective and rationale: HR-23 must close on a measured fix before item 4's gate (D4-98). The fuzz workflow goes in D4's own PR, after #715 and before HR-23's counted run (D4-112 item 4.2).
-- Owner, and the reviewers: D4 writes it. D6 reviews the workflow, then runs and judges the campaign after merge. D3 reviews the parse surface (HR-21), D7 the pins and the build.
+- Owner, and the reviewers: D4 writes it. D6 reviews the workflow, then runs and judges the campaign after merge. D3 reviews the parse surface (HR-21), D2 the CRC fix-up and the seeds (DNP3 framing), and D7 the pins and the build.
 - Required inputs and dependencies: `docs/phase4/D4-hr23-design.md` §4.5 and §4.6; D4-112 item 4 and D4-113 item 2; brief P4-4-HR23; `modules/telemetry/experiments/engine-linux/` (`pins.env`, `zeek-patch/`).
 - Files or modules each role may modify: D4, `.github/workflows/d4-zeek-dnp3-fuzz.yml` (new, dispatch-only) and `modules/telemetry/experiments/engine-linux/zeek-patch/`; the design note only where a statement must change, named in the PR.
 - Expected interfaces: no contract change.
@@ -2490,7 +2490,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Deliverable: one documents PR, branch `agent/release-p1-image`: the image's content today, the options for the shipped image, the copyleft components with the source bundle, and what D4 owes before the counted run.
 - Acceptance tests: every component and licence statement cites its source and evidence class; nothing unbuilt is claimed.
 - Owed: D4's items in the new `docs/release.md` §8.4 (#723), before HR-23's counted run.
-- Explicit exclusions: no change to the image build or pins; no keys; nothing published to a registry.
+- Explicit exclusions: no change to the image build or pins; no keys; nothing published to a registry; finding 1 is named by number only.
 - Uncertainty or safety risks: choices that set security policy are D3's (AP-31); D1 rules on the rest (D4-114 item 4).
 - Scratch files: `d7-p1-*`
 
