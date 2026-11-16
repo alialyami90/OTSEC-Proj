@@ -17,9 +17,23 @@
 # hosted image. Only the `prp` job uses apt, for tshark 4.2.2, the labeller
 # that prp_check.py pins; Ubuntu's archive signs it (apt checks the
 # signature), and prp_check.py refuses any other version.
+#
+# The `hr23` job (brief P4-4-HR23, stage 3) runs only when the dispatch sets
+# `hr23_build`. It checks zeek-patch/build.sh's refusals (selftest.sh), builds
+# the project's Zeek 9.0.1 twice from one pinned, signature-checked tree,
+# without and with option (i)'s patch (zeek-patch/), runs D4's unit and
+# negative tests of the patch on both, then the three modes above with the
+# two builds beside the stock image. The images never leave the runner: only
+# the tables, versions and the build record are uploaded. Every HR-23 result
+# is a rehearsal until D6 pins stage 2's cases and conditions.
 name: d4-engine-linux-eval
 on:
   workflow_dispatch:
+    inputs:
+      hr23_build:
+        description: "Also build the project's Zeek (HR-23, option (i)) and run it beside the stock image"
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -63,6 +77,58 @@ jobs:
         with:
           name: d4-engine-linux-eval-prp
           path: |
+            ${{ runner.temp }}/e-d4-03/prp.md
+            ${{ runner.temp }}/e-d4-03/versions.txt
+          if-no-files-found: warn
+  hr23:
+    if: ${{ inputs.hr23_build }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Free disk for the Zeek build (the runner's preinstalled SDKs)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: build.sh refuses every changed input (selftest.sh, before any build)
+        shell: bash
+        run: sh modules/telemetry/experiments/engine-linux/zeek-patch/selftest.sh "$RUNNER_TEMP/hr23-selftest" | tee "$RUNNER_TEMP/hr23-selftest.md"
+      - name: Build C1p and C2 from one pinned tree
+        id: build
+        run: |
+          sh modules/telemetry/experiments/engine-linux/zeek-patch/build.sh build "$RUNNER_TEMP/e-d4-03"
+          cat "$RUNNER_TEMP/e-d4-03/images.env" >> "$GITHUB_ENV"
+      - name: D4's unit and negative tests of the patch, on both builds
+        run: sh modules/telemetry/experiments/engine-linux/run.sh hr23-unit "$RUNNER_TEMP/e-d4-03"
+      - name: Install tshark (the labeller prp_check.py pins)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          sudo apt-get update -q
+          echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
+          tshark -v | head -1
+      - name: Fetch the public captures (pinned SHA-256s)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; run.sh checks each again and drops it, and its rows read not run"
+      - name: GT-PCAP cases under every configuration, the two builds included
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: sh modules/telemetry/experiments/engine-linux/run.sh dnp3 "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - name: Public and extra captures under every configuration, the two builds included
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: sh modules/telemetry/experiments/engine-linux/run.sh public "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - name: PRP pairs under every configuration, the two builds included
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: sh modules/telemetry/experiments/engine-linux/run.sh prp "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: d4-engine-linux-eval-hr23
+          path: |
+            ${{ runner.temp }}/hr23-selftest.md
+            ${{ runner.temp }}/e-d4-03/hr23-unit.md
+            ${{ runner.temp }}/e-d4-03/zeek-build.txt
+            ${{ runner.temp }}/e-d4-03/dnp3.md
+            ${{ runner.temp }}/e-d4-03/public.md
             ${{ runner.temp }}/e-d4-03/prp.md
             ${{ runner.temp }}/e-d4-03/versions.txt
           if-no-files-found: warn

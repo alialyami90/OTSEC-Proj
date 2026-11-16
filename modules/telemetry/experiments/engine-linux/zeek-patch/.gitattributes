@@ -1,0 +1,5 @@
+# Pinned by SHA-256 in build.env: Git must never convert their line endings.
+COPYING -text
+zeek-release-key.asc -text
+hr23-fc-dispatch.patch -text
+controls/*.patch -text

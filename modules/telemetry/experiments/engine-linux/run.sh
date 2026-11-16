@@ -37,6 +37,14 @@
 # the project's script and the Modbus/TCP content signature
 # (modbus-sig.zeek), an experiment that is not adopted. It is S0 in D6's
 # conditions for it, and `zeek-probe`, the approved configuration, is S1.
+#
+# HR-23 (brief P4-4-HR23, stage 3; docs/phase4/D4-hr23-design.md, section
+# 4.1): `zeek-probe` now carries part (a), and is C1. `zeek-probe-c0` is the
+# control C0, the same image with the script as before part (a)
+# (OtsecProbe::log_dir=F). When HR23_C1P_IMAGE and HR23_C2_IMAGE name the
+# images zeek-patch/build.sh built, `zeek-probe-c1p` and `zeek-probe-c2` run
+# too, on those images by ID. A fourth mode, `hr23-unit WORK`, runs D4's unit
+# and negative tests of the patch (zeek-patch/dispatch_unit.py) on them.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
@@ -47,6 +55,56 @@ work=$(cd "$work" && pwd)
 . "$here/pins.env"
 
 # 1. The pins, checked before anything fetched runs.
+# HR-23's two builds, if given, are checked first: each must be an image ID
+# present here, and report Zeek 9.0.1.
+hr23=
+if [ -n "${HR23_C1P_IMAGE:-}" ] || [ -n "${HR23_C2_IMAGE:-}" ]; then
+  for img in "${HR23_C1P_IMAGE:-}" "${HR23_C2_IMAGE:-}"; do
+    case $img in sha256:*) ;; *) echo "HR23_C1P_IMAGE and HR23_C2_IMAGE must both be image IDs (sha256:...)" >&2; exit 1 ;; esac
+    v=$(docker run --rm --network none "$img" zeek --version)
+    [ "$v" = "$ZEEK_VERSION" ] || { echo "HR-23 image $img is not $ZEEK_VERSION: $v" >&2; exit 1; }
+  done
+  hr23=1
+fi
+if [ "$mode" = hr23-unit ]; then
+  [ -n "$hr23" ] || { echo "hr23-unit needs HR23_C1P_IMAGE and HR23_C2_IMAGE" >&2; exit 1; }
+  u=$work/hr23-unit
+  rm -rf "$u"
+  python3 -I "$here/zeek-patch/dispatch_unit.py" write "$u/pcaps"
+  mkdir -p "$u/out"
+  # C0, the stock image with the script as before part (a), for D1's
+  # experiment on #715 (the `*-first` cases are quoted under C0 too).
+  docker pull -q "$ZEEK_IMAGE" > /dev/null
+  zv=$(docker run --rm --network none "$ZEEK_IMAGE" zeek --version)
+  [ "$zv" = "$ZEEK_VERSION" ] || { echo "Zeek image is not $ZEEK_VERSION: $zv" >&2; exit 1; }
+  # (B')'s three controls (D1's ruling on #715, condition 4.5), when build.sh
+  # built them; the check reads a missing control as not run, which fails.
+  ctl=
+  for m in STOCK_CATCH RAISE_RETHROW NO_VIOLATION; do
+    eval "im=\${HR23_M_${m}_IMAGE:-}"
+    [ -z "$im" ] || ctl="$ctl zeek-probe-m-$(echo "$m" | tr A-Z_ a-z-)=$im"
+  done
+  # Every configuration also loads zeek-patch/viol.zeek, which logs each
+  # violation as raised (otsec_viol.log), for the check's three-state judge.
+  for c in "zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F" "zeek-probe-c1p=$HR23_C1P_IMAGE" "zeek-probe-c2=$HR23_C2_IMAGE" $ctl; do
+    cfg=${c%%=*}
+    rest=${c#*=}
+    im=${rest%%=*}
+    arg=
+    [ "$im" = "$rest" ] || arg=${rest#*=}
+    docker run --rm --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
+      "$im" sh /exp/in-container.sh zeek "$cfg" /exp/probe.zeek /exp/zeek-patch/viol.zeek $arg
+  done
+  rc=0
+  { echo "# HR-23: D4's unit and negative tests of option (i)'s patch"; echo
+    echo "D4's own inputs (\`d4u-*\`), not GT-PCAP or stage 2's cases; no counted measurement reads them. Each test's"
+    echo "control is C1p, the same tree without the patch. C0 (the stock image) runs for D1's experiment on #715."
+    echo "(B')'s controls are C2 with one control patch each (zeek-patch/controls/)."; echo
+    python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?; } > "$work/hr23-unit.md"
+  cat "$work/hr23-unit.md"
+  [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/hr23-unit.md" >> "$GITHUB_STEP_SUMMARY"
+  exit $rc
+fi
 docker pull -q "$ZEEK_IMAGE" > /dev/null
 docker pull -q "$SURICATA_IMAGE" > /dev/null
 zv=$(docker run --rm --network none "$ZEEK_IMAGE" zeek --version)
@@ -88,6 +146,14 @@ docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base
   # The engines' own words for reading a capture, cited by the pipe case.
   echo "zeek --help, -r: $(docker run --rm --network none "$ZEEK_IMAGE" zeek --help 2>&1 | grep -e '--readfile' | head -1 || true)"
   echo "suricata --help, -r: $(docker run --rm --network none --entrypoint suricata "$SURICATA_IMAGE" --help 2>&1 | grep -e '-r <path>' | head -1 || true)"
+  if [ -n "$hr23" ]; then
+    echo "HR-23 C1p image: $HR23_C1P_IMAGE"
+    echo "HR-23 C2 image: $HR23_C2_IMAGE"
+    # zeek-patch/build.sh's record, if this run has it: the lines that tie
+    # each image to its binary and its generated parser.
+    grep -E '^(## |zeek --version:|zeek binary sha256:|base image:|tarball:|signature:|patch:|configure:)' "$work/zeek-build.txt" 2> /dev/null || true
+    grep -A2 '^generated parser:' "$work/zeek-build.txt" 2> /dev/null || true
+  fi
 } > "$work/versions.txt"
 # A later mode rewrites versions.txt, so the pipe case's options are kept in
 # a file of their own and copied in each time.
@@ -125,6 +191,7 @@ header() {
   [ "$ref" = refs/heads/main ] || why="${why:+$why; }not refs/heads/main"
   if [ -n "$why" ]; then sig="rehearsal: not the counted result ($why)"; else sig="counted"; fi
   printf '%s\n' "- Run, for E-D4-03's conditions: $kind" "- Run, for P4-4-E2 (the Modbus signature, \`zeek-modbus-sig\`): $sig" \
+    "- Run, for HR-23 (P4-4-HR23; \`zeek-probe-c0\`, \`zeek-probe\` as C1, \`zeek-probe-c1p\`, \`zeek-probe-c2\`): rehearsal: not the counted result (stage 2's cases and conditions are not pinned)" \
     "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch ($pinned)"
   printf '%s\n' "$pins"
   pins=
@@ -137,9 +204,10 @@ header() {
 # and the runner's own user, which is not root (D3 on #630). The file runs
 # keep Docker's defaults, which is what E-D4-03 first ran.
 locked=
+img=$ZEEK_IMAGE
 zeek_run() {
   docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
-    "$ZEEK_IMAGE" sh /exp/in-container.sh "$@"
+    "$img" sh /exp/in-container.sh "$@"
 }
 suricata_run() {
   docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
@@ -154,6 +222,14 @@ engines() {
   zeek_run zeek zeek-probe /exp/probe.zeek
   zeek_run zeek zeek-icsnpp /pkgs/icsnpp-dnp3/scripts /pkgs/icsnpp-modbus/scripts
   zeek_run zeek zeek-modbus-sig /exp/probe.zeek /exp/modbus-sig.zeek
+  zeek_run zeek zeek-probe-c0 /exp/probe.zeek OtsecProbe::log_dir=F
+  if [ -n "$hr23" ]; then
+    img=$HR23_C1P_IMAGE
+    zeek_run zeek zeek-probe-c1p /exp/probe.zeek
+    img=$HR23_C2_IMAGE
+    zeek_run zeek zeek-probe-c2 /exp/probe.zeek
+    img=$ZEEK_IMAGE
+  fi
   suricata_run suricata suricata
   suricata_run suricata suricata-midstream --set stream.midstream=true
 }
@@ -182,6 +258,25 @@ fifos() {
   locked="--cap-drop ALL --security-opt no-new-privileges --user $(id -u):$(id -g)"
   suricata_run suricata-fifo suricata-fifo
   locked=
+}
+
+# CH-53's and CH-57's requirements on the script (D4-102 item 6; D1's
+# ruling 1 on #715): script_reqs.py's captures under its configurations,
+# each a test or the control that undoes one requirement, on the stock
+# image. Prints its table; returns non-zero on a row that did not pass.
+reqs() {
+  r=$work/reqs
+  rm -rf "$r"
+  python3 -I "$here/script_reqs.py" write "$r/pcaps"
+  pcaps=$r/pcaps
+  out=$r/out
+  mkdir -p "$out"
+  python3 -I "$here/script_reqs.py" configs > "$r/configs.txt"
+  while read -r cfg args; do
+    # $args is word-split on purpose: each word is one Zeek argument.
+    zeek_run zeek "$cfg" /exp/probe.zeek /exp/script-reqs/reqtest.zeek $args < /dev/null
+  done < "$r/configs.txt"
+  python3 -I "$here/script_reqs.py" check "$out"
 }
 
 # P4-4-E2 (D4-90): the Modbus signature against D6's conditions for it
@@ -291,9 +386,16 @@ case $mode in
     fi
     engines "$work/dnp3" "$work/out-dnp3"
     pipes "$work/dnp3" "$work/out-dnp3-pipe"
-    { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; } > "$work/dnp3.md"
+    { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; python3 -I "$here/table.py" hr23 "$work/out-dnp3"; } > "$work/dnp3.md"
     fifos "$work/dnp3" "$work/out-dnp3-pipe"
     python3 -I "$here/table.py" fifo "$work/out-dnp3" "$work/out-dnp3-pipe" >> "$work/dnp3.md"
+    reqrc=0
+    reqs >> "$work/dnp3.md" || reqrc=$?
+    if [ "$reqrc" != 0 ]; then
+      cat "$work/dnp3.md" >&2
+      echo "CH-53's or CH-57's requirements on the script: a row did not pass (exit $reqrc); the job fails" >&2
+      exit 1
+    fi
     ;;
   public)
     cache=$3
@@ -317,7 +419,7 @@ case $mode in
       echo "$sha  $work/public/$n" | sha256sum -c --status || { echo "MISMATCH or missing: $n"; rm -f "$work/public/$n"; }
     done
     engines "$work/public" "$work/out-public"
-    { header; python3 -I "$here/table.py" public "$work/out-public"; } > "$work/public.md"
+    { header; python3 -I "$here/table.py" public "$work/out-public"; python3 -I "$here/table.py" hr23 "$work/out-public"; } > "$work/public.md"
     ;;
   prp)
     cache=$3
@@ -338,7 +440,8 @@ case $mode in
     rc=0
     header > "$work/prp.md"
     python3 -I "$root/modules/telemetry/experiments/prp-engines/compare.py" "$work/out-prp" "$work/labels" \
-      zeek zeek-probe zeek-icsnpp zeek-modbus-sig suricata suricata-midstream >> "$work/prp.md" || rc=$?
+      zeek zeek-probe zeek-icsnpp zeek-modbus-sig zeek-probe-c0 ${hr23:+zeek-probe-c1p zeek-probe-c2} \
+      suricata suricata-midstream >> "$work/prp.md" || rc=$?
     echo "compare.py exit code: $rc" >> "$work/prp.md"
     notrun=$(grep -c '| not run |$' "$work/prp.md" || true)
     case $rc in

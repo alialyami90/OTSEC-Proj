@@ -1,0 +1,118 @@
+OTSEC patch for HR-23, option (i): Zeek 9.0.1's DNP3 analyzer picks the
+request or the response parser by the fragment's function code, not by the
+side of the connection (docs/phase4/D4-hr23-design.md, section 2.3; D1's
+ruling 1 on #675, D4-101 item 5). Codes 129 to 131 are parsed as a
+response; every other code, and a fragment of fewer than 4 application
+octets, a response header's length, as a request (D2's (A) on #715, after
+D1's experiment there).
+
+The UDP analyzer's catch in DNP3.cc raises the DNP3 violation itself and
+does not rethrow, so that a throw on the datagram the PIA replays is
+recorded as on any other datagram ((B'), D1's ruling on #715, 6907928324).
+The TCP analyzer is unchanged.
+
+Against: Zeek 9.0.1, zeek-9.0.1.tar.gz (its SHA-256 is in build.env).
+Applied from the top of the unpacked tree with `patch -p1 --fuzz=0`.
+
+The three files changed are Zeek 9.0.1's, under the BSD-3-Clause licence in
+Zeek 9.0.1's COPYING, copied verbatim beside this patch as COPYING. The
+lines this patch adds are the project's own (LICENSE.md). No grant to offer
+them upstream exists (D7's N1 on #675; D4-101 item 8).
+
+--- a/src/analyzer/protocol/dnp3/dnp3-analyzer.pac
++++ b/src/analyzer/protocol/dnp3/dnp3-analyzer.pac
+@@ -25,6 +25,17 @@
+ flow DNP3_Flow(is_orig: bool) {
+ 	flowunit = DNP3_PDU(is_orig) withcontext (connection, this);
+ 
++	# OTSEC patch (HR-23, option (i)): true when the fragment holds a whole
++	# response header (4 octets) and its function code, its second octet,
++	# is 129 (RESPONSE), 130 (UNSOLICITED_RESPONSE) or 131 (AUTHENTICATE_RESP).
++	function is_response_code(app: const_bytestring): bool
++		%{
++		if ( app.length() < 4 )
++			return false;
++
++		return app[1] == 0x81 || app[1] == 0x82 || app[1] == 0x83;
++		%}
++
+ 	function get_dnp3_header_block(len: uint16, ctrl: uint8, dest_addr: uint16, src_addr: uint16): bool
+ 		%{
+ 		if ( ::dnp3_header_block )
+--- a/src/analyzer/protocol/dnp3/dnp3-protocol.pac
++++ b/src/analyzer/protocol/dnp3/dnp3-protocol.pac
+@@ -2,10 +2,20 @@
+ # This is Binpac code for DNP3 analyzer by Hui Lin.
+ #
+ 
+-type DNP3_PDU(is_orig: bool) = case is_orig of {
+-	true    ->  request:  DNP3_Request;
+-	false   ->  response: DNP3_Response;
+-} &byteorder = bigendian;
++# OTSEC patch (HR-23, option (i)): the parser is picked by the function
++# code, not by the side. Codes 129 to 131 are parsed as a response, every
++# other code (and a fragment shorter than a response header) as a request. The link
++# header stays the unit's first field, and the unit's length stays
++# 9 + len - 5 - 1, as in Zeek 9.0.1's DNP3_Request and DNP3_Response.
++type DNP3_PDU(is_orig: bool) = record {
++	addin_header: Header_Block;  ## added by Hui Lin in Zeek code
++	app_data:     bytestring &restofdata;
++} &let {
++	is_response: bool = $context.flow.is_response_code(app_data);
++	request:  DNP3_Request  withinput app_data &if(! is_response);
++	response: DNP3_Response withinput app_data &if(is_response);
++} &byteorder = bigendian
++  &length= 9 + addin_header.len - 5 - 1;
+ 
+ type Header_Block = record {
+ 	start_1: uint8 &enforce(start_1 == 0x05);
+@@ -17,7 +27,6 @@
+ } &byteorder = littleendian;
+ 
+ type DNP3_Request = record {
+-	addin_header: Header_Block;  ## added by Hui Lin in Zeek code
+ 	app_header: DNP3_Application_Request_Header;
+ 	data: case ( app_header.function_code ) of {
+ 		CONFIRM -> none_confirm: empty;
+@@ -56,15 +65,13 @@
+ 		AUTHENTICATE_ERR  -> auth_err: Request_Objects(app_header.function_code)[] &transient;
+ 		default -> unknown: bytestring &restofdata;
+ 	};
+-} &byteorder = bigendian
+-  &length= 9 + addin_header.len - 5 - 1;
++} &byteorder = bigendian;
+ 
+ type Debug_Byte = record {
+ 	debug: bytestring &restofdata;
+ };
+ 
+ type DNP3_Response = record {
+-	addin_header: Header_Block;
+ 	app_header: DNP3_Application_Response_Header;
+ 	data: case ( app_header.function_code ) of {
+ 		RESPONSE -> response_objects: Response_Objects(app_header.function_code)[] &transient;
+@@ -72,8 +79,7 @@
+ 		AUTHENTICATE_RESP -> auth_response: Response_Objects(app_header.function_code)[] &transient;
+ 		default -> unknown: Debug_Byte;
+ 	};
+-} &byteorder = bigendian
+-  &length= 9 + addin_header.len - 5 - 1;
++} &byteorder = bigendian;
+ 
+ type DNP3_Application_Request_Header = record {
+ 	empty: bytestring &length = 0; # Work-around BinPAC problem.
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -438,7 +438,11 @@
+     catch ( const binpac::Exception& e ) {
+         DiscardFlowBuffer(orig);
+         SetSkip(true);
+-        throw;
++        // OTSEC patch (HR-23, (B')): the violation is raised here, with
++        // Analyzer::NextPacket's text, and the exception is not rethrown.
++        // PIA::ReplayPacketBuffer calls DeliverPacket, not NextPacket, so a
++        // rethrow there left no DNP3 violation. UDP only; TCP is unchanged.
++        AnalyzerViolation(util::fmt("Binpac exception: %s", e.what()));
+     }
+ }
+ 
