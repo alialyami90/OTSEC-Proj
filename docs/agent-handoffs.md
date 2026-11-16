@@ -2403,7 +2403,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - `docs/phase4/D5-sensor-node.md` §1.4, §1.6, §1.8, §1.9 and §1.15;
   - P4-4-CC's "Owed" table, the rows whose owner is this brief; D4-104 item 1.3, D4-106 item 1.6, D4-107 items 3.1 and 5.2, and D4-108 item 4;
   - `platform/node` (`netsensor.go`, `sensormgr.go`, `sensor.go`), and `modules/detection/`.
-- Files or modules each role may modify: D5, `platform/node/` and its test packages. D4, `modules/detection/` and `contracts/netobs/` (D1 authorizes the C13 code change named below; no contract text changes).
+- Files or modules each role may modify: D5, `platform/node/`, `platform/sensorlink/` (D4-112 item 7) and their test packages. D4, `modules/detection/` and `contracts/netobs/` (D1 authorizes the C13 code change named below; no contract text changes).
 - Expected interfaces: C13 0.2 and 0.3, C4 0.4 and C5 as on `main`. No contract text changes; a gap found in a contract is raised to D1, never filled in code.
 - Deliverable:
   1. **The split first** (D4-99): D5 and D4 agree in comments on one tracking PR which owed test each writes and the order of their PRs, and D1 rules. No intermediate `main` weakens a guarantee.
