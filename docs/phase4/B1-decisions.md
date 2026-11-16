@@ -2636,7 +2636,7 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
 
 ## D4-114: work resumed and paused again, four briefs, and D1's rulings on the shipped image (D1, 2026-11-16)
 
-Evidence class: `desk` for the rulings and records; `desk` for D4's and D6's local test runs named on each PR; `CI-Linux` and `CI-Windows` for the runs named on #724. Nothing merged in this session.
+Evidence class: `desk` for the rulings and records; `desk` for D4's and D6's local test runs named on each PR; `CI-Linux` for #724's runs that had finished at the pause (its Windows `go` and `integration` runs had not). Nothing merged in this session.
 
 - **1. Work resumed at the owner's word, then paused at the owner's word the same day.** No agent is running. The session ran in a cloud container, not on the owner's PC. The owner allowed `agent/*` branches for it.
 - **2. Briefs issued** (recorded in `docs/agent-handoffs.md`, "After D4-113"): P4-4-HR23-FUZZ (D4), P4-4-HR25-ROWS (D3), P4-D7-P1 (D7), and P4-4-HR2325S PR 1b (D6) under its brief.
@@ -2646,7 +2646,7 @@ Evidence class: `desk` for the rulings and records; `desk` for D4's and D6's loc
   3. **#723, P4-D7-P1** (D7) at `22a6540`: records-auditor's notes are fixed. D3's review (6931175701): B1 and N1 to N6, each to be fixed in this PR. D6's review: see item 4.4.
   4. **#724, P4-4-HR2325S PR 1b** (D6) at `633c53cf`: complete. D4 and D2 review the labels and D3 the parse surface. Open: whether TCP twins of the two inputs are added (the PR body). D4 then pins the two TSVs' new hashes in `pins.env`.
 - **4. D1's rulings on #723** (D3's 6931175701; D4-98's delegation).
-  1. **The shipped image is option (C)**, a runtime-only Zeek tree with no Debian userland, as D3 chose. Option (B) is the fallback only if the ship check finds a setuid or setgid file or a file capability (D3's N1). No shipped image carries `rst`. (C) does not replace SL-3 (D3's N6).
+  1. **The shipped image is option (C)**, a runtime-only Zeek tree with no Debian userland, as D3 chose. Option (B) is a fallback only on D3's N1 condition: the ship check fails on any setuid or setgid file or file capability, and under (B) those programs are removed or their bits cleared. No shipped image carries `rst`. (C) does not replace SL-3 (D3's N6).
   2. **The measured image's durable home is the owner's offline storage**, two copies outside the checkout, taken before the job's artifact expires. A GitHub Release asset is not used: it would be a public, unsigned, irrevocable copy of an image O-7 says ships signed, before a release key holder is named. This is a step for the owner ("Waiting on the owner").
   3. **The job's artifact in this public repository is itself a distribution.** So the source bundle (§8.4 item 7) is complete before the counted run uploads the image.
   4. **D6's review of `22a6540` was stopped by the pause and not posted.** Its provisional points, kept here because its scratch files do not survive the session, go to D7 with D3's:
@@ -2655,7 +2655,7 @@ Evidence class: `desk` for the rulings and records; `desk` for D4's and D6's loc
      - item 1's kept-list check covers only `/usr/local/zeek`, so nothing checks (C)'s "no shell, package manager or Perl";
      - §8.1's errors: `hilti-cxx-driver` is built only on Windows; and the runtime stage installs 4 new packages, not five, upgrades `zlib1g`, leaves `libssl3t64` unchanged, and installs no `bin/rst` or `bin/adtrace` (job 133140767081, `CI-Linux`).
 
-     A fresh D6 reviews the head D7 pushes, from the start.
+     A fresh D6 reviews the head D7 pushes, from the start, and D3 confirms its B1 and notes are met.
   5. D3 then edits AP-30 (4) and AP-31 (1) to cite §8.2 (D3's offer in 6931175701).
 - **5. Carried to D4's HR-25 design PR:** `docs/phase4/D4-hr25-design.md` §8 still calls the inserted middle segment "counted", while HR-25's row says F1's route is quiet today (records-auditor on #722).
 - **6. Three lessons from earlier sessions, recorded at the owner's word** (HANDOFF, "Working in the CLI"):

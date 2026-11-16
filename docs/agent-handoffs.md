@@ -2469,6 +2469,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Scratch files: `d4-hr23fuzz-*`
 
 ### P4-4-HR25-ROWS (D3; records-auditor first, then D4 and D6 review): the HR-25 and R-1 rows
+- Owner, and the reviewers: D3 writes it. records-auditor reads it first; D4 and D6 review together on one head.
 - Objective and rationale: D4-112 item 6 and D4-113 item 2.3. The rows merge before D4's HR-25 design PR, so each is true at every head.
 - Required inputs and dependencies: those items; `docs/phase4/D4-hr23-design.md` §4.6, §4.7 and §5; `docs/phase4/D4-hr25-design.md`.
 - Files or modules each role may modify: D3, `docs/threat-model.md`.
@@ -2481,13 +2482,14 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Scratch files: `d3-hr25rows-*`
 
 ### P4-D7-P1 (D7 with D3 under AP-31; records-auditor first, then D3 and D6 review): what the shipped sensor image carries
+- Owner, and the reviewers (CLAUDE.md §5.6): D7 writes it. records-auditor reads it first; D3 (the update path's security, and AP-31's choices) and D6 (independent tests) review together.
 - Objective and rationale: D4-112 item 4.6. What the shipped image carries, and the source offer and licence text that ADR-0009 requires, are settled before HR-23's counted run. The image measured is the one shipped.
 - Required inputs and dependencies: ADR-0009; `docs/release.md`; `docs/phase4/D4-hr23-design.md` §4.5; the image build in `modules/telemetry/experiments/engine-linux/`; AP-30 to AP-32.
 - Files or modules each role may modify: D7, `docs/release.md`.
 - Expected interfaces: none.
 - Deliverable: one documents PR, branch `agent/release-p1-image`: the image's content today, the options for the shipped image, the copyleft components with the source bundle, and what D4 owes before the counted run.
 - Acceptance tests: every component and licence statement cites its source and evidence class; nothing unbuilt is claimed.
-- Owed: D4's items in `docs/release.md` §8.4, before HR-23's counted run.
+- Owed: D4's items in the new `docs/release.md` §8.4 (#723), before HR-23's counted run.
 - Explicit exclusions: no change to the image build or pins; no keys; nothing published to a registry.
 - Uncertainty or safety risks: choices that set security policy are D3's (AP-31); D1 rules on the rest (D4-114 item 4).
 - Scratch files: `d7-p1-*`
