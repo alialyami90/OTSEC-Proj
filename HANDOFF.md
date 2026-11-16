@@ -27,17 +27,22 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 **CHECKPOINT (D1), 2026-11-16, paused at the owner's word (D4-112, D4-113).** No PR is open, and no agent is running. Merged this session, after D4-109: #708, #710 to #720. P4-NODE-WT is complete. HR-23's build (#715) and its stage-2 cases (#718) are on `main`.
 - **The owner owes** "Waiting on the owner" item 3 (D4-112 item 3.4) and item 18 (D4-112 item 1), including the steps D1 described to the owner directly.
 - **Next, in order, each waiting on the step named** (D4-112 item 8; D4-113):
-  1. D4's fuzz-workflow PR (D4-112 item 4.2).
+  1. D4's fuzz-workflow PR (D4-112 item 4.2). Then D6 runs and judges the fuzz run (design §4.5 and §4.6).
   2. P4-4-HR2325S PR 1b, D3's M2 (D4-113 item 3.1).
-  3. D4's `table.py`: the HR-23 rows and the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2).
-  4. D7's P1 and finding 1's open item (D4-112 items 4.5 and 4.6).
-  5. HR-23's counted run, after steps 1 to 4.
+  3. D4's `table.py`: the HR-23 rows and the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2). It also makes the job hold the rows of D4-112 item 1.3 from per-row publication, if the job has to change for that.
+  4. D7's P1 (D4-112 item 4.6) and finding 1's open item (D4-112 item 4.5).
+  5. HR-23's counted run, after steps 1 to 4. Before it starts, D1 names to the run's author the rows that are judged inside the job and not published row by row (D4-112 item 1.3).
   6. D3's records PR, the HR-25 and R-1 rows (D4-112 item 6; D4-113 item 2.3), before step 7.
   7. D4's HR-25 design PR for option (a) (D4-112 item 3).
   8. P4-4-HR2325S PRs 2 and 3 (D4-112 item 3.5).
   9. HR-25's build.
 
-  Beside these: P4-4-INT's four PRs, in #719's order, with G4 before INT-D4b (D4-113 item 4); then P4-4-DE. D4's PRs wait on D4's one-instance queue.
+  Beside these:
+  - **P4-4-INT's four PRs,** in #719's order, with G4 before INT-D4b (D4-113 item 4). INT-D4a may go ahead of D4's HR-23 and HR-25 work, when D4 is free between tasks (D4-113 item 4). Then P4-4-DE.
+  - **HR-24's stage 2 (D6) and stage 3 (D4), and P4-4-HR22S,** as the night checkpoint's item 5 below has them. HR-24 must close on a measured fix before item 4's gate (D4-95, D4-98), and N-14 waits on HR-24's stage 3.
+  - **The rest of the night checkpoint's item 5** stands wherever steps 1 to 9 do not replace it.
+
+  D4's PRs wait on D4's one-instance queue (D4-89).
 
 **Earlier checkpoint (D1), 2026-11-16 (D4-112), superseded by the checkpoint above.** Merged since the checkpoint below was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
 - #715 (HR-23's build, D4): D2, D3 and D7 accept earlier heads. A fresh D4 is building option (B') for D3's M1, under D1's 6907928324. Then D2, D3 and D6 re-read the diff, and D7 confirms the new pin.
@@ -184,7 +189,7 @@ What D4-98 leaves with the owner:
 15. **Nothing: D1 decided that mutants are committed as patch files with a dispatch-only workflow,** and no scratch branch is pushed (D4-85). D6's mutants for the closing legs are brief P4-D6-MUT (D4-88, D4-90).
 16. **Switching on GitHub's private vulnerability reporting,** which `SECURITY.md` relies on (D4-85). `LICENSE.md` and `SECURITY.md` are added.
 17. **Nothing: the owner leaves the fourteen firewall rules** that the approved prompts left for temporary test programs (D4-85).
-18. **Finding 1 (D4-112 item 1):** the one disclosure step D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
+18. **Finding 1 (D4-112 item 1):** the disclosure steps D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
 
 ## Test policy
 
