@@ -2,6 +2,7 @@ package netobs
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -165,4 +166,70 @@ func TestHeartbeatInterfaceNamedTwice(t *testing.T) {
 	if _, err := DecodeFromSensor(b); !hasCode(err, CodeConflict) {
 		t.Errorf("eth1 twice: %v, want conflict", err)
 	}
+}
+
+// D4-107 item 3.1 (D5's N1 on #687): on the 0.2 and 0.3 channels a 0.1
+// count sent as null decodes as 0, and drops_driver as absent (unknown).
+// Each is refused as form, not read. The two other counts a sensor's
+// channel message reads that way, interfaces[].packets and
+// insecure.login.attempts, are refused the same way. Every count of the
+// fixtures is 0, so no other check refuses the null. Controls: each count
+// sent as 0 decodes, and the 0.1 channel reads a null 0.1 count as it did.
+func TestHeartbeat02NullCounterRefused(t *testing.T) {
+	hb := func(fx func() *Heartbeat) func() any {
+		return func() any {
+			h := fx()
+			h.Counters.Packets, h.Interfaces[0].Packets = 0, 0
+			return h
+		}
+	}
+	insecure := func(schema string) func() any {
+		return func() any {
+			o := fxObservation02()
+			o.Schema, o.Kind, o.Protocol, o.Function, o.Frames, o.FirstSight = schema, KindInsecure, "telnet", nil, nil, false
+			o.Insecure = &Insecure{Reason: "telnet", Login: &Login{Attempts: 0, Slot: "none"}}
+			return o
+		}
+	}
+	type leg struct {
+		conn  string
+		fx    func() any
+		field string
+		path  []any
+	}
+	var legs []leg
+	for _, conn := range []struct {
+		schema string
+		fx     func() *Heartbeat
+	}{{Identifier02, fxHeartbeat02}, {Identifier03, fxHeartbeat03}} {
+		for _, name := range append([]string{"drops_driver"}, counters01...) {
+			legs = append(legs, leg{conn.schema, hb(conn.fx), "counters." + name, []any{"counters", name}})
+		}
+		legs = append(legs, leg{conn.schema, hb(conn.fx), "interfaces[0].packets", []any{"interfaces", 0, "packets"}},
+			leg{conn.schema, insecure(conn.schema), "insecure.login.attempts", []any{"insecure", "login", "attempts"}})
+	}
+	for _, l := range legs {
+		field := l.field
+		b := encodeWith(t, l.fx(), func(m map[string]any) { setPath(m, nil, l.path...) })
+		if _, err := DecodeFromSensorIn(b, l.conn); !refusedOnly(err, CodeForm, field) {
+			t.Errorf("%s, %s null: %v, want only form at %s", l.conn, field, err, field)
+		}
+		b = encodeWith(t, l.fx(), func(m map[string]any) { setPath(m, 0, l.path...) })
+		if _, err := DecodeFromSensorIn(b, l.conn); err != nil {
+			t.Errorf("control, %s, %s 0: %v", l.conn, field, err)
+		}
+	}
+	for _, name := range append([]string{"drops_driver"}, counters01...) {
+		old := encodeWith(t, fxHeartbeat(), func(m map[string]any) { setPath(m, nil, "counters", name) })
+		if _, err := DecodeChannel(old); err != nil {
+			t.Errorf("control, 0.1 channel, counters.%s null: %v", name, err)
+		}
+	}
+}
+
+// refusedOnly reports whether err is exactly one refusal, of field with
+// code.
+func refusedOnly(err error, code Code, field string) bool {
+	var e *Error
+	return errors.As(err, &e) && len(Codes(err)) == 1 && e.Code == code && e.Field == field
 }
