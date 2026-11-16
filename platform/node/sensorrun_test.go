@@ -204,7 +204,7 @@ func heldResume() (SensorSeams, chan struct{}, func()) {
 // that it is sent within 2 s and stores its SER rows.
 //
 // A failure says which it was (D4-111 item 6.4): a run that returns within
-// 30 s more was slow, not held; one that has not returned by then is held.
+// 30 s more was slow, or held for less than 32 s; one that has not returned by then is held.
 // The 2 s is the test's wait for a run that nothing holds; RunOnce itself
 // has no deadline.
 func runSent(t *testing.T, r *Runtime) {
@@ -220,7 +220,7 @@ func runSent(t *testing.T, r *Runtime) {
 	case <-time.After(2 * time.Second):
 		select {
 		case <-done:
-			t.Fatalf("the run did not return within 2 s: it was slow, not held; it took %s", time.Since(from))
+			t.Fatalf("the run did not return within 2 s: it was slow, or held for less than 32 s; it took %s", time.Since(from))
 		case <-time.After(30 * time.Second):
 			t.Fatalf("the run did not return within 2 s: it was held; it had not returned %s after it began", time.Since(from))
 		}

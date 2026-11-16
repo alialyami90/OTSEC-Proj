@@ -433,7 +433,7 @@ func TestSensorRetryAlarmsOnce(t *testing.T) {
 // not ended. Control: the first step back in Start.
 //
 // A failure says which it was (D4-104 item 4): a Start that returned late
-// with the startup still stuck was slow, and one that returned only once
+// with the startup still stuck was slow, or held for less than 32 s, and one that returned only once
 // the startup was let go was held. A control Start of the same rig's
 // configuration, with no stuck startup, is timed first for comparison.
 // Every cleanup is registered before the timed wait, so a failure in it
@@ -482,11 +482,11 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 		got = true
 	case <-time.After(2 * time.Second):
 		// Wait on with the startup still stuck: a Start that returns now
-		// was slow; one that does not returns only once the startup is let go.
+		// was slow, or held for less than 32 s; one that does not returns only once the startup is let go.
 		select {
 		case s = <-done:
 			got = true
-			t.Fatalf("Start did not return within 2s: it was slow, not held; it took %s with the startup still stuck, and the control Start took %s", s.took, plain)
+			t.Fatalf("Start did not return within 2s: it was slow, or held for less than 32 s; it took %s with the startup still stuck, and the control Start took %s", s.took, plain)
 		case <-time.After(30 * time.Second):
 		}
 		stuck.open()
