@@ -19,7 +19,9 @@ here from the builder's units and never from a run (D4-112 item 5): rule
 (A) gives each input's judge (mal-twin) and its reqhdr under each
 configuration (mal-reqhdr); a frame whose DIR disagrees with its side names
 the weird (design 1 item 4); each cell reads as one of mal-states' states;
-and (B') sets the record of a stop on a flow's first datagram (mal-bprime).
+(B') sets the record of a stop on a flow's first datagram (mal-bprime); and
+every input on which C2's parser throws where C1p's parses on reads so,
+with D3's M2 in mid-flow from each side (mal-midflow).
 """
 
 import csv
@@ -38,8 +40,8 @@ CONDITIONS = os.path.join(HERE, "hr23-conditions.tsv")
 ENGINE = os.path.join(HERE, "engine-pass-conditions.tsv")
 SHA256 = {
     CASES: "f66f7952a398c0fc420507dfb125c00f1bd3538399305f24fe1c5b2727420687",
-    MALFORMED: "51e8285f4ee8b0fe46ddffe87098ee8e2e9b479dee970e35dd3375b41a43701e",
-    CONDITIONS: "695f9ee6512fb449e7781f9bbd373da58102500958de85011a184e032b127e51",
+    MALFORMED: "5c898991e5abb21e9475643035e3c966367d61cc65fc6c2473d4d3ef5faf85ef",
+    CONDITIONS: "2b59d5caea1abf3409dbf71cb2351005fd0fedc488c5c32ab300e736c4e94fab",
 }
 CONFIGS = ("c0", "c1", "c1p", "c2")
 FIXES = {"a", "b", "unknown", "premise", "control", "r1"}
@@ -369,6 +371,62 @@ def check_bprime(ms, caps):
                 assert s == "recorded", (m["input"], config, s)
 
 
+RESPONSE_HEADER, REQUEST_HEADER = 4, 2   # control, code and IIN; control and code (design 1 item 4)
+OBJECT_HEADER = 3                        # Object_Header's object_type_field (2) and qualifier_field (1), design 4.7
+RESPONSE_OBJECTS = {129, 130}            # response codes whose arm reads objects; 131's is not read (design 2.3)
+REQUEST_OBJECTS = {1, 2, 5}              # request codes whose arm reads objects (design 4.7's twin rule)
+
+
+def c1p_takes_any(code, n, side):
+    """C1p's parser takes the fragment whatever its octets (design 4.7, Both
+    directions): the originator's 129 to 131 by the request parser's default
+    arm, the responder's other codes of 4 or more octets by Debug_Byte."""
+    if side == "orig":
+        return code in RESPONSES
+    return code not in RESPONSES and n >= RESPONSE_HEADER
+
+
+def c2_cut(code, n):
+    """C2's parser, by rule (A), meets 1 or 2 octets of an object header."""
+    if c2_response(code, n):
+        return code in RESPONSE_OBJECTS and 0 < n - RESPONSE_HEADER < OBJECT_HEADER
+    return code in REQUEST_OBJECTS and 0 < n - REQUEST_HEADER < OBJECT_HEADER
+
+
+def stops_c2_only(code, n, side):
+    return code is not None and on_the_list(code, n, side) and c1p_takes_any(code, n, side) and c2_cut(code, n)
+
+
+# The predicate's scope, from design 1 item 4, 2.3 and 4.7: (code, application
+# octets, side, whether it finds the fragment), each bound met from both sides.
+STOPS = [(129, 5, "orig", True), (130, 6, "orig", True), (1, 4, "resp", True), (2, 4, "resp", True),
+         (5, 4, "resp", True), (129, 4, "orig", False), (129, 7, "orig", False), (131, 5, "orig", False),
+         (129, 5, "resp", False), (1, 3, "resp", False), (1, 5, "resp", False), (0, 4, "resp", False),
+         (1, 4, "orig", False)]
+
+
+def check_stops_rule():
+    assert [stops_c2_only(c, n, s) for c, n, s, _ in STOPS] == [w for _, _, _, w in STOPS]
+
+
+def check_midflow(ms, caps):
+    """mal-midflow: every input with a fragment on which C2's parser throws
+    where C1p's parses on reads parsed on under C0, C1 and C1p and a recorded
+    stop under C2; those whose X is not the flow's first data include one
+    from each side over UDP (D3's M2)."""
+    mid = set()
+    for m in ms:
+        cap = caps[m["input"]]
+        hits = [side for x, side, _, code in messages(cap) if stops_c2_only(code, x.app, side)]
+        if not hits:
+            continue
+        got = {config: state(t, order_of(cap)) for config, t in cells(m)}
+        assert got == {"c0": "on", "c2": "recorded"}, (m["input"], got)
+        if not x_first(cap):
+            mid.update((m["l4"], side) for side in hits)
+    assert {("udp", "orig"), ("udp", "resp")} <= mid, mid
+
+
 ROW_ID = re.compile(r"(?<![\w-])(?:judge|mal|fp|rerun|report|pin|cfg)-[a-z0-9]+(?:-[a-z0-9]+)*")
 
 
@@ -429,6 +487,11 @@ def test_the_malformed_cells_follow_rules_a_and_bprime():
     check_dir_weird(ms, caps)
     check_states(ms, caps)
     check_bprime(ms, caps)
+    check_midflow(ms, caps)
+
+
+def test_the_midflow_predicate_holds_its_bounds():
+    check_stops_rule()
 
 
 def test_the_conditions_are_whole_and_every_named_row_exists():
@@ -599,6 +662,49 @@ def control_bprime_udp_first_datagram_silent(mp):
 def control_bprime_tcp_silent(mp):
     ms = malformed_edited("dnp3-mal-tcp-fc129-badobj-first", c2="viol=0; svc=dnp3; P=absent; Q=absent; reqhdr=0")
     return lambda: check_bprime(ms, built())
+
+
+def control_midflow_c2_parses_on(mp):
+    """D3's M2 from the responder pinned as C2 parsing on, as a parser picked by side would."""
+    ms = malformed_edited("dnp3-mal-udp-fc1-badobj-mid", c2="viol=0; svc=dnp3; P=seen; Q=seen")
+    return lambda: check_midflow(ms, built())
+
+
+def control_midflow_input_dropped(mp):
+    """D3's M2 from the originator left out: no stop in mid-flow from that side."""
+    ms = [m for m in rows(MALFORMED) if m["input"] != "dnp3-mal-udp-fc129-badobj-mid"]
+    return lambda: check_midflow(ms, built())
+
+
+def control_midflow_object_header_of_2(mp):
+    """An object header read as 2 octets: the responder's cut read is no longer found."""
+    mp.setitem(globals(), "OBJECT_HEADER", 2)
+    return lambda: check_midflow(rows(MALFORMED), built())
+
+
+def control_midflow_predicate_object_header_of_4(mp):
+    mp.setitem(globals(), "OBJECT_HEADER", 4)
+    return check_stops_rule
+
+
+def control_midflow_predicate_response_header_of_3(mp):
+    mp.setitem(globals(), "RESPONSE_HEADER", 3)
+    return check_stops_rule
+
+
+def control_midflow_predicate_empty_object_part(mp):
+    """No object octet counted as a cut object header."""
+    def cut(code, n):
+        head, codes = (RESPONSE_HEADER, RESPONSE_OBJECTS) if c2_response(code, n) else (REQUEST_HEADER, REQUEST_OBJECTS)
+        return code in codes and 0 <= n - head < OBJECT_HEADER
+    mp.setitem(globals(), "c2_cut", cut)
+    return check_stops_rule
+
+
+def control_midflow_predicate_with_131(mp):
+    """131's arm, which the design does not read, taken as one that reads objects."""
+    mp.setitem(globals(), "RESPONSE_OBJECTS", {129, 130, 131})
+    return check_stops_rule
 
 
 def control_condition_id_missing(mp):
