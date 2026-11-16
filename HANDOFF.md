@@ -150,7 +150,6 @@ What D4-98 leaves with the owner:
 1. **The sites' facts:** questions 1 to 5 of `docs/phase4/D1-sensor-host-recommendation.md`, the protocols on each site's networks, which SEL switches the sites run, and the model naming for set authors (`SEL-2731M`). Until questions 1 to 4 are answered, the rows that depend on them are not applied at a site. A row that sets a site's security policy (O-5, O-10) needs the owner's word for that site.
 2. **Item 3's other questions:** severity scores in reports (C3 §1.3, R9.2), and the v1 and v2c approval key (HR-17, R1.8). These are the owner's requirements, so D4-98 does not settle them.
 3. **The DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5), a licensed copy only the owner can provide (D4-68), and IEEE 1815's transport-layer clause, so that HR-25's sequence rule is read against the standard (D4-112 item 3.4).
-3a. **Finding 1 (D4-112 item 1):** the one disclosure step D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
 4. **HR-18:** who publishes the advisory set and holds its signing key. No real advisory is entered until then.
 5. **The release key's holder** (TB9), for O-7's signed image. O-7 was adopted under the delegation, and the owner may reverse it.
 6. **Purchases and site changes,** when the time comes: lab TAPs and machines, and a site's outage window or switch change (#640).
@@ -170,6 +169,7 @@ What D4-98 leaves with the owner:
 15. **Nothing: D1 decided that mutants are committed as patch files with a dispatch-only workflow,** and no scratch branch is pushed (D4-85). D6's mutants for the closing legs are brief P4-D6-MUT (D4-88, D4-90).
 16. **Switching on GitHub's private vulnerability reporting,** which `SECURITY.md` relies on (D4-85). `LICENSE.md` and `SECURITY.md` are added.
 17. **Nothing: the owner leaves the fourteen firewall rules** that the approved prompts left for temporary test programs (D4-85).
+18. **Finding 1 (D4-112 item 1):** the one disclosure step D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
 
 ## Test policy
 

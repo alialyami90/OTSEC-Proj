@@ -2383,7 +2383,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Expected interfaces: C13 0.3 (D4-102). No contract change.
 - Deliverable, in order, each its own PR:
   1. HR-23's stage-2 cases and pass conditions, the shared false-positive set, and HR-23's malformed set;
-  2. S5's inputs (1) to (8) and two baselines, with row `s5-inputs` amended; input (8) is D1's 6902589450 item 3.1.
+  2. S5's inputs (1) to (8) and two baselines, with row `s5-inputs` amended; input (8) is D1's 6902589450 item 3.1. After D4's HR-25 design PR for option (a) merges.
   3. The cases of D4-111 item 8.2 and D4-112 item 3.5, after D4's HR-25 design PR for option (a) merges.
 - Acceptance tests:
   - every capture is rebuilt in `a6-gt-pcap`, checked against committed hashes and labels, and each expected tshark difference is listed with its cause, as #714 does;

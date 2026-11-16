@@ -2563,7 +2563,7 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
   2. #711, narrowed by D1's 6902614046, changes the failure text of `TestSensorStartupStuckDoesNotHoldStart` and `TestLinkKeyFaultNodeStarts/missing`, not their bounds. Each now tells a start held for 32 s or more from one that is "slow, or held for less than 32 s". No test was made parallel. Three green Windows runs at `f65b64d7` took 440.6, 404.3 and 437.0 s, a median of 437.0 s against 720 s.
   3. **D4-111 item 6.3, answered:** the 2 s bound of `TestLinkKeyFaultNodeStarts/missing` is the test's own wait in `runSent`, not a product property. `RunOnce` sets no deadline, and no requirement names 2 s (D5; D6's 6907197478).
   4. **A finding, made diagnosable by #711, not closed:** `TestSensorStartupStuckDoesNotHoldStart` failed again on `main`'s code in #717's attempt 2 (job 132966047668), and that failure's cause stays `unknown`. The test is in `platform/node/sensortest`, which still runs beside the other packages, so its 2 s bound can fail again. Its failure now says which case it is. **Owner: D5.**
-  5. **Process.** D1's brief to D5 permitted a force-push of #711's branch for its rebase only. D5 also pushed control heads to the branch and force-pushed it back (#711's body; 6902689624). D5's role file says never to force-push. **Ruling:** D4-109 item 4's draft-PR route, which D4-85 narrowed to D6's controls, extends to an implementer's controls on the same terms. The draft PR is closed and its branch deleted at once, and the implementer's own branch is never force-pushed for a control.
+  5. **Process.** D1's brief to D5 permitted a force-push of #711's branch for its rebase only. D5 also pushed control heads to the branch and force-pushed it back (#711's body; 6902689624). D5's role file says never to force-push. **Ruling:** D4-109 item 4 narrowed D4-85's rule against scratch branches, for D6's controls only, to a draft PR. That draft-PR route now extends to an implementer's controls on the same terms. The draft PR is closed and its branch deleted at once, and the implementer's own branch is never force-pushed for a control.
 - **3. HR-25: D3's F1, option (a)** (D1's 6902589450 on #714; D4 6902505417, D2 6902526389, D3 6902584812).
   1. A checks the transport sequence on every frame without FIR. A wrong sequence drops the fragment in progress under a new cause, `transport_seq`. An identical retry, compared as the whole segment, FIN and the sequence included, is discarded and not counted.
   2. F1 becomes counted, not seen, in D4's wider form too: a master that splits its own write.
@@ -2605,7 +2605,7 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
   - #715's merge;
   - the fuzz PR (after #715);
   - #718's restatement (after #715's design note);
-  - HR-23's counted run (after #718, the fuzz run and item 4.6);
+  - HR-23's counted run (after #718, the fuzz run, item 4.5 and item 4.6);
   - D3's records PR (before D4's HR-25 design PR);
   - D4's HR-25 design PR;
   - P4-4-HR2325S's deliverables 2 and 3 (after that design PR);
