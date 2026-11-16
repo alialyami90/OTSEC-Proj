@@ -1,0 +1,40 @@
+OTSEC harness patch for HR-23's sanitizer fuzz run (brief P4-4-HR23-FUZZ;
+docs/phase4/D4-hr23-design.md, section 4.6). It changes Zeek 9.0.1's fuzz
+targets only, never the code under test, and is applied alike to both
+builds, C1p and C2: it adds the `dnp3_udp` target, and links the project's
+CRC fix-up mutator (hr23-crc-mutator.cc, copied into src/fuzzers/) into
+`dnp3_tcp`, `dnp3_udp` and `packet`.
+
+Against: Zeek 9.0.1, zeek-9.0.1.tar.gz (its SHA-256 is in ../build.env).
+Applied from the top of the unpacked tree with `patch -p1 --fuzz=0`.
+
+The file changed is Zeek 9.0.1's, under the BSD-3-Clause licence in
+../COPYING. The lines this patch adds are the project's own (LICENSE.md).
+
+--- a/src/fuzzers/CMakeLists.txt
++++ b/src/fuzzers/CMakeLists.txt
+@@ -105,6 +105,8 @@
+ add_generic_analyzer_fuzz_target(dce_rpc)
+ add_generic_analyzer_fuzz_target(dhcp udp)
+ add_generic_analyzer_fuzz_target(dnp3_tcp)
++# OTSEC, HR-23's fuzz run: DNP3 over UDP, driven by NextPacket.
++add_generic_analyzer_fuzz_target(dnp3_udp udp)
+ add_generic_analyzer_fuzz_target(dtls udp)
+ add_generic_analyzer_fuzz_target(irc)
+ add_generic_analyzer_fuzz_target(ldap_udp udp)
+@@ -129,6 +131,15 @@
+ add_generic_analyzer_fuzz_target(ssl)
+ add_generic_analyzer_fuzz_target(syslog udp)
+ 
++# OTSEC, HR-23's fuzz run (docs/phase4/D4-hr23-design.md, section 4.6): the
++# project's CRC fix-up mutator, the same in both builds, linked into the
++# three targets the run uses. The packet target's chunks are raw IPv4
++# packets, so its copy fixes a UDP datagram's payload.
++foreach (_hr23_target zeek-dnp3_tcp-fuzzer zeek-dnp3_udp-fuzzer zeek-packet-fuzzer)
++    target_sources(${_hr23_target} PRIVATE hr23-crc-mutator.cc)
++endforeach ()
++target_compile_definitions(zeek-packet-fuzzer PRIVATE HR23_FRAMING_IP=1)
++
+ # add_generic_analyzer_fuzz_target(finger)  # no pcap files
+ # add_generic_analyzer_fuzz_target(gssapi)  # only samples are embedded in smb
+ # add_generic_analyzer_fuzz_target(ident)   # no pcap files
