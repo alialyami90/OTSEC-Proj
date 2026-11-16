@@ -24,20 +24,22 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-16 (D4-112).** Merged since the checkpoint above was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
+**CHECKPOINT (D1), 2026-11-16 (D4-112).** Merged since the checkpoint below was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
 - #715 (HR-23's build, D4): D2, D3 and D7 accept earlier heads. A fresh D4 is building option (B') for D3's M1, under D1's 6907928324. Then D2, D3 and D6 re-read the diff, and D7 confirms the new pin.
 - #718 (P4-4-HR2325S PR 1, D6): two blocking findings, on the short-129 rows and on `dnp3-mal-udp-limit`. A fresh D6 writer restates the rows from #715's amended design note once it is pushed (D1's 6907176282).
 - #719 (P4-4-INT's split, D5): G1 to G3 ruled. The order waits for D4's agreement.
-- **The owner owes one step:** deleting the revision of #715's description that holds finding 1's detail (D4-112 item 1.2).
-- **Next, in order:**
+- **The owner owes:** one disclosure step that D1 described to the owner directly (D4-112 item 1.2); and the decision on reporting finding 1 to the Zeek project (D4-112 item 1.4).
+- **Next, in order, each waiting on the step named** (D4-112 item 8):
   1. #715 merges;
   2. D4's fuzz-workflow PR;
   3. #718 restated and merged;
-  4. HR-23's counted run, after D7's P1 (D4-112 item 4.6);
-  5. D4's HR-25 design PR for option (a);
-  6. P4-4-HR2325S PRs 2 and 3;
-  7. HR-25's build;
-  8. then P4-4-INT's PRs and P4-4-DE.
+  4. HR-23's counted run, after D7's P1 and finding 1's open item (D4-112 items 4.5 and 4.6);
+  5. D3's records PR (D4-112 item 6), before D4's HR-25 design PR;
+  6. D4's HR-25 design PR for option (a);
+  7. P4-4-HR2325S PRs 2 and 3;
+  8. HR-25's build.
+
+  P4-4-INT (#719, after D4 agrees the split) and then P4-4-DE may run beside these.
 
 **Earlier checkpoint (D1), 2026-11-15, later (D4-110, D4-111), superseded by the checkpoint above.** Merged: #708 (D4-110 and three briefs), #713 (F-027's `relayKinds` probe, killed on `CI-Linux` and `CI-Windows`). Open PRs: `gh pr list`. Where each stands:
 - #710 (P4-COL-2) and #712 (P4-C8-T): accepted; merge after `ci-long` and D1's merge check.
@@ -147,7 +149,8 @@ What D4-98 leaves with the owner:
 
 1. **The sites' facts:** questions 1 to 5 of `docs/phase4/D1-sensor-host-recommendation.md`, the protocols on each site's networks, which SEL switches the sites run, and the model naming for set authors (`SEL-2731M`). Until questions 1 to 4 are answered, the rows that depend on them are not applied at a site. A row that sets a site's security policy (O-5, O-10) needs the owner's word for that site.
 2. **Item 3's other questions:** severity scores in reports (C3 §1.3, R9.2), and the v1 and v2c approval key (HR-17, R1.8). These are the owner's requirements, so D4-98 does not settle them.
-3. **The DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5), a licensed copy only the owner can provide (D4-68), and IEEE 1815's transport-layer clause, so that HR-25's sequence rule is read against the standard (D4-112 item 4).
+3. **The DNP3 Secure Authentication text** (IEEE 1815's SA clause or IEC 62351-5), a licensed copy only the owner can provide (D4-68), and IEEE 1815's transport-layer clause, so that HR-25's sequence rule is read against the standard (D4-112 item 3.4).
+3a. **Finding 1 (D4-112 item 1):** the one disclosure step D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
 4. **HR-18:** who publishes the advisory set and holds its signing key. No real advisory is entered until then.
 5. **The release key's holder** (TB9), for O-7's signed image. O-7 was adopted under the delegation, and the owner may reverse it.
 6. **Purchases and site changes,** when the time comes: lab TAPs and machines, and a site's outage window or switch change (#640).

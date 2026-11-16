@@ -2379,12 +2379,12 @@ The common rules are those of "The third part of item 4: implementation", F-027'
   - brief P4-4-HR23, stage 2, and `docs/phase4/D4-hr23-design.md` §4.3;
   - `docs/phase4/D4-hr25-design.md` §2.10 and §3; `docs/phase4/D6-hr25-resync-conditions.md`; rows `fp-*`, `chg-malformed`, `chg-eof`, `fuzz-seeds`, `fuzz-bit7`, `rerun-scope`, `s5-*` of `resync-conditions.tsv`;
   - D4's packing of S5's inputs and baselines, 6900746074 on #714, and D4's list of what must be built, 6900745749 (question 4).
-- Files or modules each role may modify: D6, the GT-PCAP paths (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) and `.github/workflows/a6-gt-pcap.yml`. In the two pinned TSVs, only: row `s5-inputs`, for the TCP counts per connection that D4's packing gives; and the new cases of D4-111 item 8.2, after item 8.1's ruling. `test_resync_conditions.py`'s pinned hashes are updated in the same commit.
+- Files or modules each role may modify: D6, the GT-PCAP paths (`tests/integration/gt_pcap/`, `tests/fixtures/network/gt-pcap/`) and `.github/workflows/a6-gt-pcap.yml`. In the two pinned TSVs, only: row `s5-inputs`, for the TCP counts per connection that D4's packing gives, and S5 input (8)'s rows; and the cases of D4-111 item 8.2 and D4-112 item 3.5, after D4's HR-25 design PR for option (a) merges. `test_resync_conditions.py`'s pinned hashes are updated in the same commit.
 - Expected interfaces: C13 0.3 (D4-102). No contract change.
 - Deliverable, in order, each its own PR:
   1. HR-23's stage-2 cases and pass conditions, the shared false-positive set, and HR-23's malformed set;
-  2. S5's seven inputs and two baselines, with row `s5-inputs` amended.
-  3. The cases of D4-111 item 8.2, after item 8.1's ruling.
+  2. S5's inputs (1) to (8) and two baselines, with row `s5-inputs` amended; input (8) is D1's 6902589450 item 3.1.
+  3. The cases of D4-111 item 8.2 and D4-112 item 3.5, after D4's HR-25 design PR for option (a) merges.
 - Acceptance tests:
   - every capture is rebuilt in `a6-gt-pcap`, checked against committed hashes and labels, and each expected tshark difference is listed with its cause, as #714 does;
   - labels come from how each case was built, never from an engine; the control's expected result is pinned row by row, and a row the control passes reads `unknown` for the fix;
