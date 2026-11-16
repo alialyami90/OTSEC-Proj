@@ -661,6 +661,12 @@ func (in *Insecure) check(c *checker) {
 		if c.nulls["insecure.login.attempts"] {
 			c.fail(CodeForm, "insecure.login.attempts", "null is not a count")
 		}
+		// An absent count decodes as 0 too. On the 0.2 and 0.3 channels it
+		// is refused, not read as 0 (D1's ruling on #726); the 0.1 channel
+		// and stored records read as they did.
+		if c.need >= 2 && c.keys != nil && !c.keys["insecure.login.attempts"] {
+			c.fail(CodeMissing, "insecure.login.attempts", "required")
+		}
 		if !contains([]string{"placed", "not-placed", "none"}, l.Slot) {
 			c.fail(CodeForm, "insecure.login.slot", "%q is not placed, not-placed or none", l.Slot)
 		}

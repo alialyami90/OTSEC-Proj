@@ -233,3 +233,34 @@ func refusedOnly(err error, code Code, field string) bool {
 	var e *Error
 	return errors.As(err, &e) && len(Codes(err)) == 1 && e.Code == code && e.Field == field
 }
+
+// D1's ruling on #726: an insecure login without attempts decodes as 0
+// attempts. On the 0.2 and 0.3 channels it is refused as missing, by key,
+// as an absent 0.1 counter is (C13 §4 writes "attempts": n). Controls: the
+// same record with attempts 0 decodes; the 0.1 channel and a stored 0.2
+// record without attempts read as before.
+func TestInsecureAttempts02Required(t *testing.T) {
+	insecure := func(schema string) *Observation {
+		o := fxObservation02()
+		o.Schema, o.Kind, o.Protocol, o.Function, o.Frames, o.FirstSight = schema, KindInsecure, "telnet", nil, nil, false
+		o.Insecure = &Insecure{Reason: "telnet", Login: &Login{Attempts: 0, Slot: "none"}}
+		return o
+	}
+	drop := func(m map[string]any) { delete(m["insecure"].(map[string]any)["login"].(map[string]any), "attempts") }
+	for _, schema := range []string{Identifier02, Identifier03} {
+		if _, err := DecodeFromSensorIn(encodeWith(t, insecure(schema), drop), schema); !refusedOnly(err, CodeMissing, "insecure.login.attempts") {
+			t.Errorf("%s, insecure.login.attempts absent: %v, want only missing", schema, err)
+		}
+		if _, err := DecodeFromSensorIn(mustJSON(t, insecure(schema)), schema); err != nil {
+			t.Errorf("control, %s, attempts 0: %v", schema, err)
+		}
+	}
+	old := insecure(Identifier)
+	old.MadeUTC, old.Coverage = "", fxCoverage()
+	if _, err := DecodeChannel(encodeWith(t, old, drop)); err != nil {
+		t.Errorf("control, 0.1 channel, attempts absent: %v", err)
+	}
+	if _, err := DecodeStored(encodeWith(t, asStored(insecure(Identifier02)), drop)); err != nil {
+		t.Errorf("control, stored 0.2, attempts absent: %v", err)
+	}
+}
