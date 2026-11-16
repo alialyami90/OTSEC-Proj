@@ -2452,3 +2452,45 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no contact with any device or site network; no `network_sensor` section outside the tests until F-027's gate lifts; no release.
 - Uncertainty or safety risks: the dialer opens a connection from the node to another host (TB-boundary, D3); the enrolment writes key material, and a crash between steps must leave the chain verifiable.
 - Scratch files: `d5-de-*`, `d3-de-*`
+
+## After D4-113: the next steps of the checkpoint (issued 2026-11-16, D4-114)
+
+### P4-4-HR23-FUZZ (D4; D6 reviews, runs and judges; D3 the parse surface; D7 the pins): the sanitizer fuzz workflow
+- Objective and rationale: HR-23 must close on a measured fix before item 4's gate (D4-98). The fuzz workflow goes in D4's own PR, after #715 and before HR-23's counted run (D4-112 item 4.2).
+- Owner, and the reviewers: D4 writes it. D6 reviews the workflow, then runs and judges the campaign after merge. D3 reviews the parse surface (HR-21), D7 the pins and the build.
+- Required inputs and dependencies: `docs/phase4/D4-hr23-design.md` §4.5 and §4.6; D4-112 item 4 and D4-113 item 2; brief P4-4-HR23; `modules/telemetry/experiments/engine-linux/` (`pins.env`, `zeek-patch/`).
+- Files or modules each role may modify: D4, `.github/workflows/d4-zeek-dnp3-fuzz.yml` (new, dispatch-only) and `modules/telemetry/experiments/engine-linux/zeek-patch/`; the design note only where a statement must change, named in the PR.
+- Expected interfaces: no contract change.
+- Deliverable: one PR, branch `agent/telemetry-hr23-fuzz`.
+- Acceptance tests: the self-check list; unit tests for the seed conversion and the CRC fix-up, each with a named control shown failing; the disclosure rule of §4.6 enforced and shown by test. A short PR smoke run may be proposed; it is not the run.
+- Owed: the campaign itself (D6, after merge).
+- Explicit exclusions: no counted run; no change to the measured engine's pins other than added fuzz pins; no detector or C13 change; no device contact. Finding 1 is named by number only (D4-112 item 1).
+- Uncertainty or safety risks: the fuzzing engine's handling of an uncaught throw at cleanup is `inference` (§4.6).
+- Scratch files: `d4-hr23fuzz-*`
+
+### P4-4-HR25-ROWS (D3; records-auditor first, then D4 and D6 review): the HR-25 and R-1 rows
+- Objective and rationale: D4-112 item 6 and D4-113 item 2.3. The rows merge before D4's HR-25 design PR, so each is true at every head.
+- Required inputs and dependencies: those items; `docs/phase4/D4-hr23-design.md` §4.6, §4.7 and §5; `docs/phase4/D4-hr25-design.md`.
+- Files or modules each role may modify: D3, `docs/threat-model.md`.
+- Expected interfaces: none.
+- Deliverable: one documents PR, branch `agent/security-hr25-rows`.
+- Acceptance tests: each new sentence cites its source; no sentence claims a fix not on `main`.
+- Owed: none.
+- Explicit exclusions: finding 1 is named by number only.
+- Uncertainty or safety risks: none beyond the rows.
+- Scratch files: `d3-hr25rows-*`
+
+### P4-D7-P1 (D7 with D3 under AP-31; records-auditor first, then D3 and D6 review): what the shipped sensor image carries
+- Objective and rationale: D4-112 item 4.6. What the shipped image carries, and the source offer and licence text that ADR-0009 requires, are settled before HR-23's counted run. The image measured is the one shipped.
+- Required inputs and dependencies: ADR-0009; `docs/release.md`; `docs/phase4/D4-hr23-design.md` §4.5; the image build in `modules/telemetry/experiments/engine-linux/`; AP-30 to AP-32.
+- Files or modules each role may modify: D7, `docs/release.md`.
+- Expected interfaces: none.
+- Deliverable: one documents PR, branch `agent/release-p1-image`: the image's content today, the options for the shipped image, the copyleft components with the source bundle, and what D4 owes before the counted run.
+- Acceptance tests: every component and licence statement cites its source and evidence class; nothing unbuilt is claimed.
+- Owed: D4's items in `docs/release.md` §8.4, before HR-23's counted run.
+- Explicit exclusions: no change to the image build or pins; no keys; nothing published to a registry.
+- Uncertainty or safety risks: choices that set security policy are D3's (AP-31); D1 rules on the rest (D4-114 item 4).
+- Scratch files: `d7-p1-*`
+
+### P4-4-HR2325S PR 1b (D6), under brief P4-4-HR2325S
+- D3's M2, the two mid-flow stops of `docs/phase4/D4-hr23-design.md` §4.7 "Both directions", written from the design text (D4-113 item 3.1), on branch `agent/verification-hr2325s-1b`. It merges before HR-23's counted run. The brief's other terms hold. Scratch files: `d6-hr2325s1b-*`.
