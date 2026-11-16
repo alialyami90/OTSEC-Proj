@@ -13,13 +13,15 @@ resync_tshark.py does for HR-25's captures. Three modes:
   tshark reads in the item's packets, against the code the item was built
   to carry (classes (3b-data) and (3c)) or none.
 - sides OUT EXPECTED PCAP...: the sort of design section 4.7, "Where it
-  shows". For each flow of each capture on which tshark reads a DNP3
-  application header, the side Zeek gives each end, from the capture's
+  shows". For each flow of each capture on which tshark reassembles a DNP3
+  application fragment, the side Zeek gives each end, from the capture's
   first packet of the flow and C0's likely_server_ports (hr23_cases.LIKELY,
-  design section 1 items 1 and 2), and how many fragments carry a code
-  whose class disagrees with their side: 129 to 131 from the originator,
-  any other code from the responder. A flow with none is judged as "does
-  not change"; a flow with any, by the twin rule (hr23-conditions.tsv).
+  design section 1 items 1 and 2), and how many fragments C2's parser
+  takes otherwise than C1p's (design section 2.3, "Where C2's parser
+  differs from C1p's"): C2 takes the response parser exactly for 4 or more
+  application octets with code 129 to 131 (rule (A)), and C1p exactly for
+  the responder's. A flow with none is judged as "does not change"; a flow
+  with any, by the twin rule (hr23-conditions.tsv).
 
 Each mode fails on an IPv4, UDP or TCP checksum that tshark does not read as
 good, and when its list differs from the committed EXPECTED, whose last
@@ -45,14 +47,14 @@ from resync_tshark import compare, expected_rows, packets
 
 FIELDS = ["frame.number", "ip.src", "ip.dst", "udp.srcport", "udp.dstport", "tcp.srcport", "tcp.dstport",
           "tcp.flags.syn", "tcp.flags.ack", "ip.checksum.status", "udp.checksum.status", "tcp.checksum.status",
-          "dnp3.al.func"]
+          "dnp3.al.func", "dnp3.al.fragment.reassembled.length"]
 DECODE = ["tcp.port==20001,dnp3", "udp.port==20001,dnp3"]
 FP_DECODE = [f"udp.port=={p},dnp3" for p in (40001, 40002, 40031, 40032, 40033, 40034, 40005)]
 RESPONSES = {129, 130, 131}
 
 LABEL_COLUMNS = ["capture", "message", "end", "packet", "label_code", "tshark_codes", "note"]
 FP_COLUMNS = ["capture", "item", "packets", "label_code", "tshark_codes", "note"]
-SIDE_COLUMNS = ["capture", "l4", "orig", "resp", "how", "apdus", "disagree", "codes"]
+SIDE_COLUMNS = ["capture", "l4", "orig", "resp", "how", "apdus", "changed", "codes"]
 
 # The causes a committed row may name; the committed lists' header lines say what each means.
 CAUSES = {"labels": {"reads-malformed", "no-limit"}, "fp": set()}
@@ -82,6 +84,26 @@ def bad_checksums(name, read):
 
 def codes(r):
     return [c for c in r.get("dnp3.al.func", "").split(",") if c]
+
+
+def fragments(r):
+    """(code, application octets) of each fragment tshark reassembles in a
+    packet, in order. A fragment of 2 octets or more carries the next code;
+    one of 0 or 1 has none (code None). None when the two lists do not pair,
+    so that no fragment is sorted on a guess."""
+    lens = [int(x) for x in r.get("dnp3.al.fragment.reassembled.length", "").split(",") if x]
+    cs = [int(c) for c in codes(r)]
+    if sum(1 for n in lens if n >= 2) != len(cs):
+        return None
+    it = iter(cs)
+    return [(next(it) if n >= 2 else None, n) for n in lens]
+
+
+def changed(code, n, from_resp):
+    """Whether C2's parser differs from C1p's on one fragment (design 2.3):
+    C2 takes the response parser exactly for 4 or more octets with code 129
+    to 131 (rule (A)), C1p exactly for the responder's fragments."""
+    return (n >= 4 and code in RESPONSES) != from_resp
 
 
 def read_labels(path):
@@ -144,12 +166,14 @@ def zeek_sides(l4, first, flags):
 
 
 def sides_rows(path):
-    """The sort's rows for one capture. Checksums are not judged here: each
+    """The sort's rows for one capture, and the packets whose fragments
+    could not be paired with codes. Checksums are not judged here: each
     capture's own job does that, and the PRP pairs' one-octet control
-    carries a bad IPv4 header checksum on purpose."""
+    carries a bad IPv4 header checksum on purpose. codes lists the changed
+    fragments' codes, none for a fragment of 0 or 1 octets."""
     name = os.path.basename(path).rsplit(".", 1)[0]
     read = tshark(path, DECODE)
-    flows = collections.OrderedDict()
+    flows, bad = collections.OrderedDict(), []
     for n in sorted(read):
         r = read[n]
         l4 = "tcp" if r["tcp.srcport"] else "udp" if r["udp.srcport"] else None
@@ -159,16 +183,22 @@ def sides_rows(path):
         key = (l4, frozenset((a, b)))
         if key not in flows:
             flows[key] = {"first": (*a, *b), "flags": (r["tcp.flags.syn"], r["tcp.flags.ack"]), "apdus": []}
-        flows[key]["apdus"] += [(a, int(c)) for c in codes(r)]
+        frags = fragments(r)
+        if frags is None:
+            bad.append(f"{name}: packet {n}: codes {r.get('dnp3.al.func')!r} and lengths "
+                       f"{r.get('dnp3.al.fragment.reassembled.length')!r} do not pair")
+            continue
+        flows[key]["apdus"] += [(a, c, k) for c, k in frags]
     out = []
     for (l4, _), f in flows.items():
         if not f["apdus"]:
             continue
         orig, resp, how = zeek_sides(l4, f["first"], f["flags"])
-        wrong = [c for sender, c in f["apdus"] if (c in RESPONSES) != (sender == resp)]
+        moved = [c for sender, c, k in f["apdus"] if changed(c, k, sender == resp)]
+        shown = sorted({"none" if c is None else str(c) for c in moved}, key=lambda s: (s == "none", len(s), s))
         out.append([name, l4, f"{orig[0]}:{orig[1]}", f"{resp[0]}:{resp[1]}", how, str(len(f["apdus"])),
-                    str(len(wrong)), ",".join(str(c) for c in sorted(set(wrong))) or "-"])
-    return out
+                    str(len(moved)), ",".join(shown) or "-"])
+    return out, bad
 
 
 def main(argv):
@@ -192,7 +222,9 @@ def main(argv):
         out, expected, pcaps = argv[2], argv[3], argv[4:]
         bad, rows = [], ["\t".join(SIDE_COLUMNS)]
         for p in sorted(pcaps):
-            rows += ["\t".join(x) for x in sides_rows(p)]
+            got, unpaired = sides_rows(p)
+            rows += ["\t".join(x) for x in got]
+            bad += unpaired
         with open(out, "w", encoding="utf-8", newline="\n") as f:
             f.write("\n".join(rows) + "\n")
         names = {os.path.basename(p).rsplit(".", 1)[0] for p in pcaps}

@@ -69,3 +69,11 @@ ad632e0d14c8e8fe58bb3196262698b5aba79b5a680cc7a9a01caa9b39f798ad  dnp3-mal-tcp-e
 49cee4e8c684173e4b3991eaf3959b5d83a6374005fe6f65840e75fde7955cf4  dnp3-mal-tcp-eof-firopen-open.pcap
 9286337e34d1c7c5e2fcedfd5eaf3ff8654f1757c335a10ffd4fc1adc509c56a  dnp3-mal-tcp-eof-badchunk-fin.pcap
 fabfb95b8ad4ef302fe4f782d35f623ec2a0fcfe573c361d4150848b3e1c1ceb  dnp3-mal-tcp-eof-len4-fin.pcap
+ae5c9657c009dc6d456aabc307a572c8f753de696a3e403a071f968d301982f0  dnp3-mal-udp-fc129-4-orig.pcap
+c847af3a3dc58f62bbbd9a823104983bbc547e6f0c11f8b87df2c34796592c73  dnp3-mal-udp-fc129-4-resp.pcap
+2617c998a7e69339eb5c35e515a887dce65eac1324a97645ef695b6416321936  dnp3-mal-udp-fc130-4-orig.pcap
+0c86591264909e7b9e644f03eb4d9a118d826658ab701821f22c2bbb535a4ea2  dnp3-mal-udp-fc130-4-resp.pcap
+33d0961e6964c8f8c9ee7cd9c69a74a5415f3940dd68e0ec6b3c96a72c642182  dnp3-mal-udp-fc131-4-orig.pcap
+794f2ada28767604071f977a365411a7e162bec09e81a32e7cd9d871895b2e8d  dnp3-mal-udp-fc131-4-resp.pcap
+118b57e7973a175e5be799db668a1ec19df5a06cca412da406af95c8ebd652cf  dnp3-mal-udp-fc129-badobj-first.pcap
+77deaefd2c699437af49e03fa41e76edf8a40a64997a6ee7f0d83cd0ea028e05  dnp3-mal-tcp-fc129-badobj-first.pcap

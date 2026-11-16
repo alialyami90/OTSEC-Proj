@@ -8,8 +8,10 @@ and two D6 adds to measure the design's section 1 item 2: the third
 unswapped arrangement, and the one with neither port in likely_server_ports.
 dnp3-udp-temp-port and dnp3-udp-unsolicited are dnp3_cases.py's, unchanged.
 Section 4.3 names the malformed DNP3 inputs (D4-100 item 2), each its own
-capture here. hr23-cases.tsv and hr23-malformed.tsv pin what each
-configuration is expected to do on them.
+capture here, and #718's reviews add rule (A)'s edges and D3's M1, a 129
+that the response parser rejects as the flow's first datagram (D1's
+6907176282 and 6907928324). hr23-cases.tsv and hr23-malformed.tsv pin what
+each configuration is expected to do on them.
 
 The labels are the builder's, from how each capture was made: every
 link-layer unit with the end that sent it, its role (master or outstation,
@@ -416,13 +418,13 @@ def len_6(cap):
     closing(f)
 
 
-def app_octets(end, body, code, why, objects="-"):
+def app_octets(end, body, code, why, objects="-", state="absent"):
     """X: an APDU from end of the given octets after its control octet."""
     def build(cap):
         f = udp_m(cap)
         opening(f)
         seq = f.last
-        f.send(f.message(end, "X", code, objects, bytes([0xC0 | seq]) + body, state="absent", why=why))
+        f.send(f.message(end, "X", code, objects, bytes([0xC0 | seq]) + body, state=state, why=why))
         closing(f)
     return build
 
@@ -609,6 +611,29 @@ def eof(kind, fin):
     return build
 
 
+BADOBJ = b"\x00\x00\x3c"   # IIN 0, then one object octet: an object header cut short (D3's M1 on #718)
+
+
+def badobj_first(l4):
+    """X first on the 5-tuple (D3's M1; D1's 6907928324): M5's or M1's 129
+    of 5 application octets, IIN then one object octet, then P R and Q R,
+    whole and named, so a stop is told apart from nothing more to parse
+    (condition 3 there). Over UDP, M5 and O1 on 20000: dpd_dnp3_server_udp
+    attaches DNP3_UDP at X, and the PIA replays it (design 2.3). Over TCP,
+    M1 opens a connection to O2 on 20001, both ports outside
+    likely_server_ports, so no port attaches DNP3_TCP; dpd_dnp3_server does
+    at R(P), the responder's first frame, and PIA_TCP replays X (design
+    4.1), the path on which a TCP stop is recorded without (B')."""
+    def build(cap):
+        f = udp_m(cap) if l4 == "udp" else Flow(cap, "tcp", M1, cap.tcp_port, O2, 20001)
+        f.send(f.message("m", "X", dnp3.RESPONSE, "-", bytes([0xC0 | f.app, dnp3.RESPONSE]) + BADOBJ,
+                         state="absent", why="a response with 1 object octet: its object header cut short"))
+        opening(f)
+        closing(f)
+        f.close()
+    return build
+
+
 def resp_apdu(n, objects=b""):
     """129 from the master's side: its first n application octets (2, 3 or
     4, IIN 0), or 4 and objects."""
@@ -680,6 +705,17 @@ MALFORMED += [
     ("dnp3-mal-tcp-eof-firopen-open", eof("firopen", False)),
     ("dnp3-mal-tcp-eof-badchunk-fin", eof("badchunk", True)),
     ("dnp3-mal-tcp-eof-len4-fin", eof("len4", True)),
+]
+# Rule (A)'s edges (D3's M3 on #718, which D1's 6907176282 item 3 takes): a
+# 129, 130 and 131 of exactly 4 octets, IIN 0, from each side. Appended, so
+# that no earlier capture's clock or port moves.
+for _c in (129, 130, 131):
+    for _side, _end in (("orig", "m"), ("resp", "o")):
+        MALFORMED.append((f"dnp3-mal-udp-fc{_c}-4-{_side}",
+                          app_octets(_end, bytes([_c]) + b"\x00\x00", _c, "-", state="seen")))
+MALFORMED += [
+    ("dnp3-mal-udp-fc129-badobj-first", badobj_first("udp")),
+    ("dnp3-mal-tcp-fc129-badobj-first", badobj_first("tcp")),
 ]
 
 

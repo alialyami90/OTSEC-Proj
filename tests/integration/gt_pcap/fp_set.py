@@ -57,7 +57,9 @@ EMPTY_ARM = (0, 13, 14, 15, 19, 23, 24)
 DEFAULT_ARM = (34, 40, 50, 60, 64, 70, 80, 90, 100, 110, 120, 128, 132, 140, 160, 180, 200, 220, 240, 250, 255)
 # Codes whose request arm parses objects (arm-3bdata's (3c) list).
 OBJECT_ARM = tuple(range(1, 13)) + (16, 17, 18, 20, 21, 22) + tuple(range(25, 34))
-LINK_ONLY = (0xC9, 0x0B, 0xC0, 0x00, 0xC2)   # link status request, link status, reset link states, ACK, test link
+# Link status request, link status, reset link states, ACK, and test link states with FCV set, as it is sent
+# (D2's N1 on #718; IEEE 1815 not held, inference).
+LINK_ONLY = (0xC9, 0x0B, 0xC0, 0x00, 0xD2)
 
 
 # --- deterministic draws ---------------------------------------------------

@@ -13,6 +13,13 @@ control passes reads unknown for the fix (the brief's rule); a fix of part
 4.1); every case the brief and the design name is there; each malformed
 input is a capture whose packets are its build cell; and every row id a
 cell or header names exists.
+
+The malformed set's cells are checked against the design's rules, derived
+here from the builder's units and never from a run (D4-112 item 5): rule
+(A) gives each input's judge (mal-twin) and its reqhdr under each
+configuration (mal-reqhdr); a frame whose DIR disagrees with its side names
+the weird (design 1 item 4); each cell reads as one of mal-states' states;
+and (B') sets the record of a stop on a flow's first datagram (mal-bprime).
 """
 
 import csv
@@ -30,9 +37,9 @@ MALFORMED = os.path.join(HERE, "hr23-malformed.tsv")
 CONDITIONS = os.path.join(HERE, "hr23-conditions.tsv")
 ENGINE = os.path.join(HERE, "engine-pass-conditions.tsv")
 SHA256 = {
-    CASES: "eb6a2f2a567c28d8135d22fbbaa0a7f13e34d24624fa86fc96ca9475e4d43d7e",
-    MALFORMED: "e2e0516838c3d61c6cdc541d67d17f67fa7931612f1a544957a4698968bbd084",
-    CONDITIONS: "708f6c3a6e86aaedc64693e63fff6c46fa931035ffcdac39f6d625760aa93fee",
+    CASES: "f66f7952a398c0fc420507dfb125c00f1bd3538399305f24fe1c5b2727420687",
+    MALFORMED: "51e8285f4ee8b0fe46ddffe87098ee8e2e9b479dee970e35dd3375b41a43701e",
+    CONDITIONS: "695f9ee6512fb449e7781f9bbd373da58102500958de85011a184e032b127e51",
 }
 CONFIGS = ("c0", "c1", "c1p", "c2")
 FIXES = {"a", "b", "unknown", "premise", "control", "r1"}
@@ -153,7 +160,8 @@ def check_malformed(ms, caps):
     reporter error."""
     names = [m["input"] for m in ms]
     assert names == [n for n, _ in hc.MALFORMED] + ["dnp3-udp-dir-spoof", "dnp3-tcp-dir-spoof"]
-    token = re.compile(r"(viol=(0|1|\?)|err=target|[A-Za-z0-9()]+=(seen|absent|\?)|weird=dnp3_[a-z_]+)")
+    token = re.compile(r"(viol=(0|1|\?)|err=target|[A-Za-z0-9()]+=(seen|code|absent|\?)|weird=dnp3_[a-z_]+"
+                       r"|reqhdr=[0-9]+|svc=(dnp3|removed))")
     for m in ms:
         cap = caps[m["input"]]
         assert m["build"] == hc.build_cell(cap), m["input"]
@@ -180,6 +188,185 @@ def check_sides(ms, caps):
         want = own.get(m["input"])
         u = next(u for units, _ in cap.sent for u in units if u.name in ((want,) if want else ("X", "X/1")))
         assert m["side"] == u.flow.side[u.end], m["input"]
+
+
+# --- the design's rules, derived from the builder's units --------------------
+
+RESPONSES = {129, 130, 131}
+A_CODES = {129, 130, 131}   # rule (A): the codes it sends to the response parser
+BOUND = 4                   # rule (A): from this many application octets
+
+
+def messages(cap):
+    """Each message the capture's units carry, once, in the order sent, with
+    its units, its code (None for one of 0 or 1 octets) and its side."""
+    out = {}
+    for units, _ in cap.sent:
+        for u in units:
+            if u.msg is not None:
+                out.setdefault(id(u.msg), (u.msg, u.flow.side[u.end], []))[2].append(u)
+    return [(m, side, us, m.code if isinstance(m.code, int) and m.app >= 2 else None) for m, side, us in out.values()]
+
+
+def c2_response(code, n):
+    """Rule (A): C2's response parser exactly for BOUND or more octets with code 129 to 131."""
+    return n >= BOUND and code in A_CODES
+
+
+def on_the_list(code, n, side):
+    """Design 2.3's list: C2's parser differs from C1p's, which picks the response parser for the responder."""
+    return c2_response(code, n) != (side == "resp")
+
+
+def unknown_ground(cap):
+    """mal-unknown's grounds, from the build: a header held at a TCP
+    connection's end, a link length of 4 with FIR, a frame of 6 (no
+    application octet) or a fragment of 0 or 1 octets, and a fragment of
+    more than one frame (design 4.7 items 1 and 2)."""
+    if cap.name.startswith("dnp3-mal-tcp-eof-"):
+        return True
+    if any(u.label.startswith("len(4)+FIR") for units, _ in cap.sent for u in units):
+        return True
+    return any("/" in us[0].name or m.app <= 1 for m, _, us, _ in messages(cap))
+
+
+def want_judge(cap):
+    if unknown_ground(cap):
+        return "unknown"
+    return "twin" if any(on_the_list(code, m.app, side) for m, side, _, code in messages(cap)) else "same"
+
+
+def want_reqhdr(cap, config):
+    """mal-reqhdr: the 129 to 131 raised as a request header. Under C0, C1
+    and C1p, those from the originator; under C2, those under rule (A)'s bound."""
+    return sum(1 for m, side, _, code in messages(cap) if code in RESPONSES
+               and (not c2_response(code, m.app) if config == "c2" else side == "orig"))
+
+
+def tokens(cell):
+    return dict(t.split("=", 1) if "=" in t and not t.startswith("weird=") else (t, "") for t in cell.split("; "))
+
+
+def cells(m):
+    """(config, tokens) for the c0 cell and, unless it is =c1p, the c2 cell."""
+    out = [("c0", tokens(m["c0"]))]
+    if m["c2"] != "=c1p":
+        out.append(("c2", tokens(m["c2"])))
+    return out
+
+
+def x_carries_129_131(cap):
+    return any(code in RESPONSES for m, _, _, code in messages(cap) if m.name == "X")
+
+
+def check_judge(ms, caps):
+    """mal-twin: an input's judge is twin exactly when it has a fragment on
+    design 2.3's list and no mal-unknown ground; unknown on such a ground."""
+    for m in ms:
+        assert m["judge"] == want_judge(caps[m["input"]]), m["input"]
+
+
+def check_reqhdr(ms, caps):
+    """mal-reqhdr: every input whose X carries 129 to 131 names reqhdr in
+    each cell, with the value rule (A) gives under that configuration, and
+    a c2 of =c1p only where rule (A) gives C2 C1p's value; no other input
+    names it."""
+    for m in ms:
+        cap = caps[m["input"]]
+        for config, t in cells(m):
+            if x_carries_129_131(cap):
+                assert t.get("reqhdr") == str(want_reqhdr(cap, config)), (m["input"], config)
+            else:
+                assert "reqhdr" not in t, (m["input"], config)
+        if m["c2"] == "=c1p" and x_carries_129_131(cap):
+            assert want_reqhdr(cap, "c2") == want_reqhdr(cap, "c0"), m["input"]
+
+
+def check_x_objects(ms, caps):
+    """mal-seen: where a cell names X and X carries whole objects, C2 parses
+    them (rule (A) gives 4 octets or more its own code's parser), and C0, C1
+    and C1p read its code without them exactly when X is on design 2.3's
+    list (design 1 item 5; D4's N2 on #718)."""
+    for m in ms:
+        cap = caps[m["input"]]
+        xs = [(x, side, code) for x, side, _, code in messages(cap) if x.name == "X"]
+        if not xs or xs[0][0].objects == "-" or xs[0][0].state != "seen":
+            continue
+        x, side, code = xs[0]
+        for config, t in cells(m):
+            if t.get("X", "?") != "?":
+                want = "seen" if config == "c2" or not on_the_list(code, x.app, side) else "code"
+                assert t["X"] == want, (m["input"], config)
+
+
+W_DIR = "weird=dnp3_unexpected_flow_direction"
+
+
+def dir_against_side(cap):
+    """A frame whose DIR, as built, disagrees with its end's side: Zeek
+    raises dnp3_unexpected_flow_direction for it (design 1 item 4)."""
+    return any(u.dir in ("0", "1") and (u.dir == "1") != (u.flow.side[u.end] == "orig")
+               for units, _ in cap.sent for u in units)
+
+
+def check_dir_weird(ms, caps):
+    """Each cell names the weird exactly when a frame's DIR disagrees with its side (D2's N3 on #718)."""
+    for m in ms:
+        want = dir_against_side(caps[m["input"]])
+        for config, t in cells(m):
+            assert (W_DIR in t) == want, (m["input"], config)
+
+
+def state(t, order):
+    """mal-states: parsed on, recorded or silent, read from a cell's tokens;
+    weird or err for a stop those record; None where viol is not judged."""
+    if t.get("viol") == "?":
+        return None
+    named = [n for n in order if n in t and t[n] != "?"]
+    if not named or t[named[-1]] in ("seen", "code"):
+        assert t["viol"] == "0" and t.get("svc", "dnp3") == "dnp3", t
+        return "on"
+    if t["viol"] == "1":
+        assert t.get("svc", "removed") == "removed", t
+        return "recorded"
+    if "err" in t or any(k.startswith("weird=") for k in t):
+        assert "svc" not in t, t
+        return "weird"
+    assert t.get("svc") == "dnp3", f"a stop with no record must say svc=dnp3 (a silent stop): {t}"
+    return "silent"
+
+
+def order_of(cap):
+    return [m.name for m, _, _, _ in messages(cap)]
+
+
+def check_states(ms, caps):
+    """Each judged cell reads as exactly one of mal-states' states."""
+    for m in ms:
+        for _, t in cells(m):
+            state(t, order_of(caps[m["input"]]))
+
+
+def x_first(cap):
+    return cap.sent[0][0][0].name == "X"
+
+
+def check_bprime(ms, caps):
+    """mal-bprime, for an input whose X is its 5-tuple's first data: on UDP a
+    stop is silent under C0, C1 and C1p and recorded under C2, with the
+    service removed; on TCP a stop is recorded under all four. An input whose
+    X comes later has no silent stop."""
+    for m in ms:
+        cap = caps[m["input"]]
+        for config, t in cells(m):
+            s = state(t, order_of(cap))
+            if s in (None, "on", "weird"):
+                continue
+            if x_first(cap) and m["l4"] == "udp":
+                assert s == ("recorded" if config == "c2" else "silent"), (m["input"], config, s)
+                assert config != "c2" or t.get("svc") == "removed", (m["input"], config)
+            else:
+                assert s == "recorded", (m["input"], config, s)
 
 
 ROW_ID = re.compile(r"(?<![\w-])(?:judge|mal|fp|rerun|report|pin|cfg)-[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -232,6 +419,16 @@ def test_the_cases_rows_are_what_was_built():
 def test_every_malformed_input_is_its_capture():
     check_malformed(rows(MALFORMED), built())
     check_sides(rows(MALFORMED), built())
+
+
+def test_the_malformed_cells_follow_rules_a_and_bprime():
+    ms, caps = rows(MALFORMED), built()
+    check_judge(ms, caps)
+    check_reqhdr(ms, caps)
+    check_x_objects(ms, caps)
+    check_dir_weird(ms, caps)
+    check_states(ms, caps)
+    check_bprime(ms, caps)
 
 
 def test_the_conditions_are_whole_and_every_named_row_exists():
@@ -327,6 +524,81 @@ def control_malformed_side_flipped(mp):
     m = next(m for m in ms if m["input"] == "dnp3-mal-udp-short-0-resp")
     m["side"] = "orig"
     return lambda: check_sides(ms, built())
+
+
+def malformed_edited(name, **cells_):
+    ms = [dict(m) for m in rows(MALFORMED)]
+    next(m for m in ms if m["input"] == name).update(cells_)
+    return ms
+
+
+def control_short_129_from_the_originator_as_twin(mp):
+    """The pin before rule (A): an originator's 2-octet 129 judged twin, C2 stopping."""
+    ms = malformed_edited("dnp3-mal-udp-fc129-2-orig", c2="viol=1; Q=absent; reqhdr=0", judge="twin")
+    return lambda: check_judge(ms, built())
+
+
+def control_limit_judged_same(mp):
+    """D4's B2 on #718: the fragment of 413 frames judged same."""
+    ms = malformed_edited("dnp3-mal-udp-limit", c2="=c1p", judge="same")
+    return lambda: check_judge(ms, built())
+
+
+def control_rule_a_bound_above_4(mp):
+    """A rule whose bound is more than 4 octets: the pinned edges must refuse it."""
+    mp.setitem(globals(), "BOUND", 5)
+    return lambda: check_reqhdr(rows(MALFORMED), built())
+
+
+def control_rule_a_without_131(mp):
+    """A rule that sends a 131 of 4 octets to the request parser: the pinned edges must refuse it."""
+    mp.setitem(globals(), "A_CODES", {129, 130})
+    return lambda: check_reqhdr(rows(MALFORMED), built())
+
+
+def control_reqhdr_value(mp):
+    ms = malformed_edited("dnp3-mal-udp-fc129-4-orig", c2="viol=0; Q=seen; reqhdr=1")
+    return lambda: check_reqhdr(ms, built())
+
+
+def control_x_objects_seen_under_c0(mp):
+    """D4's N2: fc2-resp's X read with its objects under C0, where the response header's default arm reads none."""
+    ms = malformed_edited("dnp3-mal-tcp-fc2-resp-dirset",
+                          c0="viol=0; X=seen; Q=seen; weird=dnp3_unexpected_flow_direction")
+    return lambda: check_x_objects(ms, built())
+
+
+def control_dir_weird_dropped(mp):
+    """D2's N3: X's DIR set from the responder, with no weird pinned."""
+    ms = malformed_edited("dnp3-mal-tcp-fc0-resp-dirset", c0="viol=1; Q=absent")
+    return lambda: check_dir_weird(ms, built())
+
+
+def control_dir_weird_where_dir_agrees(mp):
+    ms = malformed_edited("dnp3-mal-tcp-fc0-resp-dirclear", c0="viol=1; Q=absent; weird=dnp3_unexpected_flow_direction")
+    return lambda: check_dir_weird(ms, built())
+
+
+def control_stop_with_no_state(mp):
+    """A stop with no violation, weird, reporter error or svc: none of mal-states' states."""
+    ms = malformed_edited("dnp3-mal-udp-fc129-2-resp", c0="viol=0; Q=absent; reqhdr=0")
+    return lambda: check_states(ms, built())
+
+
+def control_recorded_stop_keeps_the_service(mp):
+    ms = malformed_edited("dnp3-mal-udp-fc129-badobj-first", c2="viol=1; svc=dnp3; P=absent; Q=absent; reqhdr=0")
+    return lambda: check_states(ms, built())
+
+
+def control_bprime_udp_first_datagram_silent(mp):
+    """C2 without (B'): the stop on the first datagram left silent, as the stock catch leaves it."""
+    ms = malformed_edited("dnp3-mal-udp-fc129-badobj-first", c2="viol=0; svc=dnp3; P=absent; Q=absent; reqhdr=0")
+    return lambda: check_bprime(ms, built())
+
+
+def control_bprime_tcp_silent(mp):
+    ms = malformed_edited("dnp3-mal-tcp-fc129-badobj-first", c2="viol=0; svc=dnp3; P=absent; Q=absent; reqhdr=0")
+    return lambda: check_bprime(ms, built())
 
 
 def control_condition_id_missing(mp):

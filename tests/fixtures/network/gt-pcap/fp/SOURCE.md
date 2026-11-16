@@ -16,7 +16,7 @@ One set, built once, serves both counted runs (D4-111 item 5.2): HR-23's bounds 
 | `fp-udp-2` | (2) | 300 | `05 64`, six random header octets and a CRC that fails, in a datagram of 11 to 1,472 octets (both ends included) |
 | `fp-udp-3a` | (3a) | 32 | A header whose CRC passes, then random octets in the same datagram whose every chunk CRC fails; the transport octet has FIR and FIN, so the first chunk's CRC is what fails |
 | `fp-udp-3b-data` | (3b-data) | 42 | A whole frame from the originator, DIR set: each empty-arm code (0, 13, 14, 15, 19, 23, 24) three times with 2 application octets, and 21 default-arm codes (34 to 128, 132 to 255) with 2 to 22 (`arm-3bdata`); then a datagram of 11 to 200 octets with no `05` |
-| `fp-udp-3b-link` | (3b-link) | 32 | A link-only frame (link status request, link status, reset link states, ACK or test link), then 1 to 40 octets, then 11 to 200, neither with a `05` |
+| `fp-udp-3b-link` | (3b-link) | 32 | A link-only frame (link status request, link status, reset link states, ACK, or test link states with FCV set, `D2h`, as D2's N1 on #718 reads it is sent; `inference`), then 1 to 40 octets, then 11 to 200, neither with a `05` |
 | `fp-udp-3c` | (3c) | 54 | A whole frame from the originator whose code's request arm parses objects (1 to 12, 16 to 18, 20 to 22, 25 to 33), each twice, with exactly 1 object octet (`arm-3bdata`) |
 | `fp-udp-4` | (4) | 304 | 76 each: DNS queries to 53, NetBIOS name queries to 137 and LLMNR queries to its group on 5355, each with ID 0564h; and RADIUS Accounting-Responses (code 5, identifier 64h) from 1813. DNS names are under `gt-pcap.example`, LLMNR's are `gtpcap<n>` and NetBIOS's `GTPCAP<nnn>`, and the RADIUS authenticator is random |
 | `fp-udp-5` | (5) | 304 | 76 each: random payloads of 11 to 1,472 octets, NTPv4 client packets, RFC 5424 Syslog lines and SNMPv2c GetRequests (community `gtpcap-test`), each with its first two octets forced to `05 64` |
@@ -32,5 +32,6 @@ One set, built once, serves both counted runs (D4-111 item 5.2): HR-23's bounds 
 ## Limits
 
 - **What counts as named** under each configuration, and what each class is expected to show, are the conditions files', not these labels'.
+- **No item reaches the patch's changed path.** Every (3b-data) and (3c) item is sent from the originator with a code other than 129 to 131 (HR-25's `arm-3bdata`), so C2's parser is C1p's for it, and `fp-b` is checked only where C2 equals C1p by construction. The changed path's surface rests on HR-23's malformed set and the fuzz run (D4's N3 on #718). No item is added, since that would change HR-25's pinned row.
 - **Class (4) and (5)'s messages** are well formed for their protocols as far as their first octets go, and not checked against any real implementation; (5)'s are not valid in their protocols after their first two octets are forced.
 - **Real traffic.** These say nothing about the UDP or TCP traffic at a site, where other near misses may start `05 64`.

@@ -319,6 +319,8 @@ def check_malformed(cap):
         assert x[2] == 6 and frame_ok(x)[3][0] & 0xC0 == 0xC0 and len(frame_ok(x)[3]) == 1
     elif n.startswith("udp-app-1-"):
         assert len(app(unit(cap, "X"))) == 1 and unit(cap, "X").end == ("m" if n.endswith("orig") else "o")
+    elif n.endswith("-badobj-first"):
+        check_badobj_first(cap)
     elif n.startswith(("udp-fc", "tcp-fc")):
         parts = n.split("-")
         code = int(parts[1][2:])
@@ -369,6 +371,26 @@ def check_malformed(cap):
     if n.startswith("tcp-eof-"):
         fins = sum(1 for fr in cap.flows[0].conv.frames if parse(fr.data)[7] & synth.FIN)
         assert fins == (0 if n.endswith("open") else 2)
+
+
+def check_badobj_first(cap):
+    """D3's M1 (D1's 6907928324): X, the master's 129 of 5 application octets,
+    IIN 0 and one object octet, is the 5-tuple's first data; P R and Q R
+    follow whole. Over TCP the handshake comes first and neither port is in
+    likely_server_ports, so that the analyzer attaches by signature and the
+    PIA replays X (design 4.1)."""
+    (f,) = cap.flows
+    data = units_of(cap)
+    assert [u.name for u in data] == ["X", "P", "R(P)", "Q", "R(Q)"], cap.name
+    x = data[0]
+    assert x.end == "m" and f.side["m"] == "orig" and app(x)[1:] == bytes([dnp3.RESPONSE]) + b"\x00\x00\x3c"
+    assert all(u.label == "valid" and u.msg.state == "seen" for u in data[1:]), cap.name
+    if f.l4 == "tcp":
+        flags = [parse(fr.data)[7] for fr in f.conv.frames]
+        assert flags[:3] == [synth.SYN, synth.SYN | synth.ACK, synth.ACK], cap.name
+        assert f.port["m"] not in hc.LIKELY["tcp"] and f.port["o"] not in hc.LIKELY["tcp"], cap.name
+    else:
+        assert f.port["m"] == f.port["o"] == 20000, cap.name
 
 
 def test_every_malformed_input_is_what_its_name_says():
@@ -460,6 +482,10 @@ def check_fp_classes(by):
     for d in datagrams(by["fp-udp-3b-link"]):
         assert len(d) == 3 and len(d[0]) == 10 and d[0][2] == 5 and dnp3.crc(d[0][:8]) == d[0][8:10]
         assert d[1][:2] != b"\x05\x64" and len(d[2]) >= 11 and d[2][:2] != b"\x05\x64"
+        # A primary frame sets FCV exactly for test link states (2) and confirmed user data (3), so each
+        # link-only frame is what its label names (D2's N1 on #718; IEEE 1815 not held, inference).
+        ctrl = d[0][3]
+        assert not ctrl & 0x40 or bool(ctrl & 0x10) == ((ctrl & 0x0F) in (2, 3)), hex(ctrl)
     for it, d in zip(by["fp-udp-3c"].items, datagrams(by["fp-udp-3c"])):
         hdr_ok, chunks, _, user = frame_ok(d[0])
         assert len(d) == 1 and hdr_ok and all(chunks) and len(user) == 4 and user[2] in fs.OBJECT_ARM
@@ -547,10 +573,12 @@ def check_tshark_list(path, mode):
 
 
 def check_sides(rows):
-    """The sort's rows: each how is one the rule gives, and on GT-PCAP's own
-    DNP3 captures the flows that disagree are exactly those the design names
-    (design 4.7): dnp3-udp-temp-port's responses' flow and
-    dnp3-udp-unsolicited's, besides the HR-23 cases that start with the relay."""
+    """The sort's rows: each how is one the rule gives; on GT-PCAP's own
+    DNP3 captures the flows with a changed fragment are exactly those the
+    design names (design 4.7): dnp3-udp-temp-port's responses' flow and
+    dnp3-udp-unsolicited's, besides the HR-23 cases that start with the
+    relay; and each HR-23 case's row is what its builder's units give by
+    rule (A), with the tool's own predicate (a second reading of tshark's)."""
     assert rows[0] == ht.SIDE_COLUMNS
     gt = {name for name in (fr for fr in os.listdir(os.path.join(FIX, "dnp3")) if fr.endswith(".tsv"))}
     gt = {n[:-4] for n in gt}
@@ -561,6 +589,88 @@ def check_sides(rows):
     assert dis == [("dnp3-udp-temp-port", "192.0.2.20:20000"), ("dnp3-udp-unsolicited", "192.0.2.20:20000")], dis
     hr = sorted(r[0] for r in rows[1:] if int(r[6]) > 0 and r[0] in caps())
     assert hr == sorted(set(RELAY_STARTED) - {"dnp3-udp-swap-control"}), hr
+    got = sorted((r[0], r[2], r[3], r[5], r[6], r[7]) for r in rows[1:] if r[0] in dict(hc.CASES))
+    assert got == sorted(case_sort_rows()), got
+
+
+def case_sort_rows():
+    """Each HR-23 case's flows as the sort's columns, from the builder's
+    messages: their sides, how many, and those rule (A) moves (ht.changed)."""
+    out = []
+    for name, _ in hc.CASES:
+        cap = caps()[name]
+        for f in cap.flows:
+            msgs = {}
+            for units, _ in cap.sent:
+                for u in units:
+                    if u.flow is f and u.msg is not None:
+                        msgs.setdefault(id(u.msg), (u.msg, u.end))
+            moved = []
+            for m, end in msgs.values():
+                code = m.code if isinstance(m.code, int) and m.app >= 2 else None
+                if ht.changed(code, m.app, f.side[end] == "resp"):
+                    moved.append(code)
+            orig = next(e for e in ("m", "o") if f.side[e] == "orig")
+            resp = "o" if orig == "m" else "m"
+            shown = sorted({"none" if c is None else str(c) for c in moved}, key=lambda s: (s == "none", len(s), s))
+            out.append((name, f"{f.host[orig][1]}:{f.port[orig]}", f"{f.host[resp][1]}:{f.port[resp]}",
+                        str(len(msgs)), str(len(moved)), ",".join(shown) or "-"))
+    return out
+
+
+# Rule (A) against C1p, fragment by fragment (design 2.3's list): (code, octets, from the responder) and whether
+# C2's parser differs from C1p's. None is a fragment of 0 or 1 octets, which has no code.
+CHANGED = [
+    ((129, 2, False), False), ((129, 3, False), False), ((129, 2, True), True), ((130, 3, True), True),
+    ((129, 4, False), True), ((131, 4, False), True), ((130, 9, False), True),
+    ((129, 4, True), False), ((131, 4, True), False), ((131, 20, True), False),
+    ((1, 2, True), True), ((0, 2, True), True), ((2, 30, True), True), ((1, 11, False), False), ((0, 2, False), False),
+    ((None, 1, True), True), ((None, 0, True), True), ((None, 1, False), False),
+]
+
+
+def check_changed_rule(rule):
+    for args, want in CHANGED:
+        assert rule(*args) == want, (args, want)
+
+
+def test_the_sort_predicate_is_rule_a_against_c1p():
+    check_changed_rule(ht.changed)
+
+
+# tshark's fields for one packet, and the fragments the sort reads from them: a code goes with each length of 2 or
+# more, in order (tshark 4.2.3 gives a 1-octet fragment a length and no code); lists that do not pair give None.
+L, F = "dnp3.al.fragment.reassembled.length", "dnp3.al.func"
+FRAGMENTS = [
+    ({F: "129", L: "2"}, [(129, 2)]),
+    ({F: "", L: "1"}, [(None, 1)]),
+    ({F: "5,1", L: "20,11"}, [(5, 20), (1, 11)]),
+    ({F: "1", L: "0,11"}, [(None, 0), (1, 11)]),
+    ({F: "1", L: ""}, None),
+    ({F: "", L: "4"}, None),
+]
+
+
+def check_fragments(read):
+    for r, want in FRAGMENTS:
+        assert read(r) == want, (r, want)
+
+
+def fragments_from(k):
+    """ht.fragments with the code taken from k octets on: a mutant for k other than 2."""
+    def read(r):
+        lens = [int(x) for x in r.get(L, "").split(",") if x]
+        cs = [int(c) for c in ht.codes(r)]
+        if sum(1 for n in lens if n >= k) != len(cs):
+            return None
+        it = iter(cs)
+        return [(next(it) if n >= k else None, n) for n in lens]
+    return read
+
+
+def test_the_sort_pairs_codes_with_lengths():
+    check_fragments(ht.fragments)
+    check_fragments(fragments_from(2))
 
 
 def test_the_tshark_lists_and_the_sort_name_a_cause_or_a_side_for_each_row():
@@ -809,12 +919,69 @@ def control_tshark_cause_not_named(mp):
     return lambda: check_tshark_list(path, "labels")
 
 
-def control_sides_disagree_dropped(mp):
+def control_sides_changed_dropped(mp):
     rows = rt.expected_rows(os.path.join(HR23, "sides.tsv"))
     for r in rows[1:]:
         if r[0] == "dnp3-udp-temp-port" and r[6] != "0":
             r[6], r[7] = "0", "-"
     return lambda: check_sides(rows)
+
+
+def control_sort_predicate_before_rule_a(mp):
+    """The sort as #718 first pinned it: a code whose class disagrees with its side."""
+    return lambda: check_changed_rule(lambda code, n, from_resp: (code in ht.RESPONSES) != from_resp)
+
+
+def control_sort_predicate_bound_above_4(mp):
+    return lambda: check_changed_rule(lambda code, n, from_resp: (n > 4 and code in ht.RESPONSES) != from_resp)
+
+
+def control_sort_predicate_without_131(mp):
+    return lambda: check_changed_rule(lambda code, n, from_resp: (n >= 4 and code in (129, 130)) != from_resp)
+
+
+def control_sort_code_from_1_octet(mp):
+    return lambda: check_fragments(fragments_from(1))
+
+
+def control_sort_code_from_3_octets(mp):
+    return lambda: check_fragments(fragments_from(3))
+
+
+def control_sort_case_row_moved(mp):
+    """relay-write's row with its changed count one short."""
+    rows = rt.expected_rows(os.path.join(HR23, "sides.tsv"))
+    r = next(r for r in rows[1:] if r[0] == "dnp3-udp-relay-write")
+    r[6] = str(int(r[6]) - 1)
+    return lambda: check_sides(rows)
+
+
+def control_badobj_after_the_poll(mp):
+    """M1's X sent after P, so not the 5-tuple's first datagram."""
+    c = fresh("dnp3-mal-udp-fc129-badobj-first")
+    c.sent = c.sent[1:2] + c.sent[:1] + c.sent[2:]
+    return lambda: check_malformed(c)
+
+
+def control_badobj_tcp_on_20000(mp):
+    """M1's TCP twin with O2 on 20000, where the port, not the signature, attaches DNP3_TCP."""
+    orig = hc.Flow
+
+    def on_20000(cap, l4, *a, **k):
+        a = list(a)
+        if l4 == "tcp":
+            a[3] = 20000
+        return orig(cap, l4, *a, **k)
+    mp.setattr(hc, "Flow", on_20000)
+    c = fresh("dnp3-mal-tcp-fc129-badobj-first")
+    return lambda: check_malformed(c)
+
+
+def control_fp_test_link_without_fcv(mp):
+    """(3b-link)'s test link as #718 first built it, C2h, FCV clear (D2's N1)."""
+    mp.setattr(fs, "LINK_ONLY", (0xC9, 0x0B, 0xC0, 0x00, 0xC2))
+    by = {b.name: b for b in fs.built()}
+    return lambda: check_fp_classes(by)
 
 
 CONTROLS = {name[len("control_"):].replace("_", "-"): f for name, f in globals().items() if name.startswith("control_")}
@@ -833,8 +1000,11 @@ def test_the_controls_pass_unmutated():
     check_swap_pair(caps()["dnp3-udp-relay-write"], fresh("dnp3-udp-swap-control"))
     check_arrangement(fresh("dnp3-udp-relay-off-set"))
     for name in ("dnp3-mal-udp-octets-2", "dnp3-mal-udp-len-2", "dnp3-mal-udp-fc129-2-orig",
-                 "dnp3-mal-tcp-eof-firopen-open", "dnp3-mal-udp-limit"):
+                 "dnp3-mal-tcp-eof-firopen-open", "dnp3-mal-udp-limit", "dnp3-mal-udp-fc129-badobj-first",
+                 "dnp3-mal-tcp-fc129-badobj-first"):
         check_malformed(fresh(name))
+    check_changed_rule(ht.changed)
+    check_sides(rt.expected_rows(os.path.join(HR23, "sides.tsv")))
 
 
 @pytest.mark.parametrize("control", sorted(CONTROLS))
