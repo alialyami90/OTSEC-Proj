@@ -71,7 +71,7 @@ mc=$work/containers-$mode
 # `docker run` took, less --rm. A failed rule stops the run.
 mc_run() {
   mc_rc=0
-  python3 -I "$here/mountcheck.py" run "$mc" -- "$@" || mc_rc=$?
+  MOUNTCHECK_LOG=/dev/fd/9 python3 -I "$here/mountcheck.py" run "$mc" -- "$@" || mc_rc=$?
   mc_stop
   return $mc_rc
 }

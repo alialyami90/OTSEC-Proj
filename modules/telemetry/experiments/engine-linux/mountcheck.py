@@ -379,9 +379,21 @@ def image_facts(d, image_id, zeek):
     return facts
 
 
+def log(text):
+    """The check's own lines go to MOUNTCHECK_LOG when run.sh names it (the
+    job's stderr), so that they never enter a container's output that a
+    caller keeps in a file or a table; to stderr otherwise."""
+    path = os.environ.get("MOUNTCHECK_LOG")
+    if path:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(text)
+    else:
+        sys.stderr.write(text)
+        sys.stderr.flush()
+
+
 def say(msg):
-    sys.stderr.write(f"mountcheck: {msg}\n")
-    sys.stderr.flush()
+    log(f"mountcheck: {msg}\n")
 
 
 def run(d, argv, log_argv=None, between=None):
@@ -421,7 +433,7 @@ def run(d, argv, log_argv=None, between=None):
         docker("rm", "-f", cid, check=False)
     if probs:
         text = "".join(f"mountcheck: rule {r} failed (container {n}): {m}\n" for r in RULES for m in probs.get(r, []))
-        sys.stderr.write(text)
+        log(text)
         with open(os.path.join(d, "FAILED"), "a", encoding="utf-8") as fh:
             fh.write(text)
         return 3, probs
@@ -556,7 +568,7 @@ def main(argv):
             rc, _ = run(argv[1], rest)
         except Exception as e:  # any fault of the check fails the run, never passes it
             text = f"mountcheck: the check did not finish: {e!r}\n"
-            sys.stderr.write(text)
+            log(text)
             os.makedirs(argv[1], exist_ok=True)
             with open(os.path.join(argv[1], "FAILED"), "a", encoding="utf-8") as fh:
                 fh.write(text)
