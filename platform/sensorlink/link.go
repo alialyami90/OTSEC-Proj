@@ -452,7 +452,7 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 	}
 	rec, dst, unresolved, err := l.record(hr, tie)
 	if err == nil && f != nil {
-		rec.SourceCursor, err = f.cursor()
+		rec.SourceCursor = f.cursor
 	}
 	if err != nil {
 		l.refuse(RefusedStored)

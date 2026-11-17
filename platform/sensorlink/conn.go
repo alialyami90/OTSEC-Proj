@@ -849,10 +849,18 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	marked := cn.cur.clone()
 	lost := markLost(marked)
 	marked.Taken = max(marked.Taken, n)
+	mb, err := encodeCursor(marked)
+	if err != nil {
+		// A cursor that cannot be encoded is the node's fault, not the
+		// record's refusal: the record is not taken, T stays, nothing is
+		// acked, and the connection closes (D6's B1 (ii) on #732).
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the position with record %d of run %s was not saved: %v", o.SensorID, n, o.RunID, err))
+		return netobs.ClosePositionNotSaved
+	}
 	if l.hold.on() && !l.flush(ctx, cn, true) {
 		return netobs.CloseStore // T through n-1 is saved before n can be held
 	}
-	f := &inflight{run: o.RunID, seq: n, cursor: func() ([]byte, error) { return encodeCursor(marked) }}
+	f := &inflight{run: o.RunID, seq: n, cursor: mb}
 	l.cmu.Lock()
 	l.inflight = f
 	l.cmu.Unlock()
@@ -1026,11 +1034,12 @@ const (
 )
 
 // inflight is the record the 0.2 path is taking: its commit carries the
-// cursor, and its outcome is noted. cmu guards it.
+// cursor, encoded before the record is taken, and its outcome is noted.
+// cmu guards it.
 type inflight struct {
 	run     string
 	seq     uint64
-	cursor  func() ([]byte, error)
+	cursor  []byte
 	outcome outcome
 }
 
