@@ -121,7 +121,13 @@ func others(g *holdRig, n int) []any {
 // disk (D3's and D6's B1 on #728, D1's ruling). So every dispatch is made,
 // each Lock turn is timed and its writes counted (orderAfterLock's freed
 // seam), and a failure says which it was: the rule broken (takes counted),
-// or a timeout that no single one-write turn explains.
+// or a timeout that no single one-write turn explains. The turns are read
+// only once the read loop and TickHold have stopped, so the turn that held
+// through the last dispatch's wait has ended and is counted; read earlier,
+// it was still in progress and missing (run 44078255375, P4-LINK-SFL;
+// TestLinkLockTurnReadOnceEnded). The 30 ms pauses between dispatches
+// order nothing the test asserts: they let the read loop take the lock
+// between calls, so more calls find a holder.
 func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	s := &gatedStore{delay: 100 * time.Millisecond}
 	g := gatedRig(t, s)
@@ -132,7 +138,9 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- g.l.Serve(bg, stream(t, recs...)) }()
+	ticks := make(chan struct{})
 	go func() {
+		defer close(ticks)
 		for ctx.Err() == nil {
 			g.l.TickHold(ctx)
 		}
@@ -155,8 +163,38 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 		worst = max(worst, time.Since(from))
 		time.Sleep(30 * time.Millisecond)
 	}
+	// Wait for the read loop and TickHold to stop, failing by name when
+	// nothing commits for 5 HoldLockWait: a lock never freed (D6's N1 on
+	// #738). The bound is on progress, as a slow runner's commits take 1 s
+	// and more, and some 45 records remain after the dispatches.
+	cancel()
+	stopped := make(chan error, 1)
+	go func() { <-ticks; stopped <- <-done }()
+	for last, still := g.l.Stats().Committed, 0; ; {
+		var err error
+		select {
+		case err = <-stopped:
+		case <-time.After(HoldLockWait):
+			if c := g.l.Stats().Committed; c != last {
+				last, still = c, 0
+				continue
+			}
+			if still++; still < 5 {
+				continue
+			}
+			n, _, long, open := lk.read(&g.l.cmu)
+			t.Fatalf("the read loop and TickHold did not stop, and nothing committed for %s: the lock was not freed (a Lock turn in progress: %v; %d takes while a dispatch waited; dispatches timed out %v; turns of %s or more, with their writes: %v)", 5*HoldLockWait, open, n, timedOut, HoldLockWait/2, long)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		break
+	}
 	st := g.l.Stats()
-	n, turn, long := lk.read(&g.l.cmu)
+	n, turn, long, open := lk.read(&g.l.cmu)
+	if open {
+		t.Fatal("a Lock turn is still in progress with the read loop and TickHold stopped")
+	}
 	t.Logf("worst dispatch %s (status %s), longest Lock turn %s, dispatches timed out %v", worst, st.LockWaitMax, turn, timedOut)
 	if n != 0 {
 		t.Fatalf("the rule is broken: Lock took the lock %d times while a dispatch waited; dispatches %v timed out (%d counted), longest wait %s, longest Lock turn %s", n, timedOut, st.DispatchTimeouts, st.LockWaitMax, turn)
@@ -170,9 +208,58 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 		}
 		t.Logf("dispatch %d timed out on a slow holder: one Lock turn of one store write held the lock through its wait (turns of %s or more, with their writes: %v)", i, HoldLockWait/2, long)
 	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+}
+
+// P4-LINK-SFL (run 44078255375): a dispatch that times out on one Lock
+// turn of one store write is excused only once that turn has ended. The
+// read loop's commit of one record is held in its write (the store's gate)
+// through a dispatch's whole wait. Read while the turn is in progress, as
+// TestSchedulerFirstOnLinkLock read before it stopped the read loop, the
+// turn is reported open and is not among the long turns, so heldThrough
+// cannot excuse the timeout: the CI failure, whose timed-out dispatch was
+// the last. Read once the commit is let go and Serve has returned, the
+// turn is there, of one write, and held through the wait.
+func TestLinkLockTurnReadOnceEnded(t *testing.T) {
+	s := &gatedStore{gate: make(chan struct{}), entered: make(chan struct{})}
+	g := gatedRig(t, s)
+	lk := orderAfterLock(&g.l.cmu)
+	lk.writes = &s.writes
+	done := make(chan error, 1)
+	go func() { done <- g.l.Serve(bg, stream(t, others(g, 1)...)) }()
+	<-s.entered
+	release := sync.OnceFunc(func() { close(s.gate) })
+	defer release()
+	from := time.Now()
+	if err := g.l.Dispatch(bg, HoldRun{RequestID: "late", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); !errors.Is(err, ErrHoldTimeout) {
+		t.Fatalf("dispatch with the commit held: %v; want ErrHoldTimeout", err)
+	}
+	if _, _, long, open := lk.read(&g.l.cmu); !open || heldThrough(long, from) {
+		t.Fatalf("read with the commit still held: open %v, long turns %v; want the turn open and not yet counted", open, long)
+	}
+	release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * HoldLockWait):
+		t.Fatalf("Serve did not return within %s of the commit's release", 5*HoldLockWait)
+	}
+	n, _, long, open := lk.read(&g.l.cmu)
+	if n != 0 || open || !heldThrough(long, from) {
+		t.Fatalf("read once Serve returned: %d takes while the dispatch waited, open %v, long turns %v; want one turn of one write held through the wait", n, open, long)
+	}
+	// Exactly one store write excuses a timeout, not at most or at least
+	// one (D1's ruling 6936986476 on #728): the same turn with 0 or with 2
+	// writes does not (D3's N1 on #738).
+	for _, w := range []int64{0, 2} {
+		u := append([]turn(nil), long...)
+		for i := range u {
+			u[i].writes = w
+		}
+		if heldThrough(u, from) {
+			t.Fatalf("the same turn with %d store writes excused the timeout; only exactly one may", w)
+		}
 	}
 }
 
@@ -207,11 +294,12 @@ func (c *lockCounts) nWrites() int64 {
 	return c.writes.Load()
 }
 
-// read returns the counts, under f.mu.
-func (c *lockCounts) read(f *fairLock) (int64, time.Duration, []turn) {
+// read returns the counts, under f.mu, and whether a Lock turn is in
+// progress, whose time is not yet counted.
+func (c *lockCounts) read(f *fairLock) (int64, time.Duration, []turn, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return c.bypassed, c.longest, append([]turn(nil), c.long...)
+	return c.bypassed, c.longest, append([]turn(nil), c.long...), !c.takenAt.IsZero()
 }
 
 // heldThrough reports whether one of long, a turn of exactly one store
@@ -333,7 +421,7 @@ func TestFairLockSchedulerFirst(t *testing.T) {
 		}
 		w0 := wakes
 		if !f.lockSched(HoldLockWait) {
-			n, _, _ := lk.read(&f)
+			n, _, _, _ := lk.read(&f)
 			t.Fatalf("call %d: the lock was not had within %s; Lock took it %d times while a call waited", i, HoldLockWait, n)
 		}
 		f.Unlock()
@@ -341,7 +429,7 @@ func TestFairLockSchedulerFirst(t *testing.T) {
 			t.Fatalf("call %d had the lock after %d wakes, want 1: not woken by the holder's Unlock", i, n)
 		}
 	}
-	if n, _, _ := lk.read(&f); n != 0 {
+	if n, _, _, _ := lk.read(&f); n != 0 {
 		t.Fatalf("the rule is broken: Lock took the lock %d times while a scheduler call waited", n)
 	}
 }
