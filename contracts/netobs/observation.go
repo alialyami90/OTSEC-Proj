@@ -317,6 +317,7 @@ func (o *Observation) validateChannel(want string, keys, nulls map[string]bool) 
 		c.fail(CodeConflict, "node", "a sensor's record never carries node")
 	}
 	o.checkFrames(c)
+	c.refuseNulls()
 	return c.err()
 }
 
@@ -656,10 +657,6 @@ func (in *Insecure) check(c *checker) {
 		}
 		if l.Attempts < 0 {
 			c.fail(CodeRange, "insecure.login.attempts", "%d is negative", l.Attempts)
-		}
-		// null decodes as 0; read from a sensor, it is refused, not read.
-		if c.nulls["insecure.login.attempts"] {
-			c.fail(CodeForm, "insecure.login.attempts", "null is not a count")
 		}
 		// An absent count decodes as 0 too. On the 0.2 and 0.3 channels it
 		// is refused, not read as 0 (D1's ruling on #726); the 0.1 channel

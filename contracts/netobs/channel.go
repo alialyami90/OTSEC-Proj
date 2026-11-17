@@ -286,14 +286,6 @@ func (h *Heartbeat) validateChannel(want string, keys, nulls map[string]bool) er
 			}
 		}
 	}
-	// A 0.1 count present with null decodes as 0, and drops_driver as
-	// absent, which means unknown. Read from a sensor (nulls set), it is
-	// refused, not read (D4-107 item 3.1).
-	for _, name := range append([]string{"drops_driver"}, counters01...) {
-		if c.nulls["counters."+name] {
-			c.fail(CodeForm, "counters."+name, "null is not a count")
-		}
-	}
 	// A key present with null decodes as absent; it is refused, not read
 	// as the count or object it lacks.
 	for _, x := range h.Counters.counts02() {
@@ -331,6 +323,7 @@ func (h *Heartbeat) validateChannel(want string, keys, nulls map[string]bool) er
 	if h.FrameStage != nil && h.FrameStage.OverlapTableFull == nil {
 		c.fail(CodeMissing, "frame_stage.overlap_table_full", "required")
 	}
+	c.refuseNulls()
 	return c.err()
 }
 
@@ -357,9 +350,6 @@ func (h *Heartbeat) checkInterfaces(c *checker) {
 		// An absent count decodes as 0; it is refused, not read as 0.
 		if c.keys != nil && !c.keys[f+".packets"] {
 			c.fail(CodeMissing, f+".packets", "required")
-		}
-		if c.nulls[f+".packets"] {
-			c.fail(CodeForm, f+".packets", "null is not a count")
 		}
 		if seen[in.Name] || !want[in.Name] {
 			c.fail(CodeConflict, f+".name", "%q: the names are the coverage statement's, each once", in.Name)

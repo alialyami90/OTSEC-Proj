@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -173,8 +175,9 @@ func Codes(err error) []Code {
 // optional in the Go type and in a stored record, required on the channel
 // of their minor and later). keys holds a decoded document's key paths
 // (keyPaths), nil when a Go value is validated. nulls holds the paths of
-// those keys whose value is null (docPaths), set only for a record read
-// from a sensor on the 0.2 or 0.3 channel.
+// those keys and list elements whose value is null (docPaths), set only
+// for a record read from a sensor on the 0.2 or 0.3 channel, where
+// refuseNulls refuses each.
 type checker struct {
 	errs  []error
 	minor int
@@ -345,6 +348,25 @@ func (c *checker) null(field string, isNil bool) {
 	}
 }
 
+// refuseNulls refuses, as form, every key and list element in c.nulls
+// that no check has already refused as form at its path. No value on the 0.2 or 0.3
+// channel is null (C13 0.2 CH-5, C13 0.3 §1.1; D1's ruling on #732): an
+// optional field is shown absent by leaving its key out, and a list is [].
+// One rule covers every path, a field added later included.
+func (c *checker) refuseNulls() {
+	refused := map[string]bool{}
+	for _, err := range c.errs {
+		if e, ok := err.(*Error); ok && e.Code == CodeForm {
+			refused[e.Field] = true
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(c.nulls)) {
+		if !refused[p] {
+			c.fail(CodeForm, p, "null is not a value")
+		}
+	}
+}
+
 // keyPaths lists every key of a JSON document by its path in the checker's
 // field form ("coverage.settings.prp_window_ms", "windows[0].coverage").
 // It is called only on a document strictjson has read, so no key repeats.
@@ -353,9 +375,9 @@ func keyPaths(b []byte) map[string]bool {
 	return keys
 }
 
-// docPaths is keyPaths, and also the paths of the keys whose value is
-// null. A null decodes into a plain count as 0, so only this set tells the
-// two apart.
+// docPaths is keyPaths, and also the paths of the keys and list elements
+// whose value is null. A null decodes into a plain count as 0, so only
+// this set tells the two apart.
 func docPaths(b []byte) (keys, nulls map[string]bool) {
 	var doc any
 	if json.Unmarshal(b, &doc) != nil {
@@ -379,7 +401,11 @@ func docPaths(b []byte) (keys, nulls map[string]bool) {
 			}
 		case []any:
 			for i, e := range x {
-				walk(fmt.Sprintf("%s[%d]", path, i), e)
+				p := fmt.Sprintf("%s[%d]", path, i)
+				if e == nil {
+					nulls[p] = true
+				}
+				walk(p, e)
 			}
 		}
 	}
