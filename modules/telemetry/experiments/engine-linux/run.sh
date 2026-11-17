@@ -48,13 +48,16 @@
 #
 # The script-hash check (docs/release.md section 8.4 item 3; D4-115 item 5):
 # every Zeek container that has a mount is made, checked, run and removed
-# by mountcheck.py (mc_run below) with the same options, image and command
-# as before, so the measured run is unchanged. Suricata's containers, the
+# by mountcheck.py (mc_run below) with the same options, image and Zeek
+# command line as before, one capture per container (D1's ruling 6955678741
+# on #744), so the measured run is unchanged and the rules are read before
+# every Zeek process. Suricata's containers, the
 # comparison, are left as they were: its image declares four VOLUMEs, which
 # Docker makes writable for each container, and the check refuses any
 # writable mount but /out. Each mode first shows the
 # check's controls on this runner's Docker (mountcheck.py selftest), and
-# stops the run when a rule fails on any container.
+# stops the run when a rule fails on any container. Its record, with one
+# line per container, ends the mode's table file (mc_record).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
@@ -67,6 +70,9 @@ work=$(cd "$work" && pwd)
 # log even from a container whose output a caller redirects.
 exec 9>&2
 mc=$work/containers-$mode
+# A reused WORK must not carry an earlier invocation's containers into the
+# record (D3's N3).
+rm -rf "$mc"
 # One engine container under mountcheck.py's rules: the arguments are those
 # `docker run` took, less --rm. A failed rule stops the run.
 mc_run() {
@@ -90,6 +96,16 @@ mc_selftest() {
     exit 1
   }
   cat "$work/mountcheck-$mode.md"
+}
+# The check's record of this mode, appended to FILE, which the workflow
+# uploads (D6's N5): the controls, and mountcheck.py's summary, which reads
+# every output folder again (output-unchanged) and fails on a rule failed.
+mc_record() {
+  { echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } >> "$1" || {
+    cat "$1" >&9
+    echo "the script-hash check (docs/release.md section 8.4 item 3) failed; the run stops" >&9
+    exit 1
+  }
 }
 
 # 1. The pins, checked before anything fetched runs.
@@ -131,17 +147,20 @@ if [ "$mode" = hr23-unit ]; then
     im=${rest%%=*}
     arg=
     [ "$im" = "$rest" ] || arg=${rest#*=}
-    mc_run --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
-      "$im" sh /exp/in-container.sh zeek "$cfg" /exp/probe.zeek /exp/zeek-patch/viol.zeek $arg
+    for p in "$u/pcaps"/*; do
+      case $p in *.pcap|*.pcapng|*.cap) ;; *) continue ;; esac
+      mc_run --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
+        "$im" sh /exp/in-container.sh zeek "$cfg" "/pcaps/${p##*/}" /exp/probe.zeek /exp/zeek-patch/viol.zeek $arg
+    done
   done
   rc=0
   { echo "# HR-23: D4's unit and negative tests of option (i)'s patch"; echo
     echo "D4's own inputs (\`d4u-*\`), not GT-PCAP or stage 2's cases; no counted measurement reads them. Each test's"
     echo "control is C1p, the same tree without the patch. C0 (the stock image) runs for D1's experiment on #715."
     echo "(B')'s controls are C2 with one control patch each (zeek-patch/controls/)."; echo
-    python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?
-    echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } > "$work/hr23-unit.md"
+    python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?; } > "$work/hr23-unit.md"
   mc_stop
+  mc_record "$work/hr23-unit.md"
   cat "$work/hr23-unit.md"
   [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/hr23-unit.md" >> "$GITHUB_STEP_SUMMARY"
   exit $rc
@@ -245,16 +264,27 @@ header() {
 # The pipe case adds $locked: every capability dropped, no new privileges,
 # and the runner's own user, which is not root (D3 on #630). The file runs
 # keep Docker's defaults, which is what E-D4-03 first ran.
+# One Zeek container per capture, in the order in-container.sh's own loop
+# took them (D1's ruling 6955678741 on #744).
 locked=
 img=$ZEEK_IMAGE
 zeek_run() {
-  mc_run --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
-    "$img" sh /exp/in-container.sh "$@"
+  zr_e=$1
+  zr_c=$2
+  shift 2
+  for zr_p in "$pcaps"/*; do
+    case $zr_p in *.pcap|*.pcapng|*.cap) ;; *) continue ;; esac
+    mc_run --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
+      "$img" sh /exp/in-container.sh "$zr_e" "$zr_c" "/pcaps/${zr_p##*/}" "$@"
+  done
 }
 suricata_run() {
+  sr_e=$1
+  sr_c=$2
+  shift 2
   docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
     -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh \
-    "$@" --set app-layer.protocols.dnp3.enabled=yes --set app-layer.protocols.modbus.enabled=yes
+    "$sr_e" "$sr_c" all "$@" --set app-layer.protocols.dnp3.enabled=yes --set app-layer.protocols.modbus.enabled=yes
 }
 engines() {
   pcaps=$1
@@ -518,5 +548,5 @@ case $mode in
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
 mc_stop
-{ cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } >> "$work/versions.txt"
+mc_record "$work/$mode.md"
 cat "$work/$mode.md" "$work/versions.txt"
