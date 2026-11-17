@@ -45,6 +45,13 @@
 # images zeek-patch/build.sh built, `zeek-probe-c1p` and `zeek-probe-c2` run
 # too, on those images by ID. A fourth mode, `hr23-unit WORK`, runs D4's unit
 # and negative tests of the patch (zeek-patch/dispatch_unit.py) on them.
+#
+# The script-hash check (docs/release.md section 8.4 item 3; D4-115 item 5):
+# every engine container that has a mount is made, checked, run and removed
+# by mountcheck.py (mc_run below) with the same options, image and command
+# as before, so the measured run is unchanged. Each mode first shows the
+# check's controls on this runner's Docker (mountcheck.py selftest), and
+# stops the run when a rule fails on any container.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../../../.." && pwd)
@@ -53,6 +60,34 @@ work=$2
 mkdir -p "$work"
 work=$(cd "$work" && pwd)
 . "$here/pins.env"
+# The job's own stderr, kept on fd 9, so that a failed rule reaches the job
+# log even from a container whose output a caller redirects.
+exec 9>&2
+mc=$work/containers-$mode
+# One engine container under mountcheck.py's rules: the arguments are those
+# `docker run` took, less --rm. A failed rule stops the run.
+mc_run() {
+  mc_rc=0
+  python3 -I "$here/mountcheck.py" run "$mc" -- "$@" || mc_rc=$?
+  mc_stop
+  return $mc_rc
+}
+mc_stop() {
+  if [ -e "$mc/FAILED" ]; then
+    { echo "the script-hash check (docs/release.md section 8.4 item 3) failed; the run stops:"; cat "$mc/FAILED"; } >&9
+    exit 1
+  fi
+}
+# The check's controls, on this runner's Docker and the stock image, before
+# any measured container; its table goes to WORK/mountcheck-<mode>.md.
+mc_selftest() {
+  python3 -I "$here/mountcheck.py" selftest "$ZEEK_IMAGE" "$here" "$work/mountcheck-selftest-$mode" > "$work/mountcheck-$mode.md" || {
+    cat "$work/mountcheck-$mode.md" >&9
+    echo "the script-hash check's controls did not all fail as expected; the run stops" >&9
+    exit 1
+  }
+  cat "$work/mountcheck-$mode.md"
+}
 
 # 1. The pins, checked before anything fetched runs.
 # HR-23's two builds, if given, are checked first: each must be an image ID
@@ -77,6 +112,7 @@ if [ "$mode" = hr23-unit ]; then
   docker pull -q "$ZEEK_IMAGE" > /dev/null
   zv=$(docker run --rm --network none "$ZEEK_IMAGE" zeek --version)
   [ "$zv" = "$ZEEK_VERSION" ] || { echo "Zeek image is not $ZEEK_VERSION: $zv" >&2; exit 1; }
+  mc_selftest
   # (B')'s three controls (D1's ruling on #715, condition 4.5), when build.sh
   # built them; the check reads a missing control as not run, which fails.
   ctl=
@@ -92,7 +128,7 @@ if [ "$mode" = hr23-unit ]; then
     im=${rest%%=*}
     arg=
     [ "$im" = "$rest" ] || arg=${rest#*=}
-    docker run --rm --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
+    mc_run --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
       "$im" sh /exp/in-container.sh zeek "$cfg" /exp/probe.zeek /exp/zeek-patch/viol.zeek $arg
   done
   rc=0
@@ -100,7 +136,9 @@ if [ "$mode" = hr23-unit ]; then
     echo "D4's own inputs (\`d4u-*\`), not GT-PCAP or stage 2's cases; no counted measurement reads them. Each test's"
     echo "control is C1p, the same tree without the patch. C0 (the stock image) runs for D1's experiment on #715."
     echo "(B')'s controls are C2 with one control patch each (zeek-patch/controls/)."; echo
-    python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?; } > "$work/hr23-unit.md"
+    python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?
+    echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } > "$work/hr23-unit.md"
+  mc_stop
   cat "$work/hr23-unit.md"
   [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/hr23-unit.md" >> "$GITHUB_STEP_SUMMARY"
   exit $rc
@@ -111,6 +149,7 @@ zv=$(docker run --rm --network none "$ZEEK_IMAGE" zeek --version)
 sv=$(docker run --rm --network none --entrypoint suricata "$SURICATA_IMAGE" -V 2>&1 | head -1)
 case "$zv" in "$ZEEK_VERSION") ;; *) echo "Zeek image is not $ZEEK_VERSION: $zv" >&2; exit 1 ;; esac
 case "$sv" in *"$SURICATA_VERSION"*) ;; *) echo "Suricata image is not $SURICATA_VERSION: $sv" >&2; exit 1 ;; esac
+mc_selftest
 pkgs=$work/pkgs
 rm -rf "$pkgs"
 while read -r _ path; do
@@ -130,7 +169,7 @@ docker run --rm --network none --entrypoint cat "$SURICATA_IMAGE" /etc/suricata/
 sed -i -E 's/^( +)#- dnp3$/\1- dnp3\n\1- modbus/' "$work/suricata.yaml"
 grep -qE '^ +- dnp3$' "$work/suricata.yaml" && grep -qE '^ +- modbus$' "$work/suricata.yaml" || {
   echo "could not enable the dnp3 and modbus eve types in the image's suricata.yaml" >&2; exit 1; }
-docker run --rm --network none -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint suricata \
+mc_run --network none -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint suricata \
   "$SURICATA_IMAGE" -T -c /cfg/suricata.yaml --disable-detection > "$work/suricata-T.txt" 2>&1 || {
   cat "$work/suricata-T.txt" >&2; exit 1; }
 docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base/protocols/dnp3/consts.zeek > "$work/zeek-dnp3-consts.zeek"
@@ -191,7 +230,7 @@ header() {
   [ "$ref" = refs/heads/main ] || why="${why:+$why; }not refs/heads/main"
   if [ -n "$why" ]; then sig="rehearsal: not the counted result ($why)"; else sig="counted"; fi
   printf '%s\n' "- Run, for E-D4-03's conditions: $kind" "- Run, for P4-4-E2 (the Modbus signature, \`zeek-modbus-sig\`): $sig" \
-    "- Run, for HR-23 (P4-4-HR23; \`zeek-probe-c0\`, \`zeek-probe\` as C1, \`zeek-probe-c1p\`, \`zeek-probe-c2\`): rehearsal: not the counted result (this header does not yet check the HR23_* pins in pins.env, and D4-115 items 4 and 5 are open)" \
+    "- Run, for HR-23 (P4-4-HR23; \`zeek-probe-c0\`, \`zeek-probe\` as C1, \`zeek-probe-c1p\`, \`zeek-probe-c2\`): rehearsal: not the counted result (this header does not yet check the HR23_* pins in pins.env, D4-115 item 4 is open, and so are docs/release.md section 8.4 items 1, 2 and 4 to 7)" \
     "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch ($pinned)"
   printf '%s\n' "$pins"
   pins=
@@ -206,11 +245,11 @@ header() {
 locked=
 img=$ZEEK_IMAGE
 zeek_run() {
-  docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
+  mc_run --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" -v "$pkgs:/pkgs:ro" \
     "$img" sh /exp/in-container.sh "$@"
 }
 suricata_run() {
-  docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
+  mc_run --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
     -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh \
     "$@" --set app-layer.protocols.dnp3.enabled=yes --set app-layer.protocols.modbus.enabled=yes
 }
@@ -343,7 +382,7 @@ sig() {
     set -- $c
     cfg=$1
     shift
-    docker run --rm --network none -v "$pcaps:/pcaps:ro" -v "$here:/exp:ro" "$ZEEK_IMAGE" \
+    mc_run --network none -v "$pcaps:/pcaps:ro" -v "$here:/exp:ro" "$ZEEK_IMAGE" \
       zeek -C -r /pcaps/synth-modbus-server-first.pcap "$@" /exp/ports.zeek > "$s/ports-$cfg.txt" 2>&1 || true
     sed "s/^/$cfg: /" "$s/ports-$cfg.txt"
   done
@@ -475,4 +514,6 @@ case $mode in
     ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
+mc_stop
+{ cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } >> "$work/versions.txt"
 cat "$work/$mode.md" "$work/versions.txt"
