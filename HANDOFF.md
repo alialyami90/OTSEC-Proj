@@ -202,7 +202,7 @@ What D4-98 leaves with the owner:
 17. **Nothing: the owner leaves the fourteen firewall rules** that the approved prompts left for temporary test programs (D4-85).
 18. **Finding 1 (D4-112 item 1):** the disclosure steps D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
 19. **The measured sensor image's offline copies** (D4-114 item 4.2; `docs/release.md` §8.4 item 4): after HR-23's counted run, two copies of the saved image and its source bundle on the owner's offline storage, outside the checkout, before the job's artifact expires.
-20. **The six stock Zeek reports under clang 18's whole `undefined` group** (D4-116 item 2.4): whether to report them privately to the Zeek project, as with finding 1 (item 18). Their kind and inputs were never printed or uploaded, but the public harness and the run's per-target counts show where they can be found again.
+20. **The stock Zeek reports the fuzz runs find** (D4-116 item 2.4): whether to report privately to the Zeek project the six seen under clang 18's whole `undefined` group in smoke run 44024284021, and any the counted campaign finds on the stock build, as with finding 1 (item 18). No sanitizer line or input was printed or uploaded, but the public harness and a summary's per-target counts show where a report can be found again, so the counted campaign's summary withholds those counts until you decide.
 
 ## Test policy
 

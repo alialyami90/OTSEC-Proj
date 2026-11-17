@@ -2595,7 +2595,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 ### P4-4-INT-D5P2 (D5; D6, D3 and D4 review): INT-D5 part 2
 - Objective and rationale: the rows deferred from INT-D5 part 1 (#732), with their mechanisms (D4-116 item 3.1).
 - Required inputs: `docs/phase4/D5-p44int-split.md` §2.3, §2.4 and §3; #732's body; D4-116 items 3.2 to 3.5; `docs/phase4/D5-sensor-node.md`.
-- Files: `platform/node/`, `platform/sensorlink/` and their test packages.
+- Files: `platform/node/`, `platform/sensorlink/` and their test packages; `docs/phase4/D5-sensor-node.md` §1.14 (the `GapRaised` limit, D4-116 item 3.1).
 - Expected interfaces: the node's design as approved (D4-92); options first where it is missing or contradicts C13 (D4-99).
 - Deliverable: one PR, or at most three proposed in a comment first, each safe to merge alone. D5 proposed three (2a, 2b, 2c; 6952032325), and D1 approved them (6952181701).
 - Acceptance tests: the self-check list; each row's test with a control; F-027's greps clean.
