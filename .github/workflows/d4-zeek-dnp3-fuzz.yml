@@ -17,12 +17,16 @@
 # fail and its counts, the build record and the coverage conditions. It
 # uploads nothing, and prints no input, trace or log: every fuzzer's output
 # goes to a folder on the runner that no step prints
-# (test_hr23_fuzz.py checks this file and fuzz.sh for that). Each campaign
-# step lasts HR23_FUZZ_SECONDS plus HR23_FUZZ_PAD_SECONDS (fuzz.env) from its
-# start, whatever the fuzzers did, and while an input reproduces on C1p the
-# summary prints the totals only, so neither shows which target found a
-# report (D4-116 item 2.4 (b)). The job fails
-# unless the verdict is `pass`. Evidence class: CI-Linux.
+# (test_hr23_fuzz.py checks this file and fuzz.sh for that). Nothing shows
+# which target found a report (D4-116 item 2.4 (b); D1's ruling on #746):
+# the campaign, replay and coverage steps each end a fixed time after they
+# began (fuzz.env's pads), whatever their runs did, and every run in them is
+# stopped by `timeout` below its pad; the summary prints the campaigns'
+# rows only when every campaign has a result, every report was replayed and
+# every report is against the patch alone (it reproduces on C2 and not on
+# C1p), and otherwise the totals only; and it prints no coverage condition
+# when a coverage replay exited non-zero. The job fails unless the verdict
+# is `pass`. Evidence class: CI-Linux.
 name: d4-zeek-dnp3-fuzz
 on:
   workflow_dispatch:

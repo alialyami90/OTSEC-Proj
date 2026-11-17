@@ -16,10 +16,14 @@
 #                                and ends HR23_FUZZ_SECONDS plus
 #                                HR23_FUZZ_PAD_SECONDS after it began
 #        fuzz.sh replay WORK     replays every input that gave a report, alone,
-#                                on both builds, with the same options
+#                                on both builds, with the same options, and
+#                                ends HR23_FUZZ_REPLAY_PAD_SECONDS after it
+#                                began
 #        fuzz.sh coverage WORK   replays C2's final corpus of each target on
-#                                C2 for coverage, and checks the coverage
-#                                condition (fuzz_judge.py coverage)
+#                                C2 for coverage, writes the coverage
+#                                condition (fuzz_judge.py coverage) without
+#                                printing it, and ends
+#                                HR23_FUZZ_COVERAGE_PAD_SECONDS after it began
 #        fuzz.sh summary WORK    prints the summary: pass or fail, and counts
 #
 # Disclosure (section 4.6; D4-112 item 1). Everything a fuzzer, a replay or
@@ -61,19 +65,35 @@ nonet() {
   fi
 }
 
+# The pad (D4-116 item 2.4 (b); D1's ruling 1 on #744 and ruling 2 on
+# #746): sleep until the second $1 since the epoch. libFuzzer stops at the
+# first report, so a step that ended early would show which run found one,
+# and so would its last line's time in the job log. The campaign, replay
+# and coverage steps therefore end a fixed time after they began, whatever
+# their runs did, and print their one line after the pad. A step already
+# past its end does not sleep (GNU sleep refuses a negative time).
+pad() {
+  left=$(($1 - $(date +%s)))
+  [ "$left" -le 0 ] || sleep "$left"
+}
+
 # The libFuzzer options of every campaign and replay (fuzz.env).
 fopts="-timeout=$HR23_FUZZ_TIMEOUT -rss_limit_mb=$HR23_FUZZ_RSS_LIMIT_MB -max_len=$HR23_FUZZ_MAX_LEN -seed=$HR23_FUZZ_SEED -detect_leaks=$HR23_FUZZ_DETECT_LEAKS -report_slow_units=$HR23_FUZZ_SLOW_UNITS -print_final_stats=1"
 
 # One build's fuzzer TARGET, with its options and its sanitizer settings,
-# under nonet; the caller redirects its output into WORK/fuzz/private.
+# under nonet, stopped at LIMIT seconds by `timeout` inside nonet, so that
+# the signal reaches the fuzzer and not sudo (D3's N1 on #746; fuzz.env, the
+# pads); the caller redirects its output into WORK/fuzz/private.
+# Usage: fuzzer BUILD TARGET LIMIT ARGS...
 fuzzer() {
   # Its own names: sh has no local variables, and the replay loop's $b and
   # $t must survive this call.
-  fz_b=$1 fz_t=$2
-  shift 2
+  fz_b=$1 fz_t=$2 fz_lim=$3
+  shift 3
   zp=$(cat "$f/$fz_b/zeekpath")
   nonet env ZEEKPATH="$zp" ASAN_OPTIONS="$HR23_FUZZ_ASAN_OPTIONS" UBSAN_OPTIONS="$HR23_FUZZ_UBSAN_OPTIONS" \
     LLVM_PROFILE_FILE="${PROFILE:-$priv/discard-%p.profraw}" \
+    timeout -k "$HR23_FUZZ_KILL_SECONDS" "$fz_lim" \
     "$f/$fz_b/zeek-9.0.1/build/src/fuzzers/zeek-$fz_t-fuzzer" $fopts "$@"
 }
 
@@ -192,24 +212,20 @@ campaign)
     (
       s0=$(date +%s)
       rc=0
-      fuzzer $b $t -max_total_time="$HR23_FUZZ_SECONDS" -artifact_prefix="$d/artifacts/" "$d/corpus" > "$d/log" 2>&1 || rc=$?
+      fuzzer $b $t $((HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS / 2)) -max_total_time="$HR23_FUZZ_SECONDS" -artifact_prefix="$d/artifacts/" "$d/corpus" > "$d/log" 2>&1 || rc=$?
       echo $rc > "$d/exit-code"
       echo $(($(date +%s) - s0)) > "$d/seconds"
     ) &
   done
   wait
-  # The pad (D4-116 item 2.4 (b); D1's ruling 1 on #744). libFuzzer stops
-  # at the first report, so a step that ended early would show which target
-  # found one, and so would this line's time in the job log. Every campaign
-  # step therefore lasts its pinned time plus a fixed margin from the step's
-  # start, whatever the fuzzers did. Each fuzzer's private `exit-code` and
-  # `seconds` were written above, before this wait, so the judge's
-  # early-stop rule reads the fuzzing time, not the pad.
-  left=$((step0 + HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS - $(date +%s)))
-  [ "$left" -le 0 ] || sleep "$left"
+  # Each fuzzer's private `exit-code` and `seconds` were written above,
+  # before this pad, so the judge's early-stop rule reads the fuzzing time,
+  # not the pad.
+  pad $((step0 + HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS))
   echo "fuzz.sh: campaign $t done on both builds"
   ;;
 replay)
+  step0=$(date +%s)
   : > "$priv/replay.tsv"
   for t in $TARGETS; do
     for b in c1p c2; do
@@ -218,7 +234,7 @@ replay)
         line="$t	$b"
         for rb in c1p c2; do
           rc=0
-          fuzzer $rb $t "$a" > "$priv/replay.log" 2>&1 || rc=$?
+          fuzzer $rb $t "$HR23_FUZZ_RUN_LIMIT" "$a" > "$priv/replay.log" 2>&1 || rc=$?
           line="$line	$rc"
         done
         echo "$line" >> "$priv/replay.tsv"
@@ -226,9 +242,11 @@ replay)
     done
   done
   rm -f "$priv/replay.log"
+  pad $((step0 + HR23_FUZZ_REPLAY_PAD_SECONDS))
   echo "fuzz.sh: replay done"
   ;;
 coverage)
+  step0=$(date +%s)
   lib=$(cat "$f/c2/sharedlib")
   s=$f/c2/zeek-9.0.1
   for t in $TARGETS; do
@@ -236,15 +254,25 @@ coverage)
     rm -rf "$d"
     mkdir -p "$d"
     rc=0
-    PROFILE=$d/%p.profraw fuzzer c2 $t -runs=0 -artifact_prefix="$d/" "$priv/c2/$t/corpus" > "$d/log" 2>&1 || rc=$?
+    PROFILE=$d/%p.profraw fuzzer c2 $t "$HR23_FUZZ_COVERAGE_LIMIT" -runs=0 -artifact_prefix="$d/" "$priv/c2/$t/corpus" > "$d/log" 2>&1 || rc=$?
     echo $rc > "$d/exit-code"
+    # The tools are bounded too, and a failure leaves no coverage report
+    # rather than ending the step before its pad.
     if ls "$d/"*.profraw > /dev/null 2>&1; then
-      llvm-profdata-$V merge -sparse "$d/"*.profraw -o "$d/merged.profdata"
-      llvm-cov-$V export -format=lcov -instr-profile="$d/merged.profdata" \
-        "$s/build/src/fuzzers/zeek-$t-fuzzer" -object "$s/build/$lib" > "$d/lcov.info"
+      if ! { timeout -k "$HR23_FUZZ_KILL_SECONDS" "$HR23_FUZZ_TOOL_LIMIT" \
+               llvm-profdata-$V merge -sparse "$d/"*.profraw -o "$d/merged.profdata" > "$d/tools.log" 2>&1 &&
+             timeout -k "$HR23_FUZZ_KILL_SECONDS" "$HR23_FUZZ_TOOL_LIMIT" \
+               llvm-cov-$V export -format=lcov -instr-profile="$d/merged.profdata" \
+               "$s/build/src/fuzzers/zeek-$t-fuzzer" -object "$s/build/$lib" > "$d/lcov.info" 2>> "$d/tools.log"; }; then
+        rm -f "$d/lcov.info"
+      fi
     fi
   done
+  # Written to WORK/fuzz/coverage.tsv and not printed: the summary prints
+  # the conditions, or withholds them (fuzz_judge.py summary; ruling 2).
   python3 -I "$here/fuzz_judge.py" coverage "$f" "$s/src/analyzer/protocol/dnp3/DNP3.cc"
+  pad $((step0 + HR23_FUZZ_COVERAGE_PAD_SECONDS))
+  echo "fuzz.sh: coverage done"
   ;;
 summary)
   python3 -I "$here/fuzz_judge.py" summary "$f"

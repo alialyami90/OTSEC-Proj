@@ -493,27 +493,47 @@ def test_judge_stock_report_is_counted_not_netted_out(tmp_path, capsys):
 
 
 def check_rows_withheld(judge, tmp_path, capsys):
-    """D4-116 item 2.4 (b): while a report reproduces on C1p, or has no
-    replay on C1p, the summary names no target and prints no campaign row,
-    only the totals. A report against the patch alone keeps the rows."""
+    """D4-116 item 2.4 (b); D1's ruling 1 on #746 (D6's form): the summary
+    prints the campaigns' rows only when every campaign has a result, every
+    report was replayed, and every report is against the patch alone.
+    Otherwise it names no target and prints no campaign row, only the
+    totals. Cases A to D are D6's on #746; `c1p-own-neither` and
+    `c2-own-neither` are D3's B1 (A and B, C likewise)."""
+    no_result = {"rc": 137, "secs": 95, "stats": False}
     cases = {
-        "both": (("c2", "dnp3_udp", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)}),
-                 [("dnp3_udp", "c2", "77", "77")]),
-        "c1p-only": (("c1p", "packet", {"rc": 77, "secs": 40, "artifacts": (ART,)}),
-                     [("packet", "c1p", "77", "0")]),
-        "not-replayed": (("c2", "dnp3_tcp", {"rc": 77, "secs": 40, "artifacts": (ART,)}), []),
-        "no-input": (("c1p", "dnp3_tcp", {"rc": 1, "secs": 40}), []),
+        # (campaigns, replay rows, reports, a file to remove)
+        "both": ([("c2", "dnp3_udp", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)})],
+                 [("dnp3_udp", "c2", "77", "77")], 1, None),
+        "c1p-only": ([("c1p", "packet", {"rc": 77, "secs": 40, "artifacts": (ART,)})],
+                     [("packet", "c1p", "77", "0")], 1, None),
+        "not-replayed": ([("c2", "dnp3_tcp", {"rc": 77, "secs": 40, "artifacts": (ART,)})], [], 1, None),
+        "no-input": ([("c1p", "dnp3_tcp", {"rc": 1, "secs": 40})], [], 1, None),
+        # A: killed on both builds, with no final stats and no input.
+        "A-killed-on-both": ([("c1p", "dnp3_tcp", no_result), ("c2", "dnp3_tcp", no_result)], [], 0, None),
+        # B: found on C1p, reproduces on neither build alone.
+        "B-c1p-own-neither": ([("c1p", "packet", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)})],
+                              [("packet", "c1p", "0", "0")], 1, None),
+        # C: found on C2, reproduces on neither build alone.
+        "C-c2-own-neither": ([("c2", "dnp3_udp", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)})],
+                             [("dnp3_udp", "c2", "0", "0")], 1, None),
+        # D: a campaign with no exit-code file.
+        "D-no-exit-code": ([], [], 0, ("c1p", "dnp3_udp", "exit-code")),
+        # A replay line with no report beside one against the patch.
+        "extra-replay-line": ([("c2", "dnp3_udp", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)})],
+                              [("dnp3_udp", "c2", "0", "77"), ("dnp3_udp", "c2", "0", "0")], 1, None),
     }
-    for name, (spec, replay) in cases.items():
+    for name, (specs, replay, reports, gone) in cases.items():
         f = tmp_path / name
-        run_judge(f, spec)
+        run_judge(f, *specs)
         if replay:
             write_replay(f, *replay)
+        if gone:
+            os.remove(f.joinpath("private", *gone))
         judge.summary(str(f))
         out = capsys.readouterr().out
         assert not [t for t in judge.TARGETS if t in out], (name, out)
-        assert "| target | build |" not in out and "| 40 |" not in out, name
-        assert "Each campaign's row is withheld" in out and "- Reports: 1;" in out, name
+        assert "| target | build |" not in out and "| 40 |" not in out and "| 95 |" not in out, name
+        assert "Each campaign's row is withheld" in out and f"- Reports: {reports};" in out, name
     f = tmp_path / "against"
     run_judge(f, ("c2", "dnp3_udp", {"rc": 77, "secs": 40, "artifacts": (ART,)}))
     write_replay(f, ("dnp3_udp", "c2", "0", "77"))
@@ -522,15 +542,20 @@ def check_rows_withheld(judge, tmp_path, capsys):
     assert "| dnp3_udp | c2 | ran | 40 |" in out and "withheld" not in out
 
 
-def test_judge_withholds_rows_while_a_report_reproduces_on_c1p(tmp_path, capsys):
+def test_judge_withholds_rows_unless_every_report_is_against_the_patch(tmp_path, capsys):
     check_rows_withheld(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
 
 
-# The controls: a judge that prints the rows anyway, and one that never
-# counts a replay on C1p, must fail the check.
+# The controls: a judge that prints the rows anyway, one with #746's first
+# rule (C1p or not replayed), and one without each term of the rule, must
+# fail the check.
+ROWS_RULE = '    if unknown or replayed != total_reports or classes["against"] != total_reports:\n'
 ROWS_CONTROLS = [
-    ("rows-always", ("    if on_c1p or replayed < total_reports:\n", "    if False:\n")),
-    ("c1p-not-counted", ("                on_c1p += r1\n", "                on_c1p += 0\n")),
+    ("rows-always", (ROWS_RULE, "    if False:\n")),
+    ("c1p-or-not-replayed", (ROWS_RULE, '    if classes["both"] + classes["c1p-only"] or replayed < total_reports:\n')),
+    ("no-result-term-dropped", ("    if unknown or replayed != total_reports", "    if replayed != total_reports")),
+    ("replayed-term-dropped", ("    if unknown or replayed != total_reports or ", "    if unknown or ")),
+    ("against-term-dropped", (' or classes["against"] != total_reports:\n', ":\n")),
 ]
 
 
@@ -539,6 +564,38 @@ def test_judge_withheld_rows_control_fails(tmp_path, capsys, name, edit):
     judge = load(JUDGE, "fuzz_judge_rows_" + name.replace("-", "_"), edit)
     with pytest.raises(AssertionError):
         check_rows_withheld(judge, tmp_path, capsys)
+
+
+def check_cov_withheld(judge, tmp_path, capsys):
+    """D1's ruling 2 on #746 (D3's N2, D6's N1 item 3): when a coverage
+    replay exits non-zero or leaves no exit code, the summary prints no
+    coverage condition, so `replay-path` cannot point at `packet`. With
+    every coverage replay at 0, the conditions are printed."""
+    for name, rc in (("packet-report", 134), ("packet-missing", None), ("tcp-report", 1)):
+        f = tmp_path / name
+        t = "dnp3_tcp" if name == "tcp-report" else "packet"
+        run_judge(f, cov_rc={t: rc})
+        (f / "coverage.tsv").write_text("condition\tmet\n" + "".join(
+            f"{c}\t{'no' if c == 'replay-path' else 'yes'}\n" for c in judge.CONDITIONS))
+        judge.summary(str(f))
+        out = capsys.readouterr().out
+        assert not [c for c in judge.CONDITIONS if c in out.replace("`replay-path` would", "")], (name, out)
+        assert "| coverage condition" not in out and "The coverage conditions are withheld" in out, name
+        assert "Verdict: **unknown**" in out, name
+    run_judge(tmp_path / "ok")
+    judge.summary(str(tmp_path / "ok"))
+    out = capsys.readouterr().out
+    assert "| replay-path | yes |" in out and "withheld" not in out
+
+
+def test_judge_withholds_coverage_conditions_after_a_coverage_report(tmp_path, capsys):
+    check_cov_withheld(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
+
+
+def test_judge_coverage_withheld_control_fails(tmp_path, capsys):
+    judge = load(JUDGE, "fuzz_judge_covheld", ("    if cov_bad:\n        out += [", "    if False:\n        out += ["))
+    with pytest.raises(AssertionError):
+        check_cov_withheld(judge, tmp_path, capsys)
 
 
 def test_judge_unknown_cases(tmp_path, capsys):
@@ -563,7 +620,8 @@ def test_judge_campaign_with_no_result_is_unknown(tmp_path, capsys):
     judge = run_judge(tmp_path)
     os.remove(tmp_path / "private" / "c1p" / "dnp3_udp" / "exit-code")
     out = summary(judge, tmp_path, capsys)
-    assert "Verdict: **unknown**" in out and "| dnp3_udp | c1p | no result |" in out
+    # Its row is withheld with the others (D6's case D on #746).
+    assert "Verdict: **unknown**" in out and "campaigns with no result: 1." in out
 
 
 def check_no_stats_no_result(judge, tmp_path, capsys):
@@ -572,7 +630,7 @@ def check_no_stats_no_result(judge, tmp_path, capsys):
     run_judge(tmp_path, ("c2", "dnp3_tcp", {"stats": False}))
     judge.summary(str(tmp_path))
     out = capsys.readouterr().out
-    assert "Verdict: **unknown**" in out and "| dnp3_tcp | c2 | no result |" in out
+    assert "Verdict: **unknown**" in out and "campaigns with no result: 1." in out
 
 
 def test_judge_campaign_with_no_stats_is_no_result(tmp_path, capsys):
@@ -681,7 +739,8 @@ def coverage(tmp_path, capsys, per, edit=None, other=False):
     for t, (fns, catch) in per.items():
         lcov_file(tmp_path / "private" / f"cov-{t}" / "lcov.info", fns, catch, other)
     judge.coverage(str(tmp_path), str(cc))
-    capsys.readouterr()
+    # The coverage step prints nothing (D1's ruling 2 on #746).
+    assert capsys.readouterr().out == ""
     return dict(x.split("\t") for x in (tmp_path / "coverage.tsv").read_text().splitlines()[1:])
 
 
@@ -883,6 +942,8 @@ def check_fuzz_sh(src):
     body = src[src.index("\nfuzzer() {"):]
     body = body[:body.index("\n}\n")]
     assert re.search(r"^\s*nonet env ZEEKPATH=", body, re.M)
+    # Every fuzzer run is bounded inside nonet (D1's ruling 3 on #746).
+    assert re.search(r'^    timeout -k "\$HR23_FUZZ_KILL_SECONDS" "\$fz_lim" \\\n    "\$f/\$fz_b/zeek-9\.0\.1/', body, re.M)
     assert src.count("zeek-$fz_t-fuzzer") == 1 and "zeek-$fz_t-fuzzer" in body
     assert src.count("./configure") == 1 and '(cd "$s" && nonet env CC=clang-$V ' in src
     ninja = [x for x in lines if re.search(r"\bninja -C ", x)]
@@ -924,6 +985,7 @@ FUZZ_SH_CONTROLS = [
     ("ninja-with-network", ("    nonet env ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=1 ninja",
                             "    env ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=1 ninja")),
     ("no-flags-check", ('python3 -I "$here/fuzz_judge.py" flags', 'true')),
+    ("fuzzer-without-timeout", ('    timeout -k "$HR23_FUZZ_KILL_SECONDS" "$fz_lim" \\\n', "")),
 ]
 
 
@@ -993,17 +1055,55 @@ def test_fuzz_sh_replay_control_shared_names_fails(tmp_path):
         check_replay_labels(src, tmp_path / "a" / "fuzz")
 
 
-# --- fuzz.sh's campaign: the pad from the step's start ----------------------
-# D4-116 item 2.4 (b). The run's tools are stand-ins on PATH: `date` reads a
-# clock file, both fake fuzzers set it 40 seconds on and exit, `sleep`
-# records its argument and whether each fuzzer's private `exit-code` and
-# `seconds` were written before it, and `sudo`, `unshare` and `setpriv`
-# drop their own arguments and run the command (nonet's network namespace
-# is not under test here).
+# --- fuzz.sh's pads: each step ends a fixed time from its start --------------
+# D4-116 item 2.4 (b); D1's ruling 1 on #744 and rulings 2 to 4 on #746. The
+# run's tools are stand-ins on PATH: `date` reads a clock file, the fake
+# fuzzers move it on and exit, `sleep` records its argument (and whether each
+# fuzzer's private `exit-code` and `seconds` were written before it) and
+# fails on a negative one, as GNU sleep does, and `sudo`, `unshare` and
+# `setpriv` drop their own arguments and run the command (nonet's network
+# namespace is not under test here). `timeout` is the system's own.
 
-def check_campaign_pad(fuzz_sh, tmp_path):
-    env = fuzz_env()
-    want = int(env["HR23_FUZZ_SECONDS"]) + int(env["HR23_FUZZ_PAD_SECONDS"]) - 40
+def check_pad_bounds(env):
+    """Each step's pad exceeds what the runs in it can take (fuzz.env, the
+    pads; D6's N2 on #746): a fuzzer's ordinary overrun of -max_total_time,
+    start-up plus a unit timeout caught up to 1.5 x -timeout + 1 seconds
+    after the unit starts, is below its `timeout` limit, and every limit
+    plus its kill is below its step's pad."""
+    v = {k: int(x) for k, x in env.items() if x.isdigit()}
+    overrun = 10 + 1.5 * v["HR23_FUZZ_TIMEOUT"] + 1
+    kill = v["HR23_FUZZ_KILL_SECONDS"]
+    climit = v["HR23_FUZZ_PAD_SECONDS"] // 2
+    assert climit > overrun, "a campaign's fuzzer is stopped before its ordinary overrun"
+    assert v["HR23_FUZZ_PAD_SECONDS"] - climit > kill + 30, "no time left for the seed copy and the kill"
+    assert v["HR23_FUZZ_RUN_LIMIT"] > overrun, "a replay is stopped before one unit timeout"
+    assert v["HR23_FUZZ_REPLAY_PAD_SECONDS"] >= 12 * (v["HR23_FUZZ_RUN_LIMIT"] + kill)
+    assert v["HR23_FUZZ_COVERAGE_PAD_SECONDS"] >= 3 * (
+        v["HR23_FUZZ_COVERAGE_LIMIT"] + kill + 2 * (v["HR23_FUZZ_TOOL_LIMIT"] + kill))
+
+
+def test_pads_exceed_the_runs_in_their_steps():
+    check_pad_bounds(fuzz_env())
+
+
+PAD_BOUND_CONTROLS = [("pad-0", "HR23_FUZZ_PAD_SECONDS", "0"),
+                      ("pad-below-the-overrun", "HR23_FUZZ_PAD_SECONDS", "90"),
+                      ("replay-pad-short", "HR23_FUZZ_REPLAY_PAD_SECONDS", "60"),
+                      ("coverage-pad-short", "HR23_FUZZ_COVERAGE_PAD_SECONDS", "600")]
+
+
+@pytest.mark.parametrize("name,key,value", PAD_BOUND_CONTROLS, ids=[c[0] for c in PAD_BOUND_CONTROLS])
+def test_pad_bounds_control_fails(name, key, value):
+    with pytest.raises(AssertionError):
+        check_pad_bounds(dict(fuzz_env(), **{key: value}))
+
+
+def step_rig(fuzz_sh, tmp_path, fuzzer_body, env=None, campaign=True):
+    """A WORK folder with fake C1p and C2 fuzzers of every target, one seed
+    of each, and the stand-in tools; returns (run, work, clock). `run(mode,
+    *args)` runs fuzz.sh with its stdout and stderr in files, and returns
+    (exit code, stdout, stderr). With `campaign`, `sleep` also checks that
+    each dnp3_tcp fuzzer's result was written before it."""
     work = tmp_path / "w"
     f = work / "fuzz"
     clock = tmp_path / "clock"
@@ -1020,28 +1120,65 @@ def check_campaign_pad(fuzz_sh, tmp_path):
     tool(bin_ / "setpriv", drop)
     tool(bin_ / "sudo", 'shift\nexec "$@"')
     tool(bin_ / "date", f"cat '{clock.as_posix()}'")
+    tool(bin_ / "python3", "exit 0")
     priv = (f / "private").as_posix()
-    tool(bin_ / "sleep", "for b in c1p c2; do\n"
-         f"  [ -s '{priv}'/$b/dnp3_tcp/exit-code ] && [ -s '{priv}'/$b/dnp3_tcp/seconds ] || echo \"no result $b\"\n"
-         'done\necho "slept $1"')
+    check = ("for b in c1p c2; do\n"
+             f"  [ -s '{priv}'/$b/dnp3_tcp/exit-code ] && [ -s '{priv}'/$b/dnp3_tcp/seconds ] || echo \"no result $b\"\n"
+             "done\n") if campaign else ""
+    tool(bin_ / "sleep", 'case $1 in -*) echo "negative sleep $1" >&2; exit 1 ;; esac\n' + check + 'echo "slept $1"')
     for b in ("c1p", "c2"):
         d = f / b / "zeek-9.0.1" / "build" / "src" / "fuzzers"
         d.mkdir(parents=True)
-        tool(d / "zeek-dnp3_tcp-fuzzer", f"echo 1040 > '{clock.as_posix()}'")
+        for t in ("dnp3_tcp", "dnp3_udp", "packet"):
+            tool(d / f"zeek-{t}-fuzzer", fuzzer_body.replace("CLOCK", clock.as_posix()))
         (f / b / "zeekpath").write_text("/nonexistent")
-    (f / "seeds" / "dnp3_tcp").mkdir(parents=True)
-    (f / "seeds" / "dnp3_tcp" / "s1").write_bytes(b"x")
+        (f / b / "sharedlib").write_text("lib.so\n")
+    for t in ("dnp3_tcp", "dnp3_udp", "packet"):
+        (f / "seeds" / t).mkdir(parents=True)
+        (f / "seeds" / t / "s1").write_bytes(b"x")
     (f / "seeds" / "manifest.sha256").write_text("")
     script = tmp_path / "fuzz" / "fuzz.sh"
     script.parent.mkdir()
     script.write_text(fuzz_sh, newline="\n")
-    shutil.copy(os.path.join(HERE, "fuzz.env"), script.parent / "fuzz.env")
+    text = read(os.path.join(HERE, "fuzz.env"))
+    for k, v in (env or {}).items():
+        text, n = re.subn(rf"^{k}=\S*$", f"{k}={v}", text, flags=re.M)
+        assert n == 1, k
+    (script.parent / "fuzz.env").write_text(text, newline="\n")
     (tmp_path / "build.env").write_text("")
     run_env = dict(os.environ, PATH=bin_.as_posix() + os.pathsep + os.environ["PATH"])
-    r = subprocess.run(["sh", script.as_posix(), "campaign", work.as_posix(), "dnp3_tcp"],
-                       capture_output=True, text=True, env=run_env)
-    assert r.returncode == 0, r.stderr
-    assert r.stdout == f"slept {want}\nfuzz.sh: campaign dnp3_tcp done on both builds\n", r.stdout
+
+    def run(mode, *args, timeout=60):
+        with open(tmp_path / "out", "w") as out, open(tmp_path / "err", "w") as err:
+            rc = subprocess.run(["sh", script.as_posix(), mode, work.as_posix(), *args],
+                                stdout=out, stderr=err, env=run_env, timeout=timeout).returncode
+        return rc, (tmp_path / "out").read_text(), (tmp_path / "err").read_text()
+
+    return run, work, clock
+
+
+# Each fake fuzzer moves the clock on by N seconds.
+STEP = 'echo $(($(cat CLOCK) + N)) > CLOCK'
+
+
+def check_campaign_pad(fuzz_sh, tmp_path):
+    env = fuzz_env()
+    want = int(env["HR23_FUZZ_SECONDS"]) + int(env["HR23_FUZZ_PAD_SECONDS"]) - 40
+    run, _, _ = step_rig(fuzz_sh, tmp_path, "echo 1040 > 'CLOCK'")
+    rc, out, err = run("campaign", "dnp3_tcp")
+    assert rc == 0, err
+    assert out == f"slept {want}\nfuzz.sh: campaign dnp3_tcp done on both builds\n", out
+
+
+def check_campaign_overrun(fuzz_sh, tmp_path):
+    # D6's N2 on #746: the fuzzers end past the pad. The step does not
+    # sleep, prints its line and exits 0, so the later steps run.
+    env = fuzz_env()
+    end = 1000 + int(env["HR23_FUZZ_SECONDS"]) + int(env["HR23_FUZZ_PAD_SECONDS"]) + 100
+    run, _, _ = step_rig(fuzz_sh, tmp_path, f"echo {end} > 'CLOCK'")
+    rc, out, err = run("campaign", "dnp3_tcp")
+    assert rc == 0, err
+    assert out == "fuzz.sh: campaign dnp3_tcp done on both builds\n", out
 
 
 @pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
@@ -1050,11 +1187,155 @@ def test_fuzz_sh_campaign_pads_from_the_steps_start(tmp_path):
 
 
 @pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_campaign_past_its_pad_does_not_sleep(tmp_path):
+    check_campaign_overrun(read(FUZZ_SH), tmp_path)
+
+
+def mutate(edit):
+    src = read(FUZZ_SH)
+    assert src.count(edit[0]) == 1, edit[0]
+    return src.replace(*edit)
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
 def test_fuzz_sh_campaign_pad_control_from_the_fuzzers_exit_fails(tmp_path):
     # The control: the pad measured from the fuzzers' exit, not the step's
     # start, waits the 40 seconds the fuzzers ran once more.
-    src = read(FUZZ_SH)
-    old = "  left=$((step0 + HR23_FUZZ_SECONDS"
-    assert src.count(old) == 1
+    src = mutate(("  pad $((step0 + HR23_FUZZ_SECONDS", "  pad $(($(date +%s) + HR23_FUZZ_SECONDS"))
     with pytest.raises(AssertionError):
-        check_campaign_pad(src.replace(old, "  left=$(($(date +%s) + HR23_FUZZ_SECONDS"), tmp_path)
+        check_campaign_pad(src, tmp_path)
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_campaign_overrun_control_no_guard_fails(tmp_path):
+    # The control (D6's N2 on #746): without the guard, sleep is given a
+    # negative time, fails, and set -e ends the step.
+    src = mutate(('  [ "$left" -le 0 ] || sleep "$left"', '  sleep "$left"'))
+    with pytest.raises(AssertionError):
+        check_campaign_overrun(src, tmp_path)
+
+
+def check_replay_pad(fuzz_sh, tmp_path):
+    # One input from C1p's dnp3_tcp campaign, replayed on both builds; each
+    # replay takes 30 seconds. The step ends the replay pad from its start.
+    env = fuzz_env()
+    run, work, _ = step_rig(fuzz_sh, tmp_path, STEP.replace("N", "30"), campaign=False)
+    art = work / "fuzz" / "private" / "c1p" / "dnp3_tcp" / "artifacts"
+    art.mkdir(parents=True)
+    (art / "crash-a").write_bytes(b"x")
+    rc, out, err = run("replay")
+    assert rc == 0, err
+    assert out == f"slept {int(env['HR23_FUZZ_REPLAY_PAD_SECONDS']) - 60}\nfuzz.sh: replay done\n", out
+
+
+def check_coverage_pad(fuzz_sh, tmp_path):
+    # Each target's coverage replay takes 5 seconds and leaves no profile.
+    # The step prints no condition, and ends the coverage pad from its start.
+    env = fuzz_env()
+    run, work, _ = step_rig(fuzz_sh, tmp_path, STEP.replace("N", "5"), campaign=False)
+    for t in ("dnp3_tcp", "dnp3_udp", "packet"):
+        (work / "fuzz" / "private" / "c2" / t / "corpus").mkdir(parents=True)
+    rc, out, err = run("coverage")
+    assert rc == 0, err
+    assert out == f"slept {int(env['HR23_FUZZ_COVERAGE_PAD_SECONDS']) - 15}\nfuzz.sh: coverage done\n", out
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_replay_pads_from_the_steps_start(tmp_path):
+    check_replay_pad(read(FUZZ_SH), tmp_path)
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_coverage_pads_from_the_steps_start(tmp_path):
+    check_coverage_pad(read(FUZZ_SH), tmp_path)
+
+
+STEP_PAD_CONTROLS = [
+    ("replay-no-pad", check_replay_pad, ("  pad $((step0 + HR23_FUZZ_REPLAY_PAD_SECONDS))\n", "")),
+    ("replay-pad-from-the-end", check_replay_pad,
+     ("  pad $((step0 + HR23_FUZZ_REPLAY_PAD_SECONDS))", "  pad $(($(date +%s) + HR23_FUZZ_REPLAY_PAD_SECONDS))")),
+    ("coverage-no-pad", check_coverage_pad, ("  pad $((step0 + HR23_FUZZ_COVERAGE_PAD_SECONDS))\n", "")),
+    ("coverage-pad-from-the-end", check_coverage_pad,
+     ("  pad $((step0 + HR23_FUZZ_COVERAGE_PAD_SECONDS))",
+      "  pad $(($(date +%s) + HR23_FUZZ_COVERAGE_PAD_SECONDS))")),
+]
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+@pytest.mark.parametrize("name,check,edit", STEP_PAD_CONTROLS, ids=[c[0] for c in STEP_PAD_CONTROLS])
+def test_fuzz_sh_step_pad_control_fails(tmp_path, name, check, edit):
+    with pytest.raises(AssertionError):
+        check(mutate(edit), tmp_path)
+
+
+def check_coverage_tool_failure(fuzz_sh, tmp_path):
+    # Each coverage replay leaves a profile. In `profdata`, llvm-profdata
+    # fails; in `cov`, llvm-cov writes part of a report and fails. Neither
+    # ends the step before its pad, and neither leaves a coverage report.
+    for name, profdata, cov in (("profdata", "exit 1", "echo SF:x"),
+                                ("cov", "exit 0", "echo SF:x\nexit 1")):
+        tp = tmp_path / name
+        tp.mkdir()
+        run, work, _ = step_rig(fuzz_sh, tp, STEP.replace("N", "5") + '\necho p > "$LLVM_PROFILE_FILE"',
+                                campaign=False)
+        bin_ = tp / "bin"
+        for tool_name, body in (("llvm-profdata-18", profdata), ("llvm-cov-18", cov)):
+            (bin_ / tool_name).write_text("#!/bin/sh\n" + body + "\n", newline="\n")
+            (bin_ / tool_name).chmod(0o755)
+        for t in ("dnp3_tcp", "dnp3_udp", "packet"):
+            (work / "fuzz" / "private" / "c2" / t / "corpus").mkdir(parents=True)
+        rc, out, err = run("coverage")
+        assert rc == 0, (name, err)
+        assert out.endswith("fuzz.sh: coverage done\n") and out.startswith("slept "), (name, out)
+        for t in ("dnp3_tcp", "dnp3_udp", "packet"):
+            d = work / "fuzz" / "private" / f"cov-{t}"
+            assert list(d.glob("*.profraw")), (name, t)
+            assert not (d / "lcov.info").exists(), (name, t)
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_coverage_tool_failure_leaves_no_report(tmp_path):
+    check_coverage_tool_failure(read(FUZZ_SH), tmp_path)
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_coverage_tool_failure_control_keeps_the_part_fails(tmp_path):
+    # The control: a failed tool's partial report is kept.
+    with pytest.raises(AssertionError):
+        check_coverage_tool_failure(mutate(('        rm -f "$d/lcov.info"\n', "        :\n")), tmp_path)
+
+
+def check_hung_fuzzer_stopped(fuzz_sh, tmp_path):
+    """D3's N1 on #746: a fuzzer that hangs where libFuzzer cannot end it is
+    stopped by `timeout` inside nonet, at HR23_FUZZ_SECONDS plus half the pad,
+    below the pad. Here the fuzzing time is 1 s and the pad 4 s, so each
+    fake fuzzer, which sleeps 12 s, is stopped at 3 s; `timeout`'s 124 is its
+    exit code, which the judge reads as a report with no input."""
+    run, work, _ = step_rig(fuzz_sh, tmp_path, "exec /usr/bin/sleep 12",
+                            env={"HR23_FUZZ_SECONDS": 1, "HR23_FUZZ_PAD_SECONDS": 4, "HR23_FUZZ_KILL_SECONDS": 1})
+    try:
+        rc, out, err = run("campaign", "dnp3_tcp", timeout=9)
+    except subprocess.TimeoutExpired:
+        raise AssertionError("the hung fuzzer was not stopped")
+    assert rc == 0, err
+    for b in ("c1p", "c2"):
+        assert (work / "fuzz" / "private" / b / "dnp3_tcp" / "exit-code").read_text().strip() == "124", b
+
+
+needs_timeout = pytest.mark.skipif(
+    not (shutil.which("sh") and subprocess.run(
+        ["sh", "-c", "command -v timeout && test -x /usr/bin/sleep"], capture_output=True).returncode == 0),
+    reason="needs sh, timeout and /usr/bin/sleep")
+
+
+@needs_timeout
+def test_fuzz_sh_hung_fuzzer_is_stopped_below_the_pad(tmp_path):
+    check_hung_fuzzer_stopped(read(FUZZ_SH), tmp_path)
+
+
+@needs_timeout
+def test_fuzz_sh_hung_fuzzer_control_no_timeout_fails(tmp_path):
+    # The control: fuzzer() without `timeout`.
+    src = mutate(('    timeout -k "$HR23_FUZZ_KILL_SECONDS" "$fz_lim" \\\n', ""))
+    with pytest.raises(AssertionError):
+        check_hung_fuzzer_stopped(src, tmp_path)
