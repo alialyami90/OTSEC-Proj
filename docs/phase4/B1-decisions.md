@@ -2622,7 +2622,7 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
 - **2. #715, option (B') as built** (D1's 6907928324; D4's 6909471124 and 6910182089). D2, D3, D6 and D7 accept `b1490522`.
   1. On UDP, the patch's catch raises the DNP3 violation and does not rethrow. TCP is unchanged.
   2. The judge reads parsed on, recorded stop and silent stop, and a fourth state for another analyzer's row, which no row accepts. A stop counts only when the parsed rows are a prefix, in order, of the case's named messages up to and including the stop's. Each control names the state it must read, and a crash fails it (D6's N12 and N13).
-  3. **For HR-25's row (D3's records PR, D4-112 item 6):** on TCP, stock Zeek's stop is not clean. On `d4u-short-request-first-tcp`, under C0, C1p and C2 alike, the master's next message is decoded and a second violation raised (D4's 6909471124; rehearsals 43810807509 and 43814065610, `simulated`). The rows after a TCP stop are partial, and are neither proof of coverage nor proof of blinding (D3's 6909493643). The TCP twins pass only when C2 reads exactly as C2 without (B').
+  3. **For HR-25's row (D3's records PR, D4-112 item 6):** (corrected in D4-117 item 2) on TCP, stock Zeek's stop is not clean. On `d4u-short-request-first-tcp`, under C0, C1p and C2 alike, the master's next message is decoded and a second violation raised (D4's 6909471124; rehearsals 43810807509 and 43814065610, `simulated`). The rows after a TCP stop are partial, and are neither proof of coverage nor proof of blinding (D3's 6909493643). The TCP twins pass only when C2 reads exactly as C2 without (B').
   4. §4.6 of `docs/phase4/D4-hr23-design.md` states that coverage cannot show which caller reached the patched catch. Rows 4.1 and 4.2 are the replay path's evidence (D6's N14).
 - **3. #718, D1's slip and what follows** (D1's 6910729374).
   1. Ruling 6907176282 item 3 took D3's M3 under the name "M2". D3's actual M2, the two mid-flow stops of design §4.7 "Both directions", goes in **P4-4-HR2325S PR 1b (D6)**, written from the design text. It merges before HR-23's counted run.
@@ -2731,14 +2731,14 @@ Evidence class: `desk` for the rulings and for the reviewers' local runs named o
 - **7. Briefs issued** (`docs/agent-handoffs.md`, "After D4-115"): P4-SLEEP-ORDER (#733), P4-SYSLOG-OUTAGE (#734), P4-4-NULL (#735), P4-FWD-RELP (#736), P4-LINK-SFL (#738) and P4-4-INT-D5P2 (running at this entry).
 - **8. D4's queue, in order:** #739's review findings; item 4.3's per-key proposal (under way at this entry, as a documents PR on which the other roles comment); D4-115 item 5's harness change; then D4-114's queue from step 3 on (D4's `table.py` work waits for D6's restated TCP state).
 
-## D4-117: #739 merged, the TCP stop corrected, and D1's rulings on #741 and on INT-D5 part 2a's review (D1, 2026-11-17)
+## D4-117: #739 merged, the TCP stop corrected, and D1's rulings on #741 (D1, 2026-11-17)
 
 Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs in item 1; `simulated` (`CI-Linux`) for the rehearsals in item 2. Nothing was built or run against a device, and no campaign or counted run was made.
 
 - **1. Merged:** #739 (D4-115 item 4, D4) as `c991f096` at `6aff8c84`, after D1's merge check. D2 accepts `6aff8c84` (5941460999) and D6 accepts it (5941465243); `6aff8c84` is D1's fix of D2's N3 and D6's N4 and N5 on top of D4's `e83c0729`. `ci` 44115747480, `ci-long` 44115949092, `govulncheck` 44115747351.
 - **2. The TCP stop, corrected** (D4-116 item 6's open item, closed here).
   1. D4-113 item 2.3.3's "on TCP, stock Zeek's stop is not clean" holds for a throw on the connection's first data (`d4u-short-request-first-tcp`). Its statement that "the master's next message is decoded" is not shown by its cited runs (43810807509, 43814065610): the second violation is stamped at the other end's frame, two frames before the master's next message, with the first violation's reason, and whether any later message is parsed is `unknown` (D6's review 5941291895 on #739).
-  2. For #718's three TCP cell shapes, `docs/phase4/D4-hr23-design.md` §2.3 (#739; rehearsals 44092186786, 44086631885 and 44104409796) records that the two `-resp-*` shapes stop cleanly under C0 and C1p, and the `badobj` shape stops under C2 while C0 and C1p parse it on.
+  2. `docs/phase4/D4-hr23-design.md` §2.3 (#739; rehearsals 44092186786, 44086631885 and 44104409796) measured D4's own six inputs in the orders of #718's three TCP cells, not #718's bytes (§2.3's Limits list six byte differences): the two `-resp-*` orders stop cleanly under C0 and C1p, and the `badobj` order is parsed on under C0 and C1p; its C2 stop is from (B')'s rule, not from the run, and no C2 expectation comes from the rehearsals.
   3. `docs/threat-model.md`'s HR-25 row carries both, in this entry's PR.
   - **Next, owner D6:** restate #718's TCP cells from §2.3, on D4's proposal 6950084488 with D6's own changes (D4-116 item 6); D4's `table.py` work then follows. **Open, owner D4, before HR-23's counted run:** `dnp3-tcp-master-short` (D4-116 item 6).
 - **3. Rulings on #741** (D4's proposal for absent and optional C13 keys, D4-116 item 4.3; D1's 6952677234 on D2's 6952386237, D3's 6952389925 and D6's 6952623628). D4 revises §15 to them; the code change follows, with D5 reviewing as the node's owner.
@@ -2752,5 +2752,5 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
   8. C13 0.2 and 0.3 are amended in place, with no new minor, on D3's conditions: the last in-place change once a sensor is built; D7 adds the floor to `docs/release.md` §7.1; the same change updates the test producers (fixtures, `sensor_rig`, GT-PCAP); D6's stored-size recount.
   9. Owed with the code change (D6's point 7): a key-deletion sweep; an old-reader leg, which D6 writes; GT-PCAP cases, ids from D1 when D6 asks, including #538's relabel.
 - **4. INT-D5 part 2a** (#742, D5): open at this entry. Its reviewers, D6, D3 and D4, start together on one head when D4 is free (D4-99).
-- **5. D4's queue, in order:** the `run.sh` script-hash check with D4-116 item 2.4 (b) (under way); #741's revision to item 3; #742's review; then D4-114's queue from step 3 on.
+- **5. D4's queue, in order:** the `run.sh` script-hash check with D4-116 item 2.4 (b) (under way); #741's revision to item 3; #742's review; then D4-114's queue from step 3 on, whose `table.py` work waits for D6's restated TCP state (item 2).
 - **Next decision number:** D4-118.
