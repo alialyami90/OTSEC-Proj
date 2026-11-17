@@ -2524,3 +2524,83 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Uncertainty or safety risks: none beyond the test.
 - Scratch files: `d5-storeab-*`
 - Result: #729, merged (D4-115 item 7).
+
+## After D4-115: test findings, nulls on the channel and INT-D5 part 2 (issued 2026-11-17, D4-116)
+
+### P4-SLEEP-ORDER (D5; D6 and D3 review): sleeps that order two tests
+- Objective and rationale: P6. D4-115 item 7's open item: `TestGroupsOfAStreamCommitInOrder` (`contracts/store`) and `TestFairLockSchedulerFirst` (`platform/sensorlink`) ordered goroutines by sleeping.
+- Required inputs: D4-115 item 7; D1's ruling 6936986476 on #728; #728's and #729's seams.
+- Files: the two test files (D1 authorizes `contracts/store/` tests for this brief). No product change.
+- Expected interfaces: none changed.
+- Deliverable: one PR, branch `agent/platform-sleep-order`, each test ordered by observation, each with a named control.
+- Acceptance tests: the self-check list; 50 local runs of each; controls shown failing.
+- Owed: none.
+- Exclusions: no new product mechanism; test seams stay nil in the product.
+- Uncertainty or safety risks: a test that passes without testing anything (D6's B1 on #733).
+- Scratch files: `d5-sleep-*`
+- Result: #733, merged (D4-116 item 1).
+
+### P4-SYSLOG-OUTAGE (D6; D4 reviews): `TestUnknownShareOverTheOutage`'s baseline
+- Objective and rationale: P6. Run 44057337591 failed "counts 473 stored … 472 new rows" in code #731 did not touch.
+- Required inputs: HANDOFF, "Test policy"; ci-triage's reading; `modules/telemetry/receive`'s `commitParts`.
+- Files: `tests/integration/syslogreceive/`. A product race is reported, not fixed.
+- Expected interfaces: none changed.
+- Deliverable: one PR, branch `agent/verification-outage-baseline`: a deterministic reproducer, a consistent baseline, a control.
+- Acceptance tests: the self-check list; the reproducer's control fails; the outage and restart tests pass.
+- Owed: none.
+- Exclusions: no weakening of the check that a message counted stored is in the store.
+- Uncertainty or safety risks: a race in the product rather than the harness (ruled out by D4 on #734).
+- Scratch files: `d6-outage-*`
+- Result: #734, merged (D4-116 item 5.1).
+
+### P4-4-NULL (D4; D6, D2, D5 and D3 review): every null refused on the C13 0.2 and 0.3 channel
+- Objective and rationale: P5. 34 paths in D4's list (6946933575), and a 35th from D6's N3 on #735, decoded `null` and were accepted, several failing open.
+- Required inputs: D1's rulings 6946943860 and 6947324886; D3's conditions on 5937824561.
+- Files: `contracts/netobs/` (D1 authorizes) and the two C13 proposal documents.
+- Expected interfaces: C13 0.2 and 0.3 gain one sentence; no minor bump.
+- Deliverable: one PR, branch `agent/telemetry-null-refuse`: one rule over every key and list element, hello and tick included; keys C13 marks required refused absent.
+- Acceptance tests: the self-check list; a table over every path at both minors with the rule-off control; `[null]` legs; omitted optional fields and `[]` still decode; `DecodeStored` control.
+- Owed: D4-116 item 4.3.
+- Exclusions: the 0.1 channel and the stored path unchanged.
+- Uncertainty or safety risks: keys C13 leaves optional (item 4.3).
+- Scratch files: `d4-null-*`
+- Result: #735, merged (D4-116 item 4).
+
+### P4-FWD-RELP (D4; D6 and D2 review): two rsyslog forwarder tests after repeated RELP breaks
+- Objective and rationale: P6. Run 44078255375 failed `TestRsyslogExactlyOnce` and `TestRsyslogKilledMidStream`.
+- Required inputs: C6's "Delivery modes"; R1.4; the saved log; `docs/phase2/A4-forward.md`.
+- Files: `modules/telemetry/forward/` tests and `relptest`; `docs/phase2/A4-forward.md`.
+- Expected interfaces: none changed.
+- Deliverable: one PR, branch `agent/telemetry-fwd-relp`: decide product or test with evidence; reproduce repeated breaks without sleeping; fix the wrong side, with a control.
+- Acceptance tests: the self-check list; the new test's control fails; the rsyslog tests pass by name on `CI-Linux`.
+- Owed: none.
+- Exclusions: no contract change without options agreed first.
+- Uncertainty or safety risks: the trigger of the breaks is inferred, not measured; the tests now log each break's reason.
+- Scratch files: `d4-relp-*`
+- Result: #736, merged (D4-116 item 5.2).
+
+### P4-LINK-SFL (D5; D6 and D3 review): `TestSchedulerFirstOnLinkLock`'s timeout on a slow runner
+- Objective and rationale: P6. Run 44078255375: a dispatch reached the 2 s bound while the longest recorded turn was 1.0 s.
+- Required inputs: D1's ruling 6936986476; #728's and #733's seams.
+- Files: `platform/sensorlink/fairlock_test.go`.
+- Expected interfaces: none changed.
+- Deliverable: one PR, branch `agent/platform-sfl-timeout`: the cause with a reproducer and control; options first if the rule changes.
+- Acceptance tests: the self-check list; the reproducer gives the CI message; the four lock tests pass.
+- Owed: none.
+- Exclusions: no change to the rule.
+- Uncertainty or safety risks: the run never recorded the holder's turn length; the cause rests on reasoning and the reproducer.
+- Scratch files: `d5-sfl-*`
+- Result: #738, merged (D4-116 item 5.3).
+
+### P4-4-INT-D5P2 (D5; D6, D3 and D4 review): INT-D5 part 2
+- Objective and rationale: the rows deferred from INT-D5 part 1 (#732), with their mechanisms (D4-116 item 3.1).
+- Required inputs: `docs/phase4/D5-p44int-split.md` §2.3, §2.4 and §3; #732's body; D4-116 items 3.2 to 3.5; `docs/phase4/D5-sensor-node.md`.
+- Files: `platform/node/`, `platform/sensorlink/` and their test packages; `docs/phase4/D5-sensor-node.md` §1.14 (the `GapRaised` limit, D4-116 item 3.1).
+- Expected interfaces: the node's design as approved (D4-92); options first where it is missing or contradicts C13 (D4-99).
+- Deliverable: one PR, or at most three proposed in a comment first, each safe to merge alone. D5 proposed three (2a, 2b, 2c; 6952032325), and D1 approved them (6952181701).
+- Acceptance tests: the self-check list; each row's test with a control; F-027's greps clean.
+- Owed: N-14 after P4-4-HR24's stage 3.
+- Exclusions: INT-D5b's aggregate-key legs; P4-4-DE's dialer legs; no product wiring (F-027).
+- Uncertainty or safety risks: the size of the work; mechanisms not yet built.
+- Scratch files: `d5-p2-*`
+- Result: running at D4-116.

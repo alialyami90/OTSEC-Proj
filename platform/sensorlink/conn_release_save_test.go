@@ -412,3 +412,34 @@ func TestTickSpanUnsavedRaised(t *testing.T) {
 		t.Fatalf("close %q, raises %v", got, r.al.list)
 	}
 }
+
+// A release whose save fails, then a second whose save succeeds, with no
+// connection open, then the hello: each drop is counted once in the saved
+// cursor (D6's N7 on #742, from its probe P9). Controls: moveCursor leaving
+// out l.unsaved gives dropped 1; a written release keeping l.unsaved gives 3.
+func TestReleaseUnsavedThenWrittenCountedOnce(t *testing.T) {
+	r, hs := holdRig02(t)
+	hr := heldOne(t, r, hs, 1)
+	a := withBody(t, hr, "", 10, true, nil)
+	b := withBody(t, hr, "", 11, true, nil)
+	ra := RunRecord{State: HoldHolding, Run: HoldRun{RequestID: "req-a", AssetID: relay, Endpoint: endpoint, L4: "tcp",
+		Deadline: r.now().Add(time.Second)}, Flows: []HeldFlow{{Records: []HeldRecord{a}}}}
+	rb := RunRecord{State: HoldHolding, Run: HoldRun{RequestID: "req-b", AssetID: relay, Endpoint: endpoint, L4: "tcp",
+		Deadline: r.now().Add(time.Hour)}, Flows: []HeldFlow{{Records: []HeldRecord{b}}}}
+	saveTestCursor(t, r, &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Taken: 9, Digest: testDigest})
+	restartHeld(t, r, hs, []RunRecord{ra, rb})
+	r.addWall(time.Minute)
+	r.cs.failNext(1)
+	r.l.TickHold(bg) // releases a; its save fails
+	if n := r.al.count(AlarmPositionNotSaved); n != 1 {
+		t.Fatalf("%d raises", n)
+	}
+	r.addWall(2 * time.Hour)
+	r.l.TickHold(bg) // releases b; its save succeeds
+	r.accepted(resume(12, 20)).end()
+	c := cursorNow(t, r.cs)
+	t.Logf("saved T %d dropped %d; stats %v", c.Taken, c.Dropped, r.l.Stats().Dropped)
+	if c.Dropped != 2 {
+		t.Fatalf("two drops, the saved total %d", c.Dropped)
+	}
+}
