@@ -36,6 +36,20 @@ jobs:
         run: sh "$FUZZ" build "$RUNNER_TEMP/hr23-fuzz"
       - name: The seeds, converted by the pinned script, against the corpus pin
         run: sh "$FUZZ" seeds "$RUNNER_TEMP/hr23-fuzz"
+      - name: Smoke diagnosis only - each target started on an empty corpus with -runs=0 (no seed, no mutated input); prints the exit code and filtered start-up lines
+        if: ${{ !cancelled() }}
+        run: |
+          w="$RUNNER_TEMP/hr23-fuzz/fuzz"
+          for b in c1p c2; do
+            echo "ZEEKPATH for $b: [$(cat "$w/$b/zeekpath")]"
+            for t in dnp3_tcp dnp3_udp packet; do
+              e=$(mktemp -d); rc=0
+              env ZEEKPATH="$(cat "$w/$b/zeekpath")" ASAN_OPTIONS=detect_leaks=0:symbolize=0 \
+                "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-$t-fuzzer" -runs=0 -detect_leaks=0 "$e" > "$e.log" 2>&1 || rc=$?
+              echo "$b $t exit $rc"
+              grep -E '^(INFO|WARNING|ERROR): |error|fatal|cannot|No such|not found|unknown' "$e.log" | grep -vE 'Sanitizer|==[0-9]+==|^ *#' | head -15
+            done
+          done
       - name: dnp3_tcp, smoke
         run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_tcp
       - name: dnp3_udp, smoke
