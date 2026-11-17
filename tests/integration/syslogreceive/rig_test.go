@@ -121,6 +121,10 @@ type rig struct {
 	h      *healths
 	stop   context.CancelFunc
 	done   chan error
+	// polled, when set, is sent to (without blocking) on each poll of
+	// baseline that finds read messages held (TestMarkerBaselineIsSettled).
+	// It is nil in every other test, and a send on nil is skipped.
+	polled chan struct{}
 }
 
 // open opens the real syslog database through C5 startup with a quota per

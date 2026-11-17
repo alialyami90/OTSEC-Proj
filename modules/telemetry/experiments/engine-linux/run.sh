@@ -191,7 +191,7 @@ header() {
   [ "$ref" = refs/heads/main ] || why="${why:+$why; }not refs/heads/main"
   if [ -n "$why" ]; then sig="rehearsal: not the counted result ($why)"; else sig="counted"; fi
   printf '%s\n' "- Run, for E-D4-03's conditions: $kind" "- Run, for P4-4-E2 (the Modbus signature, \`zeek-modbus-sig\`): $sig" \
-    "- Run, for HR-23 (P4-4-HR23; \`zeek-probe-c0\`, \`zeek-probe\` as C1, \`zeek-probe-c1p\`, \`zeek-probe-c2\`): rehearsal: not the counted result (stage 2's cases and conditions are not pinned)" \
+    "- Run, for HR-23 (P4-4-HR23; \`zeek-probe-c0\`, \`zeek-probe\` as C1, \`zeek-probe-c1p\`, \`zeek-probe-c2\`): rehearsal: not the counted result (this header does not yet check the HR23_* pins in pins.env, and D4-115 items 4 and 5 are open)" \
     "- Commit: $commit" "- Ref: $ref" "- engine-pass-conditions.tsv SHA-256: $ch ($pinned)"
   printf '%s\n' "$pins"
   pins=
