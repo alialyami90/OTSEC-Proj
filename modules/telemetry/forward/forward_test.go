@@ -182,12 +182,19 @@ func checkResume(t *testing.T, ms []relptest.Message) {
 	ids := eids(t, ms)
 	var high store.Seq
 	conn, prev := 0, store.Seq(0)
-	stalled := false // a withheld frame on this connection: nothing after it is confirmed
+	// A withheld frame on a connection, of any stream, leaves nothing after
+	// it on that connection confirmed: a RELP server answers in order (D2's
+	// N3 on #736).
+	stallConn, stalled := 0, false
 	for i, m := range ms {
 		k, err := event.ParseEventID(ids[i])
 		if err != nil {
 			t.Fatal(err)
 		}
+		if m.Conn != stallConn {
+			stallConn, stalled = m.Conn, false
+		}
+		stalled = stalled || m.Withheld
 		if k.Stream != serStream {
 			continue
 		}
@@ -195,13 +202,12 @@ func checkResume(t *testing.T, ms []relptest.Message) {
 			if k.Seq > high+1 {
 				t.Errorf("connection %d starts at %d after %d was acknowledged: skipped", m.Conn, k.Seq, high)
 			}
-			conn, prev, stalled = m.Conn, k.Seq-1, false
+			conn, prev = m.Conn, k.Seq-1
 		}
 		if k.Seq != prev+1 {
 			t.Errorf("connection %d: %d after %d", m.Conn, k.Seq, prev)
 		}
 		prev = k.Seq
-		stalled = stalled || m.Withheld
 		if !stalled {
 			high = max(high, k.Seq)
 		}
