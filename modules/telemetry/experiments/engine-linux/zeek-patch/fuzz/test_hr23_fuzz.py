@@ -1054,8 +1054,8 @@ def test_fuzz_sh_replay_keeps_each_inputs_build(tmp_path):
 def test_fuzz_sh_replay_control_shared_names_fails(tmp_path):
     # The control: fuzzer() assigning the replay loop's own $b and $t.
     src = read(FUZZ_SH)
-    assert src.count("  fz_b=$1 fz_t=$2\n") == 1
-    src = src.replace("  fz_b=$1 fz_t=$2\n", "  fz_b=$1 fz_t=$2 b=$1 t=$2\n")
+    assert src.count("  fz_b=$1 fz_t=$2 fz_lim=$3\n") == 1
+    src = src.replace("  fz_b=$1 fz_t=$2 fz_lim=$3\n", "  fz_b=$1 fz_t=$2 fz_lim=$3 b=$1 t=$2\n")
     with pytest.raises(AssertionError):
         check_replay_labels(src, tmp_path / "a" / "fuzz")
 
