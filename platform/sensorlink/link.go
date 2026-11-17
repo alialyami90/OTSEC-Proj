@@ -58,6 +58,16 @@ type Options struct {
 	// Hold is the intake hold (hold.go). With no node addresses nothing
 	// is held.
 	Hold HoldConfig
+	// The 0.2 intake's seams (conn.go), each read only by ServeConn and
+	// WriteOwed: the observation stream's source cursor, the kept
+	// pinned_by, the node's wall clock, the status alarms, the owed health
+	// events, and CH-4's waits.
+	Cursor   CursorStore
+	Pins     PinStore
+	Now      func() time.Time
+	Raise    func(alarm, detail string)
+	Owed     func(ctx context.Context, o Owed) error
+	Timeouts ConnTimeouts
 }
 
 // Reasons a record is refused (sensor-record-refused), beside the C13
@@ -144,6 +154,15 @@ type Link struct {
 	mu     sync.Mutex
 	stats  Stats
 	budget *budget
+
+	// The 0.2 intake (conn.go). curMu orders a connection's frames with
+	// WriteOwed, is held while a frame is acted on and never across a read
+	// or a write of the connection, and is taken before cmu; inflight is
+	// under cmu; conn under mu.
+	guard    connGuard
+	curMu    sync.Mutex
+	inflight *inflight
+	conn     ConnStats
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).
@@ -164,6 +183,7 @@ func New(cfg Config, opt Options) (*Link, error) {
 	}
 	return &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets), hold: h,
 		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
+		conn:   ConnStats{Closes: map[string]uint64{}},
 		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}, nil
 }
 
@@ -264,7 +284,7 @@ func (l *Link) handle(ctx context.Context, b []byte) {
 		}
 		return
 	}
-	l.observe(ctx, rec.Observation, n)
+	l.observe(ctx, rec.Observation, n, nil)
 }
 
 // takeSeq records seq n of run, counting the seqs skipped. A new run starts
@@ -310,15 +330,16 @@ func codeOf(err error) string {
 	return string(netobs.CodeDecode)
 }
 
-// observe adds the node object to o, and holds it (hold.go) or commits
-// it untied, or drops and counts it.
-func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
+// observe adds the node object to o, with lost as node.lost (CH-40), and
+// holds it (hold.go) or commits it untied, or drops and counts it.
+func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, lost []netobs.Span) {
 	nd, _ := l.nodeObject(o)
+	nd.Lost = lost
 	var capture *c5.Capture
 	if o.FirstSight {
 		c, err := firstSightCapture(o)
 		if err != nil {
-			l.refuse(RefusedStored)
+			l.refuseStored()
 			return
 		}
 		capture = c
@@ -327,12 +348,12 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64) {
 	stored := *o
 	stored.Frames, stored.Node = nil, nd
 	if err := stored.ValidateStored(); err != nil {
-		l.refuse(RefusedStored)
+		l.refuseStored()
 		return
 	}
 	body, err := json.Marshal(&stored)
 	if err != nil || len(body) > event.MaxNetobsBytes {
-		l.refuse(RefusedStored)
+		l.refuseStored()
 		return
 	}
 	hr := HeldRecord{RunID: o.RunID, Seq: seq, Observation: body, Capture: capture, Received: l.opt.Received()}
@@ -405,15 +426,41 @@ func tieBody(body json.RawMessage, tie *netobs.PlatformSession) ([]byte, error) 
 	return json.Marshal(top)
 }
 
+// refuseStored refuses the record being stored, and notes it for the 0.2
+// path.
+func (l *Link) refuseStored() {
+	l.refuse(RefusedStored)
+	l.cmu.Lock()
+	if l.inflight != nil {
+		l.inflight.outcome = outRefused
+	}
+	l.cmu.Unlock()
+}
+
 // commitOne commits one record with tie, if any, or drops and counts it.
-// The caller holds cmu.
+// The record the 0.2 path is taking carries the cursor in the same commit
+// (CH-17), and its outcome is noted. The caller holds cmu.
 func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.PlatformSession, _ string) {
+	f := l.inflight
+	if !f.mine(hr) {
+		f = nil
+	}
+	note := func(o outcome) {
+		if f != nil {
+			f.outcome = o
+		}
+	}
 	rec, dst, unresolved, err := l.record(hr, tie)
+	if err == nil && f != nil {
+		rec.SourceCursor, err = f.cursor()
+	}
 	if err != nil {
 		l.refuse(RefusedStored)
+		note(outRefused)
 		return
 	}
 	if !l.takeBudget(unresolved, rec.Bytes(), dst) {
+		note(outDropped)
 		return
 	}
 	_, err = l.opt.Store.Append(ctx, rec)
@@ -424,10 +471,22 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 		if unresolved {
 			l.budget.giveBack(rec.Bytes())
 		}
+		if f != nil && !finalStoreError(err) {
+			note(outStoreError) // not final: not counted, the record is resent
+			return
+		}
 		l.storeDrop(err, dst)
+		note(outDropped)
 		return
 	}
 	l.committed(hr)
+	note(outCommitted)
+}
+
+// finalStoreError reports whether a store refusal is a final outcome: a
+// full class or the record cap (CH-17).
+func finalStoreError(err error) bool {
+	return errors.Is(err, &c5.Error{Code: c5.CodeQuotaReached}) || errors.Is(err, &c5.Error{Code: c5.CodeRecordTooLarge})
 }
 
 // takeBudget takes an unresolved record's bytes from the budget, or drops
