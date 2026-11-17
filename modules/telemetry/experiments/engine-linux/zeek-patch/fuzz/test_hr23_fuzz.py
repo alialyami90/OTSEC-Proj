@@ -1032,10 +1032,15 @@ def check_replay_labels(fuzz_sh, tmp_path):
         (art / n).write_bytes(b"x")
     script = tmp_path / "fuzz.sh"
     script.write_text(fuzz_sh)
-    shutil.copy(os.path.join(HERE, "fuzz.env"), tmp_path / "fuzz.env")
+    # The replay pad is not under test here (check_replay_pad): at 0 the step
+    # does not sleep its 900 seconds.
+    env, n = re.subn(r"^HR23_FUZZ_REPLAY_PAD_SECONDS=\d+$", "HR23_FUZZ_REPLAY_PAD_SECONDS=0",
+                     read(os.path.join(HERE, "fuzz.env")), flags=re.M)
+    assert n == 1
+    (tmp_path / "fuzz.env").write_text(env, newline="\n")
     # fuzz.sh reads ../build.env beside its own folder.
     (tmp_path.parent / "build.env").write_text("")
-    subprocess.run(["sh", str(script), "replay", str(work)], check=True, capture_output=True)
+    subprocess.run(["sh", str(script), "replay", str(work)], check=True, capture_output=True, timeout=120)
     rows = (f / "private" / "replay.tsv").read_text().splitlines()
     assert rows == ["dnp3_tcp\tc1p\t0\t77"] * 2, rows
 
@@ -1148,7 +1153,7 @@ def step_rig(fuzz_sh, tmp_path, fuzzer_body, env=None, campaign=True):
     (tmp_path / "build.env").write_text("")
     run_env = dict(os.environ, PATH=bin_.as_posix() + os.pathsep + os.environ["PATH"])
 
-    def run(mode, *args, timeout=60):
+    def run(mode, *args, timeout=30):
         with open(tmp_path / "out", "w") as out, open(tmp_path / "err", "w") as err:
             rc = subprocess.run(["sh", script.as_posix(), mode, work.as_posix(), *args],
                                 stdout=out, stderr=err, env=run_env, timeout=timeout).returncode
