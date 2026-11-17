@@ -65,12 +65,14 @@ fopts="-timeout=$HR23_FUZZ_TIMEOUT -rss_limit_mb=$HR23_FUZZ_RSS_LIMIT_MB -max_le
 # One build's fuzzer TARGET, with its options and its sanitizer settings,
 # under nonet; the caller redirects its output into WORK/fuzz/private.
 fuzzer() {
-  b=$1 t=$2
+  # Its own names: sh has no local variables, and the replay loop's $b and
+  # $t must survive this call.
+  fz_b=$1 fz_t=$2
   shift 2
-  zp=$(cat "$f/$b/zeekpath")
+  zp=$(cat "$f/$fz_b/zeekpath")
   nonet env ZEEKPATH="$zp" ASAN_OPTIONS="$HR23_FUZZ_ASAN_OPTIONS" UBSAN_OPTIONS="$HR23_FUZZ_UBSAN_OPTIONS" \
     LLVM_PROFILE_FILE="${PROFILE:-$priv/discard-%p.profraw}" \
-    "$f/$b/zeek-9.0.1/build/src/fuzzers/zeek-$t-fuzzer" $fopts "$@"
+    "$f/$fz_b/zeek-9.0.1/build/src/fuzzers/zeek-$fz_t-fuzzer" $fopts "$@"
 }
 
 case $mode in

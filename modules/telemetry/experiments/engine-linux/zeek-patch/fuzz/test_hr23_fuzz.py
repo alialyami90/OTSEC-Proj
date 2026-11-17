@@ -657,3 +657,53 @@ def test_fuzz_sh_disclosure_control_fails(name, edit):
     assert src.count(edit[0]) == 1, edit[0]
     with pytest.raises(AssertionError):
         check_fuzz_sh(src.replace(*edit))
+
+
+# --- fuzz.sh's replay: each input keeps the build whose campaign found it --
+
+def can_run_nonet():
+    if not (shutil.which("sh") and shutil.which("sudo") and shutil.which("unshare")):
+        return False
+    return subprocess.run(["sudo", "-n", "unshare", "--net", "--", "true"], capture_output=True).returncode == 0
+
+
+def check_replay_labels(fuzz_sh, tmp_path):
+    """Two inputs from C1p's dnp3_tcp campaign; the fake C1p fuzzer passes
+    every input and the fake C2 fuzzer fails it. Both rows must name C1p."""
+    work = tmp_path / "w"
+    f = work / "fuzz"
+    for b, rc in (("c1p", 0), ("c2", 77)):
+        d = f / b / "zeek-9.0.1" / "build" / "src" / "fuzzers"
+        d.mkdir(parents=True)
+        for t in ("dnp3_tcp", "dnp3_udp", "packet"):
+            p = d / f"zeek-{t}-fuzzer"
+            p.write_text(f"#!/bin/sh\nexit {rc}\n")
+            p.chmod(0o755)
+        (f / b / "zeekpath").write_text("/nonexistent")
+    art = f / "private" / "c1p" / "dnp3_tcp" / "artifacts"
+    art.mkdir(parents=True)
+    for n in ("crash-a", "crash-b"):
+        (art / n).write_bytes(b"x")
+    script = tmp_path / "fuzz.sh"
+    script.write_text(fuzz_sh)
+    shutil.copy(os.path.join(HERE, "fuzz.env"), tmp_path / "fuzz.env")
+    # fuzz.sh reads ../build.env beside its own folder.
+    (tmp_path.parent / "build.env").write_text("")
+    subprocess.run(["sh", str(script), "replay", str(work)], check=True, capture_output=True)
+    rows = (f / "private" / "replay.tsv").read_text().splitlines()
+    assert rows == ["dnp3_tcp\tc1p\t0\t77"] * 2, rows
+
+
+@pytest.mark.skipif(not can_run_nonet(), reason="needs sh, and sudo -n unshare --net (the Linux CI runner)")
+def test_fuzz_sh_replay_keeps_each_inputs_build(tmp_path):
+    check_replay_labels(read(FUZZ_SH), tmp_path / "a" / "fuzz")
+
+
+@pytest.mark.skipif(not can_run_nonet(), reason="needs sh, and sudo -n unshare --net (the Linux CI runner)")
+def test_fuzz_sh_replay_control_shared_names_fails(tmp_path):
+    # The control: fuzzer() assigning the replay loop's own $b and $t.
+    src = read(FUZZ_SH)
+    assert src.count("  fz_b=$1 fz_t=$2\n") == 1
+    src = src.replace("  fz_b=$1 fz_t=$2\n", "  fz_b=$1 fz_t=$2 b=$1 t=$2\n")
+    with pytest.raises(AssertionError):
+        check_replay_labels(src, tmp_path / "a" / "fuzz")
