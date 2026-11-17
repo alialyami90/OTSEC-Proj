@@ -42,12 +42,18 @@ jobs:
           w="$RUNNER_TEMP/hr23-fuzz/fuzz"
           for b in c1p c2; do
             echo "ZEEKPATH for $b: [$(cat "$w/$b/zeekpath")]"
-            ldd "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-packet-fuzzer" | grep -E 'not found|zeek' || true
+            ldd "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-packet-fuzzer" | grep -E 'not found|zeek|broker|binpac' || true
             for t in dnp3_tcp dnp3_udp packet; do
               e=$(mktemp -d); rc=0
               env ZEEKPATH="$(cat "$w/$b/zeekpath")" ASAN_OPTIONS=detect_leaks=0:symbolize=0 \
                 "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-$t-fuzzer" -runs=0 -detect_leaks=0 "$e" > "$e.log" 2>&1 || rc=$?
               echo "$b $t exit $rc"
+              grep -o 'ERROR: AddressSanitizer: [a-z-]*' "$e.log" | head -3
+              grep -vE 'Sanitizer|==[0-9]+==|^ *#[0-9]' "$e.log" | head -30 | cut -c1-300
+              rc=0
+              env ZEEKPATH="$(cat "$w/$b/zeekpath")" ASAN_OPTIONS=detect_leaks=0:symbolize=0:detect_odr_violation=0                 "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-$t-fuzzer" -runs=0 -detect_leaks=0 "$e" > "$e.log" 2>&1 || rc=$?
+              echo "$b $t with detect_odr_violation=0: exit $rc"
+              grep -o 'ERROR: AddressSanitizer: [a-z-]*' "$e.log" | head -3
               grep -vE 'Sanitizer|==[0-9]+==|^ *#[0-9]' "$e.log" | head -30 | cut -c1-300
             done
           done
