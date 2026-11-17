@@ -32,11 +32,11 @@ import (
 //	prior: runs_skipped, records_lost, previous_end (c or u), started_by,
 //	  owed mark, span count (6), and 8 x (from, to, cut end, mark) (32)
 //
-// This build fills the position, the digest, Ds, newest_seq, the spans and
-// prior. write_no, the baselines, W, R, the gap held for the floor and M
-// are INT-D5 part 2b's and 2c's: they are written "-", and a cursor that
-// carries any of them is refused, so a later build's cursor is never read
-// as this one's. Its largest is 2,026 bytes (section 1.4), within
+// This build fills the position, write_no, the digest, Ds, newest_seq, the
+// heartbeat baselines (section 1.8), the spans and prior. W, R, the gap
+// held for the floor and M are INT-D5 part 2c's: they are written "-", and
+// a cursor that carries any of them is refused, so a later build's cursor
+// is never read as this one's. Its largest is 2,026 bytes (section 1.4), within
 // MaxLinkCursorBytes by construction.
 const (
 	cursorFormTag    = "sp2"
@@ -46,7 +46,14 @@ const (
 )
 
 // The reserved fields this build writes "-": their first index and count.
-var cursorReserved = [][2]int{{9, 1}, {13, 5}, {18, 4}, {22, 18}, {40, 6}, {46, 1}}
+var cursorReserved = [][2]int{{18, 4}, {22, 18}, {40, 6}, {46, 1}}
+
+// The egress mark (section 1.8): whether the run's baseline heartbeat
+// carried egress_check, "-" when no baseline is held.
+const (
+	EgressCarried = "1"
+	EgressOmitted = "0"
+)
 
 var cursorDecimal = regexp.MustCompile(`^(0|[1-9][0-9]{0,19})$`)
 
@@ -80,10 +87,26 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 	if digest == "" {
 		digest = cursorAbsent
 	}
-	f = append(f, cursorAbsent, digest) // write_no: 2b's
+	dec(c.WriteNo)
+	f = append(f, digest)
 	dec(c.Ds)
 	dec(c.NewestSeq)
-	for range 5 + 4 + 18 + 6 + 1 { // baselines, W, R, the gap held, M: 2b's and 2c's
+	for _, v := range []*uint64{c.FramesOutgoing, c.DropsHolder, c.FramesOverlong, c.DropsDriver} {
+		if v == nil {
+			f = append(f, cursorAbsent)
+		} else {
+			dec(*v)
+		}
+	}
+	switch c.Egress {
+	case "":
+		f = append(f, cursorAbsent)
+	case EgressCarried, EgressOmitted:
+		f = append(f, c.Egress)
+	default:
+		return nil, fmt.Errorf("sensorlink: the egress mark %q cannot be saved", c.Egress)
+	}
+	for range 4 + 18 + 6 + 1 { // W, R, the gap held, M: 2c's
 		f = append(f, cursorAbsent)
 	}
 	var err error
@@ -214,7 +237,20 @@ func decodeCursor(b []byte) (*Cursor, error) {
 		return v
 	}
 	c := &Cursor{Generation: dec(1), RunCounter: dec(2), RunID: f[3], Taken: dec(4), G: dec(5), D: dec(6),
-		Refused: dec(7), Dropped: dec(8), Ds: dec(11), NewestSeq: dec(12)}
+		Refused: dec(7), Dropped: dec(8), WriteNo: dec(9), Ds: dec(11), NewestSeq: dec(12)}
+	for i, p := range []**uint64{&c.FramesOutgoing, &c.DropsHolder, &c.FramesOverlong, &c.DropsDriver} {
+		if f[13+i] != cursorAbsent {
+			v := dec(13 + i)
+			*p = &v
+		}
+	}
+	switch f[17] {
+	case cursorAbsent:
+	case EgressCarried, EgressOmitted:
+		c.Egress = f[17]
+	default:
+		bad = true
+	}
 	if f[10] != cursorAbsent {
 		c.Digest = f[10]
 		bad = bad || !cursorDigest.MatchString(c.Digest)

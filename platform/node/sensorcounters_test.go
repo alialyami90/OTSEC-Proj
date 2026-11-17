@@ -9,6 +9,7 @@ import (
 
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/syslog"
+	"otsec.local/otsec/platform/sensorlink"
 )
 
 // worstSensorCounters is the worst 0.4 sensor.counters event of C4 0.4
@@ -50,8 +51,8 @@ func defaultTarget(t *testing.T) *syslog.Target {
 // summary, and the octets are logged; this pins section 4's unreproduced
 // estimate. The control is the agent's 14 counts added as
 // diff.agent.<name>, in an event of a later minor so that C4 lets them
-// pass, which Render refuses as too large. The node's builder leg is owed:
-// no node code builds sensor.counters yet. Desk only.
+// pass, which Render refuses as too large. The node's builder leg is
+// TestSensorCountersWorstCaseFits. Desk only.
 func TestSensorCountersEventFits(t *testing.T) {
 	e, tg := worstSensorCounters(), defaultTarget(t)
 	if n := len(e.Health.Details); n != 25 {
@@ -81,5 +82,44 @@ func TestSensorCountersEventFits(t *testing.T) {
 	var se *syslog.Error
 	if _, _, err := syslog.Render(e, tg); !errors.As(err, &se) || se.Code != syslog.CodeTooLarge {
 		t.Fatalf("with the agent's counts: %v, want %s", err, syslog.CodeTooLarge)
+	}
+}
+
+// E4-6's builder leg (P4-4-CC's table): the node's own worst-case
+// sensor.counters, built by sensorlink.SensorCountersDetails from a rise of
+// 2^64 - 1 in each of the 21 counters, so every capture-loss counter is
+// named, with a 63-character node ID, is valid C4 0.4 and renders within
+// the default target's 2,048 octets. Control: the same event with the
+// agent's 14 counts added, under a later minor so that C4 lets them pass,
+// which Render refuses as too large. Desk only.
+func TestSensorCountersWorstCaseFits(t *testing.T) {
+	rises := map[string]uint64{}
+	for _, n := range append(append([]string{}, event.SensorCounters...), event.SensorCounters04...) {
+		rises[n] = math.MaxUint64
+	}
+	e := worstSensorCounters()
+	e.Health.Details = sensorlink.SensorCountersDetails("ffffffff-ffff-4fff-bfff-ffffffffffff", "eeeeeeee-eeee-4eee-beee-eeeeeeeeeeee", rises)
+	if n := len(e.Health.Details); n != 25 {
+		t.Fatalf("%d details, want 25", n)
+	}
+	if err := e.Validate(); err != nil {
+		t.Fatalf("the node's worst sensor.counters is not valid C4 0.4: %v", err)
+	}
+	tg := defaultTarget(t)
+	msg, out, err := syslog.Render(e, tg)
+	if err != nil || out.SummaryDropped || len(msg) > syslog.DefaultMaxOctets {
+		t.Fatalf("%d octets (limit %d), %+v, %v", len(msg), syslog.DefaultMaxOctets, out, err)
+	}
+	t.Logf("the node's worst sensor.counters: %d octets of %d", len(msg), syslog.DefaultMaxOctets)
+	e.Schema = "otsec.event/0.5"
+	max := strconv.FormatUint(math.MaxUint64, 10)
+	for _, n := range []string{"closes.handshake", "closes.node-hello", "closes.node-hello-timeout", "closes.binding", "closes.ack",
+		"closes.type", "closes.idle", "closes.frame-too-large", "closes.superseded", "closes.run-complete", "closes.shutdown",
+		"taken_ahead", "sync_late", "entries_unreadable"} {
+		e.Health.Details["diff.agent."+n] = max
+	}
+	var se *syslog.Error
+	if _, _, err := syslog.Render(e, tg); !errors.As(err, &se) || se.Code != syslog.CodeTooLarge {
+		t.Fatalf("control with the agent's counts: %v, want %s", err, syslog.CodeTooLarge)
 	}
 }
