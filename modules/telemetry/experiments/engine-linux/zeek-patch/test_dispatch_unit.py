@@ -237,3 +237,21 @@ def test_unchanged_rows_read_c2_against_c2_with_the_stock_catch():
     # A crash in both is never "unchanged".
     assert du.unchanged_verdict(("exit 134", ""), ("exit 134", ""), ("parsed on", "x"), "parsed on") == "fail"
     assert du.unchanged_verdict(rec, ("not run", ""), ("parsed on", "x"), "parsed on") == "unknown (not run)"
+
+
+def test_tcp_stop_inputs_follow_the_orders_of_718s_tcp_cells():
+    """D4-115 item 4: the replay pair is on 20001 (outside
+    likely_server_ports) with X then the same end's P first; the mid-flow
+    pair is on 20000 with the responder's 2-octet X after P R."""
+    flows = du.cases()
+    for case in du.EXPERIMENT:
+        assert case in flows
+    for sfx in ("", "-badobj"):
+        f = flows["d4u-tcp-replay-same-end" + sfx]
+        assert f.conv.s.port == 20001 and f.bad == 0
+        assert [o for o, _ in f.msgs] == [True, True, False, True, False]
+    assert flows["d4u-tcp-replay-same-end-badobj"].msgs[0] == (True, 129)
+    for name, code in (("fc0", 0), ("fc13", 13)):
+        f = flows[f"d4u-tcp-resp-{name}-mid"]
+        assert f.conv.s.port == 20000 and f.bad == 2
+        assert f.msgs == [(True, 1), (False, 129), (False, code), (True, 1), (False, 129)]
