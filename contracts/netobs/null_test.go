@@ -2,6 +2,7 @@ package netobs
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -89,6 +90,15 @@ func nullTLS(schema string) *Observation {
 func nullIdentity(schema string) *Observation {
 	return nullOther(schema, KindIdentity, "telnet", func(o *Observation) {
 		o.Identity = &Identity{Attribute: "fid", Value: *nullText("FID-TEST"), Via: "telnet"}
+	})
+}
+
+// nullUndecoded is an undecoded UDP record, which carries ip (D6's N3 on
+// #735: ip null read as layer 2 on main).
+func nullUndecoded(schema string) *Observation {
+	return nullOther(schema, KindUndecoded, "unknown", func(o *Observation) {
+		o.IP.L4, o.Direction = "udp", DirectionNone
+		o.Undecoded = &Undecoded{Basis: "port", Packets: 3}
 	})
 }
 
@@ -276,10 +286,14 @@ func nullPaths(v any, at []any, out *[][]any) {
 // No value on the 0.2 or 0.3 channel is null: every key and every list
 // element of each record above, set to null one at a time, is refused.
 // A sweep, beyond the 34 rows, so that a path no row names is covered.
+// Every refusal but schema's and type's, which are read before the record
+// has a type, has form at the null's own path as its first error, so the
+// link counts it as form (D6's N1 on #735), and no path carries two form
+// errors (N2).
 func TestChannelNullRefusedEverywhere(t *testing.T) {
 	recs := []func(string) any{hbRec}
 	for _, f := range []func(string) *Observation{nullFunction, nullRepeat, nullModbus, nullModbus3, nullService, nullTelnet,
-		nullHTTP, nullSNMPv3, nullTLS, nullIdentity} {
+		nullHTTP, nullSNMPv3, nullTLS, nullIdentity, nullUndecoded} {
 		recs = append(recs, obs(f))
 	}
 	recs = append(recs, func(s string) any { return fxEnd03("tcp") }, func(s string) any { return fxEnd03("udp") })
@@ -298,12 +312,45 @@ func TestChannelNullRefusedEverywhere(t *testing.T) {
 			nullPaths(doc, nil, &paths)
 			for _, p := range paths {
 				b := encodeWith(t, rec(schema), func(m map[string]any) { setNull(m, p) })
-				if _, err := DecodeFromSensorIn(b, schema); err == nil {
-					t.Errorf("%s, %T %s null: accepted", schema, rec(schema), field(p))
+				f := field(p)
+				_, err := DecodeFromSensorIn(b, schema)
+				switch {
+				case err == nil:
+					t.Errorf("%s, %T %s null: accepted", schema, rec(schema), f)
+				case f == "schema" || f == "type":
+				case !firstFormAt(err, f):
+					t.Errorf("%s, %T %s null: %v, want form at %s first", schema, rec(schema), f, err, f)
+				}
+				if p := twoForms(err); p != "" {
+					t.Errorf("%s, %T %s null: two form errors at %s: %v", schema, rec(schema), f, p, err)
 				}
 			}
 		}
 	}
+}
+
+// firstFormAt reports whether err's first error is form at field.
+func firstFormAt(err error, field string) bool {
+	var e *Error
+	return errors.As(err, &e) && e.Code == CodeForm && e.Field == field
+}
+
+// twoForms is a path that carries two form errors in err, or "".
+func twoForms(err error) string {
+	j, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return ""
+	}
+	seen := map[string]bool{}
+	for _, e := range j.Unwrap() {
+		if x, ok := e.(*Error); ok && x.Code == CodeForm {
+			if seen[x.Field] {
+				return x.Field
+			}
+			seen[x.Field] = true
+		}
+	}
+	return ""
 }
 
 // setNull is setPath for a path that may end at a list element.
@@ -417,9 +464,12 @@ func TestChannelNullListElements(t *testing.T) {
 	}
 }
 
-// D3's condition (1) on #732: a sensor-hello and a tick refuse every null,
-// each key and each list element, at both minors, prior and its lists
-// included. Control: each as built decodes.
+// D3's condition (1) on #732 and B1 on #735: a sensor-hello and a tick
+// refuse every null, each key and each list element, at both minors, prior
+// and its lists included, by the one rule: form at the null's own path,
+// and nothing else, so the connection closes as hello or tick. schema and
+// type are read before the strict decode, and refused there. Control:
+// each as built decodes.
 func TestHelloAndTickNullRefused(t *testing.T) {
 	span := []Span{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:30:00Z"}}
 	for _, schema := range channelIdentifiers {
@@ -441,8 +491,21 @@ func TestHelloAndTickNullRefused(t *testing.T) {
 			nullPaths(doc, nil, &paths)
 			for _, p := range paths {
 				b := encodeWith(t, rec, func(m map[string]any) { setNull(m, p) })
-				if _, err := DecodeFromSensorIn(b, schema); err == nil {
-					t.Errorf("%s, %T %s null: accepted", schema, rec, field(p))
+				f := field(p)
+				m, err := DecodeFromSensorIn(b, schema)
+				switch {
+				case err == nil:
+					t.Errorf("%s, %T %s null: accepted", schema, rec, f)
+				case f == "schema" || f == "type":
+				case !refusedOnly(err, CodeForm, f):
+					t.Errorf("%s, %T %s null: %v, want only form at %s", schema, rec, f, err, f)
+				}
+				want := TypeTick
+				if _, ok := rec.(*SensorHello); ok {
+					want = TypeSensorHello
+				}
+				if f != "type" && m.Type != want {
+					t.Errorf("%s, %s null: type %q, so the connection would not close as its message", schema, f, m.Type)
 				}
 			}
 		}
@@ -508,6 +571,19 @@ func TestChannelRequiredKeysMissing(t *testing.T) {
 		if _, err := DecodeChannel(b); err != nil {
 			t.Errorf("control, 0.1 channel, %s left out: %v", f, err)
 		}
+		// D6's N4 on #735: required does not reach a stored record of any
+		// channel minor, which reads as it did.
+		for _, schema := range channelIdentifiers {
+			o := asStored(r.rec(schema))
+			o.FirstSight, o.Frames = false, nil // a first sight's bytes are its capture, not the body
+			if o.Function != nil {
+				o.Node.FunctionClass, o.Node.FunctionTable = ClassOther, FunctionTable
+			}
+			b := encodeWith(t, o, func(m map[string]any) { deletePath(m, r.path) })
+			if _, err := DecodeStored(b); err != nil {
+				t.Errorf("control, stored %s, %s left out: %v", schema, f, err)
+			}
+		}
 	}
 	// A Text's value or length left out is refused as missing too. Each is
 	// also refused by the value's own check, as the length no longer
@@ -519,6 +595,23 @@ func TestChannelRequiredKeysMissing(t *testing.T) {
 			if _, err := DecodeFromSensorIn(b, schema); !hasCode(err, CodeMissing) {
 				t.Errorf("%s, identity.value.%s left out: %v, want missing", schema, k, err)
 			}
+		}
+	}
+}
+
+// D6's N1 on #735: a heartbeat whose counters.packets is null, with its
+// interface's packets not 0, is refused with form first, as on main, though
+// the interface sum also fails; the link counts a record by its first code.
+func TestHeartbeatNullCountFormFirst(t *testing.T) {
+	for _, schema := range channelIdentifiers {
+		h := nullHeartbeat(schema)
+		if h.Interfaces[0].Packets == 0 {
+			t.Fatal("the fixture's interface packets must not be 0")
+		}
+		b := encodeWith(t, h, func(m map[string]any) { setPath(m, nil, "counters", "packets") })
+		_, err := DecodeFromSensorIn(b, schema)
+		if cs := Codes(err); len(cs) < 2 || cs[0] != CodeForm || !firstFormAt(err, "counters.packets") {
+			t.Errorf("%s: %v, want form at counters.packets first, and the sum's conflict after", schema, err)
 		}
 	}
 }
