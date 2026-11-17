@@ -105,6 +105,10 @@ build)
     nonet env ASAN_OPTIONS=detect_leaks=0 ninja -C "$s/build" $(for t in $TARGETS; do printf 'zeek-%s-fuzzer ' "$t"; done) > "$f/$b/ninja.log" 2>&1 \
       || { grep -E 'error|FAILED' "$f/$b/ninja.log" | head -40 >&2; fail "$b: build failed"; }
     sh -c ". '$s/build/zeek-path-dev.sh' && printf '%s' \"\$ZEEKPATH\"" > "$f/$b/zeekpath"
+    # Zeek 9.0.1's CMake sets no output folder for zeek_fuzzer_shared, so
+    # its place in the build tree is found, and must be one file.
+    (cd "$s/build" && find . -name libzeek_fuzzer_shared.so -type f) > "$f/$b/sharedlib"
+    [ "$(wc -l < "$f/$b/sharedlib")" = 1 ] || fail "$b: not exactly one libzeek_fuzzer_shared.so in the build"
     # The flag that makes a UBSan report stop the run (fuzz.env).
     grep -q -- '-fno-sanitize-recover=undefined' "$s/build/build.ninja" \
       || fail "$b: the build lines do not carry -fno-sanitize-recover=undefined"
@@ -131,7 +135,7 @@ build)
       echo "generated parser:"
       cat "$f/$b/generated.sha256"
       echo "binaries (sha256):"
-      (cd "$f/$b/zeek-9.0.1/build" && sha256sum src/libzeek_fuzzer_shared.so $(for t in $TARGETS; do printf 'src/fuzzers/zeek-%s-fuzzer ' "$t"; done))
+      (cd "$f/$b/zeek-9.0.1/build" && sha256sum "$(cat "$f/$b/sharedlib")" $(for t in $TARGETS; do printf 'src/fuzzers/zeek-%s-fuzzer ' "$t"; done))
     done
   } > "$rec"
   cat "$rec"
@@ -207,7 +211,7 @@ coverage)
     if ls "$d/"*.profraw > /dev/null 2>&1; then
       llvm-profdata-$V merge -sparse "$d/"*.profraw -o "$d/merged.profdata"
       llvm-cov-$V export -format=lcov -instr-profile="$d/merged.profdata" \
-        "$s/build/src/fuzzers/zeek-$t-fuzzer" -object "$s/build/src/libzeek_fuzzer_shared.so" > "$d/lcov.info"
+        "$s/build/src/fuzzers/zeek-$t-fuzzer" -object "$s/build/$(cat "$f/c2/sharedlib")" > "$d/lcov.info"
     fi
   done
   python3 -I "$here/fuzz_judge.py" coverage "$f" "$s/src/analyzer/protocol/dnp3/DNP3.cc"
