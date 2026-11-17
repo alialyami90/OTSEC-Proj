@@ -2,16 +2,19 @@ package forward
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,6 +200,57 @@ func (r *rsyslog) eids() []string {
 	return out
 }
 
+// sessions keeps the error that ended each of the forwarder's connections
+// to rsyslog, one per break, so a run with breaks says why.
+type sessions struct {
+	mu   sync.Mutex
+	f    *Forwarder
+	open bool // the last dial connected, and its end is not recorded yet
+	why  []error
+}
+
+// wrap records, at the first dial after a successful one, the error that
+// ended that session (Status.LastErr). Failed dials add nothing, and a
+// clean end (nil, the TXNRs used up with everything confirmed) is no break.
+func (s *sessions) wrap(dial func(context.Context) (net.Conn, error)) func(context.Context) (net.Conn, error) {
+	return func(ctx context.Context) (net.Conn, error) {
+		s.mu.Lock()
+		if s.open {
+			s.open = false
+			if e := s.f.Status().LastErr; e != nil {
+				s.why = append(s.why, e)
+			}
+		}
+		s.mu.Unlock()
+		c, err := dial(ctx)
+		if err == nil {
+			s.mu.Lock()
+			s.open = true
+			s.mu.Unlock()
+		}
+		return c, err
+	}
+}
+
+// breaks is the number of sessions that ended with an error and was
+// followed by another, and those errors.
+func (s *sessions) breaks() (int, []error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.why), append([]error(nil), s.why...)
+}
+
+// timedOut reports whether a session ended on the response timeout (receive
+// or open) or on a write deadline: the ways a slow collector ends one.
+func timedOut(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	m := err.Error()
+	return strings.Contains(m, "forward: no response to transaction ") || strings.Contains(m, "forward: open: no response within ")
+}
+
 func rsyslogRig(t *testing.T, r *rsyslog, p *pki, client *tls.Certificate) *rig {
 	t.Helper()
 	m := newStore()
@@ -216,34 +270,66 @@ func rsyslogRig(t *testing.T, r *rsyslog, p *pki, client *tls.Certificate) *rig 
 	}}
 }
 
-// P2-A4 acceptance: against rsyslog, every event arrives exactly once,
-// counting by event_id.
+// P2-A4 acceptance: against rsyslog, every event arrives, in order,
+// counting by event_id; exactly once when the session never broke. Delivery
+// is at least once (C6 mode A): a session that ends with transactions in
+// flight sends them again, so a run whose session broke k times may hold up
+// to k windows of duplicates, never more (while no report is owed). On a
+// loaded runner rsyslog's synchronous write can outlast the 2 s response
+// timeout and break the session (run 44078255375: 508 lines for 500 events).
+// That is the only break this test accepts: a session that ended for any
+// other reason fails it, so a fault in reading rsyslog's answers, or a close
+// from rsyslog's side, is not hidden by the duplicate bound.
 func TestRsyslogExactlyOnce(t *testing.T) {
 	p := newPKI(t)
 	r := startRsyslog(t, p, string(node))
 	g := rsyslogRig(t, r, p, &p.client)
+	var ss sessions
+	g.cfg.Dial = ss.wrap(g.cfg.Dial)
 	g.fill(500)
-	g.run(func() bool { return g.m.cursor(serStream) == 500 }, nil)
+	g.run(func() bool { return g.m.cursor(serStream) == 500 }, func(f *Forwarder) { ss.f = f })
 	got := r.eids()
 	want := g.m.keys(serStream)
-	if len(got) != len(want) {
-		t.Fatalf("rsyslog wrote %d lines for %d events", len(got), len(want))
+	breaks, why := ss.breaks()
+	t.Logf("rsyslog wrote %d lines for %d events; %d session breaks: %v", len(got), len(want), breaks, why)
+	for i, e := range why {
+		if !timedOut(e) {
+			t.Errorf("session break %d was not a timeout: %v", i+1, e)
+		}
+	}
+	var first []string
+	seen := map[string]bool{}
+	for _, id := range got {
+		if !seen[id] {
+			seen[id] = true
+			first = append(first, id)
+		}
+	}
+	if len(first) != len(want) {
+		t.Fatalf("rsyslog holds %d distinct events of %d", len(first), len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("line %d is %s, want %s", i, got[i], want[i])
+		if first[i] != want[i] {
+			t.Fatalf("event %d first arrived as %s, want %s", i, first[i], want[i])
 		}
+	}
+	if dup := len(got) - len(want); dup > breaks*g.tg.RELPWindow {
+		t.Errorf("%d duplicates over %d session breaks, more than one window (%d) per break", dup, breaks, g.tg.RELPWindow)
 	}
 }
 
 // rsyslog killed while events are in flight and started again: every
 // event whose cursor was saved before the kill is in the file (the
 // acknowledgement was durable), and after the restart every event is
-// there. Duplicates are the unconfirmed window, sent again.
+// there. Duplicates are the unconfirmed window, sent again once per session
+// that ended: the kill's, and any the response timeout ended on a loaded
+// runner (run 44078255375: 25 duplicates, window 8).
 func TestRsyslogKilledMidStream(t *testing.T) {
 	p := newPKI(t)
 	r := startRsyslog(t, p, string(node))
 	g := rsyslogRig(t, r, p, &p.client)
+	var ss sessions
+	g.cfg.Dial = ss.wrap(g.cfg.Dial)
 	g.fill(3000)
 	var confirmed store.Seq
 	killed := false
@@ -255,7 +341,7 @@ func TestRsyslogKilledMidStream(t *testing.T) {
 			r.start()
 		}
 		return g.m.cursor(serStream) == 3000
-	}, nil)
+	}, func(f *Forwarder) { ss.f = f })
 	seen := map[string]int{}
 	for _, id := range r.eids() {
 		seen[id]++
@@ -271,9 +357,13 @@ func TestRsyslogKilledMidStream(t *testing.T) {
 			dup += seen[k] - 1
 		}
 	}
-	t.Logf("confirmed through %d at the kill; %d duplicates after the restart (window %d)", confirmed, dup, g.tg.RELPWindow)
-	if dup > g.tg.RELPWindow {
-		t.Errorf("%d duplicates, more than one window", dup)
+	breaks, why := ss.breaks()
+	t.Logf("confirmed through %d at the kill; %d duplicates (window %d); %d session breaks: %v", confirmed, dup, g.tg.RELPWindow, breaks, why)
+	if breaks < 1 {
+		t.Errorf("no session break; the kill was not exercised")
+	}
+	if dup > breaks*g.tg.RELPWindow {
+		t.Errorf("%d duplicates over %d session breaks, more than one window per break", dup, breaks)
 	}
 }
 

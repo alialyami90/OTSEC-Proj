@@ -398,7 +398,7 @@ func (r *rig) run(done func() bool, tweak func(*Forwarder)) *Forwarder {
 	return f
 }
 
-// eids returns the eid of each acknowledged message, in order.
+// eids returns the eid of each recorded message, in order.
 func eids(t testing.TB, ms []relptest.Message) []string {
 	t.Helper()
 	var out []string
