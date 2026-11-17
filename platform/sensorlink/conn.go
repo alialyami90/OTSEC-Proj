@@ -631,10 +631,36 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		l.raise(AlarmBufferSmall, fmt.Sprintf("sensor %s: buffer_bytes %s is below the site floor", h.SensorID, h.BufferBytes))
 	}
 	l.checkGap(next)
-	if l.opt.Owed != nil {
-		_ = l.writeOwed(ctx, cn)
-	}
+	l.owedInRun(ctx, cn)
 	return ""
+}
+
+// owedInRun writes what the run owes; a failure is raised and the
+// connection stays open, the marks kept for the next attempt (D3's
+// condition 4 on #732).
+func (l *Link) owedInRun(ctx context.Context, cn *conn) {
+	if l.opt.Owed == nil {
+		return
+	}
+	_, n := owedOf(cn.cur)
+	if err := l.writeOwed(ctx, cn); err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: %d owed events of run %s were not written: %v", l.cfg.SensorID, n, cn.cur.RunID, err))
+	}
+}
+
+// owedOf is what c owes, under c's identity, and the number of its events.
+func owedOf(c *Cursor) (Owed, int) {
+	o := Owed{Generation: c.Generation, RunCounter: c.RunCounter, RunID: c.RunID}
+	n := 0
+	if c.Prior != nil && c.Prior.Owed {
+		o.Prior, n = c.Prior, 1
+	}
+	for _, s := range c.Spans {
+		if s.Owed {
+			o.Spans = append(o.Spans, s)
+		}
+	}
+	return o, n + len(o.Spans)
 }
 
 // resetRun starts the link's run state for the hello's run: a new run
@@ -996,9 +1022,7 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 		l.mu.Unlock()
 		cn.cur, cn.saved, cn.pending, cn.lastSave = next, next.Taken, false, now
 		l.lostOpened(t.SensorID, t.RunID, opened)
-		if l.opt.Owed != nil {
-			_ = l.writeOwed(ctx, cn)
-		}
+		l.owedInRun(ctx, cn)
 	}
 	l.checkGap(cn.cur)
 	return ""
