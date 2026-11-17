@@ -223,9 +223,10 @@ type HoldStats struct {
 	OpenSuperseded     uint64 `json:"open_superseded"` // a start on an open key
 	OpenExpired        uint64 `json:"open_expired"`
 	CheckpointFailures uint64 `json:"checkpoint_failures"`
-	// HeadUnread counts releases not begun because the stream's head
-	// could not be read: the run stays as it was, and a deadline or the
-	// next TickHold tries again (D4's condition (i) on #676).
+	// HeadUnread counts releases not begun because the stream's head, or
+	// on the 0.2 path its saved position, could not be read: the run stays
+	// as it was, and a deadline or the next TickHold tries again (D4's
+	// condition (i) on #676; D6's N3 on #742).
 	HeadUnread uint64 `json:"head_unread"`
 }
 
@@ -837,6 +838,9 @@ func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Releas
 func (l *Link) release(ctx context.Context, r *holdRun, rec RunRecord, rel []Release, remaining []HeldFlow) (uint64, error) {
 	h := l.hold
 	head, err := l.head(ctx)
+	if err == nil {
+		err = l.readPos(ctx) // the 0.2 position, as the head (D6's N3 on #742)
+	}
 	if err != nil {
 		// Nothing is applied, so the staged ties the caller built
 		// (releaseFlow) go with it: they never reach the next release (D6's
@@ -929,6 +933,9 @@ func (l *Link) RecoverHold(ctx context.Context) error {
 			continue
 		}
 		head, err := l.head(ctx)
+		if err == nil {
+			err = l.readPos(ctx)
+		}
 		if err != nil {
 			return err
 		}
