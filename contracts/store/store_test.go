@@ -262,7 +262,11 @@ func TestGroupsOfAStreamCommitInOrder(t *testing.T) {
 		return func() { l.Append(context.Background(), rec("s", ev)); done <- struct{}{} }
 	}
 	go appendRec("1")()
-	<-o.entered // group 1 is flushed and held in its commit
+	select { // group 1 is flushed and held in its commit
+	case <-o.entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("group 1's commit did not begin within 30s")
+	}
 	waitJoined(t, l, "s", appendRec("2"))
 	waitJoined(t, l, "s", appendRec("3"))
 	close(o.first)

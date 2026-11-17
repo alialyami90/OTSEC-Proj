@@ -279,13 +279,21 @@ func orderAfterLock(f *fairLock) *lockCounts {
 // call waits and every free is followed at once by the holder's Lock; no
 // sleep orders the two (D4-115 item 7). orderAfterLock makes the woken
 // call check only after Lock's first check after the free, and counts
-// Lock's takes while a call waited. Control 2 (the rule removed: Lock does
-// not yield to a waiting scheduler call) lets the holder take the lock
-// again before the waiting call, so the take is counted and the call
-// waits out HoldLockWait.
+// Lock's takes while a call waited. Each call must be had after exactly
+// one wake, the holder's Unlock: a call had at its own timeout, after its
+// wake was lost, is not the rule's bound (D6's B1 on #733). Control 2 (the
+// rule removed: Lock does not yield to a waiting scheduler call) lets the
+// holder take the lock again before the waiting call, so the take is
+// counted and the call waits out HoldLockWait. Control FL-M1 (Unlock does
+// not signal while a scheduler call waits) leaves the call to its timer,
+// so no wake is counted. A liveness break fails by name within
+// HoldLockWait at the wait for the holder, not at go test's -timeout.
 func TestFairLockSchedulerFirst(t *testing.T) {
 	var f fairLock
 	lk := orderAfterLock(&f)
+	wakes := 0 // written only in the calling goroutine, in lockSched
+	woken := f.woken
+	f.woken = func() { woken(); wakes++ }
 	stop := make(chan struct{})
 	defer close(stop)
 	held := make(chan struct{})
@@ -318,12 +326,20 @@ func TestFairLockSchedulerFirst(t *testing.T) {
 		}
 	}()
 	for i := range 10 {
-		<-held
+		select {
+		case <-held:
+		case <-time.After(HoldLockWait):
+			t.Fatalf("call %d: the holder did not take the lock again within %s", i, HoldLockWait)
+		}
+		w0 := wakes
 		if !f.lockSched(HoldLockWait) {
 			n, _, _ := lk.read(&f)
 			t.Fatalf("call %d: the lock was not had within %s; Lock took it %d times while a call waited", i, HoldLockWait, n)
 		}
 		f.Unlock()
+		if n := wakes - w0; n != 1 {
+			t.Fatalf("call %d had the lock after %d wakes, want 1: not woken by the holder's Unlock", i, n)
+		}
 	}
 	if n, _, _ := lk.read(&f); n != 0 {
 		t.Fatalf("the rule is broken: Lock took the lock %d times while a scheduler call waited", n)
