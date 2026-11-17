@@ -174,6 +174,26 @@ func TestRow6SaveFailsWritesAgain(t *testing.T) {
 	}
 }
 
+// D6's condition 4 (H-8's leg): a cursor that reads as none (its
+// generation below Began) with owed marks set has them written under its
+// own identity before the new run's save. Control: the old marks dropped.
+func TestRow6PositionReadsAsNone(t *testing.T) {
+	r := newRig(t, nil)
+	run5Owing(t, r)
+	r.mu.Lock()
+	r.owedE = nil
+	r.mu.Unlock()
+	en := enrolment()
+	en.Generation, en.Began = 3, 3
+	h := hello02() // run 5 again: the position reads as none, so a new run
+	h.Generation = "3"
+	r.accepted6(en, h)
+	w := r.owedNow()
+	if len(w) != 2 || !isRun5(w[0]) || w[1].Generation != 3 {
+		t.Fatalf("owed %+v", w)
+	}
+}
+
 // D3's condition 4 (D1's "D3 3"): an owed write that fails mid-run, at a
 // tick, raises and the connection stays open, the marks kept. Control: the
 // error dropped, as the reviewed code did (nothing raised).
