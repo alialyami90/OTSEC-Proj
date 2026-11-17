@@ -2496,3 +2496,20 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 
 ### P4-4-HR2325S PR 1b (D6), under brief P4-4-HR2325S
 - D3's M2, the two mid-flow stops of `docs/phase4/D4-hr23-design.md` §4.7 "Both directions", written from the design text (D4-113 item 3.1), on branch `agent/verification-hr2325s-1b`. It merges before HR-23's counted run. The brief's other terms hold. Scratch files: `d6-hr2325s1b-*`.
+
+## After D4-114: Windows test findings (issued 2026-11-17, D4-115)
+
+### P4-NODE-FLK (D5; D6 and D3 review): two Windows test findings in `platform/node/sensortest` and `platform/sensorlink`
+- Objective and rationale: P6. `TestSensorStartupStuckDoesNotHoldStart` (D4-112 item 2.4) and `TestSchedulerFirstOnLinkLock` failed on Windows in code the failing PRs did not touch, and blocked #724 and #726.
+- Files: `platform/node/`, `platform/sensorlink/` and their test packages. No contract or CI change.
+- Deliverable: one PR, branch `agent/platform-node-flk`. For each test, a product fix, or a test change that still fails on the defect it guards, with a named control shown failing.
+- Acceptance tests: the self-check list; both tests pass by name in both `go` jobs on three Windows runs of the final head; each control is shown failing.
+- Exclusions: no product wiring of any sensor path (F-027's gate).
+- Result: #728, merged (D4-115 item 7).
+
+### P4-STORE-AB (D5; D6 and D3 review): `TestAppendBatch`'s sleep
+- Objective and rationale: P6. A 10 ms sleep ordered two goroutines in `contracts/store`'s `TestAppendBatch` (job 133745253598).
+- Files: `contracts/store/` test files (D1 authorizes this path for this brief). No contract text change.
+- Deliverable: one PR, branch `agent/platform-store-ab`: a deterministic wait, with a named control; the same pattern elsewhere is listed, not fixed.
+- Acceptance tests: the self-check list; the test passes by name in both `go` jobs; 50 local runs.
+- Result: #729, merged (D4-115 item 7).
