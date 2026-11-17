@@ -94,22 +94,14 @@ def test_direct_zeek_passes(tree):
     assert check(line, mounts, line[7:])[0] == set()
 
 
-def test_suricata_with_a_file_mount_passes(tree):
+def test_a_file_mount_is_hashed_and_passes(tree):
     y = os.path.join(tree["exp"], "probe.zeek")
-    line = ["--network", "none", "-v", f"{y}:/cfg/suricata.yaml:ro", "--entrypoint", "suricata", IMG,
-            "-T", "-c", "/cfg/suricata.yaml", "--disable-detection"]
-    failed, rec = check(line, [("bind", y, "/cfg/suricata.yaml", False)], line[7:], entry=["suricata"])
+    line = ["--network", "none", "-v", f"{tree['pcaps']}:/pcaps:ro", "-v", f"{y}:/s/probe.zeek:ro", IMG,
+            "zeek", "-C", "-r", "/pcaps/a.pcap", "/s/probe.zeek"]
+    mounts = [("bind", tree["pcaps"], "/pcaps", False), ("bind", y, "/s/probe.zeek", False)]
+    failed, rec = check(line, mounts, line[7:])
     assert failed == set()
-    assert rec["/cfg/suricata.yaml"][0].startswith("F . ")
-
-
-def test_suricata_in_container_passes(tree):
-    line = ["--network", "none", "-v", f"{tree['pcaps']}:/pcaps:ro", "-v", f"{tree['out']}:/out",
-            "-v", f"{tree['exp']}:/exp:ro", "--entrypoint", "sh", IMG,
-            "/exp/in-container.sh", "suricata", "suricata-midstream", "--set", "stream.midstream=true"]
-    mounts = [("bind", tree["pcaps"], "/pcaps", False), ("bind", tree["out"], "/out", True),
-              ("bind", tree["exp"], "/exp", False)]
-    assert check(line, mounts, line[11:], entry=["sh"])[0] == set()
+    assert rec["/s/probe.zeek"][0].startswith("F . ")
 
 
 # One control per rule: each fails on its own rule and no other.

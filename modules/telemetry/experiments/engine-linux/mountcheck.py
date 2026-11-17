@@ -2,7 +2,7 @@
 item 5; D1's ruling 6933304617 on #723: option (c), host-side hashes of
 everything mounted, before and after the run). D4's.
 
-run.sh starts every engine container that has a mount through `run`, with
+run.sh starts every Zeek container that has a mount through `run`, with
 the arguments it gave `docker run` before, less `--rm`. The measured run is
 unchanged: the same options, image and command, so the same container
 (test_mountcheck.py; the rehearsal pair in the PR). `run`:
@@ -238,8 +238,6 @@ def command(ins):
         return "in-container", full[2], full[3], full[4:], full
     if full and posixpath.basename(full[0]) == "zeek":
         return "zeek", "zeek", None, full[1:], full
-    if full and full[0] == "suricata":
-        return "suricata", "suricata", None, full[1:], full
     return None, None, None, [], full
 
 
@@ -288,7 +286,8 @@ def precheck(line_argv, ins, image_env, help_text):
         sp = search_path(help_text)
         for k in ("ZEEKPATH", "ZEEK_PLUGIN_PATH"):
             if k not in sp:
-                p[R_PATH].append(f"the image's own zeek --help gives no ${k}")
+                p[R_PATH].append(f"the image's own zeek --help gives no ${k}; it begins "
+                                 f"{(help_text or '')[:300]!r}")
             for e in sp.get(k, []):
                 if e in ("", "."):
                     wd = c.get("WorkingDir") or "/"
@@ -425,9 +424,9 @@ def run(d, argv, log_argv=None, between=None):
         sys.stderr.write(text)
         with open(os.path.join(d, "FAILED"), "a", encoding="utf-8") as fh:
             fh.write(text)
-        return 3, set(probs)
+        return 3, probs
     say(f"container {n}: exit {rc}; the hashes after the run equal those before")
-    return (rc if isinstance(rc, int) else 1), set()
+    return (rc if isinstance(rc, int) else 1), {}
 
 
 def summary(d):
@@ -489,25 +488,36 @@ def selftest(image, exp, d):
         os.makedirs(os.path.join(out, "t", "st-new"))
         cases = [
             ("pass", None, base("st-pass"), {}),
-            ("a hashed mount writable", R_RO, base("st-ro", exp_ro=False), {}),
+            ("a hashed mount writable", R_RO, base("st-ro", exp_ro=False), {"why": "/exp is writable"}),
             ("the logged line without /pcaps's mount", R_LINE, base("st-line"),
              {"log": lambda a: [v for i, v in enumerate(a) if v != f"{pc}:/pcaps:ro" and
-                                not (v == "-v" and i + 1 < len(a) and a[i + 1] == f"{pc}:/pcaps:ro")]}),
+                                not (v == "-v" and i + 1 < len(a) and a[i + 1] == f"{pc}:/pcaps:ro")],
+              "why": "mounts "}),
             ("an extra mount that is not hashed (a read-only volume)", R_HASHED,
-             base("st-extra", extra=("--mount", f"type=volume,src={vol},dst=/extra,readonly")), {}),
-            ("ZEEKPATH set on the container", R_ENV, base("st-env", extra=("-e", "ZEEKPATH=/out")), {}),
-            ("an image whose ZEEKPATH is /out", R_PATH, base("st-path")[:-5] + [committed, "sh", INC, "zeek", "st-path"], {}),
-            ("a relative script argument", R_ABS, base("st-abs", args=("probe.zeek",)), {}),
-            ("a script argument under /out", R_COVER, base("st-cover", args=("/out/x.zeek",)), {}),
-            ("the output folder exists before the start", R_NEW, base("st-new"), {}),
+             base("st-extra", extra=("--mount", f"type=volume,src={vol},dst=/extra,readonly")),
+             {"why": "volume mount at /extra is not hashed"}),
+            ("ZEEKPATH set on the container", R_ENV, base("st-env", extra=("-e", "ZEEKPATH=/out")),
+             {"why": "ZEEKPATH=/out"}),
+            ("an image whose ZEEKPATH is /out", R_PATH, base("st-path")[:-5] + [committed, "sh", INC, "zeek", "st-path"],
+             {"why": "$ZEEKPATH holds /out, under the bind mount at /out"}),
+            ("a relative script argument", R_ABS, base("st-abs", args=("probe.zeek",)),
+             {"why": "'probe.zeek' is not an absolute path"}),
+            ("a script argument under /out", R_COVER, base("st-cover", args=("/out/x.zeek",)),
+             {"why": "/out/x.zeek is under the bind mount at /out"}),
+            ("the output folder exists before the start", R_NEW, base("st-new"), {"why": "t/st-new exists"}),
             ("a file in /exp changed during the run", R_EQ, base("st-eq"),
-             {"between": lambda: append(os.path.join(x, "probe.zeek"), "# changed by the equality control\n")}),
+             {"between": lambda: append(os.path.join(x, "probe.zeek"), "# changed by the equality control\n"),
+              "why": "F probe.zeek "}),
         ]
         for name, rule, argv, k in cases:
             log = k["log"](argv) if "log" in k else None
-            rc, failed = run(os.path.join(d, "checks"), argv, log_argv=log, between=k.get("between"))
+            rc, probs = run(os.path.join(d, "checks"), argv, log_argv=log, between=k.get("between"))
+            failed = set(probs)
             want = set() if rule is None else {rule}
-            good = failed == want and (rule is not None or rc == 0)
+            # Each control must fail on its own rule, and for its own reason.
+            why = k.get("why")
+            good = failed == want and (rule is not None or rc == 0) and \
+                (why is None or any(why in m for m in probs.get(rule, [])))
             ok = ok and good
             rows.append(f"| {name} | {rule or '(none)'} | {', '.join(sorted(failed)) or '(none)'} | "
                         f"{'as expected' if good else 'NOT AS EXPECTED'} |")

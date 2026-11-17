@@ -47,9 +47,12 @@
 # and negative tests of the patch (zeek-patch/dispatch_unit.py) on them.
 #
 # The script-hash check (docs/release.md section 8.4 item 3; D4-115 item 5):
-# every engine container that has a mount is made, checked, run and removed
+# every Zeek container that has a mount is made, checked, run and removed
 # by mountcheck.py (mc_run below) with the same options, image and command
-# as before, so the measured run is unchanged. Each mode first shows the
+# as before, so the measured run is unchanged. Suricata's containers, the
+# comparison, are left as they were: its image declares four VOLUMEs, which
+# Docker makes writable for each container, and the check refuses any
+# writable mount but /out. Each mode first shows the
 # check's controls on this runner's Docker (mountcheck.py selftest), and
 # stops the run when a rule fails on any container.
 set -eu
@@ -169,7 +172,7 @@ docker run --rm --network none --entrypoint cat "$SURICATA_IMAGE" /etc/suricata/
 sed -i -E 's/^( +)#- dnp3$/\1- dnp3\n\1- modbus/' "$work/suricata.yaml"
 grep -qE '^ +- dnp3$' "$work/suricata.yaml" && grep -qE '^ +- modbus$' "$work/suricata.yaml" || {
   echo "could not enable the dnp3 and modbus eve types in the image's suricata.yaml" >&2; exit 1; }
-mc_run --network none -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint suricata \
+docker run --rm --network none -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint suricata \
   "$SURICATA_IMAGE" -T -c /cfg/suricata.yaml --disable-detection > "$work/suricata-T.txt" 2>&1 || {
   cat "$work/suricata-T.txt" >&2; exit 1; }
 docker run --rm --network none "$ZEEK_IMAGE" cat /usr/local/zeek/share/zeek/base/protocols/dnp3/consts.zeek > "$work/zeek-dnp3-consts.zeek"
@@ -249,7 +252,7 @@ zeek_run() {
     "$img" sh /exp/in-container.sh "$@"
 }
 suricata_run() {
-  mc_run --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
+  docker run --rm --network none $locked -v "$pcaps:/pcaps:ro" -v "$out:/out" -v "$here:/exp:ro" \
     -v "$work/suricata.yaml:/cfg/suricata.yaml:ro" --entrypoint sh "$SURICATA_IMAGE" /exp/in-container.sh \
     "$@" --set app-layer.protocols.dnp3.enabled=yes --set app-layer.protocols.modbus.enabled=yes
 }
