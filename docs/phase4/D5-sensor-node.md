@@ -808,6 +808,8 @@ Rulings 1 to 15 settle the choices of the first text. What is still open:
   - The sixth case's on-time tick: §1.5's sixth case now has T-13 (j)'s tick taken on time before the record's read.
   - The double-count control: `TestSkewCountPrecedence` now lists T-13 (r)'s control, a node that counts a refusal under every cause that refuses it. It stays on `TestTieNodeMovedSinceSample`'s step-check case too.
   - "Costs the whole excursion": the limit above now uses D4-92's corrected wording.
+- **`sensor-gap-undeclared`'s last raised excess is kept in the link's memory, not in the cursor** (D1's ruling 6952181701 on #732, option (b); INT-D5 part 2a). It is kept across connections while the node runs, so a reconnect raises nothing new. After a node start it reads as 0, so an excess that still stands is raised once more, with its health event under the pool's cap. That is loud, never quiet. §1.4's form and CH-18's figures are unchanged.
+- **A time that Unix nanoseconds cannot hold** (before 1970 or after 2262) in a stated span cannot be saved in §1.4's form. The save fails, and the hello or tick that states it closes `position-not-saved` (or `store`, for a tick) with its alarm, so it fails closed (INT-D5 part 2a).
 - **Not designed here:** a merge of two sensors' records; the second sensor itself (ruling 1); the sensor; its update path; a central role.
 
 ## 1.15 C13 0.2's points D5-1 to D5-12, as ruled, and the 0.1 rollback

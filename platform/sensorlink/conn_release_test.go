@@ -311,3 +311,61 @@ func TestHeldLostDroppedAtReleaseMarksNext(t *testing.T) {
 		t.Fatalf("the next stored observation carries %+v", got)
 	}
 }
+
+// GapRaised in the link's memory (D1's ruling 6952181701 on #732, option
+// (b)): sensor-gap-undeclared rises once for an excess, not again at a
+// reconnect, and once more after a node start, which is loud, never
+// quiet. Control: the excess forgotten at each connection, which raises
+// it again at the reconnect.
+func TestGapRaisedKeptInMemory(t *testing.T) {
+	r := newRig(t, nil)
+	p := r.accepted(hello02())
+	p.send(obs02(1), obs02(3)) // G 1 above D 0
+	p.ack(3)
+	p.end()
+	if n := r.al.count(AlarmGapUndeclared); n != 1 {
+		t.Fatalf("%d raises at the first connection's end", n)
+	}
+	p = r.accepted(resume(4, 20))
+	p.end()
+	if n := r.al.count(AlarmGapUndeclared); n != 1 {
+		t.Fatalf("%d raises after a reconnect, want 1", n)
+	}
+	r.restart()
+	p = r.accepted(resume(4, 20))
+	p.end()
+	if n := r.al.count(AlarmGapUndeclared); n != 1 {
+		t.Fatalf("%d raises after the node start, want 1 (raised once more)", n)
+	}
+}
+
+// An owed event written again is the same event byte for byte, though the
+// sensor states its span's times in another form than the saved cursor
+// keeps (Owed's key, D4's N4 on #732): the node writes a span's times in
+// one form from admission on. The first write is from the connection's
+// cursor, its clearing save fails, and the repeat after a node start is
+// from the saved cursor. Control: the sensor's text kept at admission.
+func TestOwedRepeatSameFormAcrossRestart(t *testing.T) {
+	var r *rig
+	var got []Owed
+	r = newRig(t, func(o *Options) {
+		o.Owed = func(_ context.Context, w Owed) error {
+			got = append(got, w)
+			r.cs.failNext(1) // the save that clears the marks
+			return nil
+		}
+	})
+	h := hello02()
+	h.DropsChannel = "1"
+	h.Lost = []netobs.Span{{FromUTC: "2026-11-07T09:30:00.000000Z", ToUTC: "2026-11-07T09:31:00.500000Z"}}
+	h.Prior.RunsSkipped = "0"
+	r.accepted(h).end()
+	r.restart()
+	_ = r.l.WriteOwed(bg) // its clearing save fails too: only the write is compared
+	if len(got) != 2 {
+		t.Fatalf("%d writes, want 2", len(got))
+	}
+	if a, b := string(mustJSON(t, got[0])), string(mustJSON(t, got[1])); a != b {
+		t.Fatalf("the repeat differs:\n%s\n%s", a, b)
+	}
+}

@@ -163,6 +163,13 @@ type Link struct {
 	curMu    sync.Mutex
 	inflight *inflight
 	conn     ConnStats
+	// gapRaised is the excess of G over D last raised for gapRun, so
+	// sensor-gap-undeclared rises once for each rise of it (CH-15). It is
+	// kept in memory, not in the cursor (D1's ruling 6952181701 on #732,
+	// option (b)): after a node start an excess that stands is raised once
+	// more. Under curMu.
+	gapRun    string
+	gapRaised uint64
 
 	// The 0.2 position a release moves (section 1.4 items 2 and 3), all
 	// under cmu: pos is the cursor as last written, nil until read;

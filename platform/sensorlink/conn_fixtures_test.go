@@ -158,11 +158,11 @@ func cursorNow(t *testing.T, cs *cursorStore) *Cursor {
 	if b == nil {
 		return nil
 	}
-	var c Cursor
-	if err := json.Unmarshal(b, &c); err != nil {
+	c, err := decodeCursor(b)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return &c
+	return c
 }
 
 // alarms records the raises.

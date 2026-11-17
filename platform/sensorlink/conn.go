@@ -146,37 +146,23 @@ type HeldPrior struct {
 // Cursor is the part of CH-18's cursor this intake keeps: the position,
 // G and D, the run's totals, Ds, the last newest_seq, the run's digest,
 // and its spans and prior. It holds one run: what an earlier run owed is
-// written before row 6's save replaces it (D1's ruling on #732).
+// written before row 6's save replaces it (D1's ruling on #732). Its
+// stored form is section 1.4's text form (cursorform.go); the JSON tags
+// serve clone only.
 type Cursor struct {
-	Generation uint64 `json:"generation"`
-	RunCounter uint64 `json:"run_counter"`
-	RunID      string `json:"run_id"`
-	Taken      uint64 `json:"taken"`
-	G          uint64 `json:"g"`
-	D          uint64 `json:"d"`
-	// GapRaised is the excess of G over D last raised, so the alarm rises
-	// once for each rise of it (CH-15).
-	GapRaised uint64     `json:"gap_raised,omitempty"`
-	Refused   uint64     `json:"refused"`
-	Dropped   uint64     `json:"dropped"`
-	Ds        uint64     `json:"ds"`
-	NewestSeq uint64     `json:"newest_seq"`
-	Digest    string     `json:"digest"`
-	Spans     []HeldSpan `json:"spans,omitempty"`
-	Prior     *HeldPrior `json:"prior,omitempty"`
-}
-
-// encodeCursor is the cursor's stored form, refused above
-// MaxLinkCursorBytes.
-func encodeCursor(c *Cursor) ([]byte, error) {
-	b, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkCursorBytes(b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	Generation uint64     `json:"generation"`
+	RunCounter uint64     `json:"run_counter"`
+	RunID      string     `json:"run_id"`
+	Taken      uint64     `json:"taken"`
+	G          uint64     `json:"g"`
+	D          uint64     `json:"d"`
+	Refused    uint64     `json:"refused"`
+	Dropped    uint64     `json:"dropped"`
+	Ds         uint64     `json:"ds"`
+	NewestSeq  uint64     `json:"newest_seq"`
+	Digest     string     `json:"digest"`
+	Spans      []HeldSpan `json:"spans,omitempty"`
+	Prior      *HeldPrior `json:"prior,omitempty"`
 }
 
 func checkCursorBytes(b []byte) error {
@@ -487,11 +473,7 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 	if err != nil || b == nil {
 		return nil, err
 	}
-	var c Cursor
-	if err := json.Unmarshal(b, &c); err != nil {
-		return nil, err
-	}
-	return &c, nil
+	return decodeCursor(b)
 }
 
 // saveCursor saves c on its own, with what releases moved since the 0.2
@@ -822,10 +804,16 @@ func owedOf(c *Cursor) (Owed, int) {
 // checkGap is CH-15's check: G at most D. The alarm rises once for each
 // rise of the excess in a run.
 func (l *Link) checkGap(c *Cursor) {
-	if c == nil || c.G <= c.D || c.G-c.D <= c.GapRaised {
+	if c == nil || c.G <= c.D {
 		return
 	}
-	c.GapRaised = c.G - c.D
+	if l.gapRun != c.RunID {
+		l.gapRun, l.gapRaised = c.RunID, 0
+	}
+	if c.G-c.D <= l.gapRaised {
+		return
+	}
+	l.gapRaised = c.G - c.D
 	l.raise(AlarmGapUndeclared, fmt.Sprintf("sensor %s: reason %s: run %s has %d records never read beyond the %d declared",
 		l.cfg.SensorID, gapReasonSeq, c.RunID, c.G, c.D))
 }
@@ -843,7 +831,7 @@ func admit(held []HeldSpan, stated []netobs.Span, sensorUTC string, recv time.Ti
 			return !from.After(parseUTC(h.ToUTC)) && !to.Before(parseUTC(h.FromUTC))
 		})
 		if i < 0 {
-			out = append(out, HeldSpan{FromUTC: s.FromUTC, ToUTC: s.ToUTC, CutUTC: cutEnd(to, sensorUTC, recv, cut), Owed: true})
+			out = append(out, HeldSpan{FromUTC: canonUTC(from), ToUTC: canonUTC(to), CutUTC: cutEnd(to, sensorUTC, recv, cut), Owed: true})
 			*opened++
 			continue
 		}
@@ -853,13 +841,13 @@ func admit(held []HeldSpan, stated []netobs.Span, sensorUTC string, recv time.Ti
 			continue // inside: neither new nor wider
 		}
 		if from.Before(hFrom) {
-			h.FromUTC = s.FromUTC
+			h.FromUTC = canonUTC(from)
 		}
 		if to.After(hTo) {
 			if parseUTC(h.CutUTC).Equal(hTo) { // not cut: the window reaches the new part's cut end (times, not strings: D4's B1 on #732)
 				h.CutUTC = cutEnd(to, sensorUTC, recv, cut)
 			}
-			h.ToUTC = s.ToUTC
+			h.ToUTC = canonUTC(to)
 		}
 		h.Owed, h.Marked = true, false
 		*opened++
@@ -894,8 +882,13 @@ func cutEnd(to time.Time, sensorUTC string, recv time.Time, cut *uint64) string 
 	if end.Before(to) {
 		*cut++
 	}
-	return end.UTC().Format(time.RFC3339Nano)
+	return canonUTC(end)
 }
+
+// canonUTC is the one form the node writes a span's times in, so that an
+// owed event written again is the same event byte for byte, whether its
+// span was read from the sensor or from the saved cursor.
+func canonUTC(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
 func laterUTC(a, b string) string {
 	if parseUTC(b).After(parseUTC(a)) {

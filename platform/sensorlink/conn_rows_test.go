@@ -1,9 +1,11 @@
 package sensorlink
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -954,22 +956,81 @@ func TestPriorDurableUntilEvent(t *testing.T) {
 	}
 }
 
-// R-5's cursor leg: a cursor of MaxLinkCursorBytes is encoded and saved
-// in the observation stream's source cursor; one byte over is refused.
-// Control: the cap off by one.
+// R-5's cursor leg: a stored cursor of MaxLinkCursorBytes is within the
+// bound and one byte over is refused, on encode and on read; at the bound
+// the store saves it. Section 1.4's form is at most 2,032 bytes, so no
+// cursor the intake builds reaches it. Control: the cap off by one.
 func TestCursorAtMaxLinkCursorBytes(t *testing.T) {
-	c := &Cursor{RunID: testRun, Digest: testDigest, Spans: []HeldSpan{{FromUTC: "x", ToUTC: "x", CutUTC: "x"}}}
-	c.Spans[0].FromUTC += strings.Repeat("x", MaxLinkCursorBytes-len(mustJSON(t, c)))
-	at, err := encodeCursor(c)
-	if err != nil || len(at) != MaxLinkCursorBytes {
-		t.Fatalf("%d bytes: %v", len(at), err)
+	at := bytes.Repeat([]byte("x"), MaxLinkCursorBytes)
+	if err := checkCursorBytes(at); err != nil {
+		t.Fatalf("%d bytes refused: %v", len(at), err)
 	}
-	c.Spans[0].FromUTC += "x"
-	if b, err := encodeCursor(c); err == nil {
-		t.Fatalf("a cursor of %d bytes was encoded", len(b))
+	if err := checkCursorBytes(append(at, 'x')); err == nil {
+		t.Fatalf("%d bytes accepted", len(at)+1)
+	}
+	over := append([]byte("sp2"), bytes.Repeat([]byte(" -"), MaxLinkCursorBytes)...)
+	if _, err := decodeCursor(over); err == nil {
+		t.Fatal("a cursor over the bound was read")
 	}
 	r := newRig(t, nil)
 	if err := r.cs.SaveSourceCursor(bg, at); err != nil {
 		t.Fatalf("a cursor at the bound was not saved: %v", err)
+	}
+}
+
+// The cursor's text form (section 1.4, CH-18): every field it fills reads
+// back as written; a field of part 2b or 2c filled, a span slot past the
+// count, a mark out of range, or a time that Unix nanoseconds cannot hold,
+// is refused. Control: a decoder that reads the reserved fields loosely.
+func TestCursorTextForm(t *testing.T) {
+	c := &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Taken: 9, G: 3, D: 1, Refused: 4, Dropped: 6, Ds: 1,
+		NewestSeq: 20, Digest: testDigest,
+		Spans: []HeldSpan{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:00:05.5Z", CutUTC: "2026-11-07T09:00:05.5Z", Owed: true, Marked: true}},
+		Prior: &HeldPrior{RunsSkipped: 4, RecordsLost: 2, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
+			Spans: []HeldSpan{{FromUTC: "2026-11-07T08:00:00Z", ToUTC: "2026-11-07T08:01:00Z", CutUTC: "2026-11-07T08:00:30Z", Marked: true}}}}
+	b, err := encodeCursor(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeCursor(b)
+	if err != nil {
+		t.Fatalf("%v: %s", err, b)
+	}
+	if !reflect.DeepEqual(got, c) {
+		t.Fatalf("read back %+v, wrote %+v", got, c)
+	}
+	if n := len(strings.Split(string(b), " ")); n != 118 {
+		t.Fatalf("%d fields", n)
+	}
+	none := *c
+	none.Prior, none.Spans, none.Digest = nil, []HeldSpan{}, ""
+	b2, _ := encodeCursor(&none)
+	if back, err := decodeCursor(b2); err != nil || back.Prior != nil || back.Digest != "" {
+		t.Fatalf("no prior: %+v %v", back, err)
+	}
+	f := strings.Split(string(b), " ")
+	for _, k := range []struct {
+		name string
+		i    int
+		v    string
+	}{
+		{"write_no filled", 9, "1"}, {"a baseline filled", 13, "0"}, {"W filled", 18, "0"}, {"R filled", 22, "0"},
+		{"the gap held filled", 40, "0"}, {"M filled", 46, "0"}, {"a slot past the count", 52, "0"},
+		{"a mark out of range", 51, "4"}, {"a leading zero", 4, "09"}, {"a sign", 4, "+9"}, {"previous_end", 82, "x"},
+		{"started_by", 83, "someone"}, {"the tag", 0, "sp1"}, {"run_id", 3, "not-a-uuid"},
+	} {
+		g := slices.Clone(f)
+		g[k.i] = k.v
+		if _, err := decodeCursor([]byte(strings.Join(g, " "))); err == nil {
+			t.Errorf("%s: read", k.name)
+		}
+	}
+	if _, err := decodeCursor(append(slices.Clone(b), " -"...)); err == nil {
+		t.Error("119 fields read")
+	}
+	far := *c
+	far.Spans = []HeldSpan{{FromUTC: "2300-01-01T00:00:00Z", ToUTC: "2300-01-01T00:00:01Z", CutUTC: "2300-01-01T00:00:01Z"}}
+	if _, err := encodeCursor(&far); err == nil {
+		t.Error("a time past 2262 was encoded")
 	}
 }

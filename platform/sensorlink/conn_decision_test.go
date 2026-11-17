@@ -2,7 +2,7 @@ package sensorlink
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,13 +223,13 @@ func TestFirstDecisionWins(t *testing.T) {
 }
 
 // D6's B1 (ii) on #732: an observation whose marked cursor cannot be
-// encoded (above MaxLinkCursorBytes) is the node's fault, not the record's
-// refusal. It is not stored, counted or acked, T stays, and the connection
-// closes position-not-saved with its alarm. The stored cursor stands in
-// for the node's fault: one unmarked prior span, its marking 14 bytes,
-// padded so the marked cursor is one byte over the bound. Controls: the
-// cursor padded so the marked one is at the bound (6 of 6 stored and
-// acked); main's code (6 of 6 refused stored, T at 6, acked through 6).
+// encoded is the node's fault, not the record's refusal. It is not stored,
+// counted or acked, T stays, and the connection closes position-not-saved
+// with its alarm. Section 1.4's form is bounded by construction, so the
+// fault is the test seam cursorEncodeFault, failing once a prior span is
+// marked (the stored cursor holds one unmarked). Controls: the seam off
+// (6 of 6 stored and acked); main's code (6 of 6 refused stored, T at 6,
+// acked through 6).
 func TestCursorEncodeFailureNotFinal(t *testing.T) {
 	for _, over := range []bool{true, false} {
 		t.Run(map[bool]string{true: "over", false: "control"}[over], func(t *testing.T) {
@@ -237,18 +237,15 @@ func TestCursorEncodeFailureNotFinal(t *testing.T) {
 			r.accepted(hello02()).end()
 			c := cursorNow(t, r.cs)
 			c.Prior.Spans = []HeldSpan{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:01:00Z", CutUTC: "2026-11-07T09:01:00Z"}}
-			mark := len(`,"marked":true`)
-			target := MaxLinkCursorBytes - mark
+			saveTestCursor(t, r, c)
 			if over {
-				target++
-			}
-			c.Prior.StartedBy += strings.Repeat("x", target-len(mustJSON(t, c)))
-			b := mustJSON(t, c)
-			if len(b) != target {
-				t.Fatalf("padded to %d, want %d", len(b), target)
-			}
-			if err := r.cs.SaveSourceCursor(bg, b); err != nil {
-				t.Fatal(err)
+				cursorEncodeFault = func(c *Cursor) error {
+					if c.Prior != nil && len(c.Prior.Spans) == 1 && c.Prior.Spans[0].Marked {
+						return errors.New("test: the marked cursor cannot be encoded")
+					}
+					return nil
+				}
+				t.Cleanup(func() { cursorEncodeFault = nil })
 			}
 			p := r.accepted(resume(1, 20))
 			for i := 1; i <= 6; i++ {
