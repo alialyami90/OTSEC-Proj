@@ -671,8 +671,7 @@ func TestAppendBatch(t *testing.T) {
 	l, _ := NewLog(f, f.node, testStreams, GroupOptions{MaxEvents: 100, MaxWait: time.Second}, nil)
 	// One record waits in a group; the batch must commit after it.
 	first := make(chan Receipt)
-	go func() { r, _ := l.Append(context.Background(), rec("s", "single")); first <- r }()
-	waitQueued(t, l, "s")
+	waitQueued(t, l, "s", func() { r, _ := l.Append(context.Background(), rec("s", "single")); first <- r })
 	report := capture("SER report bytes")
 	recs := []Record{rec("s", "row1"), rec("s", "row2"), rec("s", "row3")}
 	for i := range recs {
@@ -714,12 +713,22 @@ func TestAppendBatch(t *testing.T) {
 	}
 }
 
-// waitQueued returns once a record of stream has joined a group of l. Append
-// sets l.tail in the same critical section that adds the record to its
-// group, so the record is ahead of any later AppendBatch on the stream,
-// whether its group is still pending or MaxWait has already flushed it.
-func waitQueued(t *testing.T, l *Log, stream StreamID) {
+// waitQueued starts appendRec in a goroutine and returns once its record has
+// joined a group of l. Append sets l.tail in the same critical section that
+// adds the record to its group, so the record is then ahead of any later
+// AppendBatch on the stream, whether its group is still pending or MaxWait
+// has already flushed it. This holds only for a stream with no earlier group:
+// a record that joins a group already open leaves l.tail as it was, so the
+// helper refuses a stream that already has one (D3's N1 on #729).
+func waitQueued(t *testing.T, l *Log, stream StreamID, appendRec func()) {
 	t.Helper()
+	l.mu.Lock()
+	had := l.tail[stream] != nil
+	l.mu.Unlock()
+	if had {
+		t.Fatalf("waitQueued: stream %s already has a group, so a new record would not show", stream)
+	}
+	go appendRec()
 	deadline := time.Now().Add(30 * time.Second)
 	for {
 		l.mu.Lock()
