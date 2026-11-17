@@ -194,6 +194,38 @@ func TestRow6PositionReadsAsNone(t *testing.T) {
 	}
 }
 
+// D6's condition 5: a hello that closes at rows 1 to 7 writes nothing of
+// what the cursor owes. Control: the write before JudgeHello's verdict.
+func TestOwedOnlyAfterAccept(t *testing.T) {
+	r := newRig(t, nil)
+	run5Owing(t, r)
+	r.mu.Lock()
+	r.owedE = nil
+	r.mu.Unlock()
+	bad := run6()
+	bad.BufferBytes = "1024" // row 1
+	binding := run6()
+	binding.Generation = "1" // row 2
+	regressed := run6()
+	regressed.RunCounter = "4" // row 3
+	forked := run6()
+	forked.RunCounter = "5" // row 4
+	noPrior := run6()
+	noPrior.Prior = nil // row 6 without prior
+	pin := run6()
+	pin.PinnedBy = "console" // row 7
+	for i, h := range []*netobs.SensorHello{bad, binding, regressed, forked, noPrior, pin} {
+		p := r.dial(enrolment())
+		p.send(h)
+		if got := p.closed(); got == "" {
+			t.Fatalf("hello %d not closed", i)
+		}
+		if w := r.owedNow(); len(w) != 0 {
+			t.Fatalf("hello %d wrote %+v", i, w)
+		}
+	}
+}
+
 // D3's condition 4 (D1's "D3 3"): an owed write that fails mid-run, at a
 // tick, raises and the connection stays open, the marks kept. Control: the
 // error dropped, as the reviewed code did (nothing raised).
