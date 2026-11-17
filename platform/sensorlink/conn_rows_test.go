@@ -291,6 +291,27 @@ func TestIntakeH1Rows(t *testing.T) {
 			t.Fatalf("row 6's save: %+v", c)
 		}
 	})
+	// D6's N1 on #732: a resume under a renewed generation is accepted and
+	// saved under it (row 5b); with the position begun at that generation,
+	// the generation 2 cursor reads as none, so the resume is a new run
+	// without prior and closes hello. Control: row 5b's save removed (the
+	// cursor stays at generation 2).
+	t.Run("5b generation renewed", func(t *testing.T) {
+		r := seeded(t, 2)
+		en := enrolment()
+		en.Generation = 3
+		h := resume(3, 4)
+		h.Generation = "3"
+		p := r.dial(en)
+		p.send(h)
+		p.ack(2)
+		p.end()
+		if c := cursorNow(t, r.cs); c.Generation != 3 || c.Taken != 2 {
+			t.Fatalf("row 5b's save: %+v", c)
+		}
+		en.Began = 3
+		closesWith(t, seeded(t, 2), h, en, netobs.CloseHello)
+	})
 	t.Run("8 digest and 9 buffer raise", func(t *testing.T) {
 		r := newRig(t, nil)
 		h := hello02()
@@ -413,6 +434,36 @@ func TestIntakeS2GapDeclared(t *testing.T) {
 	r.tickAfter(p, tick02(20, 10, 1)) // drops_channel falls from 2
 	if got := p.closed(); got != netobs.CloseTick {
 		t.Fatalf("close %q, want tick", got)
+	}
+	// The cursor counts the three refusals, and T is past them (D6's N3 on
+	// #732).
+	if c := cursorNow(t, r.cs); c.Refused != 3 || c.Taken != 10 {
+		t.Fatalf("cursor after the refused heartbeats: refused %d, T %d", c.Refused, c.Taken)
+	}
+}
+
+// K-1 within a run across a reconnect (D6's N3 on #732): a falling
+// interfaces[].packets after a resume of the same run is refused
+// counter-decrease, counted in the cursor with T past it. Control: the
+// run's heartbeat baseline cleared at a resume. Across a node restart the
+// baseline is part 2's (W in the cursor, CH-18).
+func TestIntakeK1AcrossReconnect(t *testing.T) {
+	r := newRig(t, nil)
+	p := r.accepted(hello02())
+	p.send(heartbeat02(1, 10))
+	settle(t, r.l, func(s Stats) bool { return s.Heartbeats == 1 })
+	p.end()
+	p = r.accepted(resume(2, 20))
+	p.send(heartbeat02(2, 9))
+	settle(t, r.l, func(s Stats) bool { return s.Refused[RefusedCounterDecrease] == 1 })
+	p.send(heartbeat02(3, 12))
+	settle(t, r.l, func(s Stats) bool { return s.Heartbeats == 2 })
+	p.end()
+	if c := cursorNow(t, r.cs); c.Refused != 1 || c.Taken != 3 {
+		t.Fatalf("cursor: refused %d, T %d", c.Refused, c.Taken)
+	}
+	if n := r.l.Stats().Heartbeats; n != 2 {
+		t.Fatalf("%d heartbeats taken, want 2", n)
 	}
 }
 
@@ -631,6 +682,53 @@ func TestPinnedByCloseKeepsNothing(t *testing.T) {
 	r.accepted(hello02()).end() // signature
 	if v, _ := r.pins.PinnedBy(2); v != "signature" {
 		t.Fatalf("kept %q", v)
+	}
+	// D6's N2 on #732: a first hello whose row 6 save fails keeps nothing,
+	// and the next hello, with another value, is accepted and kept.
+	// Control: KeepPinnedBy before row 6's save.
+	r = newRig(t, nil)
+	h = hello02()
+	h.PinnedBy = "console"
+	r.cs.failNext(1)
+	p = r.dial(enrolment())
+	p.send(h)
+	if got := p.closed(); got != netobs.ClosePositionNotSaved {
+		t.Fatalf("close %q", got)
+	}
+	if v, _ := r.pins.PinnedBy(2); v != "" {
+		t.Fatalf("kept %q from a hello whose save failed", v)
+	}
+	r.accepted(hello02()).end()
+	if v, _ := r.pins.PinnedBy(2); v != "signature" {
+		t.Fatalf("kept %q", v)
+	}
+}
+
+// D3's N1 on #732: a failed KeepPinnedBy closes position-not-saved,
+// raises sensor-position-not-saved and keeps nothing; once it works, the
+// next hello, with either value, is accepted and kept. Control:
+// KeepPinnedBy's error ignored (the hello is accepted with nothing kept).
+func TestKeepPinnedByFails(t *testing.T) {
+	for _, next := range []string{"signature", "console"} {
+		t.Run(next, func(t *testing.T) {
+			r := newRig(t, nil)
+			r.pins.fail = true
+			p := r.dial(enrolment())
+			p.send(hello02())
+			if got := p.closed(); got != netobs.ClosePositionNotSaved || r.al.count(AlarmPositionNotSaved) != 1 {
+				t.Fatalf("close %q, raises %v", got, r.al.list)
+			}
+			if v, _ := r.pins.PinnedBy(2); v != "" {
+				t.Fatalf("kept %q", v)
+			}
+			r.pins.fail = false
+			h := resume(1, 20) // row 6's save was made before the pin failed
+			h.PinnedBy = next
+			r.accepted(h).end()
+			if v, _ := r.pins.PinnedBy(2); v != next {
+				t.Fatalf("kept %q, want %q", v, next)
+			}
+		})
 	}
 }
 
