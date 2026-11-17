@@ -1,9 +1,12 @@
 package sensorlink
 
 import (
+	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/netobs"
 )
@@ -244,5 +247,81 @@ func TestOwedFailsInRunRaises(t *testing.T) {
 	}
 	if c := cursorNow(t, r.cs); !c.Spans[0].Owed {
 		t.Fatalf("mark cleared: %+v", c.Spans)
+	}
+}
+
+// D6's condition 1, R-5's worst-case leg: the largest cursor the intake
+// can hold, built through admit and markLost (8 spans and 8 prior spans,
+// each time at 30 octets, both marks set, unclean and enrolment, every
+// number at 20 digits, gap_raised included), committed with a record
+// through Record.SourceCursor, is at most MaxLinkCursorBytes. Control:
+// the reviewed code's carry, which adds the run's owed events again
+// (asserted above the bound here).
+func TestCursorWorstCaseFits(t *testing.T) {
+	const top = uint64(18446744073709551615)
+	base := time.Date(2026, 11, 7, 0, 0, 0, 123456789, time.UTC)
+	f := func(t time.Time) string { return t.Format("2006-01-02T15:04:05.000000000Z") }
+	var spans []netobs.Span
+	for i := range netobs.MaxLostSpans {
+		a := base.Add(time.Duration(i) * time.Hour)
+		spans = append(spans, netobs.Span{FromUTC: f(a), ToUTC: f(a.Add(30 * time.Minute))})
+	}
+	recv := base.Add(9 * time.Hour)
+	var cut, opened uint64
+	taken := top - 2
+	c := &Cursor{Generation: top, RunCounter: top, RunID: testRun, Taken: taken, G: top, D: top, GapRaised: top,
+		Refused: top, Dropped: top, Ds: top, NewestSeq: top, Digest: testDigest,
+		Spans: admit(nil, spans, f(recv), recv, &cut, &opened),
+		Prior: &HeldPrior{RunsSkipped: top, RecordsLost: top, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
+			Spans: admit(nil, spans, f(recv), recv, &cut, &opened)}}
+	r := newRig(t, nil)
+	if err := r.cs.SaveSourceCursor(bg, mustJSON(t, c)); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	r.owedE = errors.New("test: keep the owed marks")
+	r.mu.Unlock()
+	en := Enrolment{SensorID: testSensor, Generation: top, Began: 1, ConfigDigest: testDigest}
+	h := resume(0, 0)
+	h.Generation, h.RunCounter = strconv.FormatUint(top, 10), strconv.FormatUint(top, 10)
+	h.FirstSeq, h.NewestSeq, h.DropsChannel = strconv.FormatUint(taken+1, 10), strconv.FormatUint(top, 10), strconv.FormatUint(top, 10)
+	p := r.dial(en)
+	p.send(h)
+	p.ack(taken)
+	// markLost writes at most 8 windows, prior's first: the second record
+	// marks the run's own spans.
+	for i := uint64(1); i <= 2; i++ {
+		o := obs02(1)
+		o.Seq = strconv.FormatUint(taken+i, 10)
+		p.send(o)
+		p.ack(taken + i)
+	}
+	p.end()
+	b, err := r.cs.SourceCursor(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got Cursor
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(storedObs(t, r.s)) != 2 || !got.Spans[7].Marked || !got.Prior.Spans[7].Marked || !got.Spans[0].Owed {
+		t.Fatalf("not the worst case: %s", b)
+	}
+	t.Logf("worst-case cursor %d bytes (MaxLinkCursorBytes %d)", len(b), MaxLinkCursorBytes)
+	if len(b) > MaxLinkCursorBytes {
+		t.Fatalf("%d bytes", len(b))
+	}
+	// The control: the reviewed code's Carried held the run's owed events
+	// a second time.
+	o5, _ := owedOf(&got)
+	carried := struct {
+		Cursor
+		Carried []Owed `json:"carried"`
+	}{got, []Owed{o5}}
+	if n := len(mustJSON(t, carried)); n <= MaxLinkCursorBytes {
+		t.Fatalf("with one carried run %d bytes, under the bound", n)
+	} else {
+		t.Logf("with one carried run (the reviewed code) %d bytes", n)
 	}
 }
