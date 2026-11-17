@@ -304,12 +304,13 @@ var (
 // reads: every rule of C13 that holds on one record, including the frame
 // bytes against their hashes and the redactions applied. It refuses a
 // record with Node set, and any field new in 0.2.
-func (o *Observation) Validate() error { return o.validateChannel(Identifier, nil) }
+func (o *Observation) Validate() error { return o.validateChannel(Identifier, nil, nil) }
 
 // validateChannel checks a channel observation of the minor want; keys are
-// the decoded document's key paths, nil for a Go value.
-func (o *Observation) validateChannel(want string, keys map[string]bool) error {
-	c := &checker{keys: keys}
+// the decoded document's key paths and nulls those whose value is null,
+// each nil for a Go value.
+func (o *Observation) validateChannel(want string, keys, nulls map[string]bool) error {
+	c := &checker{keys: keys, nulls: nulls}
 	c.strictSchema(o.Schema, want)
 	o.check(c)
 	if o.Node != nil {
@@ -655,6 +656,16 @@ func (in *Insecure) check(c *checker) {
 		}
 		if l.Attempts < 0 {
 			c.fail(CodeRange, "insecure.login.attempts", "%d is negative", l.Attempts)
+		}
+		// null decodes as 0; read from a sensor, it is refused, not read.
+		if c.nulls["insecure.login.attempts"] {
+			c.fail(CodeForm, "insecure.login.attempts", "null is not a count")
+		}
+		// An absent count decodes as 0 too. On the 0.2 and 0.3 channels it
+		// is refused, not read as 0 (D1's ruling on #726); the 0.1 channel
+		// and stored records read as they did.
+		if c.need >= 2 && c.keys != nil && !c.keys["insecure.login.attempts"] {
+			c.fail(CodeMissing, "insecure.login.attempts", "required")
 		}
 		if !contains([]string{"placed", "not-placed", "none"}, l.Slot) {
 			c.fail(CodeForm, "insecure.login.slot", "%q is not placed, not-placed or none", l.Slot)

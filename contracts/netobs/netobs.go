@@ -172,13 +172,16 @@ func Codes(err error) []Code {
 // record must carry, 0 for a stored record (C13 0.2 §11, C13 0.3 §1.1:
 // optional in the Go type and in a stored record, required on the channel
 // of their minor and later). keys holds a decoded document's key paths
-// (keyPaths), nil when a Go value is validated.
+// (keyPaths), nil when a Go value is validated. nulls holds the paths of
+// those keys whose value is null (docPaths), set only for a record read
+// from a sensor on the 0.2 or 0.3 channel.
 type checker struct {
 	errs  []error
 	minor int
 	later bool
 	need  int
 	keys  map[string]bool
+	nulls map[string]bool
 }
 
 func (c *checker) fail(code Code, field, format string, a ...any) {
@@ -346,11 +349,19 @@ func (c *checker) null(field string, isNil bool) {
 // field form ("coverage.settings.prp_window_ms", "windows[0].coverage").
 // It is called only on a document strictjson has read, so no key repeats.
 func keyPaths(b []byte) map[string]bool {
+	keys, _ := docPaths(b)
+	return keys
+}
+
+// docPaths is keyPaths, and also the paths of the keys whose value is
+// null. A null decodes into a plain count as 0, so only this set tells the
+// two apart.
+func docPaths(b []byte) (keys, nulls map[string]bool) {
 	var doc any
 	if json.Unmarshal(b, &doc) != nil {
-		return nil
+		return nil, nil
 	}
-	out := map[string]bool{}
+	out, nulls := map[string]bool{}, map[string]bool{}
 	var walk func(path string, v any)
 	walk = func(path string, v any) {
 		switch x := v.(type) {
@@ -361,6 +372,9 @@ func keyPaths(b []byte) map[string]bool {
 					p = path + "." + k
 				}
 				out[p] = true
+				if e == nil {
+					nulls[p] = true
+				}
 				walk(p, e)
 			}
 		case []any:
@@ -370,7 +384,7 @@ func keyPaths(b []byte) map[string]bool {
 		}
 	}
 	walk("", doc)
-	return out
+	return out, nulls
 }
 
 // decimal parses a C13 0.2 number written "decimal from 1" (from1) or

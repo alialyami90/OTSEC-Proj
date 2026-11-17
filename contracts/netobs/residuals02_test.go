@@ -2,6 +2,7 @@ package netobs
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -164,5 +165,109 @@ func TestHeartbeatInterfaceNamedTwice(t *testing.T) {
 	}
 	if _, err := DecodeFromSensor(b); !hasCode(err, CodeConflict) {
 		t.Errorf("eth1 twice: %v, want conflict", err)
+	}
+}
+
+// D4-107 item 3.1 (D5's N1 on #687): on the 0.2 and 0.3 channels a 0.1
+// count sent as null decodes as 0, and drops_driver as absent (unknown).
+// Each is refused as form, not read. The two other counts a sensor's
+// channel message reads that way, interfaces[].packets and
+// insecure.login.attempts, are refused the same way. Every count of the
+// fixtures is 0, so no other check refuses the null. Controls: each count
+// sent as 0 decodes, and the 0.1 channel reads a null 0.1 count as it did.
+func TestHeartbeat02NullCounterRefused(t *testing.T) {
+	hb := func(fx func() *Heartbeat) func() any {
+		return func() any {
+			h := fx()
+			h.Counters.Packets, h.Interfaces[0].Packets = 0, 0
+			return h
+		}
+	}
+	insecure := func(schema string) func() any {
+		return func() any {
+			o := fxObservation02()
+			o.Schema, o.Kind, o.Protocol, o.Function, o.Frames, o.FirstSight = schema, KindInsecure, "telnet", nil, nil, false
+			o.Insecure = &Insecure{Reason: "telnet", Login: &Login{Attempts: 0, Slot: "none"}}
+			return o
+		}
+	}
+	type leg struct {
+		conn  string
+		fx    func() any
+		field string
+		path  []any
+	}
+	var legs []leg
+	for _, conn := range []struct {
+		schema string
+		fx     func() *Heartbeat
+	}{{Identifier02, fxHeartbeat02}, {Identifier03, fxHeartbeat03}} {
+		for _, name := range append([]string{"drops_driver"}, counters01...) {
+			legs = append(legs, leg{conn.schema, hb(conn.fx), "counters." + name, []any{"counters", name}})
+		}
+		legs = append(legs, leg{conn.schema, hb(conn.fx), "interfaces[0].packets", []any{"interfaces", 0, "packets"}},
+			leg{conn.schema, insecure(conn.schema), "insecure.login.attempts", []any{"insecure", "login", "attempts"}})
+	}
+	for _, l := range legs {
+		field := l.field
+		b := encodeWith(t, l.fx(), func(m map[string]any) { setPath(m, nil, l.path...) })
+		if _, err := DecodeFromSensorIn(b, l.conn); !refusedOnly(err, CodeForm, field) {
+			t.Errorf("%s, %s null: %v, want only form at %s", l.conn, field, err, field)
+		}
+		b = encodeWith(t, l.fx(), func(m map[string]any) { setPath(m, 0, l.path...) })
+		if _, err := DecodeFromSensorIn(b, l.conn); err != nil {
+			t.Errorf("control, %s, %s 0: %v", l.conn, field, err)
+		}
+	}
+	for _, name := range append([]string{"drops_driver"}, counters01...) {
+		old := encodeWith(t, fxHeartbeat(), func(m map[string]any) { setPath(m, nil, "counters", name) })
+		if _, err := DecodeChannel(old); err != nil {
+			t.Errorf("control, 0.1 channel, counters.%s null: %v", name, err)
+		}
+	}
+}
+
+// refusedOnly reports whether err is exactly one refusal, of field with
+// code.
+func refusedOnly(err error, code Code, field string) bool {
+	var e *Error
+	return errors.As(err, &e) && len(Codes(err)) == 1 && e.Code == code && e.Field == field
+}
+
+// D1's ruling on #726: an insecure login without attempts decodes as 0
+// attempts. On the 0.2 and 0.3 channels it is refused as missing, by key,
+// as an absent 0.1 counter is (C13 §4 writes "attempts": n). Controls: the
+// same record with attempts 0 decodes; the 0.1 channel and a stored 0.2
+// record without attempts read as before.
+func TestInsecureAttempts02Required(t *testing.T) {
+	insecure := func(schema string) *Observation {
+		o := fxObservation02()
+		o.Schema, o.Kind, o.Protocol, o.Function, o.Frames, o.FirstSight = schema, KindInsecure, "telnet", nil, nil, false
+		o.Insecure = &Insecure{Reason: "telnet", Login: &Login{Attempts: 0, Slot: "none"}}
+		return o
+	}
+	drop := func(m map[string]any) { delete(m["insecure"].(map[string]any)["login"].(map[string]any), "attempts") }
+	for _, schema := range []string{Identifier02, Identifier03} {
+		if _, err := DecodeFromSensorIn(encodeWith(t, insecure(schema), drop), schema); !refusedOnly(err, CodeMissing, "insecure.login.attempts") {
+			t.Errorf("%s, insecure.login.attempts absent: %v, want only missing", schema, err)
+		}
+		if _, err := DecodeFromSensorIn(mustJSON(t, insecure(schema)), schema); err != nil {
+			t.Errorf("control, %s, attempts 0: %v", schema, err)
+		}
+	}
+	old := insecure(Identifier)
+	old.MadeUTC, old.Coverage = "", fxCoverage()
+	if _, err := DecodeChannel(encodeWith(t, old, drop)); err != nil {
+		t.Errorf("control, 0.1 channel, attempts absent: %v", err)
+	}
+	if _, err := DecodeStored(encodeWith(t, asStored(insecure(Identifier02)), drop)); err != nil {
+		t.Errorf("control, stored 0.2, attempts absent: %v", err)
+	}
+	null := func(m map[string]any) { m["insecure"].(map[string]any)["login"].(map[string]any)["attempts"] = nil }
+	if _, err := DecodeChannel(encodeWith(t, old, null)); err != nil {
+		t.Errorf("control, 0.1 channel, attempts null: %v", err)
+	}
+	if _, err := DecodeStored(encodeWith(t, asStored(insecure(Identifier02)), null)); err != nil {
+		t.Errorf("control, stored 0.2, attempts null: %v", err)
 	}
 }

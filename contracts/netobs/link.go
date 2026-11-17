@@ -377,10 +377,16 @@ func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 		return m, decode(m.Tick, m.Tick.Validate)
 	case TypeHeartbeat:
 		m.Heartbeat = &Heartbeat{}
-		return m, decode(m.Heartbeat, func() error { return m.Heartbeat.validateChannel(head.Schema, keyPaths(b)) })
+		return m, decode(m.Heartbeat, func() error {
+			keys, nulls := docPaths(b)
+			return m.Heartbeat.validateChannel(head.Schema, keys, nulls)
+		})
 	default:
 		m.Observation = &Observation{}
-		return m, decode(m.Observation, func() error { return m.Observation.validateChannel(head.Schema, keyPaths(b)) })
+		return m, decode(m.Observation, func() error {
+			keys, nulls := docPaths(b)
+			return m.Observation.validateChannel(head.Schema, keys, nulls)
+		})
 	}
 }
 
