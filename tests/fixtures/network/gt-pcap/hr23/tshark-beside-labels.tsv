@@ -1,7 +1,7 @@
 # The pinned tshark's DNP3 reading of HR-23's stage-2 captures and malformed set, where it differs from the builder's label (D6, brief P4-4-HR2325S, deliverable 1). hr23_tshark.py labels writes the same list without the cause column, and the hr23 job of a6-gt-pcap.yml fails when the two differ.
 # A row is reported, never used as a label (hr23-conditions.tsv, judge-labels). Its columns are hr23_tshark.py's: the message's last packet, the label's function code, the codes tshark reads in that packet, and the builder's state.
 # cause: why tshark reads it otherwise.
-#   reads-malformed: tshark reads the function code of a message the builder labels absent because it is malformed (a response of 2 or 3 application octets, a response with 1 object octet, an empty arm with a trailing octet, a read with 1 object octet).
+#   reads-malformed: tshark reads the function code of a message the builder labels absent because it is malformed (a response of 2 or 3 application octets, a response with 1 object octet, an empty arm with a trailing octet, a read with 1 or 2 object octets).
 #   no-limit: tshark has no fragment limit, so it reads a fragment over the limit, which the builder labels absent.
 capture	message	end	packet	label_code	tshark_codes	note	cause
 dnp3-mal-tcp-fc129-2-dirclear	X	m	8	129	129	the builder labels it absent	reads-malformed
@@ -9,11 +9,13 @@ dnp3-mal-tcp-fc129-2-dirset	X	m	8	129	129	the builder labels it absent	reads-mal
 dnp3-mal-tcp-fc129-3-dirclear	X	m	8	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-tcp-fc129-3-dirset	X	m	8	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-tcp-fc129-badobj-first	X	m	4	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc1-badobj-mid	X	o	3	1	1	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc129-2-orig	X	m	3	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc129-2-resp	X	o	3	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc129-3-orig	X	m	3	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc129-3-resp	X	o	3	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc129-badobj-first	X	m	1	129	129	the builder labels it absent	reads-malformed
+dnp3-mal-udp-fc129-badobj-mid	X	m	3	129	129	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc130-2-orig	X	m	3	130	130	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc130-2-resp	X	o	3	130	130	the builder labels it absent	reads-malformed
 dnp3-mal-udp-fc130-3-orig	X	m	3	130	130	the builder labels it absent	reads-malformed
