@@ -274,36 +274,59 @@ func orderAfterLock(f *fairLock) *lockCounts {
 
 // The fairness rule itself: a holder that takes the lock again the moment
 // it frees it, as a read loop running hot does, yields to a waiting
-// scheduler call, which has the lock within about one hold. Control 2 (the
-// rule removed) lets the holder take it again first every time, so the
-// call waits out HoldLockWait.
+// scheduler call. Each call is made only while the holder holds the lock,
+// and the holder frees it only once the call waits (f.waiting), so every
+// call waits and every free is followed at once by the holder's Lock; no
+// sleep orders the two (D4-115 item 7). orderAfterLock makes the woken
+// call check only after Lock's first check after the free, and counts
+// Lock's takes while a call waited. Control 2 (the rule removed: Lock does
+// not yield to a waiting scheduler call) lets the holder take the lock
+// again before the waiting call, so the take is counted and the call
+// waits out HoldLockWait.
 func TestFairLockSchedulerFirst(t *testing.T) {
 	var f fairLock
+	lk := orderAfterLock(&f)
 	stop := make(chan struct{})
 	defer close(stop)
+	held := make(chan struct{})
 	go func() {
+		f.Lock()
 		for {
 			select {
+			case held <- struct{}{}:
 			case <-stop:
+				f.Unlock()
 				return
-			default:
 			}
-			f.Lock()
-			time.Sleep(20 * time.Millisecond)
+			for { // hold until a scheduler call waits
+				f.mu.Lock()
+				w := f.waiting
+				f.mu.Unlock()
+				if w > 0 {
+					break
+				}
+				select {
+				case <-stop:
+					f.Unlock()
+					return
+				default:
+				}
+				time.Sleep(time.Millisecond)
+			}
 			f.Unlock()
+			f.Lock()
 		}
 	}()
-	time.Sleep(50 * time.Millisecond)
 	for i := range 10 {
-		from := time.Now()
+		<-held
 		if !f.lockSched(HoldLockWait) {
-			t.Fatalf("call %d: the lock was not had within %s", i, HoldLockWait)
+			n, _, _ := lk.read(&f)
+			t.Fatalf("call %d: the lock was not had within %s; Lock took it %d times while a call waited", i, HoldLockWait, n)
 		}
-		took := time.Since(from)
 		f.Unlock()
-		if took > 200*time.Millisecond {
-			t.Fatalf("call %d waited %s, want about one hold (20 ms)", i, took)
-		}
+	}
+	if n, _, _ := lk.read(&f); n != 0 {
+		t.Fatalf("the rule is broken: Lock took the lock %d times while a scheduler call waited", n)
 	}
 }
 

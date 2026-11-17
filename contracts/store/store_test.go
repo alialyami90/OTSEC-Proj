@@ -228,10 +228,11 @@ func countCalls(f *fake, name string) int {
 // orderCommitter fails the test if a stream's commits ever overlap.
 type orderCommitter struct {
 	*fake
-	busy  sync.Mutex
-	first chan struct{}
-	once  sync.Once
-	t     *testing.T
+	busy    sync.Mutex
+	first   chan struct{}
+	entered chan struct{} // closed when the first commit has begun
+	once    sync.Once
+	t       *testing.T
 }
 
 func (o *orderCommitter) CommitBatch(ctx context.Context, s StreamID, recs []Record) (Commit, error) {
@@ -240,27 +241,70 @@ func (o *orderCommitter) CommitBatch(ctx context.Context, s StreamID, recs []Rec
 		return Commit{}, errInjected
 	}
 	defer o.busy.Unlock()
-	o.once.Do(func() { <-o.first }) // hold the first commit until the test lets go
+	o.once.Do(func() { close(o.entered); <-o.first }) // hold the first commit until the test lets go
 	return o.fake.CommitBatch(ctx, s, recs)
 }
 
+// The test waits on observed states, not sleeps (D4-115 item 7): group 1
+// is in its commit (entered), and records 2 and 3 are each in a group
+// behind it (waitJoined) before group 1 is let go. Control: commitGroup
+// with its wait for the previous group removed, under which a later group
+// commits while group 1 is held, and the test fails.
 func TestGroupsOfAStreamCommitInOrder(t *testing.T) {
 	f := newFake()
-	o := &orderCommitter{fake: f, first: make(chan struct{}), t: t}
-	l, _ := NewLog(o, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: 5 * time.Millisecond}, nil)
+	o := &orderCommitter{fake: f, first: make(chan struct{}), entered: make(chan struct{}), t: t}
+	l, err := NewLog(o, f.node, testStreams, GroupOptions{MaxEvents: 2, MaxWait: 5 * time.Millisecond}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan struct{})
-	go func() { l.Append(context.Background(), rec("s", "1")); done <- struct{}{} }()
-	time.Sleep(20 * time.Millisecond) // group 1 is flushed and blocked in its commit
-	go func() { l.Append(context.Background(), rec("s", "2")); done <- struct{}{} }()
-	go func() { l.Append(context.Background(), rec("s", "3")); done <- struct{}{} }()
-	time.Sleep(20 * time.Millisecond) // group 2 is full and waiting for group 1
+	appendRec := func(ev string) func() {
+		return func() { l.Append(context.Background(), rec("s", ev)); done <- struct{}{} }
+	}
+	go appendRec("1")()
+	<-o.entered // group 1 is flushed and held in its commit
+	waitJoined(t, l, "s", appendRec("2"))
+	waitJoined(t, l, "s", appendRec("3"))
 	close(o.first)
 	for i := 0; i < 3; i++ {
 		<-done
 	}
-	ev := f.events["s"]
-	if len(ev) != 3 || string(ev[0].Event) != "1" {
-		t.Fatalf("group order not kept: %q", []string{string(ev[0].Event), string(ev[1].Event), string(ev[2].Event)})
+	var got []string
+	for _, e := range f.events["s"] {
+		got = append(got, string(e.Event))
+	}
+	if !slices.Equal(got, []string{"1", "2", "3"}) {
+		t.Fatalf("group order not kept: %q", got)
+	}
+}
+
+// waitJoined starts appendRec and waits until its record is in a group of
+// stream: the pending group has one more record, or a new group is opened
+// (l.tail changes). Log.Append does either in one critical section, and a
+// new group's prev is the newest group then, so the record commits after
+// every group before it.
+func waitJoined(t *testing.T, l *Log, stream StreamID, appendRec func()) {
+	t.Helper()
+	l.mu.Lock()
+	tail, g := l.tail[stream], l.pending[stream]
+	n := 0
+	if g != nil {
+		n = len(g.recs)
+	}
+	l.mu.Unlock()
+	go appendRec()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		l.mu.Lock()
+		joined := l.tail[stream] != tail || (g != nil && len(g.recs) > n)
+		l.mu.Unlock()
+		if joined {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no record of %s queued after 30s", stream)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
