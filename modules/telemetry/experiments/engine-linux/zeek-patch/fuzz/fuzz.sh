@@ -94,7 +94,7 @@ build)
     if [ $b = c2 ]; then patch -d "$s" -p1 --fuzz=0 --no-backup-if-mismatch < "$patchdir/hr23-fc-dispatch.patch" > /dev/null; fi
     patch -d "$s" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/hr23-fuzz-harness.patch" > /dev/null
     cp "$here/hr23-crc-mutator.cc" "$s/src/fuzzers/"
-    (cd "$s" && nonet env CC=clang-$V CXX=clang++-$V LIB_FUZZING_ENGINE=-fsanitize=fuzzer \
+    (cd "$s" && nonet env CC=clang-$V CXX=clang++-$V LIB_FUZZING_ENGINE=-fsanitize=fuzzer ZEEK_TAILORED_UB_CHECKS=1 \
       CFLAGS="$cov" CXXFLAGS="$cov" LDFLAGS="$cov -fsanitize=address,undefined" \
       ./configure --build-dir=build --generator=Ninja --build-type=debug \
         --sanitizers="$HR23_FUZZ_SANITIZERS" --enable-fuzzers \
@@ -120,9 +120,10 @@ build)
     # its place in the build tree is found, and must be one file.
     (cd "$s/build" && find . -name libzeek_fuzzer_shared.so -type f) > "$f/$b/sharedlib"
     [ "$(wc -l < "$f/$b/sharedlib")" = 1 ] || fail "$b: not exactly one libzeek_fuzzer_shared.so in the build"
-    # The flag that makes a UBSan report stop the run (fuzz.env).
-    grep -q -- '-fno-sanitize-recover=undefined' "$s/build/build.ninja" \
-      || fail "$b: the build lines do not carry -fno-sanitize-recover=undefined"
+    # Zeek's tailored UB checks, and the flag that makes a UBSan report stop
+    # the run (fuzz.env).
+    grep -q -- "-fno-sanitize-recover=$HR23_FUZZ_UB_CHECKS " "$s/build/build.ninja" \
+      || fail "$b: the build lines do not carry -fno-sanitize-recover=HR23_FUZZ_UB_CHECKS"
   done
   # The two builds differ in option (i)'s generated parser, so the patch is
   # in C2 and not in C1p.
@@ -139,7 +140,7 @@ build)
     echo "option (i)'s patch: sha256 $HR23_PATCH_SHA256 (C2 only)"
     echo "harness patch: sha256 $HR23_FUZZ_HARNESS_SHA256 (both)"
     echo "mutator: sha256 $HR23_FUZZ_MUTATOR_SHA256 (both)"
-    echo "sanitizers: $HR23_FUZZ_SANITIZERS, -fno-sanitize-recover=undefined checked in both builds' lines"
+    echo "sanitizers: $HR23_FUZZ_SANITIZERS, UB checks $HR23_FUZZ_UB_CHECKS, -fno-sanitize-recover for them checked in both builds' lines"
     echo "coverage flags: $cov (both)"
     echo "configure: Spicy on, binpac static, the rest as in this file (both)"
     for b in c1p c2; do
