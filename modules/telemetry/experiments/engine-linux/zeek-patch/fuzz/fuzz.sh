@@ -12,7 +12,9 @@
 #                                seeds.py, and checks the corpus pin
 #        fuzz.sh campaign WORK TARGET
 #                                runs TARGET (dnp3_tcp, dnp3_udp or packet)
-#                                on C1p and C2 at once, for HR23_FUZZ_SECONDS
+#                                on C1p and C2 at once, for HR23_FUZZ_SECONDS,
+#                                and ends HR23_FUZZ_SECONDS plus
+#                                HR23_FUZZ_PAD_SECONDS after it began
 #        fuzz.sh replay WORK     replays every input that gave a report, alone,
 #                                on both builds, with the same options
 #        fuzz.sh coverage WORK   replays C2's final corpus of each target on
@@ -175,6 +177,7 @@ seeds)
   [ "$h" = "$HR23_FUZZ_CORPUS_SHA256" ] || fail "the corpus has SHA-256 $h, not the pin $HR23_FUZZ_CORPUS_SHA256"
   ;;
 campaign)
+  step0=$(date +%s)
   t=$3
   case " $TARGETS " in *" $t "*) ;; *) fail "unknown target $t" ;; esac
   [ -f "$f/seeds/manifest.sha256" ] || fail "no corpus: run fuzz.sh seeds first"
@@ -195,6 +198,15 @@ campaign)
     ) &
   done
   wait
+  # The pad (D4-116 item 2.4 (b); D1's ruling 1 on #744). libFuzzer stops
+  # at the first report, so a step that ended early would show which target
+  # found one, and so would this line's time in the job log. Every campaign
+  # step therefore lasts its pinned time plus a fixed margin from the step's
+  # start, whatever the fuzzers did. Each fuzzer's private `exit-code` and
+  # `seconds` were written above, before this wait, so the judge's
+  # early-stop rule reads the fuzzing time, not the pad.
+  left=$((step0 + HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS - $(date +%s)))
+  [ "$left" -le 0 ] || sleep "$left"
   echo "fuzz.sh: campaign $t done on both builds"
   ;;
 replay)

@@ -25,7 +25,12 @@ condition is `yes` or `no`:
 
 `summary F` prints the run's result as Markdown: each campaign's seconds,
 executions and report count; the replay's classes; the coverage
-conditions; and the verdict:
+conditions; and the verdict. While any input reproduces on C1p (stock Zeek
+9.0.1's source), it withholds every campaign's row and prints the totals
+only, so that the summary does not show which target found it (D4-116 item
+2.4 (b); D1's ruling 1 on #744). It withholds them too, failing closed,
+while a report has no replay on C1p (it left no input, or was not
+replayed). The verdict is:
 - `fail` when an input reproduces on C2 and not on C1p;
 - `unknown` when an input does not reproduce on its own build, a report
   left no input, a campaign left no result, a campaign stopped on a report
@@ -178,7 +183,7 @@ def summary(f):
                 early += 1
             rows.append((t, b, state, "-" if secs is None else str(secs), "-" if ex is None else str(ex), str(reps)))
     classes = {"against": 0, "both": 0, "c1p-only": 0, "unknown": 0}
-    replayed = 0
+    replayed, on_c1p = 0, 0
     rp = os.path.join(priv, "replay.tsv")
     if os.path.exists(rp):
         with open(rp, encoding="ascii", errors="replace") as fh:
@@ -188,6 +193,7 @@ def summary(f):
                     continue
                 replayed += 1
                 r1, r2 = p[-2] != "0", p[-1] != "0"
+                on_c1p += r1
                 own = r1 if p[1] == "c1p" else r2
                 if not own:
                     classes["unknown"] += 1
@@ -224,10 +230,14 @@ def summary(f):
             corpus = hashlib.sha256(fh.read()).hexdigest()
     out = ["## HR-23 sanitizer fuzz run (design section 4.6)", "",
            f"Verdict: **{verdict}**", "",
-           f"Corpus SHA-256: `{corpus}`", "",
-           "| target | build | state | seconds | executions | reports |",
-           "| --- | --- | --- | --- | --- | --- |"]
-    out += [f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} |" for r in rows]
+           f"Corpus SHA-256: `{corpus}`", ""]
+    if on_c1p or replayed < total_reports:
+        out += ["Each campaign's row is withheld: an input reproduces on C1p (stock Zeek 9.0.1's source), "
+                "or a report has no replay on C1p, and the rows would show its target. The totals follow."]
+    else:
+        out += ["| target | build | state | seconds | executions | reports |",
+                "| --- | --- | --- | --- | --- | --- |"]
+        out += [f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} |" for r in rows]
     out += ["",
             f"- Reports: {total_reports}; replayed alone on both builds: {replayed}; "
             f"reports that left no input: {reports_no_input}.",

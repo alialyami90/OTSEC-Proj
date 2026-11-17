@@ -442,8 +442,10 @@ JUDGE_LEAK_CONTROLS = [
 
 @pytest.mark.parametrize("name,edit", JUDGE_LEAK_CONTROLS, ids=[c[0] for c in JUDGE_LEAK_CONTROLS])
 def test_judge_disclosure_control_fails(tmp_path, capsys, name, edit):
+    # Against the patch only, so that the rows are printed (D4-116 item 2.4
+    # (b) withholds them while a report reproduces on C1p).
     run_judge(tmp_path, ("c2", "dnp3_tcp", {"rc": 77, "artifacts": (ART,)}))
-    write_replay(tmp_path, ("dnp3_tcp", "c2", "77", "77"))
+    write_replay(tmp_path, ("dnp3_tcp", "c2", "0", "77"))
     judge = load(JUDGE, "fuzz_judge_leak_" + name.replace("-", "_"), edit)
     judge.summary(str(tmp_path))
     out = capsys.readouterr().out
@@ -488,6 +490,55 @@ def test_judge_stock_report_is_counted_not_netted_out(tmp_path, capsys):
     out = summary(judge, tmp_path, capsys)
     assert "Verdict: **pass**" in out
     assert "held for the owner's disclosure decision): 2." in out
+
+
+def check_rows_withheld(judge, tmp_path, capsys):
+    """D4-116 item 2.4 (b): while a report reproduces on C1p, or has no
+    replay on C1p, the summary names no target and prints no campaign row,
+    only the totals. A report against the patch alone keeps the rows."""
+    cases = {
+        "both": (("c2", "dnp3_udp", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)}),
+                 [("dnp3_udp", "c2", "77", "77")]),
+        "c1p-only": (("c1p", "packet", {"rc": 77, "secs": 40, "artifacts": (ART,)}),
+                     [("packet", "c1p", "77", "0")]),
+        "not-replayed": (("c2", "dnp3_tcp", {"rc": 77, "secs": 40, "artifacts": (ART,)}), []),
+        "no-input": (("c1p", "dnp3_tcp", {"rc": 1, "secs": 40}), []),
+    }
+    for name, (spec, replay) in cases.items():
+        f = tmp_path / name
+        run_judge(f, spec)
+        if replay:
+            write_replay(f, *replay)
+        judge.summary(str(f))
+        out = capsys.readouterr().out
+        assert not [t for t in judge.TARGETS if t in out], (name, out)
+        assert "| target | build |" not in out and "| 40 |" not in out, name
+        assert "Each campaign's row is withheld" in out and "- Reports: 1;" in out, name
+    f = tmp_path / "against"
+    run_judge(f, ("c2", "dnp3_udp", {"rc": 77, "secs": 40, "artifacts": (ART,)}))
+    write_replay(f, ("dnp3_udp", "c2", "0", "77"))
+    judge.summary(str(f))
+    out = capsys.readouterr().out
+    assert "| dnp3_udp | c2 | ran | 40 |" in out and "withheld" not in out
+
+
+def test_judge_withholds_rows_while_a_report_reproduces_on_c1p(tmp_path, capsys):
+    check_rows_withheld(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
+
+
+# The controls: a judge that prints the rows anyway, and one that never
+# counts a replay on C1p, must fail the check.
+ROWS_CONTROLS = [
+    ("rows-always", ("    if on_c1p or replayed < total_reports:\n", "    if False:\n")),
+    ("c1p-not-counted", ("                on_c1p += r1\n", "                on_c1p += 0\n")),
+]
+
+
+@pytest.mark.parametrize("name,edit", ROWS_CONTROLS, ids=[c[0] for c in ROWS_CONTROLS])
+def test_judge_withheld_rows_control_fails(tmp_path, capsys, name, edit):
+    judge = load(JUDGE, "fuzz_judge_rows_" + name.replace("-", "_"), edit)
+    with pytest.raises(AssertionError):
+        check_rows_withheld(judge, tmp_path, capsys)
 
 
 def test_judge_unknown_cases(tmp_path, capsys):
@@ -940,3 +991,70 @@ def test_fuzz_sh_replay_control_shared_names_fails(tmp_path):
     src = src.replace("  fz_b=$1 fz_t=$2\n", "  fz_b=$1 fz_t=$2 b=$1 t=$2\n")
     with pytest.raises(AssertionError):
         check_replay_labels(src, tmp_path / "a" / "fuzz")
+
+
+# --- fuzz.sh's campaign: the pad from the step's start ----------------------
+# D4-116 item 2.4 (b). The run's tools are stand-ins on PATH: `date` reads a
+# clock file, both fake fuzzers set it 40 seconds on and exit, `sleep`
+# records its argument and whether each fuzzer's private `exit-code` and
+# `seconds` were written before it, and `sudo`, `unshare` and `setpriv`
+# drop their own arguments and run the command (nonet's network namespace
+# is not under test here).
+
+def check_campaign_pad(fuzz_sh, tmp_path):
+    env = fuzz_env()
+    want = int(env["HR23_FUZZ_SECONDS"]) + int(env["HR23_FUZZ_PAD_SECONDS"]) - 40
+    work = tmp_path / "w"
+    f = work / "fuzz"
+    clock = tmp_path / "clock"
+    clock.write_text("1000\n")
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+
+    def tool(path, body):
+        path.write_text("#!/bin/sh\n" + body + "\n", newline="\n")
+        path.chmod(0o755)
+
+    drop = 'while [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"'
+    tool(bin_ / "unshare", drop)
+    tool(bin_ / "setpriv", drop)
+    tool(bin_ / "sudo", 'shift\nexec "$@"')
+    tool(bin_ / "date", f"cat '{clock.as_posix()}'")
+    priv = (f / "private").as_posix()
+    tool(bin_ / "sleep", "for b in c1p c2; do\n"
+         f"  [ -s '{priv}'/$b/dnp3_tcp/exit-code ] && [ -s '{priv}'/$b/dnp3_tcp/seconds ] || echo \"no result $b\"\n"
+         'done\necho "slept $1"')
+    for b in ("c1p", "c2"):
+        d = f / b / "zeek-9.0.1" / "build" / "src" / "fuzzers"
+        d.mkdir(parents=True)
+        tool(d / "zeek-dnp3_tcp-fuzzer", f"echo 1040 > '{clock.as_posix()}'")
+        (f / b / "zeekpath").write_text("/nonexistent")
+    (f / "seeds" / "dnp3_tcp").mkdir(parents=True)
+    (f / "seeds" / "dnp3_tcp" / "s1").write_bytes(b"x")
+    (f / "seeds" / "manifest.sha256").write_text("")
+    script = tmp_path / "fuzz" / "fuzz.sh"
+    script.parent.mkdir()
+    script.write_text(fuzz_sh, newline="\n")
+    shutil.copy(os.path.join(HERE, "fuzz.env"), script.parent / "fuzz.env")
+    (tmp_path / "build.env").write_text("")
+    run_env = dict(os.environ, PATH=bin_.as_posix() + os.pathsep + os.environ["PATH"])
+    r = subprocess.run(["sh", script.as_posix(), "campaign", work.as_posix(), "dnp3_tcp"],
+                       capture_output=True, text=True, env=run_env)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == f"slept {want}\nfuzz.sh: campaign dnp3_tcp done on both builds\n", r.stdout
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_campaign_pads_from_the_steps_start(tmp_path):
+    check_campaign_pad(read(FUZZ_SH), tmp_path)
+
+
+@pytest.mark.skipif(not shutil.which("sh"), reason="needs sh")
+def test_fuzz_sh_campaign_pad_control_from_the_fuzzers_exit_fails(tmp_path):
+    # The control: the pad measured from the fuzzers' exit, not the step's
+    # start, waits the 40 seconds the fuzzers ran once more.
+    src = read(FUZZ_SH)
+    old = "  left=$((step0 + HR23_FUZZ_SECONDS"
+    assert src.count(old) == 1
+    with pytest.raises(AssertionError):
+        check_campaign_pad(src.replace(old, "  left=$(($(date +%s) + HR23_FUZZ_SECONDS"), tmp_path)
