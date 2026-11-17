@@ -1,10 +1,13 @@
 package sensorlink
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -194,6 +197,85 @@ func TestRow6PositionReadsAsNone(t *testing.T) {
 	w := r.owedNow()
 	if len(w) != 2 || !isRun5(w[0]) || w[1].Generation != 3 {
 		t.Fatalf("owed %+v", w)
+	}
+}
+
+// owedKeys is each owed event's key as D4's N4 on #732 states it: for the
+// run loss, the sensor, run_id and run_counter; for a lost gap, the
+// sensor, run_id, from_utc, to_utc and the cut end. withGen adds the
+// generation (the control).
+func owedKeys(o Owed, withGen bool) []string {
+	pre := testSensor + "|" + o.RunID
+	if withGen {
+		pre += "|" + strconv.FormatUint(o.Generation, 10)
+	}
+	var k []string
+	if o.Prior != nil {
+		k = append(k, "run-loss|"+pre+"|"+strconv.FormatUint(o.RunCounter, 10))
+	}
+	for _, s := range o.Spans {
+		k = append(k, "gap|"+pre+"|"+s.FromUTC+"|"+s.ToUTC+"|"+s.CutUTC)
+	}
+	return k
+}
+
+// D4's N4 on #732, D4's probe: run 5 owing; the in-run write passes and
+// the save that clears its marks fails; the run then resumes under a new
+// generation (row 5b) and writes the same events again. The repeat
+// differs only in generation, and is the same events under the stated
+// key. Control: a key that includes generation (the repeat reads as new
+// events).
+func TestOwedRepeatAcrossRow5b(t *testing.T) {
+	var r *rig
+	var once atomic.Bool
+	r = newRig(t, func(o *Options) {
+		inner := o.Owed
+		o.Owed = func(ctx context.Context, w Owed) error {
+			err := inner(ctx, w)
+			if err == nil && once.CompareAndSwap(false, true) {
+				r.cs.failNext(1) // the save that clears the marks
+			}
+			return err
+		}
+	})
+	run5Owing(t, r)
+	r.mu.Lock()
+	r.owedE = nil
+	r.mu.Unlock()
+	resume5 := func(gen string) *netobs.SensorHello {
+		h := resume(1, 20)
+		h.Generation, h.DropsChannel, h.Lost = gen, "1", []netobs.Span{lspan("09:30:00", "09:31:00")}
+		return h
+	}
+	p := r.accepted(resume5("2"))
+	p.stillOpen()
+	if n := r.al.count(AlarmPositionNotSaved); n != 2 {
+		t.Fatalf("the failed clearing save not raised: %v", r.al.list)
+	}
+	p.end()
+	if c := cursorNow(t, r.cs); c.Generation != 2 || !c.Prior.Owed || !c.Spans[0].Owed {
+		t.Fatalf("cursor %+v", c)
+	}
+	en := enrolment()
+	en.Generation = 3
+	r.accepted6(en, resume5("3"))
+	w := r.owedNow()
+	if len(w) != 2 || !isRun5(w[0]) || w[1].Generation != 3 {
+		t.Fatalf("owed %+v", w)
+	}
+	same := w[1]
+	same.Generation = w[0].Generation
+	if a, b := mustJSON(t, w[0]), mustJSON(t, same); string(a) != string(b) {
+		t.Fatalf("the repeat differs beyond generation:\n%s\n%s", a, mustJSON(t, w[1]))
+	}
+	if a, b := owedKeys(w[0], false), owedKeys(w[1], false); len(a) != 2 || !slices.Equal(a, b) {
+		t.Fatalf("keys %v and %v", a, b)
+	}
+	if slices.Equal(owedKeys(w[0], true), owedKeys(w[1], true)) {
+		t.Fatal("control: a key with generation reads the repeat as the same")
+	}
+	if c := cursorNow(t, r.cs); c.Generation != 3 || c.Prior.Owed || c.Spans[0].Owed {
+		t.Fatalf("cursor %+v", c)
 	}
 }
 

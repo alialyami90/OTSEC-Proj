@@ -106,9 +106,14 @@ type PinStore interface {
 // Owed is what the node owes the health stream: a new run's prior
 // (sensor.run-loss, CH-16) and each admitted span's lost gap
 // (sensor.coverage-gap, CH-40). Each stays marked in the cursor until its
-// event has committed. A write repeated after a failed save carries the
-// same identity: the run's generation, run_counter and run_id, and for a
-// lost gap the span's from_utc.
+// event has committed. A write repeated after a failed save is the same
+// event under this key: for the run loss, the sensor and run_id (with
+// run_counter); for a lost gap, the sensor, run_id, from_utc, to_utc and
+// the cut end. Generation is carried but is not part of either key: a run
+// resumed under a new generation (row 5b) writes its owed events again
+// under the new one. A span widened or merged keeps its from_utc but is a
+// new event (D4's N4 on #732). One call holds a run's events together, so
+// a writer must be idempotent per event, not per call.
 type Owed struct {
 	Generation, RunCounter uint64
 	RunID                  string
