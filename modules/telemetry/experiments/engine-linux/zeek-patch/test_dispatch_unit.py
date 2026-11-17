@@ -237,3 +237,62 @@ def test_unchanged_rows_read_c2_against_c2_with_the_stock_catch():
     # A crash in both is never "unchanged".
     assert du.unchanged_verdict(("exit 134", ""), ("exit 134", ""), ("parsed on", "x"), "parsed on") == "fail"
     assert du.unchanged_verdict(rec, ("not run", ""), ("parsed on", "x"), "parsed on") == "unknown (not run)"
+
+
+def _tcp_data(f):
+    """Each data segment of a TCP input, read from its bytes: (source port,
+    destination port, DIR bit, application octets as hex). Each segment is
+    read by its IP total length, and the link frame's user data without its
+    block CRCs, from which the transport octet is dropped."""
+    out = []
+    for fr in f.conv.frames:
+        ip = fr.data[14:]
+        t = ip[(ip[0] & 15) * 4:int.from_bytes(ip[2:4], "big")]
+        p = t[(t[12] >> 4) * 4:]
+        if not p:
+            continue
+        assert p[:2] == b"\x05\x64"
+        n, user, i = p[2] - 5, b"", 10
+        while len(user) < n:
+            k = min(16, n - len(user))
+            user += p[i:i + k]
+            i += k + 2
+        out.append((int.from_bytes(t[0:2], "big"), int.from_bytes(t[2:4], "big"), p[3] >> 7, user[1:].hex(" ")))
+    return out
+
+
+def test_tcp_stop_inputs_follow_the_orders_of_718s_tcp_cells():
+    """D4-115 item 4: the replay pair is on 20001 (outside
+    likely_server_ports) with X then the same end's P first; the mid-flow
+    pair is on 20000 with the responder's 2-octet X after P R. Every data
+    segment's ports, DIR bit and application octets are pinned (D6's N1 on
+    #739), as design 2.3 states them."""
+    flows = du.cases()
+    for case in du.EXPERIMENT:
+        assert case in flows
+    m, o = (40001, 20001), (20001, 40001)
+    p_rp_q_rq = [(*m, 1, "c1 01 3c 01 06"), (*o, 0, "c1 81 00 00"),
+                 (*m, 1, "c2 01 3c 01 06"), (*o, 0, "c2 81 00 00")]
+    want = {
+        "d4u-tcp-replay-same-end": [(*m, 1, "c0 01 3c")] + p_rp_q_rq,
+        "d4u-tcp-replay-same-end-badobj": [(*m, 1, "c0 81 00 00 01")] + p_rp_q_rq,
+    }
+    m, o = (40001, 20000), (20000, 40001)
+    for name, x in (("fc0", "d0 00"), ("fc13", "c0 0d")):
+        for dn, dirbit in (("", 0), ("-dirset", 1)):
+            want[f"d4u-tcp-resp-{name}-mid{dn}"] = [
+                (*m, 1, "c0 01 3c 01 06"), (*o, 0, "c0 81 00 00"), (*o, dirbit, x),
+                (*m, 1, "c1 01 3c 01 06"), (*o, 0, "c1 81 00 00")]
+    for case, rows in want.items():
+        assert _tcp_data(flows[case]) == rows, case
+    # The builder's names, which `judge` reads: X is the stop.
+    for sfx in ("", "-badobj"):
+        f = flows["d4u-tcp-replay-same-end" + sfx]
+        assert f.bad == 0 and [o for o, _ in f.msgs] == [True, True, False, True, False]
+    for case in du.EXPERIMENT[-4:]:
+        assert flows[case].bad == 2
+        assert [o for o, _ in flows[case].msgs] == [True, False, False, True, False]
+    # Each ends with the FIN exchange: the handshake's 3 frames, each
+    # message and its bare ACK, then FIN, FIN and ACK.
+    for case in du.EXPERIMENT[-6:]:
+        assert len(flows[case].conv.frames) == 3 + 2 * 5 + 3
