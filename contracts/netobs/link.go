@@ -337,7 +337,7 @@ func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 	// The type is read first, alone, so that a frame of a known type that
 	// fails its strict decode, a duplicate key included, still reports its
 	// type: a sensor-hello or tick then closes (CH-8, CH-10).
-	typ, keys, err := frameType(b)
+	typ, _, err := frameType(b)
 	if err != nil {
 		return &FromSensor{}, &Error{Code: CodeDecode, Field: "record", Detail: err.Error()}
 	}
@@ -367,14 +367,19 @@ func DecodeFromSensorIn(b []byte, conn string) (*FromSensor, error) {
 	case TypeSensorHello:
 		m.Hello = &SensorHello{}
 		return m, decode(m.Hello, func() error {
-			if isNull(keys["prior"]) {
-				return &Error{Code: CodeForm, Field: "prior", Detail: "null is not what came before the run"}
+			if err := firstNull(b); err != nil {
+				return err
 			}
 			return m.Hello.Validate()
 		})
 	case TypeTick:
 		m.Tick = &Tick{}
-		return m, decode(m.Tick, m.Tick.Validate)
+		return m, decode(m.Tick, func() error {
+			if err := firstNull(b); err != nil {
+				return err
+			}
+			return m.Tick.Validate()
+		})
 	case TypeHeartbeat:
 		m.Heartbeat = &Heartbeat{}
 		return m, decode(m.Heartbeat, func() error {

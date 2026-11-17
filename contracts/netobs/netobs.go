@@ -359,7 +359,10 @@ func (c *checker) required(field string) {
 }
 
 // refuseNulls refuses, as form, every key and list element in c.nulls
-// that no check has already refused as form at its path. No value on the 0.2 or 0.3
+// that no check has already refused as form at its path, and puts every
+// null refusal ahead of the record's other failures, so that a record
+// carrying a null is counted as form (codeOf takes the first code; D6's N1
+// on #735). No value on the 0.2 or 0.3
 // channel is null (C13 0.2 CH-5, C13 0.3 §1.1; D1's ruling on #732): an
 // optional field is shown absent by leaving its key out, and a list is [].
 // One rule covers every path, a field added later included.
@@ -370,11 +373,34 @@ func (c *checker) refuseNulls() {
 			refused[e.Field] = true
 		}
 	}
-	for _, p := range slices.Sorted(maps.Keys(c.nulls)) {
-		if !refused[p] {
-			c.fail(CodeForm, p, "null is not a value")
+	var first, rest []error
+	for _, err := range c.errs {
+		if e, ok := err.(*Error); ok && e.Code == CodeForm && c.nulls[e.Field] {
+			first = append(first, err)
+		} else {
+			rest = append(rest, err)
 		}
 	}
+	for _, p := range slices.Sorted(maps.Keys(c.nulls)) {
+		if !refused[p] {
+			first = append(first, &Error{Code: CodeForm, Field: p, Detail: "null is not a value"})
+		}
+	}
+	c.errs = append(first, rest...)
+}
+
+// firstNull refuses, as form at its path, the first key or list element of
+// a sensor-hello or tick whose value is null, in sorted order: the
+// connection then closes as hello or tick (D3's B1 on #735). It is the
+// rule refuseNulls applies to a record, for the two messages that have no
+// checker.
+func firstNull(b []byte) error {
+	_, nulls := docPaths(b)
+	if len(nulls) == 0 {
+		return nil
+	}
+	p := slices.Sorted(maps.Keys(nulls))[0]
+	return &Error{Code: CodeForm, Field: p, Detail: "null is not a value"}
 }
 
 // keyPaths lists every key of a JSON document by its path in the checker's
