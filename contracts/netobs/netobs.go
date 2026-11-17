@@ -348,6 +348,16 @@ func (c *checker) null(field string, isNil bool) {
 	}
 }
 
+// required refuses, on the 0.2 and 0.3 channels, a key that C13 requires
+// and the decoded document leaves out, as missing: its Go zero value is
+// never read as the value (D1's ruling on #735). The 0.1 channel and stored
+// records read as they did.
+func (c *checker) required(field string) {
+	if c.need >= 2 && c.keys != nil && !c.keys[field] {
+		c.fail(CodeMissing, field, "required")
+	}
+}
+
 // refuseNulls refuses, as form, every key and list element in c.nulls
 // that no check has already refused as form at its path. No value on the 0.2 or 0.3
 // channel is null (C13 0.2 CH-5, C13 0.3 §1.1; D1's ruling on #732): an

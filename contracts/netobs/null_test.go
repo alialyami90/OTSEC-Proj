@@ -3,6 +3,7 @@ package netobs
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	"otsec.local/otsec/contracts/internal/strictjson"
@@ -222,7 +223,7 @@ func TestChannelNullRefusedAt34Paths(t *testing.T) {
 			if _, err := DecodeFromSensorIn(b, schema); !refusedOnly(err, CodeForm, f) {
 				t.Errorf("%s null: %v, want only form at %s", name, err, f)
 			}
-			if err := decodeRuleOff(b, schema, r.rec(schema)); err != nil {
+			if err := decodeRuleOff(b, schema, r.rec(schema)); !onlyTextKeysMissing(err, f) {
 				t.Errorf("control, rule off, %s null: %v, want accepted", name, err)
 			}
 		}
@@ -230,6 +231,27 @@ func TestChannelNullRefusedAt34Paths(t *testing.T) {
 	if len(seen) != 34 {
 		t.Errorf("%d rows of D4's list covered, want 34", len(seen))
 	}
+}
+
+// onlyTextKeysMissing reports whether err is nil, or, for a Text at
+// field read with the rule off, only the missing refusals of that Text's
+// own keys (TestChannelRequiredKeysMissing): a null Text decodes as a Text
+// with none of them, and nothing is refused at field itself.
+func onlyTextKeysMissing(err error, field string) bool {
+	if err == nil {
+		return true
+	}
+	j, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return false
+	}
+	for _, e := range j.Unwrap() {
+		x, ok := e.(*Error)
+		if !ok || x.Code != CodeMissing || !strings.HasPrefix(x.Field, field+".") {
+			return false
+		}
+	}
+	return true
 }
 
 // nullPaths lists every key and list element of a decoded document by its
@@ -422,6 +444,80 @@ func TestHelloAndTickNullRefused(t *testing.T) {
 				if _, err := DecodeFromSensorIn(b, schema); err == nil {
 					t.Errorf("%s, %T %s null: accepted", schema, rec, field(p))
 				}
+			}
+		}
+	}
+}
+
+// deletePath removes the key at path from a decoded document.
+func deletePath(m map[string]any, path []any) {
+	var cur any = m
+	for _, p := range path[:len(path)-1] {
+		switch k := p.(type) {
+		case string:
+			cur = cur.(map[string]any)[k]
+		case int:
+			cur = cur.([]any)[k]
+		}
+	}
+	delete(cur.(map[string]any), path[len(path)-1].(string))
+}
+
+// as01 is o as a 0.1 channel record.
+func as01(o *Observation) *Observation {
+	cv := fxCoverage()
+	cv.PRP.LANsSeen = o.Coverage.PRP.LANsSeen
+	o.Schema, o.MadeUTC, o.Coverage = Identifier, "", cv
+	return o
+}
+
+// D1's ruling on #735: a key that C13 marks required, and that a 0.2 or
+// 0.3 channel record could leave out to be read as its Go zero value, is
+// refused as missing at both minors. Required by C13 0.1's text: function
+// code and objects (§4.3, no "?"), the SNMPv3 user and the identity value
+// (§4.3, Text with no "?"), every key of a Text (§3.1, "refuses any other
+// form"), and a redaction's offset (§3.2). Controls: each record with the
+// key decodes (TestChannelNullRefusedAt34Paths), and the same record
+// without it still decodes on the 0.1 channel, which this rule leaves as it
+// was.
+func TestChannelRequiredKeysMissing(t *testing.T) {
+	for _, r := range []struct {
+		path []any
+		rec  func(string) *Observation
+	}{
+		{[]any{"function", "code"}, nullModbus3},
+		{[]any{"function", "objects"}, nullFunction},
+		{[]any{"function", "objects"}, nullModbus3},
+		{[]any{"encrypted", "snmpv3", "user"}, nullSNMPv3},
+		{[]any{"identity", "value"}, nullIdentity},
+		{[]any{"citation", "frames", 1, "redactions", 0, "offset"}, nullRepeat},
+		{[]any{"identity", "value", "truncated"}, nullIdentity},
+		{[]any{"encrypted", "snmpv3", "user", "truncated"}, nullSNMPv3},
+		{[]any{"encrypted", "tls", "sni", "truncated"}, nullTLS},
+		{[]any{"service", "version", "truncated"}, nullService},
+		{[]any{"insecure", "login", "user", "truncated"}, nullTelnet},
+	} {
+		f := field(r.path)
+		for _, schema := range channelIdentifiers {
+			b := encodeWith(t, r.rec(schema), func(m map[string]any) { deletePath(m, r.path) })
+			if _, err := DecodeFromSensorIn(b, schema); !refusedOnly(err, CodeMissing, f) {
+				t.Errorf("%s, %s left out: %v, want only missing at %s", schema, f, err, f)
+			}
+		}
+		b := encodeWith(t, as01(r.rec(Identifier02)), func(m map[string]any) { deletePath(m, r.path) })
+		if _, err := DecodeChannel(b); err != nil {
+			t.Errorf("control, 0.1 channel, %s left out: %v", f, err)
+		}
+	}
+	// A Text's value or length left out is refused as missing too. Each is
+	// also refused by the value's own check, as the length no longer
+	// matches, on every channel; so this leg checks the missing refusal,
+	// not that it is the only one.
+	for _, k := range []string{"value", "length"} {
+		for _, schema := range channelIdentifiers {
+			b := encodeWith(t, nullIdentity(schema), func(m map[string]any) { deletePath(m, []any{"identity", "value", k}) })
+			if _, err := DecodeFromSensorIn(b, schema); !hasCode(err, CodeMissing) {
+				t.Errorf("%s, identity.value.%s left out: %v, want missing", schema, k, err)
 			}
 		}
 	}
