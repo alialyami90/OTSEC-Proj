@@ -390,14 +390,47 @@ def write_replay(f, *rows):
     (f / "private" / "replay.tsv").write_text("".join("\t".join(r) + "\n" for r in rows))
 
 
+def check_no_leak(out):
+    """The disclosure rule on the judge's output: no trace, input, artifact
+    name or log line of the private files reaches it."""
+    for leak in (TRACE, "AddressSanitizer", "heap-buffer-overflow", INPUT_B64, "AVBLVAEF", INPUT_HEX, ART,
+                 "crash-", "secret-input", "peak_rss"):
+        assert leak not in out, leak
+
+
 def test_judge_pass_and_its_output_holds_no_input_trace_or_name(tmp_path, capsys):
     judge = run_judge(tmp_path)
     out = summary(judge, tmp_path, capsys)
     assert "Verdict: **pass**" in out
     assert "| packet | c2 | ran | 1800 | 12345 | 0 |" in out
-    for leak in (TRACE, "AddressSanitizer", "heap-buffer-overflow", INPUT_B64, "AVBLVAEF", INPUT_HEX, ART,
-                 "crash-", "secret-input", "peak_rss"):
-        assert leak not in out
+    check_no_leak(out)
+    # With reports and their inputs on every campaign, too.
+    judge = run_judge(tmp_path / "r", *[(b, t, {"rc": 77, "artifacts": (ART,)})
+                                        for t in judge.TARGETS for b in judge.BUILDS])
+    write_replay(tmp_path / "r", *[(t, b, "77", "77") for t in judge.TARGETS for b in judge.BUILDS])
+    check_no_leak(summary(judge, tmp_path / "r", capsys))
+
+
+# The disclosure controls: a judge that copies a private file into the
+# summary must fail check_no_leak.
+JUDGE_LEAK_CONTROLS = [
+    ("log-in-table", ('"-" if ex is None else str(ex)',
+                      'open(os.path.join(d, "log")).read()')),
+    ("artifact-names", ('f"reports that left no input: {reports_no_input}."',
+                        'f"reports that left no input: {reports_no_input}." + " ".join('
+                        'os.listdir(os.path.join(priv, "c2", "dnp3_tcp", "artifacts")))')),
+]
+
+
+@pytest.mark.parametrize("name,edit", JUDGE_LEAK_CONTROLS, ids=[c[0] for c in JUDGE_LEAK_CONTROLS])
+def test_judge_disclosure_control_fails(tmp_path, capsys, name, edit):
+    run_judge(tmp_path, ("c2", "dnp3_tcp", {"rc": 77, "artifacts": (ART,)}))
+    write_replay(tmp_path, ("dnp3_tcp", "c2", "77", "77"))
+    judge = load(JUDGE, "fuzz_judge_leak_" + name.replace("-", "_"), edit)
+    judge.summary(str(tmp_path))
+    out = capsys.readouterr().out
+    with pytest.raises(AssertionError):
+        check_no_leak(out)
 
 
 def test_judge_fail_on_a_report_against_the_patch(tmp_path, capsys):
@@ -407,6 +440,27 @@ def test_judge_fail_on_a_report_against_the_patch(tmp_path, capsys):
     assert "Verdict: **fail**" in out and "Against the patch (reproduces on C2, not on C1p): 1." in out
     assert "ended by a report before their time: 1" in out
     assert ART not in out and TRACE not in out and "secret-input" not in out
+
+
+def check_early_bound(judge, tmp_path, capsys):
+    # A campaign that stopped on a report at exactly its pinned time ran its
+    # whole time; one second short of it ended early.
+    for secs, want in ((1800, 0), (1799, 1)):
+        f = tmp_path / str(secs)
+        run_judge(f, ("c2", "dnp3_tcp", {"rc": 77, "secs": secs, "artifacts": (ART,)}))
+        write_replay(f, ("dnp3_tcp", "c2", "77", "77"))
+        judge.summary(str(f))
+        assert f"ended by a report before their time: {want};" in capsys.readouterr().out
+
+
+def test_judge_early_stop_bound(tmp_path, capsys):
+    check_early_bound(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
+
+
+def test_judge_early_stop_control_off_by_one_fails(tmp_path, capsys):
+    judge = load(JUDGE, "fuzz_judge_early", ("secs < seconds_pin", "secs <= seconds_pin"))
+    with pytest.raises(AssertionError):
+        check_early_bound(judge, tmp_path, capsys)
 
 
 def test_judge_stock_report_is_counted_not_netted_out(tmp_path, capsys):
@@ -542,22 +596,64 @@ WORKFLOW = os.path.join(ROOT, ".github", "workflows", "d4-zeek-dnp3-fuzz.yml")
 FUZZ_SH = os.path.join(HERE, "fuzz.sh")
 
 
-def test_workflow_uploads_nothing_and_prints_no_private_file():
-    with open(WORKFLOW, encoding="utf-8") as fh:
-        wf = fh.read()
+def check_workflow(wf):
+    """The disclosure rule on the workflow: dispatch-only, nothing uploaded
+    or cached, and no step names the private folder."""
     assert "upload-artifact" not in wf and "actions/cache" not in wf
-    assert re.search(r"^on:\n  workflow_dispatch:", wf, re.M)
-    assert "pull_request" not in wf and "push:" not in wf
+    assert re.search(r"^on:\n  workflow_dispatch:\npermissions:", wf, re.M)
+    assert "pull_request" not in wf and "push:" not in wf and "schedule:" not in wf
     assert "private" not in wf
 
 
-def test_fuzz_sh_sends_every_fuzzer_run_to_a_private_file():
-    with open(FUZZ_SH, encoding="utf-8") as fh:
-        lines = fh.read().split("\n")
+def check_fuzz_sh(src):
+    """The disclosure rule on fuzz.sh: every fuzzer run writes to a private
+    file, and no command prints one."""
+    lines = src.split("\n")
     calls = [x for x in lines if re.search(r"\bfuzzer (c1p|c2|\$b|\$rb) ", x)]
     assert len(calls) == 3  # campaign, replay, coverage
     for x in calls:
         assert re.search(r'> "\$(d|priv)/[^"]*" 2>&1', x), x
-    # Nothing in fuzz.sh prints a private file.
     for x in lines:
         assert not re.search(r'\b(cat|head|tail|sed|grep|less)\b[^|]*"\$(priv|d)/', x), x
+
+
+def read(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read().replace("\r\n", "\n")
+
+
+def test_workflow_uploads_nothing_and_prints_no_private_file():
+    check_workflow(read(WORKFLOW))
+
+
+def test_fuzz_sh_sends_every_fuzzer_run_to_a_private_file():
+    check_fuzz_sh(read(FUZZ_SH))
+
+
+# The disclosure controls on the files that run: each mutant must fail.
+WORKFLOW_CONTROLS = [
+    ("upload-artifact", ("      - name: Summary and verdict\n",
+                         "      - uses: actions/upload-artifact@v4\n        with:\n          path: ${{ runner.temp }}\n"
+                         "      - name: Summary and verdict\n")),
+    ("push-trigger", ("on:\n  workflow_dispatch:\n", "on:\n  workflow_dispatch:\n  push:\n")),
+]
+FUZZ_SH_CONTROLS = [
+    ("campaign-to-the-job-log", ('"$d/corpus" > "$d/log" 2>&1 || rc=$?', '"$d/corpus" || rc=$?')),
+    ("replay-log-printed", ('  rm -f "$priv/replay.log"', '  cat "$priv/replay.log"')),
+]
+
+
+@pytest.mark.parametrize("name,edit", WORKFLOW_CONTROLS, ids=[c[0] for c in WORKFLOW_CONTROLS])
+def test_workflow_disclosure_control_fails(name, edit):
+    wf = read(WORKFLOW)
+    assert wf.count(edit[0]) == 1, edit[0]
+    with pytest.raises(AssertionError):
+        check_workflow(wf.replace(*edit))
+
+
+@pytest.mark.parametrize("name,edit", FUZZ_SH_CONTROLS, ids=[c[0] for c in FUZZ_SH_CONTROLS])
+def test_fuzz_sh_disclosure_control_fails(name, edit):
+    src = read(FUZZ_SH)
+    assert src.count(edit[0]) == 1, edit[0]
+    with pytest.raises(AssertionError):
+        check_fuzz_sh(src.replace(*edit))
