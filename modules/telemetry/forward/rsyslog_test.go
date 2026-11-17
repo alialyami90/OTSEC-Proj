@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -199,39 +200,55 @@ func (r *rsyslog) eids() []string {
 	return out
 }
 
-// sessions counts the forwarder's connections to rsyslog and keeps the
-// error that ended each one before it, so a run with breaks says why.
+// sessions keeps the error that ended each of the forwarder's connections
+// to rsyslog, one per break, so a run with breaks says why.
 type sessions struct {
-	mu  sync.Mutex
-	f   *Forwarder
-	n   int
-	why []string
+	mu   sync.Mutex
+	f    *Forwarder
+	open bool // the last dial connected, and its end is not recorded yet
+	why  []error
 }
 
-// wrap counts each connection dial opens, and notes the previous
-// session's end from the forwarder's status.
+// wrap records, at the first dial after a successful one, the error that
+// ended that session (Status.LastErr). Failed dials add nothing, and a
+// clean end (nil, the TXNRs used up with everything confirmed) is no break.
 func (s *sessions) wrap(dial func(context.Context) (net.Conn, error)) func(context.Context) (net.Conn, error) {
 	return func(ctx context.Context) (net.Conn, error) {
-		c, err := dial(ctx)
 		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.n > 0 && s.f != nil {
+		if s.open {
+			s.open = false
 			if e := s.f.Status().LastErr; e != nil {
-				s.why = append(s.why, e.Error())
+				s.why = append(s.why, e)
 			}
 		}
+		s.mu.Unlock()
+		c, err := dial(ctx)
 		if err == nil {
-			s.n++
+			s.mu.Lock()
+			s.open = true
+			s.mu.Unlock()
 		}
 		return c, err
 	}
 }
 
-// breaks is the number of sessions after the first, and why they ended.
-func (s *sessions) breaks() (int, []string) {
+// breaks is the number of sessions that ended with an error and was
+// followed by another, and those errors.
+func (s *sessions) breaks() (int, []error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return max(s.n-1, 0), append([]string(nil), s.why...)
+	return len(s.why), append([]error(nil), s.why...)
+}
+
+// timedOut reports whether a session ended on the response timeout (receive
+// or open) or on a write deadline: the ways a slow collector ends one.
+func timedOut(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	m := err.Error()
+	return strings.Contains(m, "forward: no response to transaction ") || strings.Contains(m, "forward: open: no response within ")
 }
 
 func rsyslogRig(t *testing.T, r *rsyslog, p *pki, client *tls.Certificate) *rig {
@@ -257,9 +274,12 @@ func rsyslogRig(t *testing.T, r *rsyslog, p *pki, client *tls.Certificate) *rig 
 // counting by event_id; exactly once when the session never broke. Delivery
 // is at least once (C6 mode A): a session that ends with transactions in
 // flight sends them again, so a run whose session broke k times may hold up
-// to k windows of duplicates, never more. On a loaded runner rsyslog's
-// synchronous write can outlast the 2 s response timeout and break the
-// session (run 44078255375: 508 lines for 500 events).
+// to k windows of duplicates, never more (while no report is owed). On a
+// loaded runner rsyslog's synchronous write can outlast the 2 s response
+// timeout and break the session (run 44078255375: 508 lines for 500 events).
+// That is the only break this test accepts: a session that ended for any
+// other reason fails it, so a fault in reading rsyslog's answers, or a close
+// from rsyslog's side, is not hidden by the duplicate bound.
 func TestRsyslogExactlyOnce(t *testing.T) {
 	p := newPKI(t)
 	r := startRsyslog(t, p, string(node))
@@ -271,7 +291,12 @@ func TestRsyslogExactlyOnce(t *testing.T) {
 	got := r.eids()
 	want := g.m.keys(serStream)
 	breaks, why := ss.breaks()
-	t.Logf("rsyslog wrote %d lines for %d events; %d session breaks: %q", len(got), len(want), breaks, why)
+	t.Logf("rsyslog wrote %d lines for %d events; %d session breaks: %v", len(got), len(want), breaks, why)
+	for i, e := range why {
+		if !timedOut(e) {
+			t.Errorf("session break %d was not a timeout: %v", i+1, e)
+		}
+	}
 	var first []string
 	seen := map[string]bool{}
 	for _, id := range got {
@@ -333,7 +358,7 @@ func TestRsyslogKilledMidStream(t *testing.T) {
 		}
 	}
 	breaks, why := ss.breaks()
-	t.Logf("confirmed through %d at the kill; %d duplicates (window %d); %d session breaks: %q", confirmed, dup, g.tg.RELPWindow, breaks, why)
+	t.Logf("confirmed through %d at the kill; %d duplicates (window %d); %d session breaks: %v", confirmed, dup, g.tg.RELPWindow, breaks, why)
 	if breaks < 1 {
 		t.Errorf("no session break; the kill was not exercised")
 	}
