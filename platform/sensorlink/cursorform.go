@@ -33,10 +33,10 @@ import (
 //	  owed mark, span count (6), and 8 x (from, to, cut end, mark) (32)
 //
 // This build fills the position, write_no, the digest, Ds, newest_seq, the
-// heartbeat baselines (section 1.8), the spans and prior. W, R, the gap
-// held for the floor and M are INT-D5 part 2c's: they are written "-", and
-// a cursor that carries any of them is refused, so a later build's cursor
-// is never read as this one's. Its largest is 2,026 bytes (section 1.4), within
+// heartbeat baselines (section 1.8), M (section 1.5), the spans and prior.
+// W, R and the gap held for the floor are the gap model's: they are
+// written "-", and a cursor that carries any of them is refused, so a
+// later build's cursor is never read as this one's. Its largest is 2,026 bytes (section 1.4), within
 // MaxLinkCursorBytes by construction.
 const (
 	cursorFormTag    = "sp2"
@@ -46,7 +46,7 @@ const (
 )
 
 // The reserved fields this build writes "-": their first index and count.
-var cursorReserved = [][2]int{{18, 4}, {22, 18}, {40, 6}, {46, 1}}
+var cursorReserved = [][2]int{{18, 4}, {22, 18}, {40, 6}}
 
 // The egress mark (section 1.8): whether the run's baseline heartbeat
 // carried egress_check, "-" when no baseline is held.
@@ -106,8 +106,17 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("sensorlink: the egress mark %q cannot be saved", c.Egress)
 	}
-	for range 4 + 18 + 6 + 1 { // W, R, the gap held, M: 2c's
+	for range 4 + 18 + 6 { // W, R, the gap held: the gap model's
 		f = append(f, cursorAbsent)
+	}
+	if c.M.IsZero() {
+		f = append(f, cursorAbsent)
+	} else {
+		n, err := unixNano(canonUTC(c.M))
+		if err != nil {
+			return nil, err
+		}
+		f = append(f, strconv.FormatInt(n, 10))
 	}
 	var err error
 	if f, err = appendSpans(f, c.Spans); err != nil {
@@ -254,6 +263,16 @@ func decodeCursor(b []byte) (*Cursor, error) {
 	if f[10] != cursorAbsent {
 		c.Digest = f[10]
 		bad = bad || !cursorDigest.MatchString(c.Digest)
+	}
+	if f[46] != cursorAbsent {
+		if !cursorDecimal.MatchString(f[46]) {
+			return nil, errCursorForm
+		}
+		n, err := strconv.ParseInt(f[46], 10, 64)
+		if err != nil {
+			return nil, errCursorForm
+		}
+		c.M = time.Unix(0, n).UTC()
 	}
 	if bad || !netobs.ValidUUID(c.RunID) {
 		return nil, errCursorForm

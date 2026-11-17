@@ -129,13 +129,15 @@ func TestReleaseSaveFailedNotSaved(t *testing.T) {
 		r, hs := holdRig02(t)
 		heldLate(t, r, hs, 10, true, nil, cursor9())
 		p := r.accepted(resume(4, 20)) // T 9, L 3
-		r.addWall(time.Minute)
+		// Past the deadline; tickAfter moves the monotonic clock as far, so
+		// the skew gate sees no move.
+		r.addWall(6 * time.Second)
 		r.cs.failNext(1 << 20) // every cursor save fails from here
 		r.l.TickHold(bg)       // the empty budget drops 10
 		if n := r.al.count(AlarmPositionNotSaved); n != 1 {
 			t.Fatalf("%d raises of %s", n, AlarmPositionNotSaved)
 		}
-		r.tickAfter(p, tick02(20, 10, 0))
+		r.tickAfter(p, r.agreeTick(tick02(20, 10, 0)))
 		p.ack(9) // never 10: no saved cursor holds the drop
 		r.cs.failNext(0)
 		checkCursor(t, r, 9, 0)
@@ -180,7 +182,9 @@ func TestReleaseSaveFailedNotSaved(t *testing.T) {
 		r, hs := holdRig02(t)
 		heldLate(t, r, hs, 10, false, nil, cursor9()) // resolved: the release stores it
 		p := r.accepted(resume(4, 20))
-		r.addWall(time.Minute)
+		// Past the deadline; tickAfter moves the monotonic clock as far, so
+		// the skew gate sees no move.
+		r.addWall(6 * time.Second)
 		fail := true
 		cursorEncodeFault = func(c *Cursor) error {
 			if fail && c.Taken == 10 {
@@ -195,7 +199,7 @@ func TestReleaseSaveFailedNotSaved(t *testing.T) {
 		if n, a := storedCount(t, r), r.al.count(AlarmPositionNotSaved); n != 1 || a != 1 {
 			t.Fatalf("stored %d, raises %d", n, a)
 		}
-		r.tickAfter(p, tick02(20, 10, 0))
+		r.tickAfter(p, r.agreeTick(tick02(20, 10, 0)))
 		p.ack(9)
 		r.cs.failNext(0)
 		checkCursor(t, r, 9, 0)
@@ -205,14 +209,16 @@ func TestReleaseSaveFailedNotSaved(t *testing.T) {
 		r, hs := holdRig02With(t, func(o *Options) { bf.Appender = o.Store; o.Store = bf })
 		heldLate(t, r, hs, 10, false, nil, cursor9())
 		p := r.accepted(resume(4, 20))
-		r.addWall(time.Minute)
+		// Past the deadline; tickAfter moves the monotonic clock as far, so
+		// the skew gate sees no move.
+		r.addWall(6 * time.Second)
 		bf.failNext(1)
 		r.cs.failNext(1 << 20) // the same store: the release's save fails too
 		r.l.TickHold(bg)
 		if d, a := r.l.Stats().Dropped[DropStore], r.al.count(AlarmPositionNotSaved); d != 1 || a != 1 {
 			t.Fatalf("dropped under store %d, raises %d", d, a)
 		}
-		r.tickAfter(p, tick02(20, 10, 0))
+		r.tickAfter(p, r.agreeTick(tick02(20, 10, 0)))
 		p.ack(9)
 		r.cs.failNext(0)
 		p.end()
@@ -241,7 +247,7 @@ func TestReleaseAtRecordEncode(t *testing.T) {
 	t.Run("the resend released at its encode is a duplicate", func(t *testing.T) {
 		r, hs := holdRig02(t)
 		heldDue(t, r, hs, false)
-		p := r.accepted(resume(1, 20)) // T 0
+		p := r.accepted(r.agreeHello(resume(1, 20))) // T 0
 		p.send(noSeq)
 		p.taken()
 		fired := at(t, r, 1)
@@ -257,7 +263,7 @@ func TestReleaseAtRecordEncode(t *testing.T) {
 	t.Run("a drop released at the encode keeps its count", func(t *testing.T) {
 		r, hs := holdRig02(t)
 		heldDue(t, r, hs, true)
-		p := r.accepted(resume(2, 20)) // T 1: the held record is below it
+		p := r.accepted(r.agreeHello(resume(2, 20))) // T 1: the held record is below it
 		p.send(noSeq)
 		p.taken()
 		fired := at(t, r, 2)

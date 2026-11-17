@@ -823,6 +823,12 @@ Rulings 1 to 15 settle the choices of the first text. What is still open:
   - **The sensor fold judges only whether each audit record parses** (M-10); applying what the records enrol or revoke, and the dial it holds back, are P4-4-DE's.
   - **Not in 2b's `sensorrun.json`:** SL-30's counts and proofs, the re-arm's spent set, the run's second copy, the poison record and the cap's record times (P4-4-DE), the copy of the earlier of W and R (part 2c), and the clear of `sensor-transmitted` (P4-4-DE, with its request file). The budgets' hour is the last hour on the node's monotonic clock.
   - **Not closed by 2b:** the open item on a store error that is not final at a release (above; owner D5, before P4-4-DE).
+- **INT-D5 part 2c, the skew estimate** (§1.5; `desk`). E, the alarm, the latest sample, the closure, K and the capture floor, M in the cursor, the start bound, the first break's heartbeats and the stated spans as raises, `node.skewed`, `node.late` (CH-23) and the `skew_*` counts are built, on the 0.2 path only (a link with a cursor store); the 0.1 path keeps `main`'s ties. Its choices and what it leaves, each stated:
+  - **A count is one refused tie:** a run dispatched while a cause stands (nothing is held), a held flow at its `Result`, or a record refused through the open table or at the hold.
+  - **Before any sample since the node's start, no cause stands;** a run held before the start ties nothing (`skew_prestart_windows`), and so does an open-table entry restored at a start, on the 0.2 path.
+  - **A raise of the floor whose save fails closes `store`,** as a baseline's does: the floor holds in memory, and the resend raises it again.
+  - **`Released.Skewed` is reported to the node; writing it on `collection.run` is the alert-key legs' (INT-D5b),** with the detector's use of it (INT-D4b).
+  - **Not in 2c:** the late index (§1.6) and the break rule with `node.backlog` (CH-39), which T-8 and every leg of T-13 need; the gap model (W, R and the gap held for the floor stay `-` in the cursor); N-18's node legs. D5 proposed them as further parts on 2c's PR.
 - **Not designed here:** a merge of two sensors' records; the second sensor itself (ruling 1); the sensor; its update path; a central role.
 
 ## 1.15 C13 0.2's points D5-1 to D5-12, as ruled, and the 0.1 rollback
