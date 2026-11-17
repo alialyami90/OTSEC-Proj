@@ -1028,9 +1028,62 @@ func TestCursorTextForm(t *testing.T) {
 	if _, err := decodeCursor(append(slices.Clone(b), " -"...)); err == nil {
 		t.Error("119 fields read")
 	}
-	far := *c
-	far.Spans = []HeldSpan{{FromUTC: "2300-01-01T00:00:00Z", ToUTC: "2300-01-01T00:00:01Z", CutUTC: "2300-01-01T00:00:01Z"}}
-	if _, err := encodeCursor(&far); err == nil {
-		t.Error("a time past 2262 was encoded")
+	// Every reserved field, and every field of an absent prior (D6's N1 on
+	// #742).
+	for _, rs := range cursorReserved {
+		for i := rs[0]; i < rs[0]+rs[1]; i++ {
+			g := slices.Clone(f)
+			g[i] = "0"
+			if _, err := decodeCursor([]byte(strings.Join(g, " "))); err == nil {
+				t.Errorf("reserved field %d filled: read", i)
+			}
+		}
+	}
+	nf := strings.Split(string(b2), " ")
+	for i := 80; i < cursorFields; i++ {
+		g := slices.Clone(nf)
+		g[i] = "0"
+		if _, err := decodeCursor([]byte(strings.Join(g, " "))); err == nil {
+			t.Errorf("field %d of an absent prior filled: read", i)
+		}
+	}
+	// The digest in its one form, and a span in CH-40's order (D3's N1,
+	// D6's N2 on #742). The span is 09:00:00 to 09:00:05.5.
+	to := f[49]
+	after := strconv.FormatUint(num(to)+1, 10)
+	for _, k := range []struct {
+		name string
+		i    int
+		v    string
+	}{
+		{"an empty digest", 10, ""}, {"a digest of another form", 10, "x\x00\x01<script>"},
+		{"a digest in upper case", 10, strings.ToUpper(testDigest)}, {"a span's from after its to", 48, after},
+		{"a span's cut end after its to", 50, after},
+	} {
+		g := slices.Clone(f)
+		g[k.i] = k.v
+		if _, err := decodeCursor([]byte(strings.Join(g, " "))); err == nil {
+			t.Errorf("%s: read", k.name)
+		}
+	}
+	// What the decoder refuses is never encoded.
+	for name, mut := range map[string]func(*Cursor){
+		"a time past 2262": func(c *Cursor) {
+			c.Spans = []HeldSpan{{FromUTC: "2300-01-01T00:00:00Z", ToUTC: "2300-01-01T00:00:01Z", CutUTC: "2300-01-01T00:00:01Z"}}
+		},
+		"a time before 1970": func(c *Cursor) {
+			c.Spans = []HeldSpan{{FromUTC: "1969-12-31T23:59:59Z", ToUTC: "1970-01-01T00:00:01Z", CutUTC: "1970-01-01T00:00:01Z"}}
+		},
+		"a run_id that is not a UUID": func(c *Cursor) { c.RunID = strings.Repeat("a", 3000) },
+		"a digest of another form":    func(c *Cursor) { c.Digest = "sha256:x" },
+		"a span's cut end after its to": func(c *Cursor) {
+			c.Spans = []HeldSpan{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:00:01Z", CutUTC: "2026-11-07T09:00:02Z"}}
+		},
+	} {
+		bad := *c
+		mut(&bad)
+		if _, err := encodeCursor(&bad); err == nil {
+			t.Errorf("%s: encoded", name)
+		}
 	}
 }

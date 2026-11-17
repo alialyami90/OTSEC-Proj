@@ -41,7 +41,6 @@ import (
 const (
 	cursorFormTag    = "sp2"
 	cursorFields     = 118
-	cursorDigestMax  = 71
 	cursorAbsent     = "-"
 	cursorSpanFields = 4
 )
@@ -50,6 +49,11 @@ const (
 var cursorReserved = [][2]int{{9, 1}, {13, 5}, {18, 4}, {22, 18}, {40, 6}, {46, 1}}
 
 var cursorDecimal = regexp.MustCompile(`^(0|[1-9][0-9]{0,19})$`)
+
+// cursorDigest is the digest's one form, C13's config_digest: 71
+// characters. An absent digest is "-", never empty (D3's N1, D6's N2 on
+// #742).
+var cursorDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // cursorEncodeFault is a test seam: nil in the node.
 var cursorEncodeFault func(*Cursor) error
@@ -102,7 +106,9 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if c.RunID == "" || strings.ContainsAny(c.RunID+c.Digest, " ") || len(c.Digest) > cursorDigestMax || len(f) != cursorFields {
+	// What the decoder refuses is refused here too, so a cursor saved is
+	// one the next start reads (D6's N2 on #742).
+	if !netobs.ValidUUID(c.RunID) || (c.Digest != "" && !cursorDigest.MatchString(c.Digest)) || len(f) != cursorFields {
 		return nil, fmt.Errorf("sensorlink: a cursor of run %q cannot be saved", c.RunID)
 	}
 	b := []byte(strings.Join(f, " "))
@@ -124,12 +130,17 @@ func appendSpans(f []string, spans []HeldSpan) ([]string, error) {
 			continue
 		}
 		s := spans[i]
-		for _, v := range []string{s.FromUTC, s.ToUTC, s.CutUTC} {
+		var t [3]int64
+		for j, v := range []string{s.FromUTC, s.ToUTC, s.CutUTC} {
 			n, err := unixNano(v)
 			if err != nil {
 				return nil, err
 			}
-			f = append(f, n)
+			t[j] = n
+			f = append(f, strconv.FormatInt(n, 10))
+		}
+		if !spanOrdered(t) {
+			return nil, fmt.Errorf("sensorlink: a span from %s to %s cut at %s cannot be saved", s.FromUTC, s.ToUTC, s.CutUTC)
 		}
 		m := 0
 		if s.Owed {
@@ -143,13 +154,18 @@ func appendSpans(f []string, spans []HeldSpan) ([]string, error) {
 	return f, nil
 }
 
-func unixNano(s string) (string, error) {
+func unixNano(s string) (int64, error) {
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil || t.Before(time.Unix(0, 0)) || t.After(time.Unix(0, math.MaxInt64)) {
-		return "", fmt.Errorf("sensorlink: the time %q cannot be saved in Unix nanoseconds", s)
+		return 0, fmt.Errorf("sensorlink: the time %q cannot be saved in Unix nanoseconds", s)
 	}
-	return strconv.FormatInt(t.UnixNano(), 10), nil
+	return t.UnixNano(), nil
 }
+
+// spanOrdered is CH-40's from at or before to, and a cut end never past
+// to (cutEnd); a cut end before from is a window cut to nothing (D3's N1
+// on #742).
+func spanOrdered(t [3]int64) bool { return t[0] <= t[1] && t[2] <= t[1] }
 
 func mark01(b bool) string {
 	if b {
@@ -201,8 +217,9 @@ func decodeCursor(b []byte) (*Cursor, error) {
 		Refused: dec(7), Dropped: dec(8), Ds: dec(11), NewestSeq: dec(12)}
 	if f[10] != cursorAbsent {
 		c.Digest = f[10]
+		bad = bad || !cursorDigest.MatchString(c.Digest)
 	}
-	if bad || !netobs.ValidUUID(c.RunID) || len(c.Digest) > cursorDigestMax {
+	if bad || !netobs.ValidUUID(c.RunID) {
 		return nil, errCursorForm
 	}
 	var err error
@@ -242,15 +259,18 @@ func readSpans(f []string, i int) ([]HeldSpan, error) {
 			continue
 		}
 		var t [3]string
+		var v [3]int64
 		for j := range 3 {
 			if !cursorDecimal.MatchString(s[j]) {
 				return nil, errCursorForm
 			}
-			v, err := strconv.ParseInt(s[j], 10, 64)
-			if err != nil {
+			if v[j], err = strconv.ParseInt(s[j], 10, 64); err != nil {
 				return nil, errCursorForm
 			}
-			t[j] = canonUTC(time.Unix(0, v))
+			t[j] = canonUTC(time.Unix(0, v[j]))
+		}
+		if !spanOrdered(v) {
+			return nil, errCursorForm
 		}
 		m, err := strconv.Atoi(s[3])
 		if err != nil || m < 0 || m > 3 || s[3] != strconv.Itoa(m) {
