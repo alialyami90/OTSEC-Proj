@@ -192,6 +192,18 @@ func TestTransmittedAfterNodeRestart(t *testing.T) {
 	if r.al.count(AlarmTransmitted) != 1 {
 		t.Fatalf("raises %v", r.al.list)
 	}
+	// No rise against the durable baseline raises nothing new: after the
+	// next start the alarm stands once, and a heartbeat still at 1 adds
+	// no raise.
+	p.end()
+	r.restart()
+	p = r.dial(enrolment())
+	p.send(resume(4, 20))
+	p.ack(3)
+	r.beat(p, hb(4, outgoing(1)))
+	if r.al.count(AlarmTransmitted) != 1 {
+		t.Fatalf("no rise: raises %v", r.al.list)
+	}
 	// Control: a node comparing within a connection has no earlier
 	// heartbeat on the new connection to compare 1 with.
 	withinConnection := func(prev *uint64, v uint64) bool { return prev != nil && v > *prev }
@@ -212,7 +224,12 @@ func TestTransmittedAfterNodeRestart(t *testing.T) {
 		}
 		r.clk.add(cursorSpacing)
 		p.send(hb(2, outgoing(1)))
-		p.closed()
+		if baselineFirst {
+			p.taken()
+			p.end() // killed after the baseline's save
+		} else {
+			p.closed() // store: the baseline's save failed
+		}
 		transmitBaselineFirst, runFileFault = false, nil
 		r.restart()
 		atStart = r.al.count(AlarmTransmitted)
