@@ -43,7 +43,7 @@ ENGINE = os.path.join(HERE, "engine-pass-conditions.tsv")
 SHA256 = {
     CASES: "f66f7952a398c0fc420507dfb125c00f1bd3538399305f24fe1c5b2727420687",
     MALFORMED: "cb44947dbc2e6e50dfea1b04c511a37ffdd84fa4120e8c0527d834ef10a60a93",
-    CONDITIONS: "c0c27752c48f4272ca486b2e2b5dc8b2e8dafde3f65af319593338d98228aabd",
+    CONDITIONS: "19aa8092e45cf6dc2a7b2fd68abf32966588ac7ee292a36c298967863bbe3122",
 }
 CONFIGS = ("c0", "c1", "c1p", "c2")
 FIXES = {"a", "b", "unknown", "premise", "control", "r1"}
