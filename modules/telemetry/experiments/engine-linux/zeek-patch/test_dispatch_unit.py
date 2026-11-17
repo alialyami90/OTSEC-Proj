@@ -251,7 +251,7 @@ def _tcp_data(f):
         p = t[(t[12] >> 4) * 4:]
         if not p:
             continue
-        assert p[:2] == b"d"
+        assert p[:2] == b"\x05\x64"
         n, user, i = p[2] - 5, b"", 10
         while len(user) < n:
             k = min(16, n - len(user))
