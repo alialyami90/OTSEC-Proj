@@ -386,30 +386,31 @@ func TestIntakeS2GapDeclared(t *testing.T) {
 	p := r.accepted(hello02())
 	p.send(obs02(1), obs02(3)) // G 1
 	p.ack(3)
-	r.tickAfter(p, tick02(20, 3, 1)) // D 1 covers it
+	r.tickAfter(p, tick02(20, 3, 2)) // D 2, above G: nothing
 	p.send(obs02(6))                 // G 3
 	p.ack(6)
 	if r.al.count(AlarmGapUndeclared) != 0 {
 		t.Fatalf("raised while D covers G: %v", r.al.list)
 	}
-	r.tickAfter(p, tick02(20, 6, 1))
+	r.tickAfter(p, tick02(20, 6, 2)) // G 3 above D 2: the excess, 1
 	hb7 := twoIfs(heartbeat02(7, 10), 6, 4)
-	hb7.Counters.DropsChannel = 1
+	hb7.Counters.DropsChannel = 2
 	p.send(hb7) // a frame after the tick, so the tick is read
 	settle(t, r.l, func(s Stats) bool { return s.Heartbeats == 1 })
-	if r.al.count(AlarmGapUndeclared) != 1 || !strings.Contains(r.al.list[0], "reason seq") {
+	if r.al.count(AlarmGapUndeclared) != 1 || !strings.Contains(r.al.list[0], "reason seq") || !strings.Contains(r.al.list[0], "3 records never read beyond the 2") {
 		t.Fatalf("raises: %v", r.al.list)
 	}
 	hb := twoIfs(heartbeat02(8, 9), 5, 4) // packets falls
-	hb.Counters.DropsChannel = 1
+	hb.Counters.DropsChannel = 2
 	p.send(hb)
 	hb = twoIfs(heartbeat02(9, 20), 5, 15) // interfaces[].packets falls alone (K-1)
+	hb.Counters.DropsChannel = 2
+	p.send(hb)
+	hb = twoIfs(heartbeat02(10, 20), 6, 14) // drops_channel falls from 2
 	hb.Counters.DropsChannel = 1
 	p.send(hb)
-	hb = twoIfs(heartbeat02(10, 20), 6, 14) // drops_channel falls from 1
-	p.send(hb)
 	settle(t, r.l, func(s Stats) bool { return s.Refused[RefusedCounterDecrease] == 3 })
-	r.tickAfter(p, tick02(20, 10, 0)) // drops_channel falls from 1
+	r.tickAfter(p, tick02(20, 10, 1)) // drops_channel falls from 2
 	if got := p.closed(); got != netobs.CloseTick {
 		t.Fatalf("close %q, want tick", got)
 	}

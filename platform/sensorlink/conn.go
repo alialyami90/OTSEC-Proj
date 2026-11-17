@@ -524,12 +524,14 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 	if v.Accept == netobs.HelloNewRun {
 		// CH-15's check for the run the cursor holds runs first, before the
 		// save below overwrites G and D (D5's N9 on #634).
-		if live {
+		if cur != nil {
 			l.checkGap(cur)
 		}
 		next = &Cursor{Generation: cn.en.Generation, RunCounter: num(h.RunCounter), RunID: h.RunID,
 			Taken: first - 1, G: first - 1, D: drops, Digest: h.ConfigDigest, NewestSeq: newest}
-		if live {
+		if cur != nil {
+			// A position that reads as none, or that this save replaces,
+			// keeps what it owes (CH-12).
 			next.Carried = carry(cur)
 		}
 		p := h.Prior
