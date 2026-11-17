@@ -177,6 +177,10 @@ type sensorIntake struct {
 
 	mu        sync.Mutex
 	connected int
+	// live closes each connection ServeSensor is reading, for a
+	// sensor-failed (section 1.9 item 9; D4-107 item 5.2); n names the next.
+	live map[int]func()
+	n    int
 	// base is the counts restored at start, which the link's own add to.
 	base dropCounts
 	// alerts are the alerts the store refused, by reason and by
@@ -386,15 +390,42 @@ func (r *Runtime) ServeSensor(ctx context.Context, rd io.Reader) error {
 		}
 		return errors.New("node: no network_sensor section")
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	in.mu.Lock()
 	in.connected++
+	id := in.n
+	in.n++
+	if in.live == nil {
+		in.live = map[int]func(){}
+	}
+	in.live[id] = func() {
+		cancel()
+		if c, ok := rd.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
 	in.mu.Unlock()
 	defer func() {
 		in.mu.Lock()
 		in.connected--
+		delete(in.live, id)
 		in.mu.Unlock()
 	}()
+	if r.sensorFailed.Load() { // failed while this connection was being registered
+		return errors.New("node: the sensor's work has failed")
+	}
 	return in.link.Serve(ctx, rd)
+}
+
+// closeLive closes every connection ServeSensor is reading: after
+// sensor-failed no connection stays open or is read.
+func (in *sensorIntake) closeLive() {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	for _, close := range in.live {
+		close()
+	}
 }
 
 // counts are the drop counts now: those restored at start plus the link's.

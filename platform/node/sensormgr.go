@@ -379,6 +379,9 @@ func (r *Runtime) askDrive(more bool) {
 // sensor, and stops the sensor's work until a restart.
 func (r *Runtime) failSensor(p any) {
 	r.sensorFailed.Store(true)
+	if in := r.sensor.Load(); in != nil {
+		in.closeLive()
+	}
 	detail := fmt.Sprintf("%v\n%s", p, debug.Stack())
 	if len(detail) > SensorFailedDetailBytes {
 		detail = detail[:SensorFailedDetailBytes] + "..."

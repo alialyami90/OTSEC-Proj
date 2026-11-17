@@ -122,6 +122,15 @@ func (g *holdRig) obs(kind string, sport int, at time.Duration) *netobs.Observat
 	return o
 }
 
+// otherStart is a flow start between two assets, not the node: a start of
+// the sensor run that no hold run watches.
+func (g *holdRig) otherStart() *netobs.Observation {
+	g.seq++
+	o := flow(g.seq, "192.0.2.10", "192.0.2.30")
+	o.RunID, o.Citation.CaptureID = g.run, "ring:"+g.run+":3"
+	return o
+}
+
 func (g *holdRig) send(recs ...any) {
 	g.t.Helper()
 	if err := g.l.Serve(bg, stream(g.t, recs...)); err != nil {
@@ -586,8 +595,8 @@ func TestHoldOpenExpiry(t *testing.T) {
 	g.wall = g.wall.Add(idle - time.Second)
 	g.send(g.obs("function", 40001, 2*time.Minute))
 	g.wall = g.wall.Add(idle)
-	g.send(g.obs("function", 40001, 3*time.Minute))
-	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection}, tied{4, "", ""})
+	g.send(g.otherStart(), g.obs("function", 40001, 3*time.Minute)) // a start past the bound expires it (CH-57)
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection}, tied{4, "", ""}, tied{5, "", ""})
 	if s := g.l.Stats().Hold; s.OpenExpired != 1 || s.Open != 0 {
 		t.Fatalf("hold %+v", s)
 	}
@@ -598,6 +607,7 @@ func TestHoldOpenExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.wall = g.wall.Add(idle)
+	g.send(g.otherStart())
 	g.l.TickHold(bg)
 	if s := g.l.Stats().Hold; s.OpenExpired != 2 || s.Open != 0 || len(g.saved[len(g.saved)-1].Open) != 0 {
 		t.Fatalf("after TickHold: %+v", s)
@@ -621,8 +631,8 @@ func TestHoldOpenExpiryRestart(t *testing.T) {
 	g.send(g.obs("function", 40001, 2*time.Minute)) // within the moved expiry
 	g.wall = g.wall.Add(idle)
 	g.l = g.link(g.restore())
-	g.send(g.obs("function", 40001, 3*time.Minute)) // past it
-	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection}, tied{4, "", ""})
+	g.send(g.otherStart(), g.obs("function", 40001, 3*time.Minute)) // past it, after a start (CH-57)
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection}, tied{3, inv1, TieConnection}, tied{4, "", ""}, tied{5, "", ""})
 
 	g.dispatch("req-2")
 	g.send(g.obs("start", 40002, 0))
@@ -633,8 +643,8 @@ func TestHoldOpenExpiryRestart(t *testing.T) {
 	g.l = g.link(g.restore())
 	g.l.TickHold(bg) // at start, before Serve (D3's note for the wiring)
 	g.wall = g.wall.Add(idle)
-	g.send(g.obs("function", 40002, time.Minute))
-	if c := g.committed(); c[len(c)-1] != (tied{6, "", ""}) {
+	g.send(g.otherStart(), g.obs("function", 40002, time.Minute))
+	if c := g.committed(); c[len(c)-1] != (tied{8, "", ""}) {
 		t.Fatalf("the step stretched the expiry: %+v", c)
 	}
 }
@@ -854,6 +864,7 @@ func TestHoldResultExpiredOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 	g.wall = g.wall.Add(netobs.DefaultFlowIdleS*time.Second + 30*time.Second)
+	g.send(g.otherStart()) // a start past the bound expires the entry (CH-57)
 	g.dispatch("req-2")
 	got, err := g.l.Result(bg, "req-2", session09(inv2, 40001, 2*time.Minute))
 	if err != nil {
@@ -868,7 +879,7 @@ func TestHoldResultExpiredOpen(t *testing.T) {
 		t.Fatalf("released %+v and %+v, want no open flow", got, other)
 	}
 	g.send(g.obs("function", 40001, 3*time.Minute))
-	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, "", ""})
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, "", ""}, tied{3, "", ""})
 }
 
 // D6's probe P4 on #576 (N1).
@@ -931,5 +942,128 @@ func TestHoldRepointSaveFails(t *testing.T) {
 	}
 	if last := g.saved[len(g.saved)-1]; last.Run.RequestID != "req-4" || last.State != HoldReleased || !last.OpenFlow {
 		t.Errorf("recovered record: %s %s open_flow %v", last.Run.RequestID, last.State, last.OpenFlow)
+	}
+}
+
+// openEntryPastBound has req-1's flow tied and open, then moves the wall
+// past its bound with no start taken.
+func openEntryPastBound(t *testing.T) *holdRig {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	// The wall and the monotonic clock move together: the tie's start is
+	// before the bound on both (D4's N1 on #732).
+	d := netobs.DefaultFlowIdleS*time.Second + 30*time.Second
+	g.wall, g.c.now = g.wall.Add(d), g.c.now+d
+	return g
+}
+
+// D4-102 item 5 (c), CH-57: past its wall-time bound, an open entry expires
+// only after a later flow start of the run. Control: main's expiry at the
+// bound alone (TickHold removes it before any start).
+func TestOpenExpiryAfterLaterStart(t *testing.T) {
+	g := openEntryPastBound(t)
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 1 || s.OpenExpired != 0 {
+		t.Fatalf("expired with no later start: %+v", s)
+	}
+	g.send(g.otherStart())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 || len(g.saved[len(g.saved)-1].Open) != 0 {
+		t.Fatalf("not expired after a later start: %+v", s)
+	}
+}
+
+// D4-102 item 5 (c): the arriving record is matched before the expiry
+// check, so a record past the bound with no later start ties to its entry.
+// Control: the expiry checked before the match (main's: the record is
+// untied).
+func TestOpenExpiryMatchFirst(t *testing.T) {
+	g := openEntryPastBound(t)
+	g.send(g.obs("function", 40001, 3*time.Minute))
+	want(t, g.committed(), tied{1, inv1, TieConnection}, tied{2, inv1, TieConnection})
+	if s := g.l.Stats().Hold; s.OpenExpired != 0 || s.Open != 1 {
+		t.Fatalf("hold %+v", s)
+	}
+}
+
+// D4-102 item 5 (c): an entry past its bound at a restart waits for the
+// next flow start taken after the restart; a start taken before it is not
+// remembered. Control: the start's time saved, or the entry expired at the
+// restart.
+func TestOpenExpiryWaitsAfterRestart(t *testing.T) {
+	g := openEntryPastBound(t)
+	g.send(g.otherStart()) // taken before the restart, expiry not yet applied
+	g.l = g.link(g.restore())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 1 || s.OpenExpired != 0 {
+		t.Fatalf("expired at the restart: %+v", s)
+	}
+	g.send(g.otherStart())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 {
+		t.Fatalf("not expired after a start past the restart: %+v", s)
+	}
+}
+
+// D4's N1 and D6's N4 on #732: a start taken before a backward step of the
+// wall clock does not count as taken at or after a bound the step pulls
+// back. The start is placed on the wall clock from the monotonic time
+// since it. The entry is tied, a start comes 1 min later, the wall steps
+// back 1 h, and then the wall and the monotonic clock move on past the
+// bound: the entry stays until a start is taken after it. Control: the
+// start's wall time kept (the entry expires with no start after the
+// bound).
+func TestOpenExpiryWallStepBack(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall, g.c.now = g.wall.Add(time.Minute), g.c.now+time.Minute
+	g.send(g.otherStart())
+	g.wall = g.wall.Add(-time.Hour)
+	g.l.TickHold(bg)
+	step := netobs.DefaultFlowIdleS*time.Second + 30*time.Second
+	g.wall, g.c.now = g.wall.Add(step), g.c.now+step
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 1 || s.OpenExpired != 0 {
+		t.Fatalf("expired with no start after the bound: %+v", s)
+	}
+	g.send(g.otherStart())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 {
+		t.Fatalf("not expired after a later start: %+v", s)
+	}
+}
+
+// D6's N5 on #732: a start taken before a forward step of the wall clock
+// does not count as taken at or after a bound the step passes. The entry
+// is tied, a start comes 1 min later, before the bound, and the wall
+// steps forward 1 h with the monotonic clock still: the entry stays until
+// a start is taken after the step. Control: a6264dd8's placement, the
+// monotonic one alone (the entry expires with no start after the bound).
+func TestOpenExpiryWallStepForward(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall, g.c.now = g.wall.Add(time.Minute), g.c.now+time.Minute
+	g.send(g.otherStart())
+	g.wall = g.wall.Add(time.Hour)
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 1 || s.OpenExpired != 0 {
+		t.Fatalf("expired with no start after the bound: %+v", s)
+	}
+	g.send(g.otherStart())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 {
+		t.Fatalf("not expired after a later start: %+v", s)
 	}
 }

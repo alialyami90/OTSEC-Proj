@@ -254,6 +254,21 @@ type hold struct {
 	stats     HoldStats
 	// phase is the release in progress, for result's deferred clean-up.
 	phase *releasePhase
+	// lastStart is the node's monotonic time when it last took a flow start
+	// of the sensor run, and started whether one was taken since the link
+	// was made: an open entry past its bound expires only once a start is
+	// taken at or after the bound (CH-57; D4-102 item 5 (c)). The start is
+	// placed on the wall clock at each check, from the monotonic time since
+	// it, so a step of the wall clock after it cannot move it past a bound
+	// (D4's N1 and D6's N4 on #732). Its wall time is kept too, and the
+	// earlier of the two placements counts, so a forward step cannot carry
+	// it past a bound either (D6's N5 on #732). It is not saved, so after a
+	// restart an entry past its bound waits for the next start taken after
+	// it.
+	lastStart     time.Duration
+	lastStartWall time.Time
+	started       bool
+	mono          func() time.Duration
 }
 
 // releasePhase is how far a release has gone, for result's deferred
@@ -439,14 +454,28 @@ func (h *hold) expires(of OpenFlow, now time.Time) time.Time {
 	return of.Expires
 }
 
-// expireOpen removes the open entries past their expiry, counted, and
+// expired reports whether of has expired at now: past its bound, and a
+// flow start taken at or after the bound (CH-57). The start counts only
+// when both its wall time and its monotonic placement are at or after the
+// bound, so a step of the wall clock either way after it cannot carry it
+// past the bound.
+func (h *hold) expired(of OpenFlow, now time.Time) bool {
+	end := h.expires(of, now)
+	if now.Before(end) || !h.started {
+		return false
+	}
+	return !h.lastStartWall.Before(end) && !now.Add(h.lastStart-h.mono()).Before(end)
+}
+
+// expireOpen removes the open entries that have expired, counted, and
 // writes the table if it changed.
 func (h *hold) expireOpen(ctx context.Context) {
 	now, n := h.now(), len(h.open)
 	open := make([]OpenFlow, 0, n)
 	for _, of := range h.open {
+		expired := h.expired(of, now)
 		of.Expires = h.expires(of, now)
-		if now.Before(of.Expires) {
+		if !expired {
 			open = append(open, of)
 		}
 	}
@@ -569,7 +598,7 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	rec := cloneRec(r.rec)
 	rec.Session = &s
 	if s.Connected && s.Local.IsValid() {
-		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && now.Before(h.expires(h.open[i], now)) {
+		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && !h.expired(h.open[i], now) {
 			// Staged: it takes effect only with the release's record below
 			// (D6's N1 on #576). Its expiry is unchanged.
 			o := h.open[i]
@@ -930,18 +959,24 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 	if !h.on() {
 		return false
 	}
+	if isStart(st) {
+		h.lastStart, h.lastStartWall, h.started = h.mono(), h.now(), true // any start of the run, before the match (CH-57)
+	}
 	k, ok := h.keyOf(st)
 	if !ok {
 		return false
 	}
 	if i := h.openIndex(k); i >= 0 {
 		of, now := h.open[i], h.now()
+		// The arriving record is matched before the expiry check, so it never
+		// expires the entry it is about to tie (D4-102 item 5 (c)).
 		switch {
-		case isStart(st) || !now.Before(h.expires(of, now)):
-			// A start means the sensor saw the old flow end, and past its
-			// expiry the sensor has ended it as idle: the entry leaves,
-			// written first and counted, and the record is judged as a
-			// new flow (D1 on #576).
+		case isStart(st) || h.expired(of, now):
+			// A start means the sensor saw the old flow end, and an entry
+			// that has expired (past its bound, with a later start taken)
+			// the sensor has ended as idle: the entry leaves, written first
+			// and counted, and the record is judged as a new flow (D1 on
+			// #576).
 			if isStart(st) {
 				h.stats.OpenSuperseded++
 			} else {
