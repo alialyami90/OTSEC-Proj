@@ -112,6 +112,73 @@ func TestCancelMidFrameShutdown(t *testing.T) {
 	}
 }
 
+// ackRaceConn lands a decision (CloseConn(enrolment)) at the instant the
+// ack's write deadline is set: when that deadline is set outside the
+// guard's lock, the decision is made first and the deadline then set over
+// it; when it is set under the lock, the decision waits for the lock and
+// the write waits for the decision.
+type ackRaceConn struct {
+	Conn
+	l     *Link
+	armed atomic.Bool
+	done  chan struct{}
+}
+
+func (c *ackRaceConn) SetWriteDeadline(t time.Time) error {
+	if !t.After(time.Now()) || !c.armed.CompareAndSwap(true, false) {
+		return c.Conn.SetWriteDeadline(t)
+	}
+	if c.l.guard.mu.TryLock() {
+		c.l.guard.mu.Unlock()
+		c.l.CloseConn(netobs.CloseEnrolment)
+		close(c.done)
+	} else {
+		go func() { c.l.CloseConn(netobs.CloseEnrolment); close(c.done) }()
+	}
+	return c.Conn.SetWriteDeadline(t)
+}
+
+func (c *ackRaceConn) Write(b []byte) (int, error) {
+	select {
+	case <-c.done:
+	default:
+		if !c.armed.Load() {
+			<-c.done
+		}
+	}
+	return c.Conn.Write(b)
+}
+
+// D3's N2 on #732: a decision made as the ack's write deadline is set is
+// not overwritten by it. No ack follows the decision, and the connection
+// closes as enrolment at once, not after Idle. Controls: the hook not
+// armed (the hello is acked and the connection stays open); a6264dd8's
+// order, the deadline set outside the lock (ack 0 sent after the
+// decision).
+func TestDecisionAtAckDeadline(t *testing.T) {
+	for _, armed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "decision", false: "control"}[armed], func(t *testing.T) {
+			r := newRig(t, nil)
+			c := &ackRaceConn{l: r.l, done: make(chan struct{})}
+			c.armed.Store(armed)
+			if !armed {
+				close(c.done)
+			}
+			p := r.dialWrap(bg, enrolment(), func(b Conn) Conn { c.Conn = b; return c })
+			p.send(hello02())
+			if !armed {
+				p.ack(0)
+				p.stillOpen()
+				return
+			}
+			if got := p.closedWithin(r.l.timeouts().Idle / 2); got != netobs.CloseEnrolment {
+				t.Fatalf("close %q, want enrolment", got)
+			}
+			p.noAckAfter()
+		})
+	}
+}
+
 // D3's N3 on #732: the first decision wins. CloseConn(enrolment) and then
 // the node's context cancelled closes, and is counted, as enrolment.
 // Controls: the cancel alone (shutdown); a6264dd8's assignment, the later

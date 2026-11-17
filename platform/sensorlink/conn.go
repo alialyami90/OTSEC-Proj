@@ -525,7 +525,22 @@ func (l *Link) writeAck(ctx context.Context, cn *conn) string {
 	h := cn.hello
 	b, _ := json.Marshal(netobs.Ack{Schema: netobs.Identifier02, Type: netobs.TypeAck, RunCounter: h.RunCounter, RunID: h.RunID,
 		Seq: strconv.FormatUint(seq, 10)})
-	_ = cn.c.SetWriteDeadline(time.Now().Add(l.timeouts().Idle))
+	// The decision is checked again, and the deadline set, under the lock
+	// CloseConn takes, as read does: a decision made since the check above
+	// is seen here, and its deadline is never overwritten (D3's N2 on #732).
+	g := &l.guard
+	g.mu.Lock()
+	r := g.request
+	if r == "" && ctx.Err() != nil {
+		r = netobs.CloseShutdown
+	}
+	if r == "" {
+		_ = cn.c.SetWriteDeadline(time.Now().Add(l.timeouts().Idle))
+	}
+	g.mu.Unlock()
+	if r != "" {
+		return r
+	}
 	if err := netobs.WriteFrame(cn.c, b); err != nil {
 		if r := l.decided(ctx); r != "" {
 			return r // the decision cut the write

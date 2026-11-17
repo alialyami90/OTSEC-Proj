@@ -272,10 +272,15 @@ func (r *rig) dial(en Enrolment) *peer { return r.dialCtx(bg, en) }
 
 // dialCtx is dial with the node's context ctx.
 func (r *rig) dialCtx(ctx context.Context, en Enrolment) *peer {
+	return r.dialWrap(ctx, en, func(c Conn) Conn { return c })
+}
+
+// dialWrap is dialCtx with the node's end of the pipe wrapped.
+func (r *rig) dialWrap(ctx context.Context, en Enrolment, wrap func(Conn) Conn) *peer {
 	a, b := net.Pipe()
 	l := r.l
 	p := &peer{t: r.t, c: a, acks: make(chan *netobs.Ack, 1024), done: make(chan string, 1), l: l, base: l.ConnStats().Frames}
-	go func() { p.done <- l.ServeConn(ctx, b, en) }()
+	go func() { p.done <- l.ServeConn(ctx, wrap(b), en) }()
 	go func() {
 		defer close(p.acks)
 		for {
