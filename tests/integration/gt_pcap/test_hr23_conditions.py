@@ -42,8 +42,8 @@ CONDITIONS = os.path.join(HERE, "hr23-conditions.tsv")
 ENGINE = os.path.join(HERE, "engine-pass-conditions.tsv")
 SHA256 = {
     CASES: "f66f7952a398c0fc420507dfb125c00f1bd3538399305f24fe1c5b2727420687",
-    MALFORMED: "cb44947dbc2e6e50dfea1b04c511a37ffdd84fa4120e8c0527d834ef10a60a93",
-    CONDITIONS: "19aa8092e45cf6dc2a7b2fd68abf32966588ac7ee292a36c298967863bbe3122",
+    MALFORMED: "59c088591c401ff3cae7392178873a059d3e0dd05b7d5cb7024be63064b71394",
+    CONDITIONS: "711aef47dd00f774567b28580060894cc8539924e181795eeded3485c9bf566e",
 }
 CONFIGS = ("c0", "c1", "c1p", "c2")
 FIXES = {"a", "b", "unknown", "premise", "control", "r1"}
@@ -367,7 +367,9 @@ def resp_port(cap):
 def tcp_first_to_likely(cap):
     """mal-bprime's TCP exception (design 2.3, its third measured TCP
     statement): X is the connection's first data, on a connection to a port
-    in likely_server_ports."""
+    in likely_server_ports. It was measured on 20000 alone, which is also
+    DNP3_TCP's registered port; which of the two gives the shape is unknown,
+    so the whole set is taken, as a precaution (D2's N1 on #745)."""
     return cap.flows[0].l4 == "tcp" and x_first(cap) and resp_port(cap) in TCP_LIKELY
 
 
@@ -377,7 +379,8 @@ def check_bprime(ms, caps):
     service removed; on TCP a stop is recorded under all four, with the
     service removed. An input whose X comes later has no silent stop. The
     TCP exception: where X is the connection's first data to a port in
-    likely_server_ports, a stop reads viol and every message after X ?."""
+    likely_server_ports (measured on 20000 alone, the set a precaution), a
+    stop reads viol and every message after X ?."""
     for m in ms:
         cap = caps[m["input"]]
         order = order_of(cap)
