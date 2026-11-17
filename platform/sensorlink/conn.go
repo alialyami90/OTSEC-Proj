@@ -106,7 +106,9 @@ type PinStore interface {
 // Owed is what the node owes the health stream: a new run's prior
 // (sensor.run-loss, CH-16) and each admitted span's lost gap
 // (sensor.coverage-gap, CH-40). Each stays marked in the cursor until its
-// event has committed.
+// event has committed. A write repeated after a failed save carries the
+// same identity: the run's generation, run_counter and run_id, and for a
+// lost gap the span's from_utc.
 type Owed struct {
 	Generation, RunCounter uint64
 	RunID                  string
@@ -138,7 +140,8 @@ type HeldPrior struct {
 
 // Cursor is the part of CH-18's cursor this intake keeps: the position,
 // G and D, the run's totals, Ds, the last newest_seq, the run's digest,
-// its spans and prior, and what the node still owes from an earlier run.
+// and its spans and prior. It holds one run: what an earlier run owed is
+// written before row 6's save replaces it (D1's ruling on #732).
 type Cursor struct {
 	Generation uint64 `json:"generation"`
 	RunCounter uint64 `json:"run_counter"`
@@ -156,9 +159,6 @@ type Cursor struct {
 	Digest    string     `json:"digest"`
 	Spans     []HeldSpan `json:"spans,omitempty"`
 	Prior     *HeldPrior `json:"prior,omitempty"`
-	// Carried is what an earlier run of the cursor still owed when row 6's
-	// save replaced it (CH-12, CH-40).
-	Carried []Owed `json:"carried,omitempty"`
 }
 
 // encodeCursor is the cursor's stored form, refused above
@@ -571,14 +571,16 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		// save below overwrites G and D (D5's N9 on #634).
 		if cur != nil {
 			l.checkGap(cur)
+			// What the replaced cursor owes, a position that reads as none
+			// included, is written under its own identity before the save
+			// replaces it; on a failure nothing is saved or kept (CH-12,
+			// CH-16, CH-40; option (a), D1's ruling on #732).
+			if r := l.writeReplaced(ctx, h.SensorID, cur); r != "" {
+				return r
+			}
 		}
 		next = &Cursor{Generation: cn.en.Generation, RunCounter: num(h.RunCounter), RunID: h.RunID,
 			Taken: first - 1, G: first - 1, D: drops, Digest: h.ConfigDigest, NewestSeq: newest}
-		if cur != nil {
-			// A position that reads as none, or that this save replaces,
-			// keeps what it owes (CH-12).
-			next.Carried = carry(cur)
-		}
 		p := h.Prior
 		next.Prior = &HeldPrior{RunsSkipped: num(p.RunsSkipped), RecordsLost: num(p.RecordsLost), PreviousEnd: p.PreviousEnd,
 			StartedBy: p.StartedBy, Spans: admit(nil, p.Lost, h.SensorUTC, recv, &cuts, &opened), Owed: true}
@@ -635,6 +637,26 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 	return ""
 }
 
+// writeReplaced writes what cur owes before row 6's save replaces it. Owed
+// events with no Options.Owed to write them, or a failed write, close
+// position-not-saved: the old cursor stays as it was, so the next hello
+// writes them again (twice, never not at all).
+func (l *Link) writeReplaced(ctx context.Context, sensor string, cur *Cursor) string {
+	o, n := owedOf(cur)
+	if n == 0 {
+		return ""
+	}
+	err := errors.New("no writer for the health stream")
+	if l.opt.Owed != nil {
+		err = l.opt.Owed(ctx, o)
+	}
+	if err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: %d owed events of run %s were not written: %v", sensor, n, cur.RunID, err))
+		return netobs.ClosePositionNotSaved
+	}
+	return ""
+}
+
 // owedInRun writes what the run owes; a failure is raised and the
 // connection stays open, the marks kept for the next attempt (D3's
 // condition 4 on #732).
@@ -646,21 +668,6 @@ func (l *Link) owedInRun(ctx context.Context, cn *conn) {
 	if err := l.writeOwed(ctx, cn); err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: %d owed events of run %s were not written: %v", l.cfg.SensorID, n, cn.cur.RunID, err))
 	}
-}
-
-// owedOf is what c owes, under c's identity, and the number of its events.
-func owedOf(c *Cursor) (Owed, int) {
-	o := Owed{Generation: c.Generation, RunCounter: c.RunCounter, RunID: c.RunID}
-	n := 0
-	if c.Prior != nil && c.Prior.Owed {
-		o.Prior, n = c.Prior, 1
-	}
-	for _, s := range c.Spans {
-		if s.Owed {
-			o.Spans = append(o.Spans, s)
-		}
-	}
-	return o, n + len(o.Spans)
 }
 
 // resetRun starts the link's run state for the hello's run: a new run
@@ -689,22 +696,19 @@ func (l *Link) lostOpened(sensor, run string, n uint64) {
 	l.raise(AlarmRecordsLost, fmt.Sprintf("sensor %s: run %s declares lost records; a lost coverage gap is open", sensor, run))
 }
 
-// carry is what cur still owes, kept when row 6's save replaces it.
-func carry(cur *Cursor) []Owed {
-	out := slices.Clone(cur.Carried)
-	o := Owed{Generation: cur.Generation, RunCounter: cur.RunCounter, RunID: cur.RunID}
-	if cur.Prior != nil && cur.Prior.Owed {
-		o.Prior = cur.Prior
+// owedOf is what c owes, under c's identity, and the number of its events.
+func owedOf(c *Cursor) (Owed, int) {
+	o := Owed{Generation: c.Generation, RunCounter: c.RunCounter, RunID: c.RunID}
+	n := 0
+	if c.Prior != nil && c.Prior.Owed {
+		o.Prior, n = c.Prior, 1
 	}
-	for _, s := range cur.Spans {
+	for _, s := range c.Spans {
 		if s.Owed {
 			o.Spans = append(o.Spans, s)
 		}
 	}
-	if o.Prior != nil || len(o.Spans) > 0 {
-		out = append(out, o)
-	}
-	return out
+	return o, n + len(o.Spans)
 }
 
 // checkGap is CH-15's check: G at most D. The alarm rises once for each
@@ -1052,29 +1056,14 @@ func (l *Link) WriteOwed(ctx context.Context) error {
 
 func (l *Link) writeOwed(ctx context.Context, cn *conn) error {
 	c := cn.cur
-	owed := slices.Clone(c.Carried)
-	o := Owed{Generation: c.Generation, RunCounter: c.RunCounter, RunID: c.RunID}
-	if c.Prior != nil && c.Prior.Owed {
-		o.Prior = c.Prior
-	}
-	for _, s := range c.Spans {
-		if s.Owed {
-			o.Spans = append(o.Spans, s)
-		}
-	}
-	if o.Prior != nil || len(o.Spans) > 0 {
-		owed = append(owed, o)
-	}
-	if len(owed) == 0 || l.opt.Owed == nil {
+	o, n := owedOf(c)
+	if n == 0 || l.opt.Owed == nil {
 		return nil
 	}
-	for _, w := range owed {
-		if err := l.opt.Owed(ctx, w); err != nil {
-			return err
-		}
+	if err := l.opt.Owed(ctx, o); err != nil {
+		return err
 	}
 	next := c.clone()
-	next.Carried = nil
 	if next.Prior != nil {
 		next.Prior.Owed = false
 		for i := range next.Prior.Spans {
