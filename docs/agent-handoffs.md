@@ -2554,7 +2554,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Result: #734, merged (D4-116 item 5.1).
 
 ### P4-4-NULL (D4; D6, D2, D5 and D3 review): every null refused on the C13 0.2 and 0.3 channel
-- Objective and rationale: P5. 35 paths decoded `null` and were accepted, several failing open (D4's list 6946933575).
+- Objective and rationale: P5. 34 paths in D4's list (6946933575), and a 35th from D6's N3 on #735, decoded `null` and were accepted, several failing open.
 - Required inputs: D1's rulings 6946943860 and 6947324886; D3's conditions on 5937824561.
 - Files: `contracts/netobs/` (D1 authorizes) and the two C13 proposal documents.
 - Expected interfaces: C13 0.2 and 0.3 gain one sentence; no minor bump.
@@ -2597,7 +2597,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Required inputs: `docs/phase4/D5-p44int-split.md` §2.3, §2.4 and §3; #732's body; D4-116 items 3.2 to 3.5; `docs/phase4/D5-sensor-node.md`.
 - Files: `platform/node/`, `platform/sensorlink/` and their test packages.
 - Expected interfaces: the node's design as approved (D4-92); options first where it is missing or contradicts C13 (D4-99).
-- Deliverable: one PR, or at most three proposed in a comment first, each safe to merge alone.
+- Deliverable: one PR, or at most three proposed in a comment first, each safe to merge alone. D5 proposed three (2a, 2b, 2c; 6952032325), and D1 approved them (6952181701).
 - Acceptance tests: the self-check list; each row's test with a control; F-027's greps clean.
 - Owed: N-14 after P4-4-HR24's stage 3.
 - Exclusions: INT-D5b's aggregate-key legs; P4-4-DE's dialer legs; no product wiring (F-027).
