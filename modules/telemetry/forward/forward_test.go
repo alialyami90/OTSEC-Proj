@@ -126,13 +126,18 @@ func TestReceiverClosesMidBatch(t *testing.T) {
 	}
 }
 
-// C6 mode A bounds what one break resends, not what a run resends: each
-// session that ends resends at most the window in flight, so k breaks cost
-// at most k windows of duplicates. The receiver records the frames 10, 60
-// and 110 and never answers them, the worst case for duplicates: the
-// collector wrote every frame in flight and its answer never came, as when
-// rsyslog's synchronous write outlasts the response timeout (run
-// 44078255375). Each such break resends one whole window, so three breaks
+// C6 mode A bounds what one break resends, not what a run resends: while no
+// report is owed, each session that ends resends at most the window in
+// flight, so k breaks cost at most k windows of duplicates. (A report owed
+// holds a cursor behind the confirmed position, Forwarder.limit, and a break
+// then resends more; nothing is owed here.) The receiver records the frames
+// 10, 60 and 110 and never answers them, the worst case for duplicates: the
+// collector wrote every frame in flight and its answer never came. It goes
+// on answering the frames after the withheld one, an order C6 allows but a
+// librelp server never uses: rsyslog answers in order, so when its
+// synchronous write outlasts the response timeout (run 44078255375) every
+// later answer stalls too, which leaves the same window written and
+// unconfirmed. Each such break resends one whole window, so three breaks
 // give three windows: more than one window is not a fault, and more than
 // one window per break would be.
 func TestEachBreakResendsAtMostOneWindow(t *testing.T) {
@@ -169,12 +174,15 @@ func TestEachBreakResendsAtMostOneWindow(t *testing.T) {
 
 // checkResume checks that within each connection the SER seqs run without
 // a gap, and each connection starts at or before the seq after the highest
-// one acknowledged on earlier connections.
+// one acknowledged on earlier connections. A withheld frame was recorded but
+// never answered, so neither it nor anything after it on its connection
+// counts as acknowledged: RELP confirms in order (C6 Window).
 func checkResume(t *testing.T, ms []relptest.Message) {
 	t.Helper()
 	ids := eids(t, ms)
 	var high store.Seq
 	conn, prev := 0, store.Seq(0)
+	stalled := false // a withheld frame on this connection: nothing after it is confirmed
 	for i, m := range ms {
 		k, err := event.ParseEventID(ids[i])
 		if err != nil {
@@ -187,13 +195,16 @@ func checkResume(t *testing.T, ms []relptest.Message) {
 			if k.Seq > high+1 {
 				t.Errorf("connection %d starts at %d after %d was acknowledged: skipped", m.Conn, k.Seq, high)
 			}
-			conn, prev = m.Conn, k.Seq-1
+			conn, prev, stalled = m.Conn, k.Seq-1, false
 		}
 		if k.Seq != prev+1 {
 			t.Errorf("connection %d: %d after %d", m.Conn, k.Seq, prev)
 		}
 		prev = k.Seq
-		high = max(high, k.Seq)
+		stalled = stalled || m.Withheld
+		if !stalled {
+			high = max(high, k.Seq)
+		}
 	}
 }
 

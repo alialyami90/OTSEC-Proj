@@ -40,11 +40,12 @@ const (
 	Withhold                  // record, never answer: written, with its answer lost
 )
 
-// Message is one syslog frame the receiver acknowledged.
+// Message is one syslog frame the receiver recorded.
 type Message struct {
-	Conn int    // connection number, from 1
-	TXNR uint64 // the client's transaction number
-	Data []byte // the message as received
+	Conn     int    // connection number, from 1
+	TXNR     uint64 // the client's transaction number
+	Data     []byte // the message as received
+	Withheld bool   // recorded and never answered: written, not acknowledged
 }
 
 // Command is one client frame.
@@ -330,6 +331,7 @@ func (s *Server) serve(id int, c net.Conn) error {
 			}
 			switch act {
 			case Ack, AckTwice, Withhold:
+				m.Withheld = act == Withhold
 				s.mu.Lock()
 				s.acked = append(s.acked, m)
 				s.mu.Unlock()
