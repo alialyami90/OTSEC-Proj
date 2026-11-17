@@ -6,7 +6,8 @@
 // message before it acknowledges it (the receiver side of
 // ack_after "durable-write"), and answers close. A script decides what
 // happens to each syslog frame, so tests can close the connection mid-batch,
-// refuse, stay silent, send serverclose or answer twice. A frame that breaks
+// refuse, stay silent, send serverclose, answer twice, or record a frame and
+// never answer it. A frame that breaks
 // the client grammar ends the connection with serverclose and is recorded as
 // an error: the receiver is stricter than the forwarder, never looser.
 //
@@ -36,6 +37,7 @@ const (
 	Silent                    // read on, never answer
 	ServerClose               // serverclose instead of an answer, not recorded
 	AckTwice                  // record, then 200 OK twice: a grammar violation for the client
+	Withhold                  // record, never answer: written, with its answer lost
 )
 
 // Message is one syslog frame the receiver acknowledged.
@@ -184,7 +186,8 @@ func Start(cfg *tls.Config, script func(n int, m Message) Action) (*Server, erro
 // Addr is the listening address.
 func (s *Server) Addr() *net.TCPAddr { return s.ln.Addr().(*net.TCPAddr) }
 
-// Acked returns the acknowledged messages, in the order acknowledged.
+// Acked returns the recorded messages (Ack, AckTwice and Withhold), in the
+// order recorded.
 func (s *Server) Acked() []Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -326,10 +329,13 @@ func (s *Server) serve(id int, c net.Conn) error {
 				act = s.script(nth, m)
 			}
 			switch act {
-			case Ack, AckTwice:
+			case Ack, AckTwice, Withhold:
 				s.mu.Lock()
 				s.acked = append(s.acked, m)
 				s.mu.Unlock()
+				if act == Withhold {
+					break
+				}
 				out := rsp(cmd.TXNR, "200 OK")
 				if act == AckTwice {
 					out = append(out, out...)

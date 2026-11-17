@@ -126,6 +126,47 @@ func TestReceiverClosesMidBatch(t *testing.T) {
 	}
 }
 
+// C6 mode A bounds what one break resends, not what a run resends: each
+// session that ends resends at most the window in flight, so k breaks cost
+// at most k windows of duplicates. The receiver records the frames 10, 60
+// and 110 and never answers them, the worst case for duplicates: the
+// collector wrote every frame in flight and its answer never came, as when
+// rsyslog's synchronous write outlasts the response timeout (run
+// 44078255375). Each such break resends one whole window, so three breaks
+// give three windows: more than one window is not a fault, and more than
+// one window per break would be.
+func TestEachBreakResendsAtMostOneWindow(t *testing.T) {
+	withheld := map[int]bool{10: true, 60: true, 110: true}
+	r := newRig(t, func(n int, _ relptest.Message) relptest.Action {
+		if withheld[n] {
+			return relptest.Withhold
+		}
+		return relptest.Ack
+	}, nil)
+	r.cfg.ResponseTimeout = 200 * time.Millisecond
+	r.fill(150)
+	r.run(r.delivered, nil)
+	dup := r.checkNoLoss()
+	breaks := r.srv.Conns() - 1
+	w := r.tg.RELPWindow
+	t.Logf("%d breaks, %d duplicates (window %d)", breaks, dup, w)
+	if breaks < len(withheld) {
+		t.Fatalf("%d breaks; the withheld answers were not exercised", breaks)
+	}
+	// The control: every withheld break resent a full window, so the
+	// run's duplicates exceed one window.
+	if dup < len(withheld)*w {
+		t.Errorf("%d duplicates, want at least %d: a withheld break did not resend its window", dup, len(withheld)*w)
+	}
+	if dup > breaks*w {
+		t.Errorf("%d duplicates over %d breaks, more than one window per break", dup, breaks)
+	}
+	checkResume(t, r.srv.Acked())
+	if errs := r.srv.Errors(); len(errs) > 0 {
+		t.Errorf("receiver errors: %v", errs)
+	}
+}
+
 // checkResume checks that within each connection the SER seqs run without
 // a gap, and each connection starts at or before the seq after the highest
 // one acknowledged on earlier connections.

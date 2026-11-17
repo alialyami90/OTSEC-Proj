@@ -2,6 +2,7 @@ package forward
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -197,6 +199,41 @@ func (r *rsyslog) eids() []string {
 	return out
 }
 
+// sessions counts the forwarder's connections to rsyslog and keeps the
+// error that ended each one before it, so a run with breaks says why.
+type sessions struct {
+	mu  sync.Mutex
+	f   *Forwarder
+	n   int
+	why []string
+}
+
+// wrap counts each connection dial opens, and notes the previous
+// session's end from the forwarder's status.
+func (s *sessions) wrap(dial func(context.Context) (net.Conn, error)) func(context.Context) (net.Conn, error) {
+	return func(ctx context.Context) (net.Conn, error) {
+		c, err := dial(ctx)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.n > 0 && s.f != nil {
+			if e := s.f.Status().LastErr; e != nil {
+				s.why = append(s.why, e.Error())
+			}
+		}
+		if err == nil {
+			s.n++
+		}
+		return c, err
+	}
+}
+
+// breaks is the number of sessions after the first, and why they ended.
+func (s *sessions) breaks() (int, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return max(s.n-1, 0), append([]string(nil), s.why...)
+}
+
 func rsyslogRig(t *testing.T, r *rsyslog, p *pki, client *tls.Certificate) *rig {
 	t.Helper()
 	m := newStore()
@@ -216,34 +253,58 @@ func rsyslogRig(t *testing.T, r *rsyslog, p *pki, client *tls.Certificate) *rig 
 	}}
 }
 
-// P2-A4 acceptance: against rsyslog, every event arrives exactly once,
-// counting by event_id.
+// P2-A4 acceptance: against rsyslog, every event arrives, in order,
+// counting by event_id; exactly once when the session never broke. Delivery
+// is at least once (C6 mode A): a session that ends with transactions in
+// flight sends them again, so a run whose session broke k times may hold up
+// to k windows of duplicates, never more. On a loaded runner rsyslog's
+// synchronous write can outlast the 2 s response timeout and break the
+// session (run 44078255375: 508 lines for 500 events).
 func TestRsyslogExactlyOnce(t *testing.T) {
 	p := newPKI(t)
 	r := startRsyslog(t, p, string(node))
 	g := rsyslogRig(t, r, p, &p.client)
+	var ss sessions
+	g.cfg.Dial = ss.wrap(g.cfg.Dial)
 	g.fill(500)
-	g.run(func() bool { return g.m.cursor(serStream) == 500 }, nil)
+	g.run(func() bool { return g.m.cursor(serStream) == 500 }, func(f *Forwarder) { ss.f = f })
 	got := r.eids()
 	want := g.m.keys(serStream)
-	if len(got) != len(want) {
-		t.Fatalf("rsyslog wrote %d lines for %d events", len(got), len(want))
+	breaks, why := ss.breaks()
+	t.Logf("rsyslog wrote %d lines for %d events; %d session breaks: %q", len(got), len(want), breaks, why)
+	var first []string
+	seen := map[string]bool{}
+	for _, id := range got {
+		if !seen[id] {
+			seen[id] = true
+			first = append(first, id)
+		}
+	}
+	if len(first) != len(want) {
+		t.Fatalf("rsyslog holds %d distinct events of %d", len(first), len(want))
 	}
 	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("line %d is %s, want %s", i, got[i], want[i])
+		if first[i] != want[i] {
+			t.Fatalf("event %d first arrived as %s, want %s", i, first[i], want[i])
 		}
+	}
+	if dup := len(got) - len(want); dup > breaks*g.tg.RELPWindow {
+		t.Errorf("%d duplicates over %d session breaks, more than one window (%d) per break", dup, breaks, g.tg.RELPWindow)
 	}
 }
 
 // rsyslog killed while events are in flight and started again: every
 // event whose cursor was saved before the kill is in the file (the
 // acknowledgement was durable), and after the restart every event is
-// there. Duplicates are the unconfirmed window, sent again.
+// there. Duplicates are the unconfirmed window, sent again once per session
+// that ended: the kill's, and any the response timeout ended on a loaded
+// runner (run 44078255375: 25 duplicates, window 8).
 func TestRsyslogKilledMidStream(t *testing.T) {
 	p := newPKI(t)
 	r := startRsyslog(t, p, string(node))
 	g := rsyslogRig(t, r, p, &p.client)
+	var ss sessions
+	g.cfg.Dial = ss.wrap(g.cfg.Dial)
 	g.fill(3000)
 	var confirmed store.Seq
 	killed := false
@@ -255,7 +316,7 @@ func TestRsyslogKilledMidStream(t *testing.T) {
 			r.start()
 		}
 		return g.m.cursor(serStream) == 3000
-	}, nil)
+	}, func(f *Forwarder) { ss.f = f })
 	seen := map[string]int{}
 	for _, id := range r.eids() {
 		seen[id]++
@@ -271,9 +332,13 @@ func TestRsyslogKilledMidStream(t *testing.T) {
 			dup += seen[k] - 1
 		}
 	}
-	t.Logf("confirmed through %d at the kill; %d duplicates after the restart (window %d)", confirmed, dup, g.tg.RELPWindow)
-	if dup > g.tg.RELPWindow {
-		t.Errorf("%d duplicates, more than one window", dup)
+	breaks, why := ss.breaks()
+	t.Logf("confirmed through %d at the kill; %d duplicates (window %d); %d session breaks: %q", confirmed, dup, g.tg.RELPWindow, breaks, why)
+	if breaks < 1 {
+		t.Errorf("no session break; the kill was not exercised")
+	}
+	if dup > breaks*g.tg.RELPWindow {
+		t.Errorf("%d duplicates over %d session breaks, more than one window per break", dup, breaks)
 	}
 }
 
