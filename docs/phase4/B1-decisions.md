@@ -2633,3 +2633,33 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
   - **N-14** (D1's 6909754276): owed by INT-D5, or by a later INT PR if INT-D5b has merged first. It can be written once P4-4-HR24's stage 3 merges, and it is due before item 4's exit gate.
 - **5. Work paused at the owner's word, 2026-11-16.** No PR is open, and no agent is running. HANDOFF's checkpoint gives the next steps in order.
 - **Next decision number:** D4-114.
+
+## D4-114: work resumed and paused again, four briefs, and D1's rulings on the shipped image (D1, 2026-11-16)
+
+Evidence class: `desk` for the rulings and records; `desk` for D4's and D6's local test runs named on each PR; `CI-Linux` for #724's runs that had finished at the pause (its Windows `go` run and its `integration` run had not). The fuzz branch has no PR and no CI run; its local runs are named in its commit. Nothing merged in this session.
+
+- **1. Work resumed at the owner's word, then paused at the owner's word the same day.** No agent is running. The session ran in a cloud container, not on the owner's PC. The owner allowed `agent/*` branches for it.
+- **2. Briefs issued** (recorded in `docs/agent-handoffs.md`, "After D4-113"): P4-4-HR23-FUZZ (D4), P4-4-HR25-ROWS (D3), P4-D7-P1 (D7), and P4-4-HR2325S PR 1b (D6) under its brief.
+- **3. Where each stands at the pause:**
+  1. **P4-4-HR23-FUZZ** (D4): branch `agent/telemetry-hr23-fuzz` at `444d6c1b`, a WIP commit. No PR is open. The workflow, the CRC fix-up mutator, the harness patch, the seed conversion, the judge and their tests (36 pass locally, `desk`) are written. The fuzz build has never completed. D4's open questions, for the resume: the builds run natively on the runner with clang, not in the pinned Debian image (D7 to answer against design §4.6's "same runner image"); Spicy is off; LSan is off; coverage is read from the C2 fuzz build; Zeek's corpus seeds the two DNP3 targets only; a campaign stops at its first report.
+  2. **#722, P4-4-HR25-ROWS** (D3) at `e37a756`: records-auditor's notes are fixed. D4 and D6 review it together on one head.
+  3. **#723, P4-D7-P1** (D7) at `22a6540`: records-auditor's notes are fixed. D3's review (6931175701): B1 and N1 to N6, each to be fixed in this PR. D6's review: see item 4.4.
+  4. **#724, P4-4-HR2325S PR 1b** (D6) at `633c53cf`: complete. D4 and D2 review the labels and D3 the parse surface. Open: whether TCP twins of the two inputs are added (the PR body). D4 then pins the two TSVs' new hashes in `pins.env`.
+- **4. D1's rulings on #723** (D3's 6931175701; D4-98's delegation).
+  1. **The shipped image is option (C)**, a runtime-only Zeek tree with no Debian userland, as D3 chose. Under every option, the ship check covers the whole image and fails on any setuid or setgid file or file capability (D3's N1). Option (B) is a fallback only on that condition, and under (B) those programs are removed or their bits cleared. No shipped image carries `rst`. (C) does not replace SL-3 (D3's N6).
+  2. **The measured image is kept by option (i) of §8.4 item 4, with its durable home on the owner's offline storage:** two copies outside the checkout, taken before the job's artifact expires. D1 records the artifact's expiry date in the decision entry of the counted run. The job checks the saved archive's image ID and `zeek` hash against what the run logged. The owner checks each copy's SHA-256 against the archive's, since `docker load` is not run on the owner's PC. A GitHub Release asset is not used: it would be a public, unsigned, irrevocable copy of an image O-7 says ships signed, before a release key holder is named. This is a step for the owner ("Waiting on the owner").
+  3. **The job's artifact in this public repository is itself a distribution.** So the source bundle (§8.4 item 7) is complete, and reviewed by D7, D3 and D6, before the counted run uploads the image.
+  4. **D6's review of `22a6540` was stopped by the pause and not posted.** Its provisional points, kept here because its scratch files do not survive the session, go to D7 with D3's:
+     - provisional B1: §8.4 logs the image ID, the zeek SHA-256 and the archive SHA-256, but nothing compares them. After `docker save`, the job reads the archive's own image ID and zeek hash and fails unless both equal what the run logged, with a negative control against C1p's ID that must fail;
+     - under (C) the image has no shell or tools, so `build.sh`'s record step and the `Dockerfile`'s `dpkg-query` cannot read the shipped image (with D3's B1);
+     - item 1's kept-list check covers only `/usr/local/zeek`, so nothing checks (C)'s "no shell, package manager or Perl";
+     - §8.1's errors: `hilti-cxx-driver` is built only on Windows; and the runtime stage installs 4 new packages, not five, upgrades `zlib1g`, leaves `libssl3t64` unchanged, and installs no `bin/rst` or `bin/adtrace` (job 133140767081, `CI-Linux`).
+
+     A fresh D6 reviews the head D7 pushes, from the start, and D3 confirms its B1 and notes are met.
+  5. D3 then edits AP-30 (4) and AP-31 (1) to cite §8.2 (D3's offer in 6931175701).
+- **5. Carried to D4's HR-25 design PR:** `docs/phase4/D4-hr25-design.md` §8 still calls the inserted middle segment "counted", while HR-25's row says F1's route is quiet today (records-auditor on #722).
+- **6. Three lessons from earlier sessions, recorded at the owner's word** (HANDOFF, "Working in the CLI"):
+  1. Stop an old agent with TaskStop before relaunching its role. An agent that says it stopped may not have ended (D4-89).
+  2. Before relaunching a quiet agent, check its branch and PR. An agent shown as completed may still be waiting on CI. A duplicate once wrote to #701.
+  3. Agents share one scratchpad, so each brief gives a unique scratch prefix. D4 once posted D3's comment on #643 from a shared `comment.md`.
+- **Next decision number:** D4-115.
