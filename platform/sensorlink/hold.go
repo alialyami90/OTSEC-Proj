@@ -260,11 +260,15 @@ type hold struct {
 	// taken at or after the bound (CH-57; D4-102 item 5 (c)). The start is
 	// placed on the wall clock at each check, from the monotonic time since
 	// it, so a step of the wall clock after it cannot move it past a bound
-	// (D4's N1 and D6's N4 on #732). It is not saved, so after a restart an
-	// entry past its bound waits for the next start taken after it.
-	lastStart time.Duration
-	started   bool
-	mono      func() time.Duration
+	// (D4's N1 and D6's N4 on #732). Its wall time is kept too, and the
+	// earlier of the two placements counts, so a forward step cannot carry
+	// it past a bound either (D6's N5 on #732). It is not saved, so after a
+	// restart an entry past its bound waits for the next start taken after
+	// it.
+	lastStart     time.Duration
+	lastStartWall time.Time
+	started       bool
+	mono          func() time.Duration
 }
 
 // releasePhase is how far a release has gone, for result's deferred
@@ -451,13 +455,16 @@ func (h *hold) expires(of OpenFlow, now time.Time) time.Time {
 }
 
 // expired reports whether of has expired at now: past its bound, and a
-// flow start taken at or after the bound (CH-57).
+// flow start taken at or after the bound (CH-57). The start counts only
+// when both its wall time and its monotonic placement are at or after the
+// bound, so a step of the wall clock either way after it cannot carry it
+// past the bound.
 func (h *hold) expired(of OpenFlow, now time.Time) bool {
 	end := h.expires(of, now)
 	if now.Before(end) || !h.started {
 		return false
 	}
-	return !now.Add(h.lastStart - h.mono()).Before(end)
+	return !h.lastStartWall.Before(end) && !now.Add(h.lastStart-h.mono()).Before(end)
 }
 
 // expireOpen removes the open entries that have expired, counted, and
@@ -953,7 +960,7 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		return false
 	}
 	if isStart(st) {
-		h.lastStart, h.started = h.mono(), true // any start of the run, before the match (CH-57)
+		h.lastStart, h.lastStartWall, h.started = h.mono(), h.now(), true // any start of the run, before the match (CH-57)
 	}
 	k, ok := h.keyOf(st)
 	if !ok {

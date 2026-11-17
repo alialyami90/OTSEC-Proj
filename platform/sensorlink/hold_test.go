@@ -1040,3 +1040,30 @@ func TestOpenExpiryWallStepBack(t *testing.T) {
 		t.Fatalf("not expired after a later start: %+v", s)
 	}
 }
+
+// D6's N5 on #732: a start taken before a forward step of the wall clock
+// does not count as taken at or after a bound the step passes. The entry
+// is tied, a start comes 1 min later, before the bound, and the wall
+// steps forward 1 h with the monotonic clock still: the entry stays until
+// a start is taken after the step. Control: a6264dd8's placement, the
+// monotonic one alone (the entry expires with no start after the bound).
+func TestOpenExpiryWallStepForward(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall, g.c.now = g.wall.Add(time.Minute), g.c.now+time.Minute
+	g.send(g.otherStart())
+	g.wall = g.wall.Add(time.Hour)
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 1 || s.OpenExpired != 0 {
+		t.Fatalf("expired with no start after the bound: %+v", s)
+	}
+	g.send(g.otherStart())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 {
+		t.Fatalf("not expired after a later start: %+v", s)
+	}
+}
