@@ -261,7 +261,9 @@ func (l *Link) ServeConn(ctx context.Context, c Conn, en Enrolment) string {
 	l.conn.Connected = 1
 	l.mu.Unlock()
 	g.mu.Unlock()
-	stop := context.AfterFunc(ctx, func() { _ = c.SetReadDeadline(time.Now()) })
+	// A cancel is a decision like any other: it acts before any further
+	// frame or ack, and closes as shutdown (D3's B2 on #732).
+	stop := context.AfterFunc(ctx, func() { l.CloseConn(netobs.CloseShutdown) })
 	defer func() {
 		stop()
 		g.mu.Lock()
@@ -279,8 +281,9 @@ func (l *Link) ServeConn(ctx context.Context, c Conn, en Enrolment) string {
 }
 
 // CloseConn closes the live connection for a decision: enrolment (CH-37),
-// shutdown, or state-unread (CH-11). The read loop takes no further record
-// once it sees the request.
+// shutdown, or state-unread (CH-11). From the request on, the read loop
+// acts on no further frame and sends no ack (CH-37 steps 1 and 2): a read
+// in progress, or an ack being written, ends at once.
 func (l *Link) CloseConn(reason string) {
 	g := &l.guard
 	g.mu.Lock()
@@ -290,6 +293,7 @@ func (l *Link) CloseConn(reason string) {
 	}
 	g.request = reason
 	_ = g.live.SetReadDeadline(time.Now())
+	_ = g.live.SetWriteDeadline(time.Now())
 }
 
 func (l *Link) requested() string {
@@ -323,7 +327,19 @@ func (l *Link) raise(alarm, detail string) {
 // for a frame above the cap, a deadline, the context or a decision, and
 // eof when the sensor ended the stream.
 func (l *Link) read(ctx context.Context, cn *conn, d time.Duration, timeout string) (b []byte, reason string, eof bool) {
-	_ = cn.c.SetReadDeadline(time.Now().Add(d))
+	// The request is checked, and the deadline set, under the lock
+	// CloseConn takes, so a decision either ends this read or is seen
+	// here: its deadline is never overwritten (D3's B2 on #732).
+	g := &l.guard
+	g.mu.Lock()
+	r := g.request
+	if r == "" {
+		_ = cn.c.SetReadDeadline(time.Now().Add(d))
+	}
+	g.mu.Unlock()
+	if r != "" {
+		return nil, r, false
+	}
 	b, err := netobs.ReadFrame(cn.c)
 	if r := l.requested(); r != "" {
 		return nil, r, false
@@ -357,6 +373,9 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 		return reason
 	}
 	reason = l.locked(func() string {
+		if r := l.requested(); r != "" {
+			return r // a decision made while the frame was read
+		}
 		cur, err := l.loadCursor(ctx)
 		if err != nil {
 			return netobs.CloseStateUnread // the position cannot be read (CH-18)
@@ -381,6 +400,9 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 		}
 		if reason == "" {
 			reason = l.locked(func() string {
+				if r := l.requested(); r != "" {
+					return r // a decision made while the frame was read
+				}
 				if r := l.frame(ctx, cn, b); r != "" {
 					return r
 				}
@@ -474,6 +496,9 @@ func (l *Link) flush(ctx context.Context, cn *conn, now bool) bool {
 // writeAck sends an ack when the saved T, bounded by what was read and
 // sent on the connection, has risen (CH-17, CH-9).
 func (l *Link) writeAck(cn *conn) string {
+	if r := l.requested(); r != "" {
+		return r // no ack after a decision (CH-37)
+	}
 	seq := min(cn.saved, max(cn.l, cn.sent))
 	if cn.ackSent && seq <= cn.acked {
 		return ""
@@ -483,6 +508,9 @@ func (l *Link) writeAck(cn *conn) string {
 		Seq: strconv.FormatUint(seq, 10)})
 	_ = cn.c.SetWriteDeadline(time.Now().Add(l.timeouts().Idle))
 	if err := netobs.WriteFrame(cn.c, b); err != nil {
+		if r := l.requested(); r != "" {
+			return r // the decision cut the write
+		}
 		return netobs.CloseIdle
 	}
 	cn.acked, cn.ackSent = seq, true

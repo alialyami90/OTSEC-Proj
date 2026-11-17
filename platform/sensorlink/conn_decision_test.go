@@ -1,11 +1,27 @@
 package sensorlink
 
 import (
+	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/netobs"
 )
+
+// closedWithin waits at most d for the node's close reason, and fails when
+// the connection is still open.
+func (p *peer) closedWithin(d time.Duration) string {
+	p.t.Helper()
+	select {
+	case r := <-p.done:
+		return r
+	case <-time.After(d):
+		p.t.Fatalf("the connection is still open %v after the decision", d)
+		return ""
+	}
+}
 
 // noAckAfter fails if the node sent any ack after the decision: the acks
 // channel closes when the connection does.
@@ -13,6 +29,86 @@ func (p *peer) noAckAfter() {
 	p.t.Helper()
 	for a := range p.acks {
 		p.t.Errorf("ack %s sent after the decision", a.Seq)
+	}
+}
+
+// D3's B2 on #732, CH-37 steps 1 and 2: a decision (CloseConn) made while
+// a frame is acted on is followed by no ack, and the connection closes at
+// once with the sensor silent, not at the next frame or Idle. Controls:
+// the hook not armed (the tick is acked and the connection stays open);
+// main's code (ack 5 after the decision, the close only at the next frame).
+func TestDecisionMidFrameNoAck(t *testing.T) {
+	for _, armed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "decision", false: "control"}[armed], func(t *testing.T) {
+			var l *Link
+			var arm atomic.Bool
+			r := newRig(t, func(o *Options) {
+				inner := o.Owed
+				o.Owed = func(ctx context.Context, w Owed) error {
+					if arm.Load() {
+						l.CloseConn(netobs.CloseEnrolment)
+					}
+					return inner(ctx, w)
+				}
+			})
+			l = r.l
+			p := r.accepted(hello02())
+			arm.Store(armed)
+			tk := tick02(20, 5, 5)
+			tk.Lost = []netobs.Span{lspan("09:00:00", "09:10:00")} // widened: Owed is called inside the frame
+			r.tickAfter(p, tk)
+			if !armed {
+				p.ack(5)
+				p.stillOpen()
+				return
+			}
+			if got := p.closedWithin(r.l.timeouts().Idle / 2); got != netobs.CloseEnrolment {
+				t.Fatalf("close %q, want enrolment", got)
+			}
+			p.noAckAfter()
+		})
+	}
+}
+
+// D3's B2 on #732: the node's context cancelled while a frame is acted on
+// closes as shutdown at once, with no ack after it and no later frame
+// acted on. Controls: the context not cancelled (the tick is acked); main's
+// code (the next frame acted on, the close as store).
+func TestCancelMidFrameShutdown(t *testing.T) {
+	for _, armed := range []bool{true, false} {
+		t.Run(map[bool]string{true: "cancel", false: "control"}[armed], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var arm atomic.Bool
+			r := newRig(t, func(o *Options) {
+				inner := o.Owed
+				o.Owed = func(c context.Context, w Owed) error {
+					if arm.Load() {
+						cancel()
+					}
+					return inner(c, w)
+				}
+			})
+			p := r.dialCtx(ctx, enrolment())
+			p.send(hello02())
+			p.ack(0)
+			arm.Store(armed)
+			tk := tick02(20, 5, 5)
+			tk.Lost = []netobs.Span{lspan("09:00:00", "09:10:00")}
+			r.tickAfter(p, tk)
+			if !armed {
+				p.ack(5)
+				p.stillOpen()
+				return
+			}
+			if got := p.closedWithin(r.l.timeouts().Idle / 2); got != netobs.CloseShutdown {
+				t.Fatalf("close %q, want shutdown", got)
+			}
+			p.noAckAfter()
+			if n := closes(r.l, netobs.CloseStore); n != 0 {
+				t.Fatalf("closed as store %d times", n)
+			}
+		})
 	}
 }
 

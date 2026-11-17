@@ -268,11 +268,14 @@ type peer struct {
 
 // dial hands the link a connection, as P4-4-DE's dialer will, and serves
 // it under en.
-func (r *rig) dial(en Enrolment) *peer {
+func (r *rig) dial(en Enrolment) *peer { return r.dialCtx(bg, en) }
+
+// dialCtx is dial with the node's context ctx.
+func (r *rig) dialCtx(ctx context.Context, en Enrolment) *peer {
 	a, b := net.Pipe()
 	l := r.l
 	p := &peer{t: r.t, c: a, acks: make(chan *netobs.Ack, 1024), done: make(chan string, 1), l: l, base: l.ConnStats().Frames}
-	go func() { p.done <- l.ServeConn(bg, b, en) }()
+	go func() { p.done <- l.ServeConn(ctx, b, en) }()
 	go func() {
 		defer close(p.acks)
 		for {
