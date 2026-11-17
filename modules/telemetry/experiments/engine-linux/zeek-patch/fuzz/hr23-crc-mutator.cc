@@ -16,6 +16,17 @@
 // rest of a 10-octet header. Its header CRC is recomputed, then each block
 // its length octet announces that the chunk holds whole, with its CRC.
 // A block cut short by the chunk's end is left as it is.
+//
+// Two limits on what the mutated inputs reach (D2's N2 and N3 on #731):
+// - The fix-up works per chunk, but DNP3_Base buffers per endpoint across
+//   chunks (TCP segments, UDP datagrams). So a frame that runs on into the
+//   next chunk keeps its later blocks' CRCs unfixed, and the next chunk is
+//   scanned for 05 64 from its first octet, where a match in user data has
+//   two octets rewritten as a CRC. Such inputs mostly stop at CheckCRC.
+// - Every mutated input gets valid CRCs, so the CRC-failure paths
+//   (broken_checksum, dnp3_corrupt_app_chunk_checksum, HR-25's skip) are
+//   reached only by the unmutated seeds that carry a bad CRC, not by the
+//   campaign's mutations. The coverage of the run does not cover them.
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

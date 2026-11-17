@@ -3,7 +3,9 @@ docs/phase4/D4-hr23-design.md, section 4.6). It changes Zeek 9.0.1's fuzz
 targets only, never the code under test, and is applied alike to both
 builds, C1p and C2: it adds the `dnp3_udp` target, and links the project's
 CRC fix-up mutator (hr23-crc-mutator.cc, copied into src/fuzzers/) into
-`dnp3_tcp`, `dnp3_udp` and `packet`.
+`dnp3_tcp`, `dnp3_udp` and `packet`; and it gives binpac's runtime library
+the sanitizer and fuzzer-coverage flags libzeek has, which changes how that
+library is compiled, not its source.
 
 Against: Zeek 9.0.1, zeek-9.0.1.tar.gz (its SHA-256 is in ../build.env).
 Applied from the top of the unpacked tree with `patch -p1 --fuzz=0`.
@@ -22,7 +24,7 @@ The file changed is Zeek 9.0.1's, under the BSD-3-Clause licence in
  add_generic_analyzer_fuzz_target(dtls udp)
  add_generic_analyzer_fuzz_target(irc)
  add_generic_analyzer_fuzz_target(ldap_udp udp)
-@@ -129,6 +131,15 @@
+@@ -129,6 +131,21 @@
  add_generic_analyzer_fuzz_target(ssl)
  add_generic_analyzer_fuzz_target(syslog udp)
  
@@ -34,6 +36,12 @@ The file changed is Zeek 9.0.1's, under the BSD-3-Clause licence in
 +    target_sources(${_hr23_target} PRIVATE hr23-crc-mutator.cc)
 +endforeach ()
 +target_compile_definitions(zeek-packet-fuzzer PRIVATE HR23_FRAMING_IP=1)
++
++# OTSEC, HR-23's fuzz run (D3's B1 on #731): binpac's runtime library, whose
++# FlowBuffer every DNP3 flow runs through, gets libzeek's sanitizer and
++# fuzzer-coverage flags. Zeek 9.0.1 names no binpac target for them, so
++# without this line the library is not instrumented.
++zeek_target_enable_sanitizers(binpac_static)
 +
  # add_generic_analyzer_fuzz_target(finger)  # no pcap files
  # add_generic_analyzer_fuzz_target(gssapi)  # only samples are embedded in smb

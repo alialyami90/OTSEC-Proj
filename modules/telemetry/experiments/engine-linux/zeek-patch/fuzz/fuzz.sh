@@ -103,12 +103,14 @@ build)
         --disable-zkg --disable-zeekctl --disable-javascript --disable-python \
         --disable-cluster-backend-zeromq --disable-af-packet) > "$f/$b/configure.log" 2>&1 \
       || { grep -A8 "CMake Error" "$f/$b/configure.log" | head -60 >&2; fail "$b: configure failed"; }
-    # binpac is linked statically, as in Zeek's OSS-Fuzz build: with binpac
-    # and Broker as shared libraries beside libzeek_fuzzer_shared.so, ASan's
-    # start-up check reported an ODR violation (smoke run 44008961055) and
-    # no fuzzer started. A static Broker does not configure with
-    # --sanitizers in 9.0.1 (smoke run 44017063571); the duplicate left is
-    # SQLite's, which fuzz.env's detect_odr_violation=1 passes (same size).
+    # binpac is linked statically to match how Zeek's OSS-Fuzz build links
+    # it, not because of a measured report: the one ODR report seen (smoke
+    # run 44008961055) was on SQLite's sqlite3_version, in libzeek and in
+    # Broker, which fuzz.env's detect_odr_violation=1 passes (same size). A
+    # static Broker does not configure with --sanitizers in 9.0.1 (smoke
+    # run 44017063571). binpac's runtime library gets the run's sanitizer
+    # and coverage flags from the harness patch (D3's B1 on #731), checked
+    # below on its compile lines.
     # Spicy is on, as in the measured image (fuzz.env).
     # The build's own tools (bifcl, binpac, spicyz) link the sanitizer
     # runtimes through LDFLAGS; LSan is off for them as for the run, and
@@ -121,9 +123,10 @@ build)
     (cd "$s/build" && find . -name libzeek_fuzzer_shared.so -type f) > "$f/$b/sharedlib"
     [ "$(wc -l < "$f/$b/sharedlib")" = 1 ] || fail "$b: not exactly one libzeek_fuzzer_shared.so in the build"
     # Zeek's tailored UB checks, and the flag that makes a UBSan report stop
-    # the run (fuzz.env).
-    grep -q -- "-fno-sanitize-recover=$HR23_FUZZ_UB_CHECKS " "$s/build/build.ninja" \
-      || fail "$b: the build lines do not carry -fno-sanitize-recover=HR23_FUZZ_UB_CHECKS"
+    # the run (fuzz.env), on every compile line of binpac's runtime library
+    # and of DNP3.cc (fuzz_judge.py flags).
+    python3 -I "$here/fuzz_judge.py" flags "$s/build/build.ninja" "$HR23_FUZZ_SANITIZERS" "$HR23_FUZZ_UB_CHECKS" \
+      || fail "$b: the compile lines of binpac's runtime or DNP3.cc lack the run's sanitizer flags"
   done
   # The two builds differ in option (i)'s generated parser, so the patch is
   # in C2 and not in C1p.
@@ -135,14 +138,15 @@ build)
   {
     echo "runner image: ${ImageOS:-unknown} ${ImageVersion:-unknown}"
     echo "clang: $(clang-$V --version | head -1)"
-    echo "packages: $(dpkg-query -W -f '${Package}=${Version} ' clang-$V libclang-rt-$V-dev llvm-$V libpcap-dev libssl-dev flex bison cmake ninja-build 2> /dev/null)"
+    echo "packages: $(dpkg-query -W -f '${Package}=${Version} ' clang-$V libclang-rt-$V-dev llvm-$V libpcap-dev libssl-dev flex libfl-dev bison cmake ninja-build libmaxminddb-dev libuv1-dev zlib1g-dev 2> /dev/null)"
     echo "tarball: sha256 $ZEEK_TARBALL_SHA256 (build.sh verify: signature by subkey $ZEEK_SIGNING_SUBKEY_FPR)"
     echo "option (i)'s patch: sha256 $HR23_PATCH_SHA256 (C2 only)"
     echo "harness patch: sha256 $HR23_FUZZ_HARNESS_SHA256 (both)"
     echo "mutator: sha256 $HR23_FUZZ_MUTATOR_SHA256 (both)"
-    echo "sanitizers: $HR23_FUZZ_SANITIZERS, UB checks $HR23_FUZZ_UB_CHECKS, -fno-sanitize-recover for them checked in both builds' lines"
+    echo "sanitizers: $HR23_FUZZ_SANITIZERS, UB checks $HR23_FUZZ_UB_CHECKS, -fno-sanitize-recover for them; both checked on the compile lines of binpac's runtime and DNP3.cc in both builds"
     echo "coverage flags: $cov (both)"
-    echo "configure: Spicy on, binpac static, the rest as in this file (both)"
+    echo "configure: Spicy on, binpac static and instrumented, the rest as in this file (both)"
+    echo "against the measured image: clang $V, not Debian 13's g++; debug with -O1, not Release; the runner image above, not Debian 13; its library versions, listed above. The result speaks for the source and the patches, not for the measured binary (fuzz.env)"
     for b in c1p c2; do
       echo "## $b"
       echo "generated parser:"
@@ -220,7 +224,7 @@ coverage)
     rm -rf "$d"
     mkdir -p "$d"
     rc=0
-    PROFILE=$d/%p.profraw fuzzer c2 $t -runs=0 "$priv/c2/$t/corpus" > "$d/log" 2>&1 || rc=$?
+    PROFILE=$d/%p.profraw fuzzer c2 $t -runs=0 -artifact_prefix="$d/" "$priv/c2/$t/corpus" > "$d/log" 2>&1 || rc=$?
     echo $rc > "$d/exit-code"
     if ls "$d/"*.profraw > /dev/null 2>&1; then
       llvm-profdata-$V merge -sparse "$d/"*.profraw -o "$d/merged.profdata"

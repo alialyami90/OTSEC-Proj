@@ -28,14 +28,25 @@ executions and report count; the replay's classes; the coverage
 conditions; and the verdict:
 - `fail` when an input reproduces on C2 and not on C1p;
 - `unknown` when an input does not reproduce on its own build, a report
-  left no input, a campaign left no result, or a coverage condition is
+  left no input, a campaign left no result, a campaign stopped on a report
+  before its pinned time (D6's B1 on #731: it did not fuzz its time), a
+  coverage replay has no exit code or a non-zero one (D3's B2 on #731: a
+  report there, or no coverage report from it), or a coverage condition is
   `no`;
 - `pass` otherwise.
 An input that reproduces on C1p (stock Zeek 9.0.1's source) is counted,
 never netted out, and held for the owner's disclosure decision.
 
+`flags NINJA SANITIZERS UBCHECKS` checks the build's own lines (D3's B1
+on #731): every compile line in NINJA (build.ninja) of binpac's runtime
+library and of DNP3.cc carries -fsanitize= with each of SANITIZERS
+(fuzz.env's; `undefined` read as UBCHECKS) and -fno-sanitize-recover=
+UBCHECKS. It prints only `ok` or the source file's name, and exits 1 on a
+miss.
+
 Usage: python -I fuzz_judge.py coverage F DNP3CC
        python -I fuzz_judge.py summary F
+       python -I fuzz_judge.py flags NINJA SANITIZERS UBCHECKS
 """
 import hashlib
 import os
@@ -196,9 +207,13 @@ def summary(f):
                 if len(p) == 2 and p[0] in CONDITIONS:
                     cov[p[0]] = p[1] == "yes"
     cov_ok = all(cov.get(c, False) for c in CONDITIONS)
+    # A coverage replay with no exit code, or a non-zero one, ended without
+    # its coverage report, and may have stopped on a report.
+    cov_bad = sum(1 for t in TARGETS if read_int(os.path.join(priv, "cov-" + t, "exit-code")) != 0)
     if classes["against"]:
         verdict = "fail"
-    elif unknown or classes["unknown"] or reports_no_input or not cov_ok or replayed + reports_no_input < total_reports:
+    elif (unknown or early or cov_bad or classes["unknown"] or reports_no_input or not cov_ok
+          or replayed + reports_no_input < total_reports):
         verdict = "unknown"
     else:
         verdict = "pass"
@@ -222,10 +237,44 @@ def summary(f):
             f"- Reproduces on C1p only (held likewise): {classes['c1p-only']}.",
             f"- Does not reproduce on its own build (`unknown`, counted): {classes['unknown']}.",
             f"- Campaigns ended by a report before their time: {early}; campaigns with no result: {unknown}.",
+            f"- Coverage replays with no exit code or a non-zero one: {cov_bad}.",
             "", "| coverage condition (C2's final corpus) | met |", "| --- | --- |"]
     out += [f"| {c} | {'-' if c not in cov else ('yes' if cov[c] else 'no')} |" for c in CONDITIONS]
     out += ["", "No input, trace or log leaves the runner (design section 4.6, Disclosure)."]
     sys.stdout.write("\n".join(out) + "\n")
+    return 0
+
+
+# binpac's runtime library, and the DNP3 analyzer as libzeek's reference.
+FLAG_SOURCES = ("binpac_buffer.cc", "binpac_bytestring.cc", "binpac_regex.cc", "DNP3.cc")
+
+
+def flags(ninja, sanitizers, ub):
+    want = {s for s in sanitizers.split(",") if s != "undefined"} | set(ub.split(","))
+    recover = "-fno-sanitize-recover=" + ub
+    found = {s: [] for s in FLAG_SOURCES}
+    cur = None
+    with open(ninja, encoding="utf-8", errors="replace") as fh:
+        for x in fh:
+            if x.startswith("build "):
+                out = x[6:].split(":", 1)[0].strip()
+                name = out.rsplit("/", 1)[-1]
+                cur = name[:-2] if name.endswith(".o") and name[:-2] in found else None
+            elif cur and x.startswith("  FLAGS = "):
+                toks = x.split()
+                san = set()
+                for k in toks:
+                    if k.startswith("-fsanitize="):
+                        san |= set(k[len("-fsanitize="):].split(","))
+                found[cur].append(want <= san and recover in toks)
+            elif not x.startswith(" "):
+                cur = None
+    bad = [s for s in FLAG_SOURCES if not found[s] or not all(found[s])]
+    for s in bad:
+        sys.stdout.write(f"flags: {s}: no compile line, or one without the run's sanitizer flags\n")
+    if bad:
+        return 1
+    sys.stdout.write("flags: ok\n")
     return 0
 
 
@@ -234,6 +283,8 @@ def main(argv):
         return coverage(argv[1], argv[2])
     if len(argv) == 2 and argv[0] == "summary":
         return summary(argv[1])
+    if len(argv) == 4 and argv[0] == "flags":
+        return flags(argv[1], argv[2], argv[3])
     sys.stderr.write(__doc__.split("Usage:")[1])
     return 2
 

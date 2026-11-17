@@ -144,6 +144,13 @@ def check_ip(fix):
     assert fix(odd, ip=True) == (odd, 1)
 
 
+def test_dnp3_crc_has_the_catalogue_check_value():
+    # The fix-up's tests compare it with dnp3.crc; this anchors dnp3.crc on a
+    # constant (D2's N1 on #731): CRC RevEng's CRC-16/DNP, check 0xEA82 over
+    # "123456789", written low octet first.
+    assert dnp3.crc(b"123456789") == b"\x82\xea"
+
+
 def test_fixup_restores_every_crc_in_stream_framing(tmp_path):
     check_stream(build_fixup(tmp_path))
 
@@ -192,6 +199,7 @@ def test_fixup_ignores_input_with_no_magic(tmp_path):
 FIXUP_CONTROLS = [
     ("block-15", ("size_t b = user < 16 ? user : 16;", "size_t b = user < 15 ? user : 15;"), check_stream),
     ("poly", ("0xA6BC", "0xA6BD"), check_stream),
+    ("no-complement", ("return ~c;", "return c;"), check_stream),
     ("header-bound-off-by-one", ("while ( i + 10 <= n ) {", "while ( i + 10 < n ) {"), check_stream),
     ("block-bound-off-by-one", ("if ( j + b + 2 > n )", "if ( j + b + 2 >= n )"), check_stream),
     ("ip-any-protocol", ("|| d[9] != 17 )", ")"), check_ip),
@@ -357,19 +365,23 @@ INPUT_HEX = "0x1,0x50,0x4b,0x54,0x1,0x5,0x64,"
 ART = "crash-0123456789abcdef0123456789abcdef01234567"
 
 
-def campaign(f, b, t, rc=0, secs=1800, execs=12345, artifacts=()):
+def campaign(f, b, t, rc=0, secs=1800, execs=12345, artifacts=(), stats=True):
     d = f / "private" / b / t
     (d / "artifacts").mkdir(parents=True)
     (d / "exit-code").write_text(f"{rc}\n")
     (d / "seconds").write_text(f"{secs}\n")
+    stat = f"stat::number_of_executed_units: {execs}\n" if stats else ""
     (d / "log").write_text(f"INFO: Seed: 1\n{TRACE}\n{INPUT_HEX}\n{INPUT_B64}\n"
                            f"artifact_prefix='./'; Test unit written to ./{ART}\n"
-                           f"stat::number_of_executed_units: {execs}\nstat::peak_rss_mb: 900\n")
+                           f"{stat}stat::peak_rss_mb: 900\n")
     for a in artifacts:
         (d / "artifacts" / a).write_bytes(b"\x01PKT\x01\x05\x64secret-input")
 
 
-def run_judge(f, *rows, cov=True):
+def run_judge(f, *rows, cov=True, cov_rc=None):
+    """Campaigns, and with `cov` not None the coverage step's files: its
+    conditions, and each target's coverage replay exit code (0 unless
+    `cov_rc` names a target's code, None for no exit-code file)."""
     judge = load(JUDGE, "fuzz_judge")
     for t in judge.TARGETS:
         for b in judge.BUILDS:
@@ -378,6 +390,12 @@ def run_judge(f, *rows, cov=True):
     if cov is not None:
         (f / "coverage.tsv").write_text("condition\tmet\n" + "".join(
             f"{c}\t{'yes' if cov else 'no'}\n" for c in judge.CONDITIONS))
+        for t in judge.TARGETS:
+            rc = (cov_rc or {}).get(t, 0)
+            d = f / "private" / f"cov-{t}"
+            d.mkdir(parents=True, exist_ok=True)
+            if rc is not None:
+                (d / "exit-code").write_text(f"{rc}\n")
     return judge
 
 
@@ -497,6 +515,71 @@ def test_judge_campaign_with_no_result_is_unknown(tmp_path, capsys):
     assert "Verdict: **unknown**" in out and "| dnp3_udp | c1p | no result |" in out
 
 
+def check_no_stats_no_result(judge, tmp_path, capsys):
+    # An exit code and no final stats: the campaign left no result (D6's M3
+    # on #731).
+    run_judge(tmp_path, ("c2", "dnp3_tcp", {"stats": False}))
+    judge.summary(str(tmp_path))
+    out = capsys.readouterr().out
+    assert "Verdict: **unknown**" in out and "| dnp3_tcp | c2 | no result |" in out
+
+
+def test_judge_campaign_with_no_stats_is_no_result(tmp_path, capsys):
+    check_no_stats_no_result(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
+
+
+def test_judge_no_stats_control_fails(tmp_path, capsys):
+    judge = load(JUDGE, "fuzz_judge_nostats", ("if rc is None or ex is None:", "if rc is None:"))
+    with pytest.raises(AssertionError):
+        check_no_stats_no_result(judge, tmp_path, capsys)
+
+
+def check_early_unknown(judge, tmp_path, capsys):
+    # D6's B1 on #731: C2's dnp3_udp stopped on a report after 40 s; its
+    # input reproduces on both builds and every coverage condition is met.
+    # The campaign did not fuzz its time, so the run is not a pass.
+    run_judge(tmp_path, ("c2", "dnp3_udp", {"rc": 77, "secs": 40, "execs": 3, "artifacts": (ART,)}))
+    write_replay(tmp_path, ("dnp3_udp", "c2", "77", "77"))
+    judge.summary(str(tmp_path))
+    out = capsys.readouterr().out
+    assert "ended by a report before their time: 1;" in out
+    assert "Verdict: **unknown**" in out
+
+
+def test_judge_campaign_stopped_early_is_unknown(tmp_path, capsys):
+    check_early_unknown(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
+
+
+def test_judge_early_unknown_control_fails(tmp_path, capsys):
+    # The control: the verdict without the early term passes that run.
+    judge = load(JUDGE, "fuzz_judge_noearly", ("unknown or early or cov_bad or", "unknown or cov_bad or"))
+    with pytest.raises(AssertionError):
+        check_early_unknown(judge, tmp_path, capsys)
+
+
+def check_cov_exit(judge, tmp_path, capsys):
+    # D3's B2 on #731: every coverage condition is met, but one coverage
+    # replay ended non-zero, or left no exit code. Neither is a pass.
+    for name, rc in (("crash", 1), ("missing", None)):
+        f = tmp_path / name
+        run_judge(f, cov_rc={"dnp3_tcp": rc})
+        judge.summary(str(f))
+        out = capsys.readouterr().out
+        assert "Coverage replays with no exit code or a non-zero one: 1." in out, name
+        assert "Verdict: **unknown**" in out, name
+
+
+def test_judge_coverage_replay_exit_code(tmp_path, capsys):
+    check_cov_exit(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
+
+
+def test_judge_coverage_replay_exit_code_control_fails(tmp_path, capsys):
+    # The control: the verdict without the coverage replay's exit codes.
+    judge = load(JUDGE, "fuzz_judge_nocovrc", ("unknown or early or cov_bad or", "unknown or early or"))
+    with pytest.raises(AssertionError):
+        check_cov_exit(judge, tmp_path, capsys)
+
+
 def test_judge_control_netting_out_stock_reports_fails(tmp_path, capsys):
     # The control: a judge that counts a both-builds report against the
     # patch, or drops it, must not pass this check.
@@ -528,20 +611,24 @@ FN = {
 }
 
 
-def lcov_file(path, fns, catch=True):
+def lcov_file(path, fns, catch=True, other=False):
+    """One lcov file; with `other`, a second source file whose line of the
+    catch's number ran (a real lcov holds hundreds of files)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     out = ["SF:/w/c2/zeek-9.0.1/src/analyzer/protocol/dnp3/DNP3.cc"]
     out += [f"FN:1,{FN[k]}" for k in FN] + [f"FNDA:{1 if k in fns else 0},{FN[k]}" for k in FN]
     out += ["DA:7,0", f"DA:8,{1 if catch else 0}", "end_of_record"]
+    if other:
+        out += ["SF:/w/c2/zeek-9.0.1/src/Conn.cc", "DA:8,5", "end_of_record"]
     path.write_text("\n".join(out) + "\n")
 
 
-def coverage(tmp_path, capsys, per, edit=None):
+def coverage(tmp_path, capsys, per, edit=None, other=False):
     judge = load(JUDGE, "fuzz_judge_cov", edit)
     cc = tmp_path / "DNP3.cc"
     cc.write_text(DNP3CC)
     for t, (fns, catch) in per.items():
-        lcov_file(tmp_path / "private" / f"cov-{t}" / "lcov.info", fns, catch)
+        lcov_file(tmp_path / "private" / f"cov-{t}" / "lcov.info", fns, catch, other)
     judge.coverage(str(tmp_path), str(cc))
     capsys.readouterr()
     return dict(x.split("\t") for x in (tmp_path / "coverage.tsv").read_text().splitlines()[1:])
@@ -568,6 +655,39 @@ def test_coverage_catch_line_not_reached(tmp_path, capsys):
     assert coverage(tmp_path, capsys, per)["bprime-catch"] == "no"
 
 
+def check_replay_needs_udp_deliver(tmp_path, capsys, edit=None):
+    # D6's M1 on #731: the packet target reached ReplayPacketBuffer and not
+    # DNP3_UDP_Analyzer::DeliverPacket.
+    per = dict(ALL)
+    per["packet"] = ({"req", "replay"}, False)
+    assert coverage(tmp_path, capsys, per, edit)["replay-path"] == "no"
+
+
+def test_coverage_replay_path_needs_udp_deliver(tmp_path, capsys):
+    check_replay_needs_udp_deliver(tmp_path, capsys)
+
+
+def test_coverage_replay_path_control_fails(tmp_path, capsys):
+    with pytest.raises(AssertionError):
+        check_replay_needs_udp_deliver(tmp_path, capsys, (' and hit(pk[0], "udp-deliver")', ""))
+
+
+def check_catch_only_in_dnp3cc(tmp_path, capsys, edit=None):
+    # D6's M2 on #731: the catch's line number ran in another source file,
+    # and not in DNP3.cc.
+    per = {t: (fns, False) for t, (fns, _) in ALL.items()}
+    assert coverage(tmp_path, capsys, per, edit, other=True)["bprime-catch"] == "no"
+
+
+def test_coverage_catch_counted_in_dnp3cc_only(tmp_path, capsys):
+    check_catch_only_in_dnp3cc(tmp_path, capsys)
+
+
+def test_coverage_catch_file_control_fails(tmp_path, capsys):
+    with pytest.raises(AssertionError):
+        check_catch_only_in_dnp3cc(tmp_path, capsys, ('if sf.endswith("analyzer/protocol/dnp3/DNP3.cc"))', "if sf)"))
+
+
 def test_coverage_one_arm_missing(tmp_path, capsys):
     per = {t: (fns - {"resp"}, c) for t, (fns, c) in ALL.items()}
     got = coverage(tmp_path, capsys, per)
@@ -590,6 +710,86 @@ def test_judge_catch_strings_match_the_pinned_patch():
     assert any(x.strip() == judge.CATCH_LINE for x in added)
 
 
+# --- The build's sanitizer flags on binpac's runtime and DNP3.cc -----------
+# (D3's B1 and D6's M10 on #731.)
+
+def fuzz_env():
+    with open(os.path.join(HERE, "fuzz.env"), encoding="utf-8") as fh:
+        return dict(re.findall(r"^(HR23_FUZZ_[A-Z_]+)=(\S*)$", fh.read(), re.M))
+
+
+NINJA_OBJS = {
+    "binpac_buffer.cc": "tools/binpac/lib/CMakeFiles/binpac_static.dir/binpac_buffer.cc.o",
+    "binpac_bytestring.cc": "tools/binpac/lib/CMakeFiles/binpac_static.dir/binpac_bytestring.cc.o",
+    "binpac_regex.cc": "tools/binpac/lib/CMakeFiles/binpac_static.dir/binpac_regex.cc.o",
+    "DNP3.cc": "src/analyzer/protocol/dnp3/CMakeFiles/plugin-Zeek-DNP3.dir/DNP3.cc.o",
+}
+
+
+def ninja_file(path, bare=(), recover=None):
+    """A build.ninja with one compile edge per source, as CMake's Ninja
+    generator writes it. Sources in `bare` get the coverage flags only, as
+    binpac's runtime does without the harness patch's line."""
+    env = fuzz_env()
+    ub = env["HR23_FUZZ_UB_CHECKS"]
+    san = "-fsanitize=" + env["HR23_FUZZ_SANITIZERS"].replace("undefined", ub)
+    rec = "-fno-sanitize-recover=" + (ub if recover is None else recover)
+    out = ["# This file is generated by CMake", "include CMakeFiles/rules.ninja", ""]
+    for src, obj in NINJA_OBJS.items():
+        fl = "-fprofile-instr-generate -fcoverage-mapping -g -std=c++20"
+        if src not in bare:
+            fl += f" {san} {rec} -fno-omit-frame-pointer -fno-optimize-sibling-calls -O1"
+        out += [f"build {obj}: CXX_COMPILER__x_unscanned_Debug /w/zeek-9.0.1/{src} || cmake_object_order_x",
+                "  DEFINES = -DHAVE_CONFIG_H", f"  DEP_FILE = {obj}.d", f"  FLAGS = {fl}",
+                "  INCLUDES = -I/w/zeek-9.0.1/build", "  OBJECT_DIR = x", ""]
+    out += ["build zeek-dnp3_tcp-fuzzer: CXX_EXECUTABLE_LINKER__x_Debug a.o", "  FLAGS = -g", ""]
+    path.write_text("\n".join(out) + "\n")
+
+
+def run_flags(tmp_path, capsys, **kw):
+    env = fuzz_env()
+    p = tmp_path / "build.ninja"
+    ninja_file(p, **kw)
+    rc = load(JUDGE, "fuzz_judge_flags").flags(str(p), env["HR23_FUZZ_SANITIZERS"], env["HR23_FUZZ_UB_CHECKS"])
+    return rc, capsys.readouterr().out
+
+
+def test_flags_ok_when_binpac_and_dnp3_carry_them(tmp_path, capsys):
+    assert run_flags(tmp_path, capsys) == (0, "flags: ok\n")
+
+
+def test_flags_control_binpac_not_instrumented_fails(tmp_path, capsys):
+    # The control for the harness patch's line: without it, binpac's
+    # runtime has the coverage flags only, and the check must fail.
+    rc, out = run_flags(tmp_path, capsys, bare=("binpac_buffer.cc", "binpac_bytestring.cc", "binpac_regex.cc"))
+    assert rc == 1 and "binpac_buffer.cc" in out and "ok" not in out
+
+
+def test_flags_control_recover_list_or_source_missing_fails(tmp_path, capsys):
+    env = fuzz_env()
+    # One check short in the recover list.
+    rc, _ = run_flags(tmp_path, capsys, recover=env["HR23_FUZZ_UB_CHECKS"].rsplit(",", 1)[0])
+    assert rc == 1
+    # No compile line for DNP3.cc.
+    p = tmp_path / "build.ninja"
+    ninja_file(p)
+    p.write_text(p.read_text().replace("DNP3.cc.o:", "DNP3x.cc.o:"))
+    assert load(JUDGE, "j").flags(str(p), env["HR23_FUZZ_SANITIZERS"], env["HR23_FUZZ_UB_CHECKS"]) == 1
+
+
+def test_flags_missing_build_ninja_is_not_ok(tmp_path):
+    # A failed read raises, so fuzz.sh's `|| fail` stops the build.
+    env = fuzz_env()
+    with pytest.raises(OSError):
+        load(JUDGE, "j").flags(str(tmp_path / "none.ninja"), env["HR23_FUZZ_SANITIZERS"], env["HR23_FUZZ_UB_CHECKS"])
+
+
+def test_harness_patch_instruments_binpac_runtime():
+    with open(os.path.join(HERE, "hr23-fuzz-harness.patch"), encoding="utf-8") as fh:
+        added = [x[1:].strip() for x in fh.read().split("\n") if x.startswith("+") and not x.startswith("+++")]
+    assert "zeek_target_enable_sanitizers(binpac_static)" in added
+
+
 # --- Disclosure, by the files that run -------------------------------------
 
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "d4-zeek-dnp3-fuzz.yml")
@@ -603,18 +803,41 @@ def check_workflow(wf):
     assert re.search(r"^on:\n  workflow_dispatch:\npermissions:", wf, re.M)
     assert "pull_request" not in wf and "push:" not in wf and "schedule:" not in wf
     assert "private" not in wf
+    # The token reads the repository and nothing more (D6's M8 on #731).
+    assert re.search(r"^permissions:\n  contents: read\njobs:", wf, re.M)
 
 
 def check_fuzz_sh(src):
-    """The disclosure rule on fuzz.sh: every fuzzer run writes to a private
-    file, and no command prints one."""
+    """The disclosure rule and the settings on fuzz.sh: every fuzzer run
+    writes to a private file; every run on a corpus folder saves its
+    artifacts in the private folder; no command prints a private file; the
+    builds and every fuzzer run have no network; and the build checks its
+    sanitizer flags (D3's B2, D6's M5b to M7, M10 and M12 on #731)."""
     lines = src.split("\n")
     calls = [x for x in lines if re.search(r"\bfuzzer (c1p|c2|\$b|\$rb) ", x)]
     assert len(calls) == 3  # campaign, replay, coverage
     for x in calls:
         assert re.search(r'> "\$(d|priv)/[^"]*" 2>&1', x), x
+    corpus = [x for x in calls if '/corpus"' in x]
+    assert len(corpus) == 2  # campaign, coverage
+    for x in corpus:
+        assert re.search(r'-artifact_prefix="\$d/[^"]*" ', x), x
+    assert [x.strip() for x in lines if re.match(r"\s*d=", x)] and all(
+        x.strip().startswith("d=$priv/") for x in lines if re.match(r"\s*d=", x))
     for x in lines:
-        assert not re.search(r'\b(cat|head|tail|sed|grep|less)\b[^|]*"\$(priv|d)/', x), x
+        if x.lstrip().startswith("#"):
+            continue
+        assert not re.search(r'\b(cat|head|tail|sed|grep|less|tee|od|xxd|base64|strings)\b[^|]*'
+                             r'("\$(priv|d)/|private)', x), x
+    body = src[src.index("\nfuzzer() {"):]
+    body = body[:body.index("\n}\n")]
+    assert re.search(r"^\s*nonet env ZEEKPATH=", body, re.M)
+    assert src.count("zeek-$fz_t-fuzzer") == 1 and "zeek-$fz_t-fuzzer" in body
+    assert src.count("./configure") == 1 and '(cd "$s" && nonet env CC=clang-$V ' in src
+    ninja = [x for x in lines if re.search(r"\bninja -C ", x)]
+    assert ninja and all(x.lstrip().startswith("nonet env ") for x in ninja), ninja
+    assert re.search(r'\n    python3 -I "\$here/fuzz_judge\.py" flags "\$s/build/build\.ninja" '
+                     r'"\$HR23_FUZZ_SANITIZERS" "\$HR23_FUZZ_UB_CHECKS" \\\n      \|\| fail ', src)
 
 
 def read(path):
@@ -636,10 +859,20 @@ WORKFLOW_CONTROLS = [
                          "      - uses: actions/upload-artifact@v4\n        with:\n          path: ${{ runner.temp }}\n"
                          "      - name: Summary and verdict\n")),
     ("push-trigger", ("on:\n  workflow_dispatch:\n", "on:\n  workflow_dispatch:\n  push:\n")),
+    ("contents-write", ("  contents: read\n", "  contents: write\n")),
 ]
 FUZZ_SH_CONTROLS = [
     ("campaign-to-the-job-log", ('"$d/corpus" > "$d/log" 2>&1 || rc=$?', '"$d/corpus" || rc=$?')),
     ("replay-log-printed", ('  rm -f "$priv/replay.log"', '  cat "$priv/replay.log"')),
+    ("private-by-another-path", ('  rm -f "$priv/replay.log"', '  cat "$f/private/replay.log"')),
+    ("campaign-no-artifact-prefix", (' -artifact_prefix="$d/artifacts/" ', ' ')),
+    ("coverage-no-artifact-prefix", (' -runs=0 -artifact_prefix="$d/" ', ' -runs=0 ')),
+    ("coverage-folder-outside-private", ("d=$priv/cov-$t", "d=$f/cov-$t")),
+    ("fuzzer-with-network", ("  nonet env ZEEKPATH=", "  env ZEEKPATH=")),
+    ("configure-with-network", ('(cd "$s" && nonet env CC=', '(cd "$s" && env CC=')),
+    ("ninja-with-network", ("    nonet env ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=1 ninja",
+                            "    env ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=1 ninja")),
+    ("no-flags-check", ('python3 -I "$here/fuzz_judge.py" flags', 'true')),
 ]
 
 
