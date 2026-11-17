@@ -101,7 +101,7 @@ build)
         --disable-btest-pcaps --disable-broker-tests --disable-cpp-tests \
         --disable-zkg --disable-zeekctl --disable-javascript --disable-python \
         --disable-cluster-backend-zeromq --disable-af-packet) > "$f/$b/configure.log" 2>&1 \
-      || { tail -40 "$f/$b/configure.log" >&2; fail "$b: configure failed"; }
+      || { grep -A8 "CMake Error" "$f/$b/configure.log" | head -60 >&2; fail "$b: configure failed"; }
     # binpac and Broker are linked statically, as in Zeek's OSS-Fuzz build:
     # as shared libraries beside libzeek_fuzzer_shared.so, ASan's start-up
     # check reported an ODR violation (smoke run 44008961055) and no fuzzer
