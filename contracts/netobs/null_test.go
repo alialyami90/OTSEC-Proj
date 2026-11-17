@@ -615,3 +615,22 @@ func TestHeartbeatNullCountFormFirst(t *testing.T) {
 		}
 	}
 }
+
+// TestHeartbeatPerFieldFormAtNullMovedFirst covers the branch that moves a
+// per-field form at a null path ahead of an earlier error (D6's N5 on #735):
+// a heartbeat whose coverage carries VLAN 0 (range) and whose egress_check is
+// null is counted form, not range. Control: without the move the codes come
+// out [range form].
+func TestHeartbeatPerFieldFormAtNullMovedFirst(t *testing.T) {
+	for _, schema := range channelIdentifiers {
+		h := nullHeartbeat(schema)
+		b := encodeWith(t, h, func(m map[string]any) {
+			setPath(m, []any{0}, "coverage", "vlans_seen")
+			setPath(m, nil, "egress_check")
+		})
+		_, err := DecodeFromSensorIn(b, schema)
+		if cs := Codes(err); len(cs) < 2 || cs[0] != CodeForm || !firstFormAt(err, "egress_check") {
+			t.Errorf("%s: %v, want form at egress_check first, and the VLAN's range after", schema, err)
+		}
+	}
+}
