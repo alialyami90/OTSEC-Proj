@@ -252,10 +252,18 @@ def test_tcp_stop_inputs_follow_the_orders_of_718s_tcp_cells():
         assert [o for o, _ in f.msgs] == [True, True, False, True, False]
     assert flows["d4u-tcp-replay-same-end-badobj"].msgs[0] == (True, 129)
     for name, code in (("fc0", 0), ("fc13", 13)):
-        f = flows[f"d4u-tcp-resp-{name}-mid"]
-        assert f.conv.s.port == 20000 and f.bad == 2
-        assert f.msgs == [(True, 1), (False, 129), (False, code), (True, 1), (False, 129)]
+        for dn, dirbit in (("", 0), ("-dirset", 0x80)):
+            f = flows[f"d4u-tcp-resp-{name}-mid{dn}"]
+            assert f.conv.s.port == 20000 and f.bad == 2
+            assert f.msgs == [(True, 1), (False, 129), (False, code), (True, 1), (False, 129)]
+            # X's link frame ends its segment (frame 7: the handshake's 3,
+            # then P, R(P) and their ACKs): 10 header octets, then the
+            # transport octet and 2 application octets, then their CRC.
+            # DIR is the top bit of the control octet, after the magic and
+            # the length.
+            link = f.conv.frames[7].data[-15:]
+            assert link[:2] == b"\x05\x64" and link[3] & 0x80 == dirbit
     # Each ends with the FIN exchange: the handshake's 3 frames, each
     # message and its bare ACK, then FIN, FIN and ACK.
-    for case in du.EXPERIMENT[-4:]:
+    for case in du.EXPERIMENT[-6:]:
         assert len(flows[case].conv.frames) == 3 + 2 * 5 + 3

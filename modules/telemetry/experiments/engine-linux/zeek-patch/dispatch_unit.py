@@ -201,7 +201,7 @@ def cases():
     # PIA_TCP replays X and P. X is the truncated READ, which every build
     # rejects (the stock engine's stop), or M1's 129 of 5 octets, which only
     # C2's parser rejects.
-    for sfx, x in (("", bytes([0xC0, dnp3.READ, 60])), ("-badobj", dnp3.response(0, objects=b""))):
+    for sfx, x in (("", bytes([0xC0, dnp3.READ, 60])), ("-badobj", dnp3.response(0, objects=b"\x01"))):
         f = Flow("master", True, server_port=20001)
         f.send(True, x, bad=True)
         f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
@@ -213,16 +213,18 @@ def cases():
     # dnp3-mal-tcp-fc0-resp-* and -fc13-resp-*'s order: P and R(P) on a
     # connection to 20000, which attaches DNP3_TCP by port, then X, a 2-octet
     # request code from the responder, which the response parser of C0 and
-    # C1p rejects in mid-flow, then Q and R(Q).
-    for name, x in (("fc0", dnp3.confirm(0)), ("fc13", dnp3.request(0, 13))):
+    # C1p rejects in mid-flow, then Q and R(Q); X's DIR clear, as its
+    # role's, or set, against its side (#718's -dirclear and -dirset).
+    for name, x, dirset, dn in ((n, x, d, dn) for n, x in (("fc0", dnp3.confirm(0)), ("fc13", dnp3.request(0, 13)))
+                                for d, dn in ((False, ""), (True, "-dirset"))):
         f = Flow("master", True)
         f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(0))
-        f.send(False, x, bad=True)
+        f.send(False, x, dir_set=dirset, bad=True)
         f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(1))
         f.conv.close()
-        out[f"d4u-tcp-resp-{name}-mid"] = f
+        out[f"d4u-tcp-resp-{name}-mid{dn}"] = f
     # A master's direct operate with a control block and DIR clear, on a
     # flow the master starts: the code picks the request parser, so the
     # block is parsed under both builds (a selector keyed by DIR would not).
@@ -323,7 +325,8 @@ EXPERIMENT = ["d4u-short-request-first", "d4u-short-response-first",
               "d4u-short-request-second",
               # D4-115 item 4: the orders of #718's TCP cells.
               "d4u-tcp-replay-same-end", "d4u-tcp-replay-same-end-badobj",
-              "d4u-tcp-resp-fc0-mid", "d4u-tcp-resp-fc13-mid"]
+              "d4u-tcp-resp-fc0-mid", "d4u-tcp-resp-fc13-mid",
+              "d4u-tcp-resp-fc0-mid-dirset", "d4u-tcp-resp-fc13-mid-dirset"]
 
 
 def state(d, test):
