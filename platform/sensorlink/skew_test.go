@@ -543,3 +543,51 @@ func TestSkewBounds(t *testing.T) {
 		}
 	}
 }
+
+// The capture floor at a run's Result (section 1.5): a run's own flow
+// held, then a tick stating a lost span whose upper end plus
+// HeartbeatGapMax plus max_skew_ms is past the flow's capture, paid for by
+// a rise of drops_channel, with no clock moved: the flow is refused by the
+// floor alone, committed untied with node.skewed, counted once under
+// skew_span_windows. The floor refuses the flow, not the run's window, so
+// the Result does not report the window refused (section 1.5: "a run whose
+// window is refused is marked skewed"). Control: a gate with no capture
+// floor, which ties it.
+func TestCaptureFloorRefusesHeldFlow(t *testing.T) {
+	run := func(t *testing.T) (*netobs.Observation, Released, SkewStats) {
+		r, _ := holdRig02(t)
+		p := r.accepted(r.agreeHello(hello02()))
+		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+			t.Fatal(err)
+		}
+		start := r.now()
+		f := nodeFlow02(1)
+		f.FirstUTC = canonUTC(start.Add(time.Second))
+		f.LastUTC = f.FirstUTC
+		p.send(f)
+		p.taken()
+		r.pass(netobs.TickMinSpacing + time.Second)
+		tk := r.agreeTick(tick02(20, 1, 1))
+		tk.Lost = []netobs.Span{{FromUTC: canonUTC(start.Add(-time.Minute)), ToUTC: canonUTC(start.Add(-25 * time.Second))}}
+		p.send(tk)
+		p.taken()
+		r.pass(30 * time.Second)
+		s := session09("0e4d8a2c-6b1f-4c3e-9a5d-7f2b1c0d9e8f", 40001, 0)
+		s.StartedAt, s.ConnectedAt, s.EndedAt = start, start, start.Add(20*time.Second)
+		rel, err := r.l.Result(bg, "req-1", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return storedObs(t, r.s)[0], rel, r.l.SkewStats()
+	}
+	o, rel, st := run(t)
+	if o.Node.PlatformSession != nil || !o.Node.Skewed || rel.Skewed || windows(st) != [5]uint64{0, 0, 0, 0, 1} {
+		t.Fatalf("stored %+v, released %+v, window counts %v, floor %s by %q", o.Node, rel, windows(st), st.Floor, st.FloorBy)
+	}
+	t.Run("control: no capture floor", func(t *testing.T) {
+		withSeam(t, &skewNoFloor)
+		if o, _, _ := run(t); o.Node.PlatformSession == nil {
+			t.Fatal("the control made no tie")
+		}
+	})
+}

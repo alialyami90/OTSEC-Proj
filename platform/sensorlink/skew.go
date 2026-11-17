@@ -81,8 +81,9 @@ func first(cs ...string) string {
 // skewGateEOnly gates ties on E alone (no latest-sample gate);
 // skewMarkAlarmOnly marks only while the alarm stands; skewNoMarkAlarm
 // marks nothing for the alarm; skewSubtractE places a sensor time at
-// t - E; lateWithoutE judges lateness without E.
-var skewGateEOnly, skewMarkAlarmOnly, skewNoMarkAlarm, skewSubtractE, lateWithoutE bool
+// t - E; lateWithoutE judges lateness without E; skewNoFloor makes no
+// refusal by the capture floor or the start bound.
+var skewGateEOnly, skewMarkAlarmOnly, skewNoMarkAlarm, skewSubtractE, lateWithoutE, skewNoFloor bool
 
 // afterMarkSeam runs in observe after the record's mark is read and
 // before the hold takes it; skewTakeHeldUnmarked is its control, a hold
@@ -322,7 +323,7 @@ func (l *Link) standing() string {
 // floorRefusal is the cause for which a record captured at capt takes no
 // tie by the start bound or the capture floor, "" when neither refuses.
 func (l *Link) floorRefusal(capt time.Time) string {
-	if !l.skewOn() {
+	if !l.skewOn() || skewNoFloor {
 		return ""
 	}
 	s := &l.skew
