@@ -97,7 +97,7 @@ build)
     (cd "$s" && nonet env CC=clang-$V CXX=clang++-$V LIB_FUZZING_ENGINE=-fsanitize=fuzzer \
       CFLAGS="$cov" CXXFLAGS="$cov" LDFLAGS="$cov -fsanitize=address,undefined" \
       ./configure --build-dir=build --generator=Ninja --build-type=debug \
-        --sanitizers="$HR23_FUZZ_SANITIZERS" --enable-fuzzers --disable-spicy \
+        --sanitizers="$HR23_FUZZ_SANITIZERS" --enable-fuzzers \
         --enable-static-binpac \
         --disable-btest-pcaps --disable-broker-tests --disable-cpp-tests \
         --disable-zkg --disable-zeekctl --disable-javascript --disable-python \
@@ -107,10 +107,13 @@ build)
     # and Broker as shared libraries beside libzeek_fuzzer_shared.so, ASan's
     # start-up check reported an ODR violation (smoke run 44008961055) and
     # no fuzzer started. A static Broker does not configure with
-    # --sanitizers in 9.0.1 (smoke run 44017063571).
-    # The build's own tools (bifcl, binpac) link the sanitizer runtimes
-    # through LDFLAGS; LSan is off for them as for the run (fuzz.env).
-    nonet env ASAN_OPTIONS=detect_leaks=0 ninja -C "$s/build" $(for t in $TARGETS; do printf 'zeek-%s-fuzzer ' "$t"; done) > "$f/$b/ninja.log" 2>&1 \
+    # --sanitizers in 9.0.1 (smoke run 44017063571); the duplicate left is
+    # SQLite's, which fuzz.env's detect_odr_violation=1 passes (same size).
+    # Spicy is on, as in the measured image (fuzz.env).
+    # The build's own tools (bifcl, binpac, spicyz) link the sanitizer
+    # runtimes through LDFLAGS; LSan is off for them as for the run, and
+    # their ODR check is the run's (fuzz.env).
+    nonet env ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=1 ninja -C "$s/build" $(for t in $TARGETS; do printf 'zeek-%s-fuzzer ' "$t"; done) > "$f/$b/ninja.log" 2>&1 \
       || { grep -E 'error|FAILED' "$f/$b/ninja.log" | head -40 >&2; fail "$b: build failed"; }
     sh -c ". '$s/build/zeek-path-dev.sh' && printf '%s' \"\$ZEEKPATH\"" > "$f/$b/zeekpath"
     # Zeek 9.0.1's CMake sets no output folder for zeek_fuzzer_shared, so
@@ -138,6 +141,7 @@ build)
     echo "mutator: sha256 $HR23_FUZZ_MUTATOR_SHA256 (both)"
     echo "sanitizers: $HR23_FUZZ_SANITIZERS, -fno-sanitize-recover=undefined checked in both builds' lines"
     echo "coverage flags: $cov (both)"
+    echo "configure: Spicy on, binpac static, the rest as in this file (both)"
     for b in c1p c2; do
       echo "## $b"
       echo "generated parser:"

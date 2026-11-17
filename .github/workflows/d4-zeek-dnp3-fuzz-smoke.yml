@@ -15,7 +15,7 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: 330
     env:
       FUZZ: modules/telemetry/experiments/engine-linux/zeek-patch/fuzz/fuzz.sh
     steps:
@@ -51,8 +51,8 @@ jobs:
               grep -o 'ERROR: AddressSanitizer: [a-z-]*' "$e.log" | head -3
               grep -vE 'Sanitizer|==[0-9]+==|^ *#[0-9]' "$e.log" | head -30 | cut -c1-300
               rc=0
-              env ZEEKPATH="$(cat "$w/$b/zeekpath")" ASAN_OPTIONS=detect_leaks=0:symbolize=0:detect_odr_violation=0                 "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-$t-fuzzer" -runs=0 -detect_leaks=0 "$e" > "$e.log" 2>&1 || rc=$?
-              echo "$b $t with detect_odr_violation=0: exit $rc"
+              env ZEEKPATH="$(cat "$w/$b/zeekpath")" ASAN_OPTIONS=detect_leaks=0:symbolize=0:detect_odr_violation=1                 "$w/$b/zeek-9.0.1/build/src/fuzzers/zeek-$t-fuzzer" -runs=0 -detect_leaks=0 "$e" > "$e.log" 2>&1 || rc=$?
+              echo "$b $t with detect_odr_violation=1: exit $rc"
               grep -o 'ERROR: AddressSanitizer: [a-z-]*' "$e.log" | head -3
               grep -vE 'Sanitizer|==[0-9]+==|^ *#[0-9]' "$e.log" | head -30 | cut -c1-300
             done
