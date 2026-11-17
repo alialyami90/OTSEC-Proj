@@ -163,6 +163,16 @@ type Link struct {
 	curMu    sync.Mutex
 	inflight *inflight
 	conn     ConnStats
+
+	// The 0.2 position a release moves (section 1.4 items 2 and 3), all
+	// under cmu: pos is the cursor as last written, nil until read;
+	// curOpen is set while the 0.2 path holds a cursor in memory (a
+	// connection, WriteOwed); moved is what releases changed since that
+	// cursor last took their changes.
+	pos     *Cursor
+	posRead bool
+	curOpen bool
+	moved   *posMove
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).
@@ -361,6 +371,15 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, l
 	l.cmu.Lock()
 	defer l.cmu.Unlock()
 	defer l.syncHold()
+	if f := l.inflight; f.mine(hr) && l.moved != nil && l.moved.run == hr.RunID && hr.Seq <= l.moved.taken {
+		// A release disposed of this seq since the frame was placed: the
+		// resend of a record it committed (section 1.4 item 4).
+		l.mu.Lock()
+		l.stats.Dropped[RefusedDuplicate]++
+		l.mu.Unlock()
+		f.outcome = outDuplicate
+		return
+	}
 	if degraded(o.Coverage) {
 		l.giveWay(ctx, false)
 	}
@@ -452,8 +471,21 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 		}
 	}
 	rec, dst, unresolved, err := l.record(hr, tie)
+	var folded *Cursor
 	if err == nil && f != nil {
 		rec.SourceCursor = f.cursor
+		if l.moved != nil {
+			// A release moved the position since f's cursor was encoded:
+			// the commit carries both, so it never writes T or a total back.
+			folded = f.marked.clone()
+			l.moved.apply(folded)
+			b, err := encodeCursor(folded)
+			if err != nil {
+				note(outStoreError) // not taken: T stays, the record is resent
+				return
+			}
+			rec.SourceCursor = b
+		}
 	}
 	if err != nil {
 		l.refuse(RefusedStored)
@@ -481,6 +513,12 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 		return
 	}
 	l.committed(hr)
+	if f != nil {
+		if folded != nil {
+			f.marked, l.moved = folded, nil
+		}
+		l.pos, l.posRead = f.marked.clone(), true
+	}
 	note(outCommitted)
 }
 
@@ -509,11 +547,18 @@ func (l *Link) takeBudget(unresolved bool, n int64, dst string) bool {
 // counts each. As soon as the batch returns, taken gets the largest seq
 // of its receipts, when any record committed: past that point its records
 // are in the store, whatever happens next (release). The caller holds cmu.
+//
+// With a 0.2 position (section 1.4 items 2 and 3), the batch's last record
+// carries the position moved past every released record of the position's
+// run, with the totals of those the release did not store; when it stores
+// nothing, the cursor is saved on its own. An earlier run's record never
+// moves T.
 func (l *Link) commitBatch(ctx context.Context, rel []Release, taken func(last uint64)) {
 	var recs []c5.Record
 	var held []HeldRecord
 	var dsts []string
 	var bytes []int64 // the budget each unresolved record took
+	mv := l.releaseMove(ctx)
 	func() {
 		l.mu.Lock()
 		defer l.mu.Unlock() // a recovered panic never leaves l.mu held (D3's B1 on #676)
@@ -521,12 +566,14 @@ func (l *Link) commitBatch(ctx context.Context, rel []Release, taken func(last u
 			rec, dst, unresolved, err := l.record(r.Record, r.Tie)
 			if err != nil {
 				l.stats.Refused[RefusedStored]++
+				mv.dispose(r.Record, true)
 				continue
 			}
 			var took int64
 			if unresolved {
 				if !l.budget.take(rec.Bytes(), l.opt.Monotonic()) {
 					l.drop(DropUnresolvedBudget, dst)
+					mv.dispose(r.Record, false)
 					continue
 				}
 				took = rec.Bytes()
@@ -535,7 +582,12 @@ func (l *Link) commitBatch(ctx context.Context, rel []Release, taken func(last u
 		}
 	}()
 	if len(recs) == 0 {
+		l.saveMove(ctx, mv)
 		return
+	}
+	stored := mv.with(held)
+	if b := l.moveCursor(stored); b != nil {
+		recs[len(recs)-1].SourceCursor = b
 	}
 	rcs, err := l.opt.Store.AppendBatch(ctx, recs)
 	if err == nil && len(rcs) > 0 {
@@ -545,16 +597,138 @@ func (l *Link) commitBatch(ctx context.Context, rel []Release, taken func(last u
 		}
 		taken(last)
 	}
+	if err == nil {
+		l.tookMove(stored, true)
+	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	for i := range recs {
 		if err != nil {
 			l.budget.giveBack(bytes[i])
 			l.storeDrop(err, dsts[i])
+			mv.dispose(held[i], false)
 			continue
 		}
 		l.committed(held[i])
 	}
+	l.mu.Unlock()
+	if err != nil {
+		l.saveMove(ctx, mv)
+	}
+}
+
+// releaseMove is a release's change to the 0.2 position, nil when the link
+// keeps none (the 0.1 path, or no position saved yet). The caller holds
+// cmu.
+func (l *Link) releaseMove(ctx context.Context) *posMove {
+	if l.opt.Cursor == nil {
+		return nil
+	}
+	if !l.posRead {
+		c, err := l.loadCursor(ctx)
+		if err != nil {
+			return nil // unread: the release commits as on the 0.1 path, and the next read tries again
+		}
+		l.pos, l.posRead = c, true
+	}
+	if l.pos == nil {
+		return nil
+	}
+	return &posMove{run: l.pos.RunID}
+}
+
+// dispose counts r, which the release does not store: a record of the
+// position's run moves T past it, and its node.lost windows are unmarked
+// (D4's N3 on #732).
+func (m *posMove) dispose(r HeldRecord, refused bool) {
+	if m == nil {
+		return
+	}
+	if refused {
+		m.refused++
+	} else {
+		m.dropped++
+	}
+	if r.RunID != m.run {
+		return
+	}
+	m.taken = max(m.taken, r.Seq)
+	var o struct {
+		Node struct {
+			Lost []netobs.Span `json:"lost"`
+		} `json:"node"`
+	}
+	if json.Unmarshal(r.Observation, &o) == nil {
+		m.unmark = append(m.unmark, o.Node.Lost...)
+	}
+}
+
+// with is m with the records rs stored as well.
+func (m *posMove) with(rs []HeldRecord) *posMove {
+	if m == nil {
+		return nil
+	}
+	n := *m
+	n.unmark = slices.Clone(m.unmark)
+	for _, r := range rs {
+		if r.RunID == n.run {
+			n.taken = max(n.taken, r.Seq)
+		}
+	}
+	return &n
+}
+
+// moveCursor is the position with m applied, encoded, or nil when there is
+// nothing to carry. The caller holds cmu.
+func (l *Link) moveCursor(m *posMove) []byte {
+	if m == nil {
+		return nil
+	}
+	c := l.pos.clone()
+	m.apply(c)
+	b, err := encodeCursor(c)
+	if err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the position moved by a release was not saved: %v", l.cfg.SensorID, err))
+		return nil
+	}
+	return b
+}
+
+// tookMove records m: in the position when written, and for the cursor
+// the 0.2 path holds in memory, which takes it at its next write or frame.
+// The caller holds cmu.
+func (l *Link) tookMove(m *posMove, written bool) {
+	if m == nil || (m.taken == 0 && m.refused == 0 && m.dropped == 0) {
+		return
+	}
+	if written {
+		m.apply(l.pos)
+	}
+	if !l.curOpen {
+		return
+	}
+	if l.moved == nil {
+		l.moved = &posMove{run: m.run}
+	}
+	if l.moved.run != m.run {
+		// The cursor in memory moved to a newer run: only the totals carry.
+		m = &posMove{run: l.moved.run, refused: m.refused, dropped: m.dropped}
+	}
+	l.moved.taken = max(l.moved.taken, m.taken)
+	l.moved.refused += m.refused
+	l.moved.dropped += m.dropped
+	l.moved.unmark = append(l.moved.unmark, m.unmark...)
+}
+
+// saveMove saves the position moved by a release that stored nothing, so
+// that no ack passes a count that is not saved (section 1.4 item 3). The
+// caller holds cmu.
+func (l *Link) saveMove(ctx context.Context, m *posMove) {
+	if m == nil || (m.taken == 0 && m.refused == 0 && m.dropped == 0) {
+		return
+	}
+	b := l.moveCursor(m)
+	written := b != nil && l.opt.Cursor.SaveSourceCursor(ctx, b) == nil
+	l.tookMove(m, written)
 }
 
 // storeDrop counts a record the store refused. The caller holds l.mu.

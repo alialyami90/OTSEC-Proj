@@ -271,6 +271,7 @@ func (l *Link) ServeConn(ctx context.Context, c Conn, en Enrolment) string {
 	stop := context.AfterFunc(ctx, func() { l.CloseConn(netobs.CloseShutdown) })
 	defer func() {
 		stop()
+		l.openCursor(false)
 		g.mu.Lock()
 		g.live = nil
 		g.mu.Unlock()
@@ -400,6 +401,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 		if r := l.decided(ctx); r != "" {
 			return r // a decision made while the frame was read
 		}
+		l.openCursor(true) // from the read on, a release records its change for this connection
 		cur, err := l.loadCursor(ctx)
 		if err != nil {
 			return netobs.CloseStateUnread // the position cannot be read (CH-18)
@@ -427,6 +429,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 				if r := l.decided(ctx); r != "" {
 					return r // a decision made while the frame was read
 				}
+				l.foldLive(cn)
 				if r := l.frame(ctx, cn, b); r != "" {
 					return r
 				}
@@ -491,13 +494,96 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 	return &c, nil
 }
 
-// saveCursor saves c on its own.
+// saveCursor saves c on its own, with what releases moved since the 0.2
+// path's cursor last took it, under cmu so that no release writes between
+// the two. Only a save that succeeds puts the releases' changes in c.
 func (l *Link) saveCursor(ctx context.Context, c *Cursor) error {
-	b, err := encodeCursor(c)
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	next := c
+	if l.moved != nil {
+		next = c.clone()
+		l.moved.apply(next)
+	}
+	b, err := encodeCursor(next)
 	if err != nil {
 		return err
 	}
-	return l.opt.Cursor.SaveSourceCursor(ctx, b)
+	if err := l.opt.Cursor.SaveSourceCursor(ctx, b); err != nil {
+		return err
+	}
+	if l.moved != nil {
+		l.moved.apply(c)
+		l.moved = nil
+	}
+	l.pos, l.posRead = c.clone(), true
+	return nil
+}
+
+// posMove is what releases changed in the position while the 0.2 path
+// held its cursor in memory (section 1.4 items 2 and 3; D4's N3 on #732).
+type posMove struct {
+	run              string // the position's run when the release ran
+	taken            uint64 // the highest seq of run the releases disposed of
+	refused, dropped uint64 // what the releases refused and dropped
+	unmark           []netobs.Span
+}
+
+// apply puts m in c: T moves only within m's run, the totals go to c's run
+// (a newer one's included), and a window that a dropped record carried is
+// unmarked, so the run's next stored observation carries it.
+func (m *posMove) apply(c *Cursor) {
+	if c.RunID == m.run {
+		c.Taken = max(c.Taken, m.taken)
+		for _, w := range m.unmark {
+			unmark(c, w)
+		}
+	}
+	c.Refused += m.refused
+	c.Dropped += m.dropped
+}
+
+// unmark clears the mark of the held span whose node.lost window is w.
+func unmark(c *Cursor, w netobs.Span) {
+	f := func(list []HeldSpan) {
+		for i := range list {
+			s := &list[i]
+			if s.Marked && parseUTC(s.FromUTC).Equal(parseUTC(w.FromUTC)) && parseUTC(s.CutUTC).Equal(parseUTC(w.ToUTC)) {
+				s.Marked = false
+			}
+		}
+	}
+	if c.Prior != nil {
+		f(c.Prior.Spans)
+	}
+	f(c.Spans)
+}
+
+// foldLive puts what releases moved in the connection's cursor before a
+// frame is acted on, so the duplicate check reads the position saved now
+// (section 1.4 item 4). The releases' writes are durable already.
+func (l *Link) foldLive(cn *conn) {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	if l.moved == nil || cn.cur == nil {
+		return
+	}
+	l.moved.apply(cn.cur)
+	if cn.cur.RunID == l.moved.run {
+		cn.saved = max(cn.saved, l.moved.taken)
+	}
+	l.moved, cn.pending = nil, true
+}
+
+// openCursor and closeCursor bracket the time the 0.2 path holds a cursor
+// in memory: in it, a release records its changes for that cursor.
+func (l *Link) openCursor(open bool) {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	l.curOpen = open
+	if !open {
+		l.moved = nil // every release wrote its own change
+	}
 }
 
 // flush saves a pending cursor on its own, at most once a second unless
@@ -957,7 +1043,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	if l.hold.on() && !l.flush(ctx, cn, true) {
 		return netobs.CloseStore // T through n-1 is saved before n can be held
 	}
-	f := &inflight{run: o.RunID, seq: n, cursor: mb}
+	f := &inflight{run: o.RunID, seq: n, cursor: mb, marked: marked}
 	l.cmu.Lock()
 	l.inflight = f
 	l.cmu.Unlock()
@@ -972,7 +1058,10 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	case outStoreError:
 		return netobs.CloseStore // not final: T stays, the record is resent
 	case outCommitted:
-		cn.cur, cn.saved, cn.pending = marked, marked.Taken, false
+		cn.cur, cn.saved, cn.pending = f.marked, f.marked.Taken, false // with what releases moved (commitOne)
+	case outDuplicate:
+		// A release disposed of n after it was placed: a duplicate by the
+		// position saved now (section 1.4 item 4). T moves at the next fold.
 	case outRefused:
 		cn.cur.Refused++
 		cn.cur.Taken, cn.pending = n, true
@@ -1069,6 +1158,8 @@ func (l *Link) WriteOwed(ctx context.Context) error {
 	if live {
 		return nil // the live connection writes what it admits, and its own cursor is newer
 	}
+	l.openCursor(true)
+	defer l.openCursor(false)
 	cur, err := l.loadCursor(ctx)
 	if err != nil || cur == nil {
 		return err
@@ -1111,6 +1202,7 @@ const (
 	outRefused                   // refused, counted
 	outDropped                   // dropped, counted
 	outStoreError                // a store error that is not final (CH-17)
+	outDuplicate                 // released since it was placed: a duplicate
 )
 
 // inflight is the record the 0.2 path is taking: its commit carries the
@@ -1120,6 +1212,7 @@ type inflight struct {
 	run     string
 	seq     uint64
 	cursor  []byte
+	marked  *Cursor // the cursor encoded in cursor
 	outcome outcome
 }
 
