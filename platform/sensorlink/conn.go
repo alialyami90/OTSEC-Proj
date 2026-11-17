@@ -291,7 +291,9 @@ func (l *Link) CloseConn(reason string) {
 	if g.live == nil {
 		return
 	}
-	g.request = reason
+	if g.request == "" {
+		g.request = reason // the first decision wins (D3's N3 on #732)
+	}
 	_ = g.live.SetReadDeadline(time.Now())
 	_ = g.live.SetWriteDeadline(time.Now())
 }

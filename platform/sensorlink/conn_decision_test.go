@@ -112,6 +112,49 @@ func TestCancelMidFrameShutdown(t *testing.T) {
 	}
 }
 
+// D3's N3 on #732: the first decision wins. CloseConn(enrolment) and then
+// the node's context cancelled closes, and is counted, as enrolment.
+// Controls: the cancel alone (shutdown); a6264dd8's assignment, the later
+// request kept (shutdown, the enrolment close not counted).
+func TestFirstDecisionWins(t *testing.T) {
+	for _, revoke := range []bool{true, false} {
+		t.Run(map[bool]string{true: "enrolment then cancel", false: "control"}[revoke], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var l *Link
+			var arm atomic.Bool
+			r := newRig(t, func(o *Options) {
+				inner := o.Owed
+				o.Owed = func(c context.Context, w Owed) error {
+					if arm.Load() {
+						if revoke {
+							l.CloseConn(netobs.CloseEnrolment)
+						}
+						cancel()
+					}
+					return inner(c, w)
+				}
+			})
+			l = r.l
+			p := r.dialCtx(ctx, enrolment())
+			p.send(hello02())
+			p.ack(0)
+			arm.Store(true)
+			tk := tick02(20, 5, 5)
+			tk.Lost = []netobs.Span{lspan("09:00:00", "09:10:00")}
+			r.tickAfter(p, tk)
+			want := map[bool]string{true: netobs.CloseEnrolment, false: netobs.CloseShutdown}[revoke]
+			if got := p.closedWithin(r.l.timeouts().Idle / 2); got != want {
+				t.Fatalf("close %q, want %q", got, want)
+			}
+			p.noAckAfter()
+			if n, m := closes(r.l, want), closes(r.l, netobs.CloseShutdown)+closes(r.l, netobs.CloseEnrolment); n != 1 || m != 1 {
+				t.Fatalf("closes %v", r.l.ConnStats().Closes)
+			}
+		})
+	}
+}
+
 // D6's B1 (ii) on #732: an observation whose marked cursor cannot be
 // encoded (above MaxLinkCursorBytes) is the node's fault, not the record's
 // refusal. It is not stored, counted or acked, T stays, and the connection
