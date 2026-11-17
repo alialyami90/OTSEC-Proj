@@ -200,6 +200,7 @@ replay)
   echo "fuzz.sh: replay done"
   ;;
 coverage)
+  lib=$(cat "$f/c2/sharedlib")
   s=$f/c2/zeek-9.0.1
   for t in $TARGETS; do
     d=$priv/cov-$t
@@ -211,7 +212,7 @@ coverage)
     if ls "$d/"*.profraw > /dev/null 2>&1; then
       llvm-profdata-$V merge -sparse "$d/"*.profraw -o "$d/merged.profdata"
       llvm-cov-$V export -format=lcov -instr-profile="$d/merged.profdata" \
-        "$s/build/src/fuzzers/zeek-$t-fuzzer" -object "$s/build/$(cat "$f/c2/sharedlib")" > "$d/lcov.info"
+        "$s/build/src/fuzzers/zeek-$t-fuzzer" -object "$s/build/$lib" > "$d/lcov.info"
     fi
   done
   python3 -I "$here/fuzz_judge.py" coverage "$f" "$s/src/analyzer/protocol/dnp3/DNP3.cc"
