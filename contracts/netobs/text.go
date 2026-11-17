@@ -63,6 +63,12 @@ func (t Text) Bytes() ([]byte, error) {
 // check fails c unless t is in C13 §3.1's form: Value decodes to exactly
 // min(Length, MaxTextBytes) bytes, and Truncated says Length exceeds it.
 func (t Text) check(c *checker, field string) {
+	// A Text sent as null is refused as null by refuseNulls, not here.
+	if c.keys[field] && !c.nulls[field] {
+		for _, k := range []string{"value", "length", "truncated"} {
+			c.required(field + "." + k)
+		}
+	}
 	b, err := t.Bytes()
 	switch {
 	case err != nil:

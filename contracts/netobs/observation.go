@@ -317,6 +317,7 @@ func (o *Observation) validateChannel(want string, keys, nulls map[string]bool) 
 		c.fail(CodeConflict, "node", "a sensor's record never carries node")
 	}
 	o.checkFrames(c)
+	c.refuseNulls()
 	return c.err()
 }
 
@@ -500,6 +501,7 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 		if !contains([]string{"fid", "partno", "devid", "engine-id", "banner", "http-server", "snmp-sysdescr", "ssh-ident"}, id.Attribute) {
 			c.fail(CodeForm, "identity.attribute", "%q is not an identity attribute", id.Attribute)
 		}
+		c.required("identity.value")
 		id.Value.check(c, "identity.value")
 		c.token("identity.via", id.Via)
 	case o.Undecoded != nil:
@@ -586,6 +588,8 @@ func (f *Flow) check03(c *checker, l4 string) {
 }
 
 func (f *Function) check(c *checker, protocol string) {
+	c.required("function.code")
+	c.required("function.objects")
 	if f.Code < 0 || f.Code > 255 {
 		c.fail(CodeRange, "function.code", "%d not in [0, 255]", f.Code)
 	}
@@ -657,10 +661,6 @@ func (in *Insecure) check(c *checker) {
 		if l.Attempts < 0 {
 			c.fail(CodeRange, "insecure.login.attempts", "%d is negative", l.Attempts)
 		}
-		// null decodes as 0; read from a sensor, it is refused, not read.
-		if c.nulls["insecure.login.attempts"] {
-			c.fail(CodeForm, "insecure.login.attempts", "null is not a count")
-		}
 		// An absent count decodes as 0 too. On the 0.2 and 0.3 channels it
 		// is refused, not read as 0 (D1's ruling on #726); the 0.1 channel
 		// and stored records read as they did.
@@ -703,6 +703,7 @@ func (e *Encrypted) check(c *checker) {
 		if !engineIDForm.MatchString(s.EngineID) {
 			c.fail(CodeForm, "encrypted.snmpv3.engine_id", "%q is not 5 to 32 octets in lowercase hex", s.EngineID)
 		}
+		c.required("encrypted.snmpv3.user")
 		s.User.check(c, "encrypted.snmpv3.user")
 		if !contains([]string{"noAuthNoPriv", "authNoPriv", "authPriv"}, s.Level) {
 			c.fail(CodeForm, "encrypted.snmpv3.level", "%q is not a security level", s.Level)

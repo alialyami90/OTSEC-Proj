@@ -103,6 +103,7 @@ func (f *CitedFrame) check(c *checker, field string) {
 	end := 0
 	for i, r := range f.Redactions {
 		rf := fmt.Sprintf("%s.redactions[%d]", field, i)
+		c.required(rf + ".offset")
 		if r.Reason != ReasonCredential && r.Reason != ReasonSlotNotPlaced {
 			c.fail(CodeForm, rf+".reason", "%q is not %s or %s", r.Reason, ReasonCredential, ReasonSlotNotPlaced)
 		}
