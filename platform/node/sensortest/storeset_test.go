@@ -446,8 +446,8 @@ func TestSensorRetryAlarmsOnce(t *testing.T) {
 // with no stuck startup on the hosted Windows runner (the control Start in
 // jobs 133676712307 and 133698551724), over the 2 s this test counted from
 // Start's call. A failure says which it was: held until the startup was
-// let go; slow, with the startup not yet entered after 32 s; or returned
-// more than 2 s after the startup was entered. Every cleanup is registered
+// let go; slow, only when the startup was never entered after 32 s; or
+// returned more than 2 s after the startup was entered. Every cleanup is registered
 // before the timed wait, so a failure in it still lets the startup go and
 // closes the runtime.
 func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
@@ -509,9 +509,15 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 			got = true // nothing to close; the cleanup does not wait on
 			t.Fatalf("Start did not return within 32 s with the startup stuck, nor within 30 s after it was let go; the startup %s; the control Start took %s", entered, plain)
 		}
+		// Slow only when the startup was never entered (D6's N1 on #728):
+		// once it was, Start went on past its entry, so it was held, or
+		// waited on it for a time and then had more to do.
 		which := "slow"
-		if in && s.took-released < 2*time.Second {
+		switch {
+		case in && s.took-released < 2*time.Second:
 			which = "held by the stuck startup"
+		case in:
+			which = "held by the stuck startup, or waiting on it, with more than 2 s of work after it was let go"
 		}
 		t.Fatalf("Start did not return within 32 s with the startup stuck: it was %s; it returned %s after the startup was let go; the startup %s; the control Start took %s", which, s.took-released, entered, plain)
 	}
