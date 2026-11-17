@@ -591,3 +591,49 @@ func TestCaptureFloorRefusesHeldFlow(t *testing.T) {
 		}
 	})
 }
+
+// Section 1.5 item 2: at the onset of a cause that refuses every tie,
+// every run the hold keeps gives way untied at once: a held own flow is
+// committed at the tick that shows the step, marked node.skewed, and the
+// run's Result, which still comes, reports its window refused, ties
+// nothing and commits nothing twice. Control: a node that releases nothing
+// at the onset, which still holds the record after that tick.
+func TestSkewOnsetReleasesHeld(t *testing.T) {
+	run := func(t *testing.T) (atOnset int, rel Released, got []*netobs.Observation) {
+		r, _ := holdRig02(t)
+		p := r.accepted(r.agreeHello(hello02()))
+		r.tickO(p, 0, 20, 0)
+		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+			t.Fatal(err)
+		}
+		start := r.now()
+		f := nodeFlow02(1)
+		f.FirstUTC = canonUTC(start.Add(time.Second))
+		f.LastUTC = f.FirstUTC
+		p.send(f)
+		p.taken()
+		if n := len(storedObs(t, r.s)); n != 0 {
+			t.Fatalf("%d stored before the onset: not held", n)
+		}
+		r.tickO(p, 3*time.Second, 20, 1) // the sensor's clock stepped back 3 s
+		atOnset = len(storedObs(t, r.s))
+		r.pass(30 * time.Second)
+		s := session09("0e4d8a2c-6b1f-4c3e-9a5d-7f2b1c0d9e8f", 40001, 0)
+		s.StartedAt, s.ConnectedAt, s.EndedAt = start, start, start.Add(20*time.Second)
+		rel, err := r.l.Result(bg, "req-1", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return atOnset, rel, storedObs(t, r.s)
+	}
+	n, rel, got := run(t)
+	if n != 1 || !rel.Skewed || len(got) != 1 || got[0].Node.PlatformSession != nil || !got[0].Node.Skewed {
+		t.Fatalf("stored %d at the onset; released %+v; stored after %d: %+v", n, rel, len(got), got)
+	}
+	t.Run("control: no release at the onset", func(t *testing.T) {
+		withSeam(t, &skewNoOnset)
+		if n, _, _ := run(t); n != 0 {
+			t.Fatalf("the control committed %d at the onset", n)
+		}
+	})
+}

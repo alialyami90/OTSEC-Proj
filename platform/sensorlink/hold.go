@@ -739,6 +739,9 @@ func (l *Link) laterRefusal(r *holdRun, capt time.Time) string {
 // refused (section 1.5 item 2). A holding run stays, empty, so its Result
 // reports the window refused. The caller holds curMu and not cmu.
 func (l *Link) skewOnset(ctx context.Context) {
+	if skewNoOnset {
+		return
+	}
 	l.cmu.Lock()
 	defer l.cmu.Unlock()
 	defer l.syncHold()

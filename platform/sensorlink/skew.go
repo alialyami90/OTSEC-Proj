@@ -92,6 +92,9 @@ var skewGateEOnly, skewMarkAlarmOnly, skewNoMarkAlarm, skewSubtractE, lateWithou
 var (
 	afterMarkSeam        func()
 	skewTakeHeldUnmarked bool
+	// skewNoOnset: the control of the onset's release, a node that
+	// releases nothing at the onset.
+	skewNoOnset bool
 )
 
 // SkewStats is what status shows of the estimate (section 1.5).
