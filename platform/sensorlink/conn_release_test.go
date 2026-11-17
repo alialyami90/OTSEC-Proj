@@ -45,7 +45,10 @@ func (h *holdSaves) last() RunRecord {
 }
 
 // holdRig is a 0.2 rig whose link holds the node's own flows to endpoint.
-func holdRig02(t *testing.T) (*rig, *holdSaves) {
+func holdRig02(t *testing.T) (*rig, *holdSaves) { return holdRig02With(t, nil) }
+
+// holdRig02With is holdRig02 with more set on each link's options.
+func holdRig02With(t *testing.T, extra func(o *Options)) (*rig, *holdSaves) {
 	hs := &holdSaves{}
 	var r *rig
 	r = newRig(t, func(o *Options) {
@@ -54,6 +57,9 @@ func holdRig02(t *testing.T) (*rig, *holdSaves) {
 		hs.mu.Unlock()
 		o.Hold = HoldConfig{NodeAddrs: []netip.Addr{netip.MustParseAddr(nodeAddr)}, TieGrace: 30 * time.Second,
 			Now: func() time.Time { return r.now() }, Save: hs.save, Restore: restore}
+		if extra != nil {
+			extra(o)
+		}
 	})
 	return r, hs
 }
@@ -291,24 +297,32 @@ func TestHoldReleaseMovesTOnce(t *testing.T) {
 
 // D4's N3 on #732: a held observation that carries node.lost and is
 // dropped at its release leaves its window unmarked, so the run's next
-// stored observation carries it. Control: the marks kept as they were.
+// stored observation carries it. node.lost carries the cut end, so the
+// second leg's span is cut (D6's N6 on #742). Controls: the marks kept as
+// they were; unmark matching the span's to_utc, not its cut end (the cut
+// leg).
 func TestHeldLostDroppedAtReleaseMarksNext(t *testing.T) {
-	r, hs := holdRig02(t)
-	hr := heldOne(t, r, hs, 1)
-	w := lspan("09:00:00", "09:00:05")
-	saveTestCursor(t, r, &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Digest: testDigest,
-		Spans: []HeldSpan{{FromUTC: w.FromUTC, ToUTC: w.ToUTC, CutUTC: w.ToUTC, Marked: true}}})
-	hr = withBody(t, hr, "", 0, true, []netobs.Span{w})
-	restartHeld(t, r, hs, []RunRecord{releasing([]HeldRecord{hr}, head(t, r))})
-	if c := cursorNow(t, r.cs); len(c.Spans) != 1 || c.Spans[0].Marked {
-		t.Fatalf("the dropped record's window is still marked: %+v", c.Spans)
-	}
-	p := r.accepted(resume(2, 20))
-	p.send(obs02(2))
-	p.ack(2)
-	got := storedObs(t, r.s)
-	if len(got) != 1 || len(got[0].Node.Lost) != 1 || got[0].Node.Lost[0].FromUTC != w.FromUTC {
-		t.Fatalf("the next stored observation carries %+v", got)
+	for _, cut := range []string{"09:00:05", "09:00:03"} {
+		t.Run("cut at "+cut, func(t *testing.T) {
+			r, hs := holdRig02(t)
+			hr := heldOne(t, r, hs, 1)
+			s := lspan("09:00:00", "09:00:05")
+			w := lspan("09:00:00", cut) // the window node.lost carried
+			saveTestCursor(t, r, &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Digest: testDigest,
+				Spans: []HeldSpan{{FromUTC: s.FromUTC, ToUTC: s.ToUTC, CutUTC: w.ToUTC, Marked: true}}})
+			hr = withBody(t, hr, "", 0, true, []netobs.Span{w})
+			restartHeld(t, r, hs, []RunRecord{releasing([]HeldRecord{hr}, head(t, r))})
+			if c := cursorNow(t, r.cs); len(c.Spans) != 1 || c.Spans[0].Marked {
+				t.Fatalf("the dropped record's window is still marked: %+v", c.Spans)
+			}
+			p := r.accepted(resume(2, 20))
+			p.send(obs02(2))
+			p.ack(2)
+			got := storedObs(t, r.s)
+			if len(got) != 1 || len(got[0].Node.Lost) != 1 || got[0].Node.Lost[0] != w {
+				t.Fatalf("the next stored observation carries %+v", got)
+			}
+		})
 	}
 }
 
@@ -336,6 +350,31 @@ func TestGapRaisedKeptInMemory(t *testing.T) {
 	p.end()
 	if n := r.al.count(AlarmGapUndeclared); n != 1 {
 		t.Fatalf("%d raises after the node start, want 1 (raised once more)", n)
+	}
+}
+
+// D6's MJ on #742: the excess last raised starts again at a new run, so
+// run 6's excess of 1 is raised though run 5's was 3. Control: gapRaised
+// not reset at a new run.
+func TestGapRaisedResetAtNewRun(t *testing.T) {
+	r := newRig(t, nil)
+	p := r.accepted(hello02())
+	p.send(obs02(1), obs02(5)) // G 3 above D 0
+	p.ack(5)
+	p.end()
+	if n := r.al.count(AlarmGapUndeclared); n != 1 {
+		t.Fatalf("%d raises in run 5", n)
+	}
+	p = r.accepted(run6())
+	o1, o3 := obs02(1), obs02(3)
+	for _, o := range []*netobs.Observation{o1, o3} {
+		o.RunID, o.Citation.CaptureID = testRun2, "ring:"+testRun2+":3"
+	}
+	p.send(o1, o3) // G 1 above D 0
+	p.ack(3)
+	p.end()
+	if n := r.al.count(AlarmGapUndeclared); n != 2 {
+		t.Fatalf("%d raises, want 2: run 6's excess not raised", n)
 	}
 }
 
