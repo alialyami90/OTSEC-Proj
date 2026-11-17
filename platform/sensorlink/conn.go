@@ -673,7 +673,7 @@ func admit(held []HeldSpan, stated []netobs.Span, sensorUTC string, recv time.Ti
 			h.FromUTC = s.FromUTC
 		}
 		if to.After(hTo) {
-			if h.CutUTC == h.ToUTC { // not cut: the window reaches the new part's cut end
+			if parseUTC(h.CutUTC).Equal(hTo) { // not cut: the window reaches the new part's cut end (times, not strings: D4's B1 on #732)
 				h.CutUTC = cutEnd(to, sensorUTC, recv, cut)
 			}
 			h.ToUTC = s.ToUTC

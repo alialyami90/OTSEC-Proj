@@ -137,26 +137,34 @@ func TestLostSpanCutOnce(t *testing.T) {
 
 // S-10 (f), one cut end: a cut span widened after its stated end keeps its
 // window and raises the gap and the alarm; an uncut span widened reaches
-// the new part's cut end. Control: the window taken to the new part's cut
-// end in both cases.
+// the new part's cut end. Its fractional leg states every time with six
+// fractional digits, which C13 allows: "not cut" compares times, not
+// strings (D4's B1 on #732). Controls: the window taken to the new part's
+// cut end in both cases; the string compare, which fails the fractional
+// leg.
 func TestLostSpanOneCutEnd(t *testing.T) {
-	r := newRig(t, nil)
-	p := r.accepted(hello02())
-	cutSpan, uncut := lspan("09:59:00", "10:05:00"), lspan("09:00:00", "09:05:00")
-	r.tickAfter(p, spanTick(1, uncut, cutSpan))
-	p.send(obs02(1))
-	p.ack(1) // the tick is taken
-	r.addWall(5 * time.Minute)
-	r.tickAfter(p, spanTick(2, lspan("09:00:00", "09:10:00"), lspan("09:59:00", "10:07:00")))
-	p.send(obs02(2))
-	p.ack(2)
-	p.stillOpen()
-	c := cursorNow(t, r.cs)
-	if len(c.Spans) != 2 || c.Spans[0].CutUTC != "2026-11-07T09:10:00Z" || c.Spans[1].CutUTC != "2026-11-07T10:00:02Z" {
-		t.Fatalf("windows %+v", c.Spans)
-	}
-	if cs := r.l.ConnStats(); cs.LostGaps != 4 || r.al.count(AlarmRecordsLost) != 2 {
-		t.Fatalf("gaps %d, raises %v", cs.LostGaps, r.al.list)
+	for _, frac := range []string{"", ".000000"} {
+		t.Run("frac="+frac, func(t *testing.T) {
+			sp := func(from, to string) netobs.Span { return lspan(from+frac, to+frac) }
+			r := newRig(t, nil)
+			p := r.accepted(hello02())
+			cutSpan, uncut := sp("09:59:00", "10:05:00"), sp("09:00:00", "09:05:00")
+			r.tickAfter(p, spanTick(1, uncut, cutSpan))
+			p.send(obs02(1))
+			p.ack(1) // the tick is taken
+			r.addWall(5 * time.Minute)
+			r.tickAfter(p, spanTick(2, sp("09:00:00", "09:10:00"), sp("09:59:00", "10:07:00")))
+			p.send(obs02(2))
+			p.ack(2)
+			p.stillOpen()
+			c := cursorNow(t, r.cs)
+			if len(c.Spans) != 2 || c.Spans[0].CutUTC != "2026-11-07T09:10:00Z" || c.Spans[1].CutUTC != "2026-11-07T10:00:02Z" {
+				t.Fatalf("windows %+v", c.Spans)
+			}
+			if cs := r.l.ConnStats(); cs.LostGaps != 4 || r.al.count(AlarmRecordsLost) != 2 {
+				t.Fatalf("gaps %d, raises %v", cs.LostGaps, r.al.list)
+			}
+		})
 	}
 }
 
