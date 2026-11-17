@@ -19,7 +19,9 @@ here from the builder's units and never from a run (D4-112 item 5): rule
 (A) gives each input's judge (mal-twin) and its reqhdr under each
 configuration (mal-reqhdr); a frame whose DIR disagrees with its side names
 the weird (design 1 item 4); each cell reads as one of mal-states' states;
-(B') sets the record of a stop on a flow's first datagram (mal-bprime); and
+(B') sets the record of a stop on a flow's first datagram, and design 2.3's
+measured TCP statements a TCP stop's service and its one exception
+(mal-bprime); and
 every input on which C2's parser throws where C1p's parses on reads so,
 with D3's M2 in mid-flow from each side, its stop at X (mal-midflow).
 """
@@ -40,8 +42,8 @@ CONDITIONS = os.path.join(HERE, "hr23-conditions.tsv")
 ENGINE = os.path.join(HERE, "engine-pass-conditions.tsv")
 SHA256 = {
     CASES: "f66f7952a398c0fc420507dfb125c00f1bd3538399305f24fe1c5b2727420687",
-    MALFORMED: "5c898991e5abb21e9475643035e3c966367d61cc65fc6c2473d4d3ef5faf85ef",
-    CONDITIONS: "2b59d5caea1abf3409dbf71cb2351005fd0fedc488c5c32ab300e736c4e94fab",
+    MALFORMED: "cb44947dbc2e6e50dfea1b04c511a37ffdd84fa4120e8c0527d834ef10a60a93",
+    CONDITIONS: "c0c27752c48f4272ca486b2e2b5dc8b2e8dafde3f65af319593338d98228aabd",
 }
 CONFIGS = ("c0", "c1", "c1p", "c2")
 FIXES = {"a", "b", "unknown", "premise", "control", "r1"}
@@ -353,15 +355,39 @@ def x_first(cap):
     return cap.sent[0][0][0].name == "X"
 
 
+TCP_LIKELY = hc.LIKELY["tcp"]   # cfg-ports: C0's set, as the pins assume
+
+
+def resp_port(cap):
+    """The port of the end Zeek takes as the responder: the one a connection is to."""
+    f = cap.flows[0]
+    return f.port[next(e for e, side in f.side.items() if side == "resp")]
+
+
+def tcp_first_to_likely(cap):
+    """mal-bprime's TCP exception (design 2.3, its third measured TCP
+    statement): X is the connection's first data, on a connection to a port
+    in likely_server_ports."""
+    return cap.flows[0].l4 == "tcp" and x_first(cap) and resp_port(cap) in TCP_LIKELY
+
+
 def check_bprime(ms, caps):
     """mal-bprime, for an input whose X is its 5-tuple's first data: on UDP a
     stop is silent under C0, C1 and C1p and recorded under C2, with the
-    service removed; on TCP a stop is recorded under all four. An input whose
-    X comes later has no silent stop."""
+    service removed; on TCP a stop is recorded under all four, with the
+    service removed. An input whose X comes later has no silent stop. The
+    TCP exception: where X is the connection's first data to a port in
+    likely_server_ports, a stop reads viol and every message after X ?."""
     for m in ms:
         cap = caps[m["input"]]
+        order = order_of(cap)
         for config, t in cells(m):
-            s = state(t, order_of(cap))
+            s = state(t, order)
+            if tcp_first_to_likely(cap) and s != "on":
+                after = order[order.index("X") + 1:]
+                assert t.get("viol") == "?" and all(t.get(n, "?") == "?" for n in after), \
+                    ("mal-bprime's TCP exception", m["input"], config)
+                continue
             if s in (None, "on", "weird"):
                 continue
             if x_first(cap) and m["l4"] == "udp":
@@ -369,6 +395,8 @@ def check_bprime(ms, caps):
                 assert config != "c2" or t.get("svc") == "removed", (m["input"], config)
             else:
                 assert s == "recorded", (m["input"], config, s)
+                assert m["l4"] != "tcp" or t.get("svc") == "removed", ("a TCP stop without svc=removed",
+                                                                        m["input"], config)
 
 
 RESPONSE_HEADER, REQUEST_HEADER = 4, 2   # control, code and IIN; control and code (design 1 item 4)
@@ -433,9 +461,9 @@ def check_stop_at_x(m, cap):
 def check_midflow(ms, caps):
     """mal-midflow: every input with a fragment on which C2's parser throws
     where C1p's parses on reads parsed on under C0, C1 and C1p and a recorded
-    stop under C2; those whose X is not the flow's first data include one
-    from each side over UDP (D3's M2), and each reads its stop at X (D3's N1
-    on #724)."""
+    stop under C2, or ? under C2 where mal-bprime's TCP exception reaches
+    it; those whose X is not the flow's first data include one from each side
+    over UDP (D3's M2), and each reads its stop at X (D3's N1 on #724)."""
     mid = set()
     for m in ms:
         cap = caps[m["input"]]
@@ -443,7 +471,7 @@ def check_midflow(ms, caps):
         if not hits:
             continue
         got = {config: state(t, order_of(cap)) for config, t in cells(m)}
-        assert got == {"c0": "on", "c2": "recorded"}, (m["input"], got)
+        assert got == {"c0": "on", "c2": None if tcp_first_to_likely(cap) else "recorded"}, (m["input"], got)
         if not x_first(cap):
             mid.update((m["l4"], side) for side in hits)
             check_stop_at_x(m, cap)
@@ -687,6 +715,30 @@ def control_bprime_tcp_silent(mp):
     return lambda: check_bprime(ms, built())
 
 
+def control_bprime_tcp_stop_without_svc(mp):
+    """fc0-resp-dirclear's C0 cell as pinned before design 2.3's measured statements, without svc=removed."""
+    ms = malformed_edited("dnp3-mal-tcp-fc0-resp-dirclear", c0="viol=1; Q=absent")
+    return lambda: check_bprime(ms, built())
+
+
+def control_bprime_tcp_exception_at_20001(mp):
+    """A set holding 20001: the exception reaches the TCP twin, whose C2 cell reads viol=1, P and Q absent."""
+    mp.setitem(globals(), "TCP_LIKELY", TCP_LIKELY | {20001})
+    return lambda: check_bprime(rows(MALFORMED), built())
+
+
+def control_midflow_tcp_exception_at_20001(mp):
+    """The same set: check_midflow then expects ? of the twin's C2 cell, which reads a recorded stop."""
+    mp.setitem(globals(), "TCP_LIKELY", TCP_LIKELY | {20001})
+    return lambda: check_midflow(rows(MALFORMED), built())
+
+
+def control_bprime_tcp_exception_past_first_data(mp):
+    """The exception read for any throw to a port in the set: the -resp- stops in mid-flow, to 20000, must refuse it."""
+    mp.setitem(globals(), "tcp_first_to_likely", lambda cap: cap.flows[0].l4 == "tcp" and resp_port(cap) in TCP_LIKELY)
+    return lambda: check_bprime(rows(MALFORMED), built())
+
+
 def control_midflow_c2_parses_on(mp):
     """D3's M2 from the responder pinned as C2 parsing on, as a parser picked by side would."""
     ms = malformed_edited("dnp3-mal-udp-fc1-badobj-mid", c2="viol=0; svc=dnp3; P=seen; Q=seen")
@@ -762,3 +814,17 @@ def test_the_stop_at_x_fails_a_midflow_cell_the_states_pass(monkeypatch):
         check_midflow(ms, caps)
     with pytest.raises(AssertionError, match="a stop before X"):
         check_midflow(ms, caps)
+
+
+def test_a_cell_in_the_tcp_exceptions_form_passes(monkeypatch):
+    """mal-bprime's TCP exception is not refused where it applies: with 20001
+    in the set, the TCP twin's C2 cell with viol and every message after X
+    ? passes check_bprime and check_midflow, and with P judged it does not."""
+    monkeypatch.setitem(globals(), "TCP_LIKELY", TCP_LIKELY | {20001})
+    caps = built()
+    ok = malformed_edited("dnp3-mal-tcp-fc129-badobj-first", c2="viol=?; svc=removed; P=?; Q=?; reqhdr=0")
+    check_bprime(ok, caps)
+    check_midflow(ok, caps)
+    bad = malformed_edited("dnp3-mal-tcp-fc129-badobj-first", c2="viol=?; svc=removed; P=absent; Q=?; reqhdr=0")
+    with pytest.raises(AssertionError, match="mal-bprime's TCP exception"):
+        check_bprime(bad, caps)
