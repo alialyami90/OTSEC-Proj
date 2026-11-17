@@ -17,7 +17,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      WORK: ${{ runner.temp }}/hr23-fuzz
       FUZZ: modules/telemetry/experiments/engine-linux/zeek-patch/fuzz/fuzz.sh
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -34,21 +33,21 @@ jobs:
       - name: Smoke only, not the campaign - 60 seconds per target per build
         run: sed -i 's/^HR23_FUZZ_SECONDS=.*/HR23_FUZZ_SECONDS=60/' modules/telemetry/experiments/engine-linux/zeek-patch/fuzz/fuzz.env
       - name: Build C1p and C2's fuzz targets (inputs checked first)
-        run: sh "$FUZZ" build "$WORK"
+        run: sh "$FUZZ" build "$RUNNER_TEMP/hr23-fuzz"
       - name: The seeds, converted by the pinned script, against the corpus pin
-        run: sh "$FUZZ" seeds "$WORK"
+        run: sh "$FUZZ" seeds "$RUNNER_TEMP/hr23-fuzz"
       - name: dnp3_tcp, smoke
-        run: sh "$FUZZ" campaign "$WORK" dnp3_tcp
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_tcp
       - name: dnp3_udp, smoke
-        run: sh "$FUZZ" campaign "$WORK" dnp3_udp
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_udp
       - name: packet, smoke
-        run: sh "$FUZZ" campaign "$WORK" packet
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" packet
       - name: Replay every input that gave a report, alone, on both builds
-        run: sh "$FUZZ" replay "$WORK"
+        run: sh "$FUZZ" replay "$RUNNER_TEMP/hr23-fuzz"
       - name: Coverage of C2's final corpus, and the coverage condition
-        run: sh "$FUZZ" coverage "$WORK"
+        run: sh "$FUZZ" coverage "$RUNNER_TEMP/hr23-fuzz"
       - name: Summary and verdict
         if: ${{ !cancelled() }}
         run: |
-          sh "$FUZZ" summary "$WORK" > "$WORK/summary.md"
-          cat "$WORK/summary.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          sh "$FUZZ" summary "$RUNNER_TEMP/hr23-fuzz" > "$RUNNER_TEMP/hr23-fuzz/summary.md"
+          cat "$RUNNER_TEMP/hr23-fuzz/summary.md" | tee -a "$GITHUB_STEP_SUMMARY"

@@ -29,7 +29,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 340
     env:
-      WORK: ${{ runner.temp }}/hr23-fuzz
       FUZZ: modules/telemetry/experiments/engine-linux/zeek-patch/fuzz/fuzz.sh
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -44,22 +43,22 @@ jobs:
             clang-18 libclang-rt-18-dev llvm-18 bison cmake flex libfl-dev libmaxminddb-dev \
             libpcap-dev libssl-dev libuv1-dev ninja-build zlib1g-dev
       - name: Build C1p and C2's fuzz targets (inputs checked first)
-        run: sh "$FUZZ" build "$WORK"
+        run: sh "$FUZZ" build "$RUNNER_TEMP/hr23-fuzz"
       - name: The seeds, converted by the pinned script, against the corpus pin
-        run: sh "$FUZZ" seeds "$WORK"
+        run: sh "$FUZZ" seeds "$RUNNER_TEMP/hr23-fuzz"
       - name: dnp3_tcp, 30 minutes on each build
-        run: sh "$FUZZ" campaign "$WORK" dnp3_tcp
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_tcp
       - name: dnp3_udp, 30 minutes on each build
-        run: sh "$FUZZ" campaign "$WORK" dnp3_udp
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_udp
       - name: packet, 30 minutes on each build
-        run: sh "$FUZZ" campaign "$WORK" packet
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" packet
       - name: Replay every input that gave a report, alone, on both builds
-        run: sh "$FUZZ" replay "$WORK"
+        run: sh "$FUZZ" replay "$RUNNER_TEMP/hr23-fuzz"
       - name: Coverage of C2's final corpus, and the coverage condition
-        run: sh "$FUZZ" coverage "$WORK"
+        run: sh "$FUZZ" coverage "$RUNNER_TEMP/hr23-fuzz"
       - name: Summary and verdict
         if: ${{ !cancelled() }}
         run: |
-          sh "$FUZZ" summary "$WORK" > "$WORK/summary.md"
-          cat "$WORK/summary.md" | tee -a "$GITHUB_STEP_SUMMARY"
-          grep -qx 'Verdict: \*\*pass\*\*' "$WORK/summary.md"
+          sh "$FUZZ" summary "$RUNNER_TEMP/hr23-fuzz" > "$RUNNER_TEMP/hr23-fuzz/summary.md"
+          cat "$RUNNER_TEMP/hr23-fuzz/summary.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -qx 'Verdict: \*\*pass\*\*' "$RUNNER_TEMP/hr23-fuzz/summary.md"
