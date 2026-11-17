@@ -3,6 +3,7 @@ package sensorlink
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -28,9 +29,12 @@ type gatedStore struct {
 	headFailAfter atomic.Bool
 	// panicBatch makes the next batch panic before it commits anything.
 	panicBatch atomic.Bool
+	// writes counts the appends and batches begun.
+	writes atomic.Int64
 }
 
 func (s *gatedStore) wait() {
+	s.writes.Add(1)
 	if s.gate != nil {
 		s.once.Do(func() { close(s.entered) })
 		<-s.gate
@@ -92,20 +96,37 @@ func others(g *holdRig, n int) []any {
 // The scheduler goes first: while the read loop commits a flood at 100 ms
 // a record, and the manager's TickHold takes the lock as often as it can,
 // Lock never takes the lock while a Dispatch waits for it, so each waits
-// for at most the holder's turn in progress, and none times out. The rule
-// is counted at Lock's take, not timed: on the hosted runners a woken call
-// that waits for Lock's check (below) has twice measured over 400 ms under
-// the rule, which is the runner's scheduling, not a turn taken from it.
-// Each woken call checks the lock only after the first check Lock makes
-// after the lock was freed (orderAfterLock), so the order is the test's,
-// not the Go scheduler's. Control 2 (the fairness rule removed: Lock does
-// not yield to a waiting scheduler call) then lets the read loop or
-// TickHold take the lock before a waiting call every time, so the first
-// call waits out HoldLockWait.
+// for at most the holder's turn in progress. The rule is counted at Lock's
+// take, not timed: on the hosted runners a woken call that waits for
+// Lock's check (below) has twice measured over 400 ms under the rule,
+// which is the runner's scheduling, not a turn taken from it. Each woken
+// call checks the lock only after the first check Lock makes after the
+// lock was freed (orderAfterLock), so the order is the test's, not the Go
+// scheduler's. Control 2 (the fairness rule removed: Lock does not yield
+// to a waiting scheduler call) then lets the read loop or TickHold take
+// the lock before a waiting call every time, so the first call waits out
+// HoldLockWait.
+//
+// A dispatch that times out with no take counted is the rule's own limit,
+// not a break of it, only when one holder's turn, taken with Lock, held
+// the lock through the whole of that dispatch's wait and made exactly one
+// store write: the rule bounds a wait by the turn in progress, one record
+// in commit for the read loop, and a commit that a loaded runner's disk
+// slows can outlast HoldLockWait, which then gives up as designed and is
+// counted (P4-NODE-FLK; job 133688900667 timed out before either figure
+// was read). In this rig every Lock turn that writes is the read loop's
+// commit of one record: the wall clock never moves, so TickHold releases
+// nothing, and the flows are untied, so giveWay has nothing to release. A
+// long turn of several writes, or of none, is a holding defect, not a slow
+// disk (D3's and D6's B1 on #728, D1's ruling). So every dispatch is made,
+// each Lock turn is timed and its writes counted (orderAfterLock's freed
+// seam), and a failure says which it was: the rule broken (takes counted),
+// or a timeout that no single one-write turn explains.
 func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	s := &gatedStore{delay: 100 * time.Millisecond}
 	g := gatedRig(t, s)
-	bypassed := orderAfterLock(&g.l.cmu)
+	lk := orderAfterLock(&g.l.cmu)
+	lk.writes = &s.writes
 	recs := others(g, 60)
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
@@ -120,18 +141,34 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	var worst time.Duration
+	var timedOut []int
+	var froms []time.Time
 	for i := range 10 {
 		from := time.Now()
-		if err := g.l.Dispatch(bg, HoldRun{RequestID: "run-" + string(rune('a'+i)), AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+		froms = append(froms, from)
+		err := g.l.Dispatch(bg, HoldRun{RequestID: "run-" + string(rune('a'+i)), AssetID: relay, Endpoint: endpoint, L4: "tcp"})
+		if errors.Is(err, ErrHoldTimeout) {
+			timedOut = append(timedOut, i)
+		} else if err != nil {
 			t.Fatalf("dispatch %d: %v", i, err)
 		}
 		worst = max(worst, time.Since(from))
 		time.Sleep(30 * time.Millisecond)
 	}
 	st := g.l.Stats()
-	t.Logf("worst dispatch %s (status %s)", worst, st.LockWaitMax)
-	if n := bypassed.Load(); n != 0 || st.DispatchTimeouts != 0 {
-		t.Fatalf("Lock took the lock %d times while a dispatch waited, %d dispatches timed out; want none", n, st.DispatchTimeouts)
+	n, turn, long := lk.read(&g.l.cmu)
+	t.Logf("worst dispatch %s (status %s), longest Lock turn %s, dispatches timed out %v", worst, st.LockWaitMax, turn, timedOut)
+	if n != 0 {
+		t.Fatalf("the rule is broken: Lock took the lock %d times while a dispatch waited; dispatches %v timed out (%d counted), longest wait %s, longest Lock turn %s", n, timedOut, st.DispatchTimeouts, st.LockWaitMax, turn)
+	}
+	if st.DispatchTimeouts != uint64(len(timedOut)) {
+		t.Fatalf("%d dispatch timeouts counted, %d returned", st.DispatchTimeouts, len(timedOut))
+	}
+	for _, i := range timedOut {
+		if !heldThrough(long, froms[i]) {
+			t.Fatalf("dispatch %d timed out with no take counted, and no single Lock turn of one store write held the lock through its wait (turns of %s or more, with their writes: %v; longest wait %s): neither the rule broken nor a slow holder", i, HoldLockWait/2, long, st.LockWaitMax)
+		}
+		t.Logf("dispatch %d timed out on a slow holder: one Lock turn of one store write held the lock through its wait (turns of %s or more, with their writes: %v)", i, HoldLockWait/2, long)
 	}
 	cancel()
 	if err := <-done; err != nil {
@@ -139,21 +176,87 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 	}
 }
 
+// lockCounts are orderAfterLock's counts, kept under the lock's f.mu:
+// Lock's takes while a scheduler call waited, the longest turn of a holder
+// that took the lock with Lock, and each such turn of HoldLockWait/2 or
+// more. writes, when set, counts the store's writes; w0 is its count at
+// the take.
+type lockCounts struct {
+	bypassed int64
+	takenAt  time.Time
+	longest  time.Duration
+	long     []turn
+	writes   *atomic.Int64
+	w0       int64
+}
+
+// turn is a holder's turn, from its take to its Unlock, and the store
+// writes begun in it.
+type turn struct {
+	from, to time.Time
+	writes   int64
+}
+
+func (u turn) String() string { return fmt.Sprintf("%s/%d writes", u.to.Sub(u.from), u.writes) }
+
+// nWrites is the writes count, 0 when unset.
+func (c *lockCounts) nWrites() int64 {
+	if c.writes == nil {
+		return 0
+	}
+	return c.writes.Load()
+}
+
+// read returns the counts, under f.mu.
+func (c *lockCounts) read(f *fairLock) (int64, time.Duration, []turn) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return c.bypassed, c.longest, append([]turn(nil), c.long...)
+}
+
+// heldThrough reports whether one of long, a turn of exactly one store
+// write, held the lock through a wait of HoldLockWait that began at from,
+// to within the clock's step: a scheduler call that timed out under the
+// rule waited on the one turn it found, one record in commit.
+func heldThrough(long []turn, from time.Time) bool {
+	const step = 50 * time.Millisecond
+	for _, u := range long {
+		if u.writes == 1 && !u.from.After(from.Add(step)) && !u.to.Before(from.Add(HoldLockWait-step)) {
+			return true
+		}
+	}
+	return false
+}
+
 // orderAfterLock sets f's seams so that a scheduler call woken from its
 // wait checks the lock only once Lock has checked since the last signal,
 // and under the same hold of f.mu as that finding. A caller of Lock that
-// runs hot (here TickHold) checks soon, so the wait ends. It returns the
-// count of Lock's takes while a scheduler call waited.
-func orderAfterLock(f *fairLock) *atomic.Int64 {
-	var bypassed atomic.Int64
+// runs hot (here TickHold) checks soon, so the wait ends. It counts Lock's
+// takes while a scheduler call waited, and times each turn of a holder
+// that took the lock with Lock, from its take to its Unlock.
+func orderAfterLock(f *fairLock) *lockCounts {
+	c := &lockCounts{}
 	tried := make(chan struct{}, 1)
-	f.tried = func(took bool) {
-		if took && f.waiting > 0 { // under f.mu
-			bypassed.Add(1)
+	f.tried = func(took bool) { // under f.mu
+		if took {
+			c.takenAt, c.w0 = time.Now(), c.nWrites()
+			if f.waiting > 0 {
+				c.bypassed++
+			}
 		}
 		select {
 		case tried <- struct{}{}:
 		default:
+		}
+	}
+	f.freed = func() { // under f.mu
+		if !c.takenAt.IsZero() {
+			u := turn{c.takenAt, time.Now(), c.nWrites() - c.w0}
+			c.longest = max(c.longest, u.to.Sub(u.from))
+			if u.to.Sub(u.from) >= HoldLockWait/2 {
+				c.long = append(c.long, u)
+			}
+			c.takenAt = time.Time{}
 		}
 	}
 	f.woken = func() {
@@ -166,7 +269,7 @@ func orderAfterLock(f *fairLock) *atomic.Int64 {
 			<-tried
 		}
 	}
-	return &bypassed
+	return c
 }
 
 // The fairness rule itself: a holder that takes the lock again the moment
