@@ -445,6 +445,12 @@ def summary(d):
             sets.setdefault(dst, {}).setdefault(h, 0)
             sets[dst][h] += 1
     failed = os.path.exists(os.path.join(d, "FAILED"))
+    for x in sorted(os.listdir(d) if os.path.isdir(d) else []):
+        if x.startswith("image-") and x.endswith("-zeek.json"):
+            with open(os.path.join(d, x), encoding="utf-8") as fh:
+                sp = search_path(json.load(fh)["help"])
+            print(f"mount check, search path from the image's own zeek --help ({x[6:-10]}): "
+                  + "; ".join(f"${k}={':'.join(v)}" for k, v in sorted(sp.items())))
     print(f"mount check (docs/release.md section 8.4 item 3): {n} container(s) checked; "
           f"{'a rule FAILED' if failed else 'every rule held'}")
     for dst in sorted(sets):
@@ -480,9 +486,16 @@ def selftest(image, exp, d):
     committed = None
     vol = "otsec-mountcheck-selftest"
     try:
+        stock = search_path(image_facts(d, json.loads(docker("image", "inspect", image).stdout)[0]["Id"], True)["help"])
+        if "ZEEKPATH" not in stock:
+            raise RuntimeError("the stock image's zeek --help gives no $ZEEKPATH")
+        # /out first, the stock path after it: Zeek 9.0.1's --help loads
+        # base/init-bare.zeek from $ZEEKPATH before it prints, so a path of
+        # /out alone stops it (rehearsal 44118394198).
         cid = docker("create", image, "true").stdout.strip()
         try:
-            committed = docker("commit", "--change", "ENV ZEEKPATH=/out", cid).stdout.strip()
+            committed = docker("commit", "--change", "ENV ZEEKPATH=/out:" + ":".join(stock["ZEEKPATH"]),
+                               cid).stdout.strip()
         finally:
             docker("rm", "-f", cid, check=False)
         os.makedirs(os.path.join(out, "t", "st-new"))
@@ -526,7 +539,7 @@ def selftest(image, exp, d):
             docker("rmi", "-f", committed, check=False)
         docker("volume", "rm", "-f", vol, check=False)
     print("\n### Mount check controls (docs/release.md section 8.4 item 3), on this runner's Docker\n")
-    print(f"Image: `{image}`. Each control must fail on its own rule and no other.\n")
+    print(f"Image: `{image}`. Each control must fail on its own rule, for its own reason, and on no other rule.\n")
     print("| control | rule that must fail | rules that failed | result |")
     print("| --- | --- | --- | --- |")
     print("\n".join(rows))
