@@ -193,7 +193,8 @@ def cases():
     f.send(False, dnp3.response(2))
     out["d4u-short-request-second"] = f
     # D4-115 item 4 (D4's N1 on #724): what a TCP stop leaves, in the orders
-    # of #718's TCP cells, on D4's own bytes. Measured, not judged.
+    # of #718's TCP cells, on D4's own bytes, each ending, as those do, with
+    # the FIN exchange. Measured, not judged.
     # dnp3-mal-tcp-fc129-badobj-first's order: X, then the same end's P,
     # then R(P), Q and R(Q), on a connection to 20001, outside
     # likely_server_ports, so dpd_dnp3_server attaches DNP3_TCP at R(P) and
@@ -207,6 +208,7 @@ def cases():
         f.send(False, dnp3.response(1))
         f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(2))
+        f.conv.close()
         out["d4u-tcp-replay-same-end" + sfx] = f
     # dnp3-mal-tcp-fc0-resp-* and -fc13-resp-*'s order: P and R(P) on a
     # connection to 20000, which attaches DNP3_TCP by port, then X, a 2-octet
@@ -219,6 +221,7 @@ def cases():
         f.send(False, x, bad=True)
         f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
         f.send(False, dnp3.response(1))
+        f.conv.close()
         out[f"d4u-tcp-resp-{name}-mid"] = f
     # A master's direct operate with a control block and DIR clear, on a
     # flow the master starts: the code picks the request parser, so the

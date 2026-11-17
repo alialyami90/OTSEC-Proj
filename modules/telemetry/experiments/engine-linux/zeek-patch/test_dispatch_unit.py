@@ -255,3 +255,7 @@ def test_tcp_stop_inputs_follow_the_orders_of_718s_tcp_cells():
         f = flows[f"d4u-tcp-resp-{name}-mid"]
         assert f.conv.s.port == 20000 and f.bad == 2
         assert f.msgs == [(True, 1), (False, 129), (False, code), (True, 1), (False, 129)]
+    # Each ends with the FIN exchange: the handshake's 3 frames, each
+    # message and its bare ACK, then FIN, FIN and ACK.
+    for case in du.EXPERIMENT[-4:]:
+        assert len(flows[case].conv.frames) == 3 + 2 * 5 + 3
