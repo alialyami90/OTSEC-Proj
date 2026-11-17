@@ -3,8 +3,6 @@ package syslogreceive
 import (
 	"context"
 	"fmt"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,9 +39,9 @@ func (h *heldLog) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Recei
 // with every message counted stored in the store. heldLog reproduces the
 // moment by order, not by timing: a batch committed and not yet counted.
 // The two reads the flood took (rows, then status) differ by the batch
-// there. baseline, started there, does not return: it is seen asleep
-// between polls, read from its goroutine's state as writerIdle reads the
-// receiver's. Once the batch is counted it returns a pair on which
+// there. baseline, started there, does not return: it signals on
+// rig.polled a poll that found messages held, and only then is the batch
+// released. Once the batch is counted it returns a pair on which
 // awaitMarker's check passes. Controls, run by hand and recorded in the PR:
 // the two reads in baseline's place fail here, as baseline returning while
 // the batch is held; given to awaitMarker they fail "counts 1 stored since
@@ -70,17 +68,19 @@ func TestMarkerBaselineIsSettled(t *testing.T) {
 		st   receive.Status
 	}
 	got := make(chan pair, 1)
+	g.polled = make(chan struct{}, 1)
 	go func() {
 		defer close(got) // also when baseline fails the test from here
 		rows, st := g.baseline()
 		got <- pair{rows, st}
 	}()
-	for !g.baselineAsleep() {
-		select {
-		case p := <-got:
-			t.Fatalf("baseline returned %d rows and %d counted stored while a committed batch is not counted", p.rows, p.st.Stored)
-		case <-time.After(time.Millisecond):
+	select {
+	case p, ok := <-got:
+		if !ok {
+			t.FailNow()
 		}
+		t.Fatalf("baseline returned %d rows and %d counted stored while a committed batch is not counted", p.rows, p.st.Stored)
+	case <-g.polled:
 	}
 	free()
 	p, ok := <-got
@@ -91,22 +91,4 @@ func TestMarkerBaselineIsSettled(t *testing.T) {
 		t.Fatalf("baseline after the batch was counted: %d rows and %d counted stored, want 1 and 1", p.rows, p.st.Stored)
 	}
 	g.awaitMarker(known, "<13>a6 marker", p.rows, p.st)
-}
-
-// baselineAsleep reports whether a goroutine sleeps in g's baseline poll:
-// time.Sleep called from baseline itself, so it has read the counts at
-// least once and not returned. g is picked out by the pointer the method
-// prints as its first argument, as writerIdle picks out a receiver.
-func (g *rig) baselineAsleep() bool {
-	frame := fmt.Sprintf(".(*rig).baseline(%p", g)
-	buf := make([]byte, 1<<20)
-	buf = buf[:runtime.Stack(buf, true)]
-	for _, gr := range strings.Split(string(buf), "\n\n") {
-		lines := strings.Split(gr, "\n")
-		if len(lines) > 3 && strings.Contains(lines[0], "[sleep]") && strings.HasPrefix(lines[1], "time.Sleep(") &&
-			strings.Contains(lines[3], frame) {
-			return true
-		}
-	}
-	return false
 }

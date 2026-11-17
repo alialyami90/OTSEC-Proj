@@ -443,6 +443,10 @@ func (g *rig) baseline() (int64, receive.Status) {
 				fmt.Fprintf(os.Stderr, "%s: baseline: the receiver has not settled for %v and holds %d read messages; waiting. Its goroutines:\n%s\nThe store's commits:\n%s\n",
 					g.t.Name(), d, held, receiverStacks(), g.commitTrail())
 			}
+			select {
+			case g.polled <- struct{}{}:
+			default:
+			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
