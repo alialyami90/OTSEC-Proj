@@ -672,7 +672,7 @@ func TestAppendBatch(t *testing.T) {
 	// One record waits in a group; the batch must commit after it.
 	first := make(chan Receipt)
 	go func() { r, _ := l.Append(context.Background(), rec("s", "single")); first <- r }()
-	time.Sleep(10 * time.Millisecond)
+	waitQueued(t, l, "s")
 	report := capture("SER report bytes")
 	recs := []Record{rec("s", "row1"), rec("s", "row2"), rec("s", "row3")}
 	for i := range recs {
@@ -711,6 +711,27 @@ func TestAppendBatch(t *testing.T) {
 		if _, err := l.AppendBatch(context.Background(), bad); !isCode(err, CodeInvalid) {
 			t.Errorf("%s: %v", name, err)
 		}
+	}
+}
+
+// waitQueued returns once a record of stream has joined a group of l. Append
+// sets l.tail in the same critical section that adds the record to its
+// group, so the record is ahead of any later AppendBatch on the stream,
+// whether its group is still pending or MaxWait has already flushed it.
+func waitQueued(t *testing.T, l *Log, stream StreamID) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		l.mu.Lock()
+		queued := l.tail[stream] != nil
+		l.mu.Unlock()
+		if queued {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no record of %s queued after 30s", stream)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
