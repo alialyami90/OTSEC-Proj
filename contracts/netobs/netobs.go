@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"time"
 
@@ -173,8 +175,9 @@ func Codes(err error) []Code {
 // optional in the Go type and in a stored record, required on the channel
 // of their minor and later). keys holds a decoded document's key paths
 // (keyPaths), nil when a Go value is validated. nulls holds the paths of
-// those keys whose value is null (docPaths), set only for a record read
-// from a sensor on the 0.2 or 0.3 channel.
+// those keys and list elements whose value is null (docPaths), set only
+// for a record read from a sensor on the 0.2 or 0.3 channel, where
+// refuseNulls refuses each.
 type checker struct {
 	errs  []error
 	minor int
@@ -345,6 +348,61 @@ func (c *checker) null(field string, isNil bool) {
 	}
 }
 
+// required refuses, on the 0.2 and 0.3 channels, a key that C13 requires
+// and the decoded document leaves out, as missing: its Go zero value is
+// never read as the value (D1's ruling on #735). The 0.1 channel and stored
+// records read as they did.
+func (c *checker) required(field string) {
+	if c.need >= 2 && c.keys != nil && !c.keys[field] {
+		c.fail(CodeMissing, field, "required")
+	}
+}
+
+// refuseNulls refuses, as form, every key and list element in c.nulls
+// that no check has already refused as form at its path, and puts every
+// null refusal ahead of the record's other failures, so that a record
+// carrying a null is counted as form (codeOf takes the first code; D6's N1
+// on #735). No value on the 0.2 or 0.3
+// channel is null (C13 0.2 CH-5, C13 0.3 §1.1; D1's ruling on #732): an
+// optional field is shown absent by leaving its key out, and a list is [].
+// One rule covers every path, a field added later included.
+func (c *checker) refuseNulls() {
+	refused := map[string]bool{}
+	for _, err := range c.errs {
+		if e, ok := err.(*Error); ok && e.Code == CodeForm {
+			refused[e.Field] = true
+		}
+	}
+	var first, rest []error
+	for _, err := range c.errs {
+		if e, ok := err.(*Error); ok && e.Code == CodeForm && c.nulls[e.Field] {
+			first = append(first, err)
+		} else {
+			rest = append(rest, err)
+		}
+	}
+	for _, p := range slices.Sorted(maps.Keys(c.nulls)) {
+		if !refused[p] {
+			first = append(first, &Error{Code: CodeForm, Field: p, Detail: "null is not a value"})
+		}
+	}
+	c.errs = append(first, rest...)
+}
+
+// firstNull refuses, as form at its path, the first key or list element of
+// a sensor-hello or tick whose value is null, in sorted order: the
+// connection then closes as hello or tick (D3's B1 on #735). It is the
+// rule refuseNulls applies to a record, for the two messages that have no
+// checker.
+func firstNull(b []byte) error {
+	_, nulls := docPaths(b)
+	if len(nulls) == 0 {
+		return nil
+	}
+	p := slices.Sorted(maps.Keys(nulls))[0]
+	return &Error{Code: CodeForm, Field: p, Detail: "null is not a value"}
+}
+
 // keyPaths lists every key of a JSON document by its path in the checker's
 // field form ("coverage.settings.prp_window_ms", "windows[0].coverage").
 // It is called only on a document strictjson has read, so no key repeats.
@@ -353,9 +411,9 @@ func keyPaths(b []byte) map[string]bool {
 	return keys
 }
 
-// docPaths is keyPaths, and also the paths of the keys whose value is
-// null. A null decodes into a plain count as 0, so only this set tells the
-// two apart.
+// docPaths is keyPaths, and also the paths of the keys and list elements
+// whose value is null. A null decodes into a plain count as 0, so only
+// this set tells the two apart.
 func docPaths(b []byte) (keys, nulls map[string]bool) {
 	var doc any
 	if json.Unmarshal(b, &doc) != nil {
@@ -379,7 +437,11 @@ func docPaths(b []byte) (keys, nulls map[string]bool) {
 			}
 		case []any:
 			for i, e := range x {
-				walk(fmt.Sprintf("%s[%d]", path, i), e)
+				p := fmt.Sprintf("%s[%d]", path, i)
+				if e == nil {
+					nulls[p] = true
+				}
+				walk(p, e)
 			}
 		}
 	}

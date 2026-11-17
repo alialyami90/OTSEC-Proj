@@ -168,7 +168,7 @@ func (g *rig) flood(more func(sent int) bool, mark string) (sent int) {
 	g.t.Helper()
 	c := dialFrom(g.t, ipStranger, "udp", g.addr)
 	known := dialFrom(g.t, ipA, "udp", g.addr)
-	rows0, st0 := g.rows(), g.r.Status()
+	rows0, st0 := g.baseline()
 	for ; more(sent); sent++ {
 		c.Write(strangerMsg)
 		if sent%20 == 0 {
@@ -396,6 +396,60 @@ func (g *rig) rows() (n int64) {
 		g.t.Fatal(err)
 	}
 	return n
+}
+
+// baseline is the stream's row count and the receiver's status read at one
+// settled moment, the start of awaitMarker's check that the rows a flood
+// adds are the messages the receiver counts stored. Stored moves only after
+// AppendBatch returns, so a batch the store has committed and the receiver
+// has not yet counted is in the rows and not in Stored, and the two read one
+// after the other while such a batch is in flight are off by its size. That
+// failed the outage test's second flood on #731's head 0167022b (run
+// 44057337591, go on ubuntu): 473 counted and 472 new rows, with all 745
+// counted stored in the store. awaitMarker returns once the marker is in
+// the store, which can be before its batch is counted
+// (TestMarkerBaselineIsSettled). The pair is taken as awaitMarker takes its
+// own: with nothing held, so every message read is counted, and with the
+// counts the same on both sides of the row count, so no message was read
+// and committed between the reads. The wait has no deadline, as
+// awaitMarker's has none: a held commit is a slow store, not a loss. Held
+// messages with the writer idle on two polls in a row are lost without a
+// count and fail as in awaitMarker; a hold past markerUnread prints the
+// receiver's goroutines and the store's commits; the test binary's timeout
+// is the backstop.
+func (g *rig) baseline() (int64, receive.Status) {
+	g.t.Helper()
+	began, idle, noted := time.Now(), 0, false
+	for {
+		st := g.r.Status()
+		if held := st.Received - st.Stored - st.Empty - dropped(st); held <= 0 {
+			idle = 0
+			if rows, again := g.rows(), g.r.Status(); again.Received == st.Received && again.Stored == st.Stored {
+				return rows, st
+			}
+		} else {
+			idleNow := writerIdle(g.r)
+			if lostUncounted(st, g.r.Status(), idleNow) {
+				idle++
+			} else {
+				idle = 0
+			}
+			if idle >= 2 {
+				g.t.Fatalf("baseline: the receiver holds %d read messages and its writer waits on an empty queue: messages lost without a count (%+v)\n%s",
+					held, st, receiverStacks())
+			}
+			if d := time.Since(began); d > markerUnread && !noted {
+				noted = true
+				fmt.Fprintf(os.Stderr, "%s: baseline: the receiver has not settled for %v and holds %d read messages; waiting. Its goroutines:\n%s\nThe store's commits:\n%s\n",
+					g.t.Name(), d, held, receiverStacks(), g.commitTrail())
+			}
+			select {
+			case g.polled <- struct{}{}:
+			default:
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // markerFatalf fails the test for mark with the listener's diagnostic

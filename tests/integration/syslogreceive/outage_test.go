@@ -78,9 +78,11 @@ func TestUnknownShareOverTheOutage(t *testing.T) {
 	markers := 0
 	// flood sends until end and sets F to how long it sent, then returns T:
 	// the clock from start until a marker sent after the flood is stored.
+	// Its baseline waits for the receiver to settle (rig.baseline); the wait
+	// comes out of the flood, and F is measured from after it.
 	var F time.Duration
 	flood := func(end time.Time) time.Duration {
-		rows0, st0 := g.rows(), g.r.Status()
+		rows0, st0 := g.baseline()
 		began := time.Now()
 		for i := 0; time.Now().Before(end); i++ {
 			c.Write(msg)

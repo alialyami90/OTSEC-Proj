@@ -1,0 +1,64 @@
+# HR-23's sanitizer fuzz run (brief P4-4-HR23-FUZZ; docs/phase4/
+# D4-hr23-design.md, sections 4.5 and 4.6). D4 wrote it; D6 runs it and
+# judges it. It can only be started by hand (workflow_dispatch) and is not a
+# project CI pipeline. It runs on a GitHub-hosted runner, never on the
+# owner's PC.
+#
+# One job, so that no input ever leaves the runner: it builds Zeek 9.0.1's
+# fuzz targets twice from the pinned, signature-checked tarball, C1p
+# without option (i)'s patch and C2 with it, both with ASan, UBSan and
+# coverage, then fuzzes `dnp3_tcp`, `dnp3_udp` and `packet` for 30 minutes
+# each on each build (the two builds of a target at once, on equal terms),
+# replays every input that gave a report alone on both builds, replays C2's
+# final corpus for coverage, and judges (zeek-patch/fuzz/fuzz.sh,
+# fuzz_judge.py). Every build, campaign and replay runs with no network.
+#
+# Disclosure (section 4.6; D4-112 item 1): the job publishes only pass or
+# fail and its counts, the build record and the coverage conditions. It
+# uploads nothing, and prints no input, trace or log: every fuzzer's output
+# goes to a folder on the runner that no step prints
+# (test_hr23_fuzz.py checks this file and fuzz.sh for that). The job fails
+# unless the verdict is `pass`. Evidence class: CI-Linux.
+name: d4-zeek-dnp3-fuzz
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    env:
+      FUZZ: modules/telemetry/experiments/engine-linux/zeek-patch/fuzz/fuzz.sh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Free disk for the two builds (the runner's preinstalled SDKs)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Install clang 18, its libFuzzer and sanitizer runtimes, LLVM's coverage tools, and Zeek's build packages
+        run: |
+          sudo apt-get update -q
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends \
+            clang-18 libclang-rt-18-dev llvm-18 bison cmake flex libfl-dev libmaxminddb-dev \
+            libpcap-dev libssl-dev libuv1-dev ninja-build zlib1g-dev
+      - name: Build C1p and C2's fuzz targets (inputs checked first)
+        run: sh "$FUZZ" build "$RUNNER_TEMP/hr23-fuzz"
+      - name: The seeds, converted by the pinned script, against the corpus pin
+        run: sh "$FUZZ" seeds "$RUNNER_TEMP/hr23-fuzz"
+      - name: dnp3_tcp, 30 minutes on each build
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_tcp
+      - name: dnp3_udp, 30 minutes on each build
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" dnp3_udp
+      - name: packet, 30 minutes on each build
+        run: sh "$FUZZ" campaign "$RUNNER_TEMP/hr23-fuzz" packet
+      - name: Replay every input that gave a report, alone, on both builds
+        run: sh "$FUZZ" replay "$RUNNER_TEMP/hr23-fuzz"
+      - name: Coverage of C2's final corpus, and the coverage condition
+        run: sh "$FUZZ" coverage "$RUNNER_TEMP/hr23-fuzz"
+      - name: Summary and verdict
+        if: ${{ !cancelled() }}
+        run: |
+          sh "$FUZZ" summary "$RUNNER_TEMP/hr23-fuzz" > "$RUNNER_TEMP/hr23-fuzz/summary.md"
+          cat "$RUNNER_TEMP/hr23-fuzz/summary.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -qx 'Verdict: \*\*pass\*\*' "$RUNNER_TEMP/hr23-fuzz/summary.md"
