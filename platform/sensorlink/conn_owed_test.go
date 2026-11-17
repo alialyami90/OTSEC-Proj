@@ -14,6 +14,20 @@ import (
 // test below is the reviewed code's carry (8e5528ea), which saves the new
 // run with the old run's owed events carried and unwritten.
 
+// run5Owing has run 5 accepted while the health stream is down, so its
+// prior and its one lost span stay owed in the saved cursor.
+func run5Owing(t *testing.T, r *rig) {
+	t.Helper()
+	r.owedE = errors.New("test: the health stream is down")
+	h := hello02()
+	h.DropsChannel, h.Lost = "1", []netobs.Span{lspan("09:30:00", "09:31:00")}
+	h.Prior.RecordsLost, h.Prior.Lost = "3", []netobs.Span{lspan("09:00:00", "09:01:00")}
+	r.accepted(h).end()
+	if c := cursorNow(t, r.cs); !c.Prior.Owed || !c.Spans[0].Owed {
+		t.Fatalf("run 5 owes nothing: %+v", c)
+	}
+}
+
 // run6 is a new run after run 5.
 func run6() *netobs.SensorHello {
 	h := hello02()
@@ -124,6 +138,39 @@ func TestRow6OwedNoWriter(t *testing.T) {
 	}
 	if after := mustJSON(t, cursorNow(t, r.cs)); string(after) != string(before) {
 		t.Fatalf("the cursor changed")
+	}
+}
+
+// D6's condition 3 and D3's condition 2: the write succeeds and row 6's
+// save fails, the kill's stand-in. The old cursor stays with its marks,
+// and the next hello writes the same events again, with the same
+// identity, and is accepted: twice, never not at all. Control: the marks
+// cleared before the save (the second hello writes run 5 nothing).
+func TestRow6SaveFailsWritesAgain(t *testing.T) {
+	r := newRig(t, nil)
+	run5Owing(t, r)
+	r.mu.Lock()
+	r.owedE = nil
+	r.mu.Unlock()
+	r.cs.failNext(1)
+	p := r.dial(enrolment())
+	p.send(run6())
+	if got := p.closed(); got != netobs.ClosePositionNotSaved {
+		t.Fatalf("close %q", got)
+	}
+	if w := r.owedNow(); len(w) != 1 || !isRun5(w[0]) {
+		t.Fatalf("owed %+v", w)
+	}
+	if c := cursorNow(t, r.cs); c.RunCounter != 5 || !c.Prior.Owed {
+		t.Fatalf("cursor %+v", c)
+	}
+	r.accepted(run6()).end()
+	w := r.owedNow()
+	if len(w) != 3 || !isRun5(w[1]) || w[2].RunID != testRun2 {
+		t.Fatalf("owed %+v", w)
+	}
+	if string(mustJSON(t, w[0])) != string(mustJSON(t, w[1])) {
+		t.Fatalf("the repeat's identity differs:\n%s\n%s", mustJSON(t, w[0]), mustJSON(t, w[1]))
 	}
 }
 
