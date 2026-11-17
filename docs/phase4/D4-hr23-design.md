@@ -424,7 +424,7 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
   - **`EndpointEOF`:** only `TCPSessionAdapter::EndpointEOF` calls a child's `EndpointEOF`, and only `TCP_Reassembler::CheckEOF` calls that, on a TCP FIN, close or reset (`TCP_Reassembler.cc`). The fuzzer hands each chunk to `NextStream` directly, with no segment and no reassembler, so `EndpointEOF` is never called.
 - **The CRC fix-up.** `DNP3_Base::CheckCRC` checks every header and every chunk in C++ before binpac sees a byte, and `DNP3.cc` has no fuzzing bypass. So a plain mutator would almost never reach the patched dispatch. The run uses a libFuzzer custom mutator (`LLVMFuzzerCustomMutator`) that recomputes the header and chunk CRCs after each mutation. The code under test stays byte for byte the shipped source.
 - **The settings, pinned before the run:**
-  - UBSan with `-fno-sanitize-recover=all`, so that a report stops the run and is counted;
+  - UBSan with Zeek 9.0.1's tailored check list (`ZEEK_TAILORED_UB_CHECKS`; `fuzz.env`'s `HR23_FUZZ_UB_CHECKS`), with recovery off for every check in it (`-fno-sanitize-recover=` that list), so that a report stops the run and is counted (D3's B3 on #731, with D6);
   - `-timeout`, `-rss_limit_mb` and `-max_len`;
   - whether LSan is on or off;
   - `-seed`.
@@ -434,6 +434,7 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
 - **The pass rule.** Every input that gives a report, in either build's campaign, is replayed alone on both builds, with the same options, **inside the job** (D1 6866095230, point 3). No input leaves the runner.
   - It counts against the patch only when it reproduces on the patched build and not on the unpatched one.
   - An input that does not reproduce on its own build is `unknown`. It is counted, never dismissed.
+  - A campaign that stops on a report before its time leaves the result `unknown`, since it did not fuzz for the duration set (D6's B1 on #731).
   - A report that reproduces on the unpatched build may be a vulnerability in stock Zeek 9.0.1, which the sensor ships either way. It is not netted out. It is handled by the disclosure rule below.
 - **The coverage condition** (D1 6866095230, point 3, restating D3's and D6's form). The final patched corpus is replayed on a coverage build inside the job. The coverage report shows the lines and branches of the patched parser path that were reached: both arms of the new dispatch, `DNP3_Request` and `DNP3_Response` entered, and (B')'s `catch` and `PIA::ReplayPacketBuffer` (the third target, above). If they were not reached, the result is `unknown`, never `pass`. The report does not show which caller reached the `catch` (the third target's limit, above).
   - **A limit of that report** (D6's B3 on `9919fd24`): side and DIR are values in the input, not branches. Under ruling 1 the dispatch branches only on the code, and `is_orig` only picks `upflow` or `downflow`, which run the same generated code. So the report shows that both arms ran. It does not show from which side, or with which DIR.
@@ -446,6 +447,7 @@ The fuzz run is agreed for (i) (D1 6862064732, point 2). D4 adds the job, and D6
   - fragments assembled across many datagrams (FIR and FIN sequences), or the 100,000-octet `DNP3::max_application_layer_fragment_size`, which a short input cannot reach;
   - algorithmic and memory exhaustion beyond the limits set;
   - reads of uninitialised memory, since no MSan is run;
+  - misaligned access, and calls through a mismatched function type (UBSan's `alignment` and `function` checks, which are not run; D3's B3 on #731);
   - the optimised binary that ships, which is a different build from the sanitizer one. So the result speaks for the source and the patch, not for the shipped bytes;
   - the script layer above the analyzer;
   - **the end-of-connection parse by `EndpointEOF`** (D3's B1 on `be6b8cea`). The fuzzer never drives it (above), so it is shown only by section 4.3's TCP inputs that end by a TCP FIN while a header is held. The `Done` path is reached at each input's cleanup, but only on the fuzzer's one synthetic connection, and for the UDP target not at all, since `DNP3_UDP_Analyzer` has no `Done` of its own that calls `FlowEOF`.
