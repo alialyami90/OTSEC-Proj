@@ -254,12 +254,17 @@ type hold struct {
 	stats     HoldStats
 	// phase is the release in progress, for result's deferred clean-up.
 	phase *releasePhase
-	// lastStart is the node's wall time when it last took a flow start of
-	// the sensor run, zero since the link was made: an open entry past its
-	// bound expires only once a start is taken at or after the bound
-	// (CH-57; D4-102 item 5 (c)). It is not saved, so after a restart an
+	// lastStart is the node's monotonic time when it last took a flow start
+	// of the sensor run, and started whether one was taken since the link
+	// was made: an open entry past its bound expires only once a start is
+	// taken at or after the bound (CH-57; D4-102 item 5 (c)). The start is
+	// placed on the wall clock at each check, from the monotonic time since
+	// it, so a step of the wall clock after it cannot move it past a bound
+	// (D4's N1 and D6's N4 on #732). It is not saved, so after a restart an
 	// entry past its bound waits for the next start taken after it.
-	lastStart time.Time
+	lastStart time.Duration
+	started   bool
+	mono      func() time.Duration
 }
 
 // releasePhase is how far a release has gone, for result's deferred
@@ -449,7 +454,10 @@ func (h *hold) expires(of OpenFlow, now time.Time) time.Time {
 // flow start taken at or after the bound (CH-57).
 func (h *hold) expired(of OpenFlow, now time.Time) bool {
 	end := h.expires(of, now)
-	return !now.Before(end) && !h.lastStart.Before(end)
+	if now.Before(end) || !h.started {
+		return false
+	}
+	return !now.Add(h.lastStart - h.mono()).Before(end)
 }
 
 // expireOpen removes the open entries that have expired, counted, and
@@ -945,7 +953,7 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		return false
 	}
 	if isStart(st) {
-		h.lastStart = h.now() // any start of the run, before the match (CH-57)
+		h.lastStart, h.started = h.mono(), true // any start of the run, before the match (CH-57)
 	}
 	k, ok := h.keyOf(st)
 	if !ok {

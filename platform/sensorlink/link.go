@@ -181,6 +181,7 @@ func New(cfg Config, opt Options) (*Link, error) {
 	if err != nil {
 		return nil, err
 	}
+	h.mono = opt.Monotonic
 	return &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets), hold: h,
 		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
 		conn:   ConnStats{Closes: map[string]uint64{}},

@@ -954,7 +954,10 @@ func openEntryPastBound(t *testing.T) *holdRig {
 	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
 		t.Fatal(err)
 	}
-	g.wall = g.wall.Add(netobs.DefaultFlowIdleS*time.Second + 30*time.Second)
+	// The wall and the monotonic clock move together: the tie's start is
+	// before the bound on both (D4's N1 on #732).
+	d := netobs.DefaultFlowIdleS*time.Second + 30*time.Second
+	g.wall, g.c.now = g.wall.Add(d), g.c.now+d
 	return g
 }
 
@@ -1003,5 +1006,37 @@ func TestOpenExpiryWaitsAfterRestart(t *testing.T) {
 	g.l.TickHold(bg)
 	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 {
 		t.Fatalf("not expired after a start past the restart: %+v", s)
+	}
+}
+
+// D4's N1 and D6's N4 on #732: a start taken before a backward step of the
+// wall clock does not count as taken at or after a bound the step pulls
+// back. The start is placed on the wall clock from the monotonic time
+// since it. The entry is tied, a start comes 1 min later, the wall steps
+// back 1 h, and then the wall and the monotonic clock move on past the
+// bound: the entry stays until a start is taken after it. Control: the
+// start's wall time kept (the entry expires with no start after the
+// bound).
+func TestOpenExpiryWallStepBack(t *testing.T) {
+	g := newHoldRig(t)
+	g.dispatch("req-1")
+	g.send(g.obs("start", 40001, 0))
+	if _, err := g.l.Result(bg, "req-1", session09(inv1, 40001, 0)); err != nil {
+		t.Fatal(err)
+	}
+	g.wall, g.c.now = g.wall.Add(time.Minute), g.c.now+time.Minute
+	g.send(g.otherStart())
+	g.wall = g.wall.Add(-time.Hour)
+	g.l.TickHold(bg)
+	step := netobs.DefaultFlowIdleS*time.Second + 30*time.Second
+	g.wall, g.c.now = g.wall.Add(step), g.c.now+step
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 1 || s.OpenExpired != 0 {
+		t.Fatalf("expired with no start after the bound: %+v", s)
+	}
+	g.send(g.otherStart())
+	g.l.TickHold(bg)
+	if s := g.l.Stats().Hold; s.Open != 0 || s.OpenExpired != 1 {
+		t.Fatalf("not expired after a later start: %+v", s)
 	}
 }
