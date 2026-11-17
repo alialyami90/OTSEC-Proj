@@ -71,14 +71,15 @@ class Flow:
     """One UDP 5-tuple; `first` is the end whose datagram the sensor sees
     first, so it is Zeek's originator (both ports are 20000, which Zeek does
     not swap). With tcp=True, one TCP connection instead: `first` is the
-    client, from port CLIENT_PORT to the other end's 20000, after a full
-    handshake, and each frame is one segment, acknowledged."""
+    client, from port CLIENT_PORT to the other end's `server_port`, after a
+    full handshake, and each frame is one segment, acknowledged."""
 
-    def __init__(self, first, tcp=False):
+    def __init__(self, first, tcp=False, server_port=20000):
         self.clock = synth.Clock()
         a, b = (RELAY, MASTER) if first == "relay" else (MASTER, RELAY)
         if tcp:
             a = synth.Host(a.mac, a.ip, CLIENT_PORT)
+            b = synth.Host(b.mac, b.ip, server_port)
             self.conv = synth.TCPConv(a, b, self.clock)
             self.conv.handshake()
         else:
@@ -191,6 +192,39 @@ def cases():
     f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
     f.send(False, dnp3.response(2))
     out["d4u-short-request-second"] = f
+    # D4-115 item 4 (D4's N1 on #724): what a TCP stop leaves, in the orders
+    # of #718's TCP cells, on D4's own bytes, each ending, as those do, with
+    # the FIN exchange. Measured, not judged.
+    # dnp3-mal-tcp-fc129-badobj-first's order: X, then the same end's P,
+    # then R(P), Q and R(Q), on a connection to 20001, outside
+    # likely_server_ports, so dpd_dnp3_server attaches DNP3_TCP at R(P) and
+    # PIA_TCP replays X and P. X is the truncated READ, which every build
+    # rejects (the stock engine's stop), or M1's 129 of 5 octets, which only
+    # C2's parser rejects.
+    for sfx, x in (("", bytes([0xC0, dnp3.READ, 60])), ("-badobj", dnp3.response(0, objects=b"\x01"))):
+        f = Flow("master", True, server_port=20001)
+        f.send(True, x, bad=True)
+        f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
+        f.send(False, dnp3.response(1))
+        f.send(True, dnp3.request(2, dnp3.READ, dnp3.all_objects(60, 1)))
+        f.send(False, dnp3.response(2))
+        f.conv.close()
+        out["d4u-tcp-replay-same-end" + sfx] = f
+    # dnp3-mal-tcp-fc0-resp-* and -fc13-resp-*'s order: P and R(P) on a
+    # connection to 20000, which attaches DNP3_TCP by port, then X, a 2-octet
+    # request code from the responder, which the response parser of C0 and
+    # C1p rejects in mid-flow, then Q and R(Q); X's DIR clear, as its
+    # role's, or set, against its side (#718's -dirclear and -dirset).
+    for name, x, dirset, dn in ((n, x, d, dn) for n, x in (("fc0", dnp3.confirm(0)), ("fc13", dnp3.request(0, 13)))
+                                for d, dn in ((False, ""), (True, "-dirset"))):
+        f = Flow("master", True)
+        f.send(True, dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1)))
+        f.send(False, dnp3.response(0))
+        f.send(False, x, dir_set=dirset, bad=True)
+        f.send(True, dnp3.request(1, dnp3.READ, dnp3.all_objects(60, 1)))
+        f.send(False, dnp3.response(1))
+        f.conv.close()
+        out[f"d4u-tcp-resp-{name}-mid{dn}"] = f
     # A master's direct operate with a control block and DIR clear, on a
     # flow the master starts: the code picks the request parser, so the
     # block is parsed under both builds (a selector keyed by DIR would not).
@@ -288,7 +322,11 @@ EXPERIMENT = ["d4u-short-request-first", "d4u-short-response-first",
               "d4u-short-request-first-tcp", "d4u-short-response-first-tcp",
               # D3's M1 on #718, at D1's request on #715.
               "d4u-bad-objects-response-first", "d4u-bad-objects-response-first-tcp",
-              "d4u-short-request-second"]
+              "d4u-short-request-second",
+              # D4-115 item 4: the orders of #718's TCP cells.
+              "d4u-tcp-replay-same-end", "d4u-tcp-replay-same-end-badobj",
+              "d4u-tcp-resp-fc0-mid", "d4u-tcp-resp-fc13-mid",
+              "d4u-tcp-resp-fc0-mid-dirset", "d4u-tcp-resp-fc13-mid-dirset"]
 
 
 def state(d, test):
