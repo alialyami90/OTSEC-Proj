@@ -263,4 +263,11 @@ func TestInsecureAttempts02Required(t *testing.T) {
 	if _, err := DecodeStored(encodeWith(t, asStored(insecure(Identifier02)), drop)); err != nil {
 		t.Errorf("control, stored 0.2, attempts absent: %v", err)
 	}
+	null := func(m map[string]any) { m["insecure"].(map[string]any)["login"].(map[string]any)["attempts"] = nil }
+	if _, err := DecodeChannel(encodeWith(t, old, null)); err != nil {
+		t.Errorf("control, 0.1 channel, attempts null: %v", err)
+	}
+	if _, err := DecodeStored(encodeWith(t, asStored(insecure(Identifier02)), null)); err != nil {
+		t.Errorf("control, stored 0.2, attempts null: %v", err)
+	}
 }
