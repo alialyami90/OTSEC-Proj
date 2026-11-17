@@ -302,6 +302,20 @@ func (l *Link) requested() string {
 	return l.guard.request
 }
 
+// decided is the close a decision asks for: CloseConn's request, or
+// shutdown once ctx is done. The context is read here as well as through
+// its AfterFunc, which runs on its own goroutine and may not have run yet
+// when the cancel has returned.
+func (l *Link) decided(ctx context.Context) string {
+	if r := l.requested(); r != "" {
+		return r
+	}
+	if ctx.Err() != nil {
+		return netobs.CloseShutdown
+	}
+	return ""
+}
+
 func (l *Link) countClose(reason string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -333,6 +347,9 @@ func (l *Link) read(ctx context.Context, cn *conn, d time.Duration, timeout stri
 	g := &l.guard
 	g.mu.Lock()
 	r := g.request
+	if r == "" && ctx.Err() != nil {
+		r = netobs.CloseShutdown
+	}
 	if r == "" {
 		_ = cn.c.SetReadDeadline(time.Now().Add(d))
 	}
@@ -373,7 +390,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 		return reason
 	}
 	reason = l.locked(func() string {
-		if r := l.requested(); r != "" {
+		if r := l.decided(ctx); r != "" {
 			return r // a decision made while the frame was read
 		}
 		cur, err := l.loadCursor(ctx)
@@ -385,7 +402,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 	if reason != "" {
 		return reason
 	}
-	if r := l.writeAck(cn); r != "" {
+	if r := l.writeAck(ctx, cn); r != "" {
 		return r
 	}
 	for {
@@ -400,7 +417,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 		}
 		if reason == "" {
 			reason = l.locked(func() string {
-				if r := l.requested(); r != "" {
+				if r := l.decided(ctx); r != "" {
 					return r // a decision made while the frame was read
 				}
 				if r := l.frame(ctx, cn, b); r != "" {
@@ -410,7 +427,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 				return ""
 			})
 			if reason == "" {
-				reason = l.writeAck(cn)
+				reason = l.writeAck(ctx, cn)
 			}
 		} else {
 			l.mu.Lock()
@@ -495,8 +512,8 @@ func (l *Link) flush(ctx context.Context, cn *conn, now bool) bool {
 
 // writeAck sends an ack when the saved T, bounded by what was read and
 // sent on the connection, has risen (CH-17, CH-9).
-func (l *Link) writeAck(cn *conn) string {
-	if r := l.requested(); r != "" {
+func (l *Link) writeAck(ctx context.Context, cn *conn) string {
+	if r := l.decided(ctx); r != "" {
 		return r // no ack after a decision (CH-37)
 	}
 	seq := min(cn.saved, max(cn.l, cn.sent))
@@ -508,7 +525,7 @@ func (l *Link) writeAck(cn *conn) string {
 		Seq: strconv.FormatUint(seq, 10)})
 	_ = cn.c.SetWriteDeadline(time.Now().Add(l.timeouts().Idle))
 	if err := netobs.WriteFrame(cn.c, b); err != nil {
-		if r := l.requested(); r != "" {
+		if r := l.decided(ctx); r != "" {
 			return r // the decision cut the write
 		}
 		return netobs.CloseIdle
