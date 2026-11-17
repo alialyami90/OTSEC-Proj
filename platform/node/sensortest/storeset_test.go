@@ -23,6 +23,8 @@ type gate struct {
 	release chan struct{}
 	once    sync.Once
 	calls   atomic.Int32
+	// at is when the first caller entered, read once in is closed.
+	at time.Time
 }
 
 func newGate() *gate { return &gate{in: make(chan struct{}), release: make(chan struct{})} }
@@ -30,6 +32,7 @@ func newGate() *gate { return &gate{in: make(chan struct{}), release: make(chan 
 // wait blocks the first call until release; later calls pass at once.
 func (g *gate) wait() {
 	if g.calls.Add(1) == 1 {
+		g.at = time.Now()
 		close(g.in)
 		<-g.release
 	}
@@ -428,16 +431,25 @@ func TestSensorRetryAlarmsOnce(t *testing.T) {
 }
 
 // D6's B3 on #663 (section 1.9 item 1, F7): a sensor database's startup
-// that never returns does not hold the node's start. Start returns within
-// 2 s, every collecting stream commits, and the manager's first step has
-// not ended. Control: the first step back in Start.
+// that never returns does not hold the node's start. Start returns while
+// the startup is still stuck, at most 2 s after the startup was entered,
+// every collecting stream commits, and the manager's first step has not
+// ended. Controls (P4-NODE-FLK): the first step back in Start, which fails
+// as held; and Start waiting up to 5 s for the first step, which fails as
+// a wait on the startup.
 //
-// A failure says which it was (D4-104 item 4): a Start that returned late
-// with the startup still stuck was slow, or held for less than 32 s, and one that returned only once
-// the startup was let go was held. A control Start of the same rig's
-// configuration, with no stuck startup, is timed first for comparison.
-// Every cleanup is registered before the timed wait, so a failure in it
-// still lets the startup go and closes the runtime.
+// The 2 s are counted from the startup's entry, not from Start's call
+// (P4-NODE-FLK). The sensor databases open only after every other database
+// has, so a Start that waits on the stuck startup goes on past its entry,
+// and one that does not returns with no more than its status write left.
+// The whole of Start, which a loaded runner slows, took 2.1 s and 4.8 s
+// with no stuck startup on the hosted Windows runner (the control Start in
+// jobs 133676712307 and 133698551724), over the 2 s this test counted from
+// Start's call. A failure says which it was: held until the startup was
+// let go; slow, with the startup not yet entered after 32 s; or returned
+// more than 2 s after the startup was entered. Every cleanup is registered
+// before the timed wait, so a failure in it still lets the startup go and
+// closes the runtime.
 func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 	control := newRig(t)
 	from := time.Now()
@@ -454,6 +466,7 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 		r    *node.Runtime
 		err  error
 		took time.Duration
+		at   time.Time
 	}
 	done := make(chan started, 1)
 	from = time.Now()
@@ -462,7 +475,7 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 			stuck.wait()
 			return c5.RunStartup(ctx, env, p)
 		}}))
-		done <- started{r, err, time.Since(from)}
+		done <- started{r, err, time.Since(from), time.Now()}
 	}()
 	// Cleanups run last first: the gate opens, then Start's return is
 	// awaited and the runtime closed, so the manager stops within its bound.
@@ -480,14 +493,12 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 	select {
 	case s = <-done:
 		got = true
-	case <-time.After(2 * time.Second):
-		// Wait on with the startup still stuck: a Start that returns now
-		// was slow, or held for less than 32 s; one that does not returns only once the startup is let go.
+	case <-time.After(32 * time.Second):
+		entered, in := "had not been entered", false
 		select {
-		case s = <-done:
-			got = true
-			t.Fatalf("Start did not return within 2s: it was slow, or held for less than 32 s; it took %s with the startup still stuck, and the control Start took %s", s.took, plain)
-		case <-time.After(30 * time.Second):
+		case <-stuck.in:
+			entered, in = "was entered "+stuck.at.Sub(from).String()+" after Start began", true
+		default:
 		}
 		stuck.open()
 		released := time.Since(from)
@@ -496,15 +507,24 @@ func TestSensorStartupStuckDoesNotHoldStart(t *testing.T) {
 			got = true
 		case <-time.After(30 * time.Second):
 			got = true // nothing to close; the cleanup does not wait on
-			t.Fatalf("Start did not return within 2s, nor within 30 s after the startup was let go; the control Start took %s", plain)
+			t.Fatalf("Start did not return within 32 s with the startup stuck, nor within 30 s after it was let go; the startup %s; the control Start took %s", entered, plain)
 		}
-		t.Fatalf("Start did not return within 2s: it was held by the stuck startup; it had not returned %s after it began, and returned %s after the startup was let go; the control Start took %s", released, s.took-released, plain)
+		which := "slow"
+		if in && s.took-released < 2*time.Second {
+			which = "held by the stuck startup"
+		}
+		t.Fatalf("Start did not return within 32 s with the startup stuck: it was %s; it returned %s after the startup was let go; the startup %s; the control Start took %s", which, s.took-released, entered, plain)
 	}
 	if s.err != nil {
 		t.Fatal(s.err)
 	}
 	r := s.r
 	stuck.entered(t, "the sensor database's startup")
+	after := s.at.Sub(stuck.at)
+	t.Logf("Start took %s with the startup stuck, and returned %s after the startup was entered; the control Start took %s; %s", s.took, after, plain, r.StartLine())
+	if after > 2*time.Second {
+		t.Fatalf("Start returned %s after the stuck startup was entered, with the startup still stuck: it waited on the startup for a time; it took %s, and the control Start %s; %s", after, s.took, plain, r.StartLine())
+	}
 	collecting(t, r, 1)
 	select {
 	case <-r.SensorFirstStep():
