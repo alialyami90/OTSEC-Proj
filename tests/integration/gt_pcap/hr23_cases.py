@@ -10,8 +10,10 @@ dnp3-udp-temp-port and dnp3-udp-unsolicited are dnp3_cases.py's, unchanged.
 Section 4.3 names the malformed DNP3 inputs (D4-100 item 2), each its own
 capture here, and #718's reviews add rule (A)'s edges and D3's M1, a 129
 that the response parser rejects as the flow's first datagram (D1's
-6907176282 and 6907928324). hr23-cases.tsv and hr23-malformed.tsv pin what
-each configuration is expected to do on them.
+6907176282 and 6907928324). PR 1b adds D3's M2, the design's section 4.7
+"Both directions": the two stops of C2's alone, in mid-flow (D4-113 item
+3.1). hr23-cases.tsv and hr23-malformed.tsv pin what each configuration is
+expected to do on them.
 
 The labels are the builder's, from how each capture was made: every
 link-layer unit with the end that sent it, its role (master or outstation,
@@ -716,6 +718,18 @@ for _c in (129, 130, 131):
 MALFORMED += [
     ("dnp3-mal-udp-fc129-badobj-first", badobj_first("udp")),
     ("dnp3-mal-tcp-fc129-badobj-first", badobj_first("tcp")),
+]
+# D3's M2 on #718 (D4-113 item 3.1; D1's 6910729374): design 4.7's two
+# inputs, "Both directions", on which C2's parser throws where C1p's parses
+# on, each one datagram in mid-flow, between P R and Q R on a flow M5 starts.
+# M5's is M1's X; O1's is a read whose object part is an object type and no
+# qualifier, 2 octets, short of Object_Header's first two fields (3). Appended,
+# so that no earlier capture's clock or port moves.
+MALFORMED += [
+    ("dnp3-mal-udp-fc129-badobj-mid", app_octets("m", bytes([dnp3.RESPONSE]) + BADOBJ, dnp3.RESPONSE,
+                                                 "a response with 1 object octet: its object header cut short")),
+    ("dnp3-mal-udp-fc1-badobj-mid", app_octets("o", bytes([dnp3.READ]) + b"\x3c\x02", dnp3.READ,
+                                               "a read with 2 object octets: its object header cut short")),
 ]
 
 

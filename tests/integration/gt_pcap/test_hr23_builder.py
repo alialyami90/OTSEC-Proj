@@ -321,6 +321,8 @@ def check_malformed(cap):
         assert len(app(unit(cap, "X"))) == 1 and unit(cap, "X").end == ("m" if n.endswith("orig") else "o")
     elif n.endswith("-badobj-first"):
         check_badobj_first(cap)
+    elif n.endswith("-badobj-mid"):
+        check_badobj_mid(cap)
     elif n.startswith(("udp-fc", "tcp-fc")):
         parts = n.split("-")
         code = int(parts[1][2:])
@@ -391,6 +393,27 @@ def check_badobj_first(cap):
         assert f.port["m"] not in hc.LIKELY["tcp"] and f.port["o"] not in hc.LIKELY["tcp"], cap.name
     else:
         assert f.port["m"] == f.port["o"] == 20000, cap.name
+
+
+# D3's M2 (D4-113 item 3.1; mal-midflow): X's end and application octets after its control octet.
+BADOBJ_MID = {"fc129": ("m", bytes([dnp3.RESPONSE]) + b"\x00\x00\x3c"),   # IIN 0, then one object octet
+              "fc1": ("o", bytes([dnp3.READ]) + b"\x3c\x02")}              # an object type, no qualifier
+
+
+def check_badobj_mid(cap):
+    """D3's M2: X is one datagram in mid-flow on a flow M5 starts, between P R
+    and Q R, all whole: M5's 129 of 5 application octets, IIN 0 and one
+    object octet, or O1's read of 4, an object type and no qualifier. Its
+    DIR is its role's, so that no weird of DIR against the side is owed."""
+    (f,) = cap.flows
+    data = units_of(cap)
+    assert [u.name for u in data] == ["P", "R(P)", "X", "Q", "R(Q)"], cap.name
+    assert f.l4 == "udp" and f.first == "m" and f.side["m"] == "orig" and f.port["m"] == f.port["o"] == 20000
+    end, octets = BADOBJ_MID[cap.name.split("-")[3]]
+    x = unit(cap, "X")
+    assert x.end == end and x.dir == ("1" if end == "m" else "0") and app(x)[1:] == octets, cap.name
+    assert x.label == "valid" and x.msg.state == "absent", cap.name
+    assert all(u.label == "valid" and u.msg.state == "seen" for u in data if u is not x), cap.name
 
 
 def test_every_malformed_input_is_what_its_name_says():
@@ -977,6 +1000,55 @@ def control_badobj_tcp_on_20000(mp):
     return lambda: check_malformed(c)
 
 
+def control_badobj_mid_sent_first(mp):
+    """M2's X sent before P, as the 5-tuple's first datagram: M1's route, not a stop in mid-flow."""
+    c = fresh("dnp3-mal-udp-fc129-badobj-mid")
+    c.sent = c.sent[2:3] + c.sent[:2] + c.sent[3:]
+    return lambda: check_malformed(c)
+
+
+def control_badobj_mid_whole_object_header(mp):
+    """M2's read from the responder with its qualifier (all objects): an object header no parser rejects."""
+    mp.setattr(hc, "MALFORMED", [(n, hc.app_octets("o", bytes([dnp3.READ]) + b"\x3c\x02\x06", dnp3.READ, "-")
+                                  if n == "dnp3-mal-udp-fc1-badobj-mid" else b) for n, b in hc.MALFORMED])
+    c = fresh("dnp3-mal-udp-fc1-badobj-mid")
+    return lambda: check_malformed(c)
+
+
+def badobj_mid_read(dirbit, state):
+    """M2's read from the responder, built with the DIR bit and the label state given."""
+    def build(cap):
+        f = hc.udp_m(cap)
+        hc.opening(f)
+        f.send(f.message("o", "X", dnp3.READ, "-", bytes([0xC0 | f.last, dnp3.READ]) + b"\x3c\x02", dirbit=dirbit,
+                         state=state))
+        hc.closing(f)
+    return build
+
+
+def control_badobj_mid_dir_set_from_the_responder(mp):
+    """M2's read with DIR set: against its side, so a weird would be owed that its cells do not name."""
+    mp.setattr(hc, "MALFORMED", [(n, badobj_mid_read(True, "absent") if n == "dnp3-mal-udp-fc1-badobj-mid" else b)
+                                 for n, b in hc.MALFORMED])
+    c = fresh("dnp3-mal-udp-fc1-badobj-mid")
+    return lambda: check_malformed(c)
+
+
+def control_badobj_mid_master_off_20000(mp):
+    """M2's input on a flow whose master is on 41019, not the arrangement of every other UDP input."""
+    mp.setattr(hc, "udp_m", lambda cap: hc.Flow(cap, "udp", hc.M5, 41019, hc.O1, 20000))
+    c = fresh("dnp3-mal-udp-fc129-badobj-mid")
+    return lambda: check_malformed(c)
+
+
+def control_badobj_mid_labelled_seen(mp):
+    """M2's cut read labelled seen, as if it were built to parse."""
+    mp.setattr(hc, "MALFORMED", [(n, badobj_mid_read(None, "seen") if n == "dnp3-mal-udp-fc1-badobj-mid" else b)
+                                 for n, b in hc.MALFORMED])
+    c = fresh("dnp3-mal-udp-fc1-badobj-mid")
+    return lambda: check_malformed(c)
+
+
 def control_fp_test_link_without_fcv(mp):
     """(3b-link)'s test link as #718 first built it, C2h, FCV clear (D2's N1)."""
     mp.setattr(fs, "LINK_ONLY", (0xC9, 0x0B, 0xC0, 0x00, 0xC2))
@@ -1001,7 +1073,7 @@ def test_the_controls_pass_unmutated():
     check_arrangement(fresh("dnp3-udp-relay-off-set"))
     for name in ("dnp3-mal-udp-octets-2", "dnp3-mal-udp-len-2", "dnp3-mal-udp-fc129-2-orig",
                  "dnp3-mal-tcp-eof-firopen-open", "dnp3-mal-udp-limit", "dnp3-mal-udp-fc129-badobj-first",
-                 "dnp3-mal-tcp-fc129-badobj-first"):
+                 "dnp3-mal-tcp-fc129-badobj-first", "dnp3-mal-udp-fc129-badobj-mid", "dnp3-mal-udp-fc1-badobj-mid"):
         check_malformed(fresh(name))
     check_changed_rule(ht.changed)
     check_sides(rt.expected_rows(os.path.join(HR23, "sides.tsv")))

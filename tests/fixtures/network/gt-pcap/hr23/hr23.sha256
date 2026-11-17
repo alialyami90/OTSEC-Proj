@@ -77,3 +77,5 @@ c847af3a3dc58f62bbbd9a823104983bbc547e6f0c11f8b87df2c34796592c73  dnp3-mal-udp-f
 794f2ada28767604071f977a365411a7e162bec09e81a32e7cd9d871895b2e8d  dnp3-mal-udp-fc131-4-resp.pcap
 118b57e7973a175e5be799db668a1ec19df5a06cca412da406af95c8ebd652cf  dnp3-mal-udp-fc129-badobj-first.pcap
 77deaefd2c699437af49e03fa41e76edf8a40a64997a6ee7f0d83cd0ea028e05  dnp3-mal-tcp-fc129-badobj-first.pcap
+e3f5f4ca7fd619f87d9aab44836d3232b4f5cab7b0984b4f35b085003fb9bf07  dnp3-mal-udp-fc129-badobj-mid.pcap
+e0792ec69e5ea1b1d4576fcf4d75c0afdc21ae1f5ee5aae91ed855839d8c77df  dnp3-mal-udp-fc1-badobj-mid.pcap

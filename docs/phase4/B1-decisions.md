@@ -2633,3 +2633,63 @@ Evidence class: `desk` for the rulings; `CI-Linux` and `CI-Windows` for the runs
   - **N-14** (D1's 6909754276): owed by INT-D5, or by a later INT PR if INT-D5b has merged first. It can be written once P4-4-HR24's stage 3 merges, and it is due before item 4's exit gate.
 - **5. Work paused at the owner's word, 2026-11-16.** No PR is open, and no agent is running. HANDOFF's checkpoint gives the next steps in order.
 - **Next decision number:** D4-114.
+
+## D4-114: work resumed and paused again, four briefs, and D1's rulings on the shipped image (D1, 2026-11-16)
+
+Evidence class: `desk` for the rulings and records; `desk` for D4's and D6's local test runs named on each PR; `CI-Linux` for #724's runs that had finished at the pause (its Windows `go` run and its `integration` run had not). The fuzz branch has no PR and no CI run; its local runs are named in its commit. Nothing merged in this session.
+
+- **1. Work resumed at the owner's word, then paused at the owner's word the same day.** No agent is running. The session ran in a cloud container, not on the owner's PC. The owner allowed `agent/*` branches for it.
+- **2. Briefs issued** (recorded in `docs/agent-handoffs.md`, "After D4-113"): P4-4-HR23-FUZZ (D4), P4-4-HR25-ROWS (D3), P4-D7-P1 (D7), and P4-4-HR2325S PR 1b (D6) under its brief.
+- **3. Where each stands at the pause:**
+  1. **P4-4-HR23-FUZZ** (D4): branch `agent/telemetry-hr23-fuzz` at `444d6c1b`, a WIP commit. No PR is open. The workflow, the CRC fix-up mutator, the harness patch, the seed conversion, the judge and their tests (36 pass locally, `desk`) are written. The fuzz build has never completed. D4's open questions, for the resume: the builds run natively on the runner with clang, not in the pinned Debian image (D7 to answer against design §4.6's "same runner image"); Spicy is off; LSan is off; coverage is read from the C2 fuzz build; Zeek's corpus seeds the two DNP3 targets only; a campaign stops at its first report.
+  2. **#722, P4-4-HR25-ROWS** (D3) at `e37a756`: records-auditor's notes are fixed. D4 and D6 review it together on one head.
+  3. **#723, P4-D7-P1** (D7) at `22a6540`: records-auditor's notes are fixed. D3's review (6931175701): B1 and N1 to N6, each to be fixed in this PR. D6's review: see item 4.4.
+  4. **#724, P4-4-HR2325S PR 1b** (D6) at `633c53cf`: complete. D4 and D2 review the labels and D3 the parse surface. Open: whether TCP twins of the two inputs are added (the PR body). D4 then pins the two TSVs' new hashes in `pins.env`.
+- **4. D1's rulings on #723** (D3's 6931175701; D4-98's delegation).
+  1. **The shipped image is option (C)**, a runtime-only Zeek tree with no Debian userland, as D3 chose. Under every option, the ship check covers the whole image and fails on any setuid or setgid file or file capability (D3's N1). Option (B) is a fallback only on that condition, and under (B) those programs are removed or their bits cleared. No shipped image carries `rst`. (C) does not replace SL-3 (D3's N6).
+  2. **The measured image is kept by option (i) of §8.4 item 4, with its durable home on the owner's offline storage:** two copies outside the checkout, taken before the job's artifact expires. D1 records the artifact's expiry date in the decision entry of the counted run. The job checks the saved archive's image ID and `zeek` hash against what the run logged. The owner checks each copy's SHA-256 against the archive's, since `docker load` is not run on the owner's PC. A GitHub Release asset is not used: it would be a public, unsigned, irrevocable copy of an image O-7 says ships signed, before a release key holder is named. This is a step for the owner ("Waiting on the owner").
+  3. **The job's artifact in this public repository is itself a distribution.** So the source bundle (§8.4 item 7) is complete, and reviewed by D7, D3 and D6, before the counted run uploads the image.
+  4. **D6's review of `22a6540` was stopped by the pause and not posted.** Its provisional points, kept here because its scratch files do not survive the session, go to D7 with D3's:
+     - provisional B1: §8.4 logs the image ID, the zeek SHA-256 and the archive SHA-256, but nothing compares them. After `docker save`, the job reads the archive's own image ID and zeek hash and fails unless both equal what the run logged, with a negative control against C1p's ID that must fail;
+     - under (C) the image has no shell or tools, so `build.sh`'s record step and the `Dockerfile`'s `dpkg-query` cannot read the shipped image (with D3's B1);
+     - item 1's kept-list check covers only `/usr/local/zeek`, so nothing checks (C)'s "no shell, package manager or Perl";
+     - §8.1's errors: `hilti-cxx-driver` is built only on Windows; and the runtime stage installs 4 new packages, not five, upgrades `zlib1g`, leaves `libssl3t64` unchanged, and installs no `bin/rst` or `bin/adtrace` (job 133140767081, `CI-Linux`).
+
+     A fresh D6 reviews the head D7 pushes, from the start, and D3 confirms its B1 and notes are met.
+  5. D3 then edits AP-30 (4) and AP-31 (1) to cite §8.2 (D3's offer in 6931175701).
+- **5. Carried to D4's HR-25 design PR:** `docs/phase4/D4-hr25-design.md` §8 still calls the inserted middle segment "counted", while HR-25's row says F1's route is quiet today (records-auditor on #722).
+- **6. Three lessons from earlier sessions, recorded at the owner's word** (HANDOFF, "Working in the CLI"):
+  1. Stop an old agent with TaskStop before relaunching its role. An agent that says it stopped may not have ended (D4-89).
+  2. Before relaunching a quiet agent, check its branch and PR. An agent shown as completed may still be waiting on CI. A duplicate once wrote to #701.
+  3. Agents share one scratchpad, so each brief gives a unique scratch prefix. D4 once posted D3's comment on #643 from a shared `comment.md`.
+- **Next decision number:** D4-115.
+
+## D4-115: work resumed, six PRs merged, three Windows test findings, and D1's rulings on #723, #724 and #726 (D1, 2026-11-17)
+
+Evidence class: `desk` for the rulings and the reviewers' local runs named on each PR; `CI-Linux` and `CI-Windows` for the runs named in item 2. Nothing was built or run against a device.
+
+- **1. Work resumed at the owner's word** ("continue"), on the owner's PC, from D4-114's checkpoint.
+- **2. Merged** (each by D1, at the head its reviewers accepted, except #724, after D1's merge check where CI applies):
+  1. #722 (P4-4-HR25-ROWS, D3) as `214d2e36`: D4 and D6 accept `166b958d`; documents only.
+  2. #723 (P4-D7-P1, D7) as `0a210808`: D3 and D6 accept `8c6b6f36`; documents only.
+  3. #727 (D4-114 item 4.5, D3) as `212fd865`: D6 and D7 accept `f4d7c28e`; documents only.
+  4. #728 (P4-NODE-FLK, D5) as `bd60fb0b`: D3 and D6 accept `3c8098e6`; `ci` run 43992667294, with three green Windows runs of that head (attempts 1, 3 and 4; attempt 2's failure is item 7.3), `ci-long` run 43995645249 and `govulncheck` run 43992667279.
+  5. #724 (P4-4-HR2325S PR 1b, D6) as `ef0fb16e`: D2, D3 and D4 accept `b536fec2`; merged at `41623749`, which adds only a merge of `main`: the diff from `b536fec2` to `41623749` over #724's own files is empty (D6 on #730, as D4-85 did for #614). CI ran on `ci` run 44002149477, `ci-long` run 44002149443, `a6-gt-pcap` run 44002149542 and `govulncheck` run 44002149707.
+  6. #729 (P4-STORE-AB, D5) as `dba135bc`: D3 and D6 accept `94b0d722`; `ci` run 44002277045, `ci-long` run 44002351057 (run 44002277029 was skipped, before the `full-ci` label), and `govulncheck` run 44002277068.
+  - The three documents-only PRs skipped CI (CLAUDE.md, "Testing and merging").
+- **3. D4's queue reordered** (D1). D4's reviews of #722 and #724 went first, then INT-D4a (#726), then the fuzz PR, so that each PR's reviewers started together on one head (D4-99) and INT-D5 can open sooner.
+- **4. Rulings on #724** (D1's 6931805991): the TCP twins of the two mid-flow inputs are dropped (D2, D3 and D4 agree); D3's N1 (`check_midflow` checks the stop at X, with a control) and D2's N1 (the `REQUEST_OBJECTS` comment) were fixed in the PR.
+  - **Open item, owner D4 then D6, then D4, before HR-23's counted run** (D4's N1 on #724, 6931797788): `mal-bprime` and `mal-states` pin a clean TCP recorded stop, while D4-113 item 2.3 records that a TCP stop is not clean, so #718's TCP cells (`dnp3-mal-tcp-fc129-badobj-first`'s C2 cell and the `fc0` and `fc13` `-resp-*` C0 cells) may fail on the counted run. D4 adds the TCP statement, with its run, to `docs/phase4/D4-hr23-design.md` §2.3; D6 then restates those cells from the design (D4-112 item 5), with the new state settled in comments first (D4-99). D4's `table.py` work (D4-114's step 3) then waits for D6's restated TCP state.
+- **5. Ruling on #723, D6's B1, the script-hash check of `docs/release.md` §8.4 item 3** (D1's 6933304617): option (c), host-side hashes of everything mounted, before and after the run (D7's options 6932172429; D6's 6932208997; D4's 6933288659, who confirms that it leaves the measured run unchanged). Its conditions, each with a control: the mount list is read from the container itself; the whole `docker create` line is logged; an extra mount that is not hashed fails; Zeek's search path is read from the image's own `zeek --help`, script arguments are absolute, and each run's output folder does not exist before its container starts. Under D6's N11 and D3's N8 on #723: `/pcaps` is hashed, every mount except `/out` is read-only, and `/out` is the only exemption.
+  - **Owed by D4, in its own PR, after the fuzz PR and before HR-23's counted run:** the harness change in `run.sh` for §8.4 item 3, with a control for condition 2 (the logged `docker create` line), which §8.4 item 3 does not yet give. §8.4's other items (1, 2, 4 to 7) are D4's too, as #723 records.
+- **6. Rulings on #726 (INT-D4a, D4).**
+  1. **Widened** (D1, given to D4 directly, not as a PR comment; D4's comment 6932391882 on #726 records it): an absent `insecure.login.attempts` on the 0.2 and 0.3 channels is refused, as `missing`, like every other absent-key refusal in `contracts/netobs` (D4's report). C13 §4 makes the field required.
+  2. **Open at this entry:** D6's N1 (two control legs for a `null` `attempts` that decodes, on the 0.1 channel and in a stored 0.2 record) and N2 (the PR body's sentence on `null` read as absent) on 6933489665, both to be fixed in the PR. D2 and D5 accept `173815ed`.
+  3. **Open item, owner D4** (D4's report; D2's note 1 and D6's N2 on #726): fields that are not counts, and keys sent as `null` that still decode, among them a Modbus `function.code` sent as `null` (read as 0) and `encrypted.snmpv3.boots` and `.time` (read as absent). D4 lists them and proposes, per field, refuse or keep, for D1 to rule before INT-D5 merges. It is second in D4's queue (item 8), so that it does not hold INT-D5 back.
+- **7. Three Windows test findings, and their fixes** (HANDOFF, "Test policy": a failure is a finding, never a flake).
+  1. `TestSensorStartupStuckDoesNotHoldStart` (D4-112 item 2.4): the 2 s bound counted from `Start`'s call, and the control `Start` alone took 2.13 s and 4.81 s on loaded runners. #728 counts the 2 s from the stuck startup's entry and names held, slow and waiting failures; D6 confirms that it still catches a held `Start` and meets B3 on #663. D4-112 item 2.4 is closed by #728.
+  2. `TestSchedulerFirstOnLinkLock`: its one failure (job 133688900667) stays `unknown` in cause. #728 excuses a timeout only when the turn that held the lock made exactly one store write (D1's ruling 6936986476 on D3's and D6's B1; "at most one" let a hold with no write pass).
+  3. `TestAppendBatch` (`contracts/store`): a 10 ms sleep ordered two goroutines (job 133745253598). #729 waits until the record is queued, and refuses a stream that already has a group (D3's N1).
+  - **Open item, owner D5:** the same sleep-to-order pattern in `TestGroupsOfAStreamCommitInOrder` (`contracts/store`) and `TestFairLockSchedulerFirst` (`platform/sensorlink`; it can pass without testing anything), listed on #729. D5 fixes both in one PR, each with a control.
+- **8. D4's queue, in order:** #726's N1 and N2; item 6.3's list; the new hashes of `hr23-malformed.tsv` and `hr23-conditions.tsv` (#724) in `pins.env`; the fuzz PR (P4-4-HR23-FUZZ: branch `agent/telemetry-hr23-fuzz` at `e9cf3c6c` at this entry, no PR yet); item 4's TCP statement; item 5's harness change; then D4-114's queue from step 3 on.
+- **Next decision number:** D4-116.

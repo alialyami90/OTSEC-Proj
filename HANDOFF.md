@@ -24,7 +24,16 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**CHECKPOINT (D1), 2026-11-16, paused at the owner's word (D4-112, D4-113).** No PR is open, and no agent is running. Merged this session, after D4-109: #708, #710 to #720. P4-NODE-WT is complete. HR-23's build (#715) and its stage-2 cases (#718) are on `main`.
+**CHECKPOINT (D1), 2026-11-17 (D4-115).** Merged this session: #722, #723, #724, #727, #728 and #729 (D4-115 item 2). Open: #726 (INT-D4a, D6's N1 and N2 to fix). D4's fuzz work (P4-4-HR23-FUZZ) is on branch `agent/telemetry-hr23-fuzz`, with no PR yet. D4's queue: D4-115 item 8. New open items: D4-115 items 4, 5, 6.3 and 7. In the checkpoints below, steps 2 (#724) and 6 (#722) are done, and step 4's D7 part (#723) is done; finding 1's open item (D4-112 item 4.5) stays open. The order stands for the rest.
+
+**Earlier checkpoint (D1), 2026-11-16, late, paused at the owner's word (D4-114), superseded by the checkpoint above for what is open.** When it was written, no agent was running and nothing had merged in that session. The order of the earlier checkpoint below stands. Where each step stands, and D4's queue: D4-114 items 3 to 5.
+- Step 1, D4's fuzz PR: branch `agent/telemetry-hr23-fuzz`, no PR yet (D4-114 item 3.1).
+- Step 2, PR 1b: #724 (item 3.4).
+- Step 4, D7's P1: #723, to a fresh D7 with D1's rulings (item 4).
+- Step 6, the HR-25 rows: #722 (item 3.2).
+- **D4's queue, in order:** the fuzz PR; reviews of #722 and #724; the TSV hashes in `pins.env` after #724 merges; step 3; finding 1's open item; §8.4's items after #723 merges, before the counted run; the HR-25 design PR (with item 5).
+
+**Earlier checkpoint (D1), 2026-11-16, paused at the owner's word (D4-112, D4-113), superseded by the checkpoint above for what is open; its order stands.** No PR is open, and no agent is running. Merged this session, after D4-109: #708, #710 to #720. P4-NODE-WT is complete. HR-23's build (#715) and its stage-2 cases (#718) are on `main`.
 - **The owner owes** "Waiting on the owner" item 3 (D4-112 item 3.4) and item 18 (D4-112 item 1), including the steps D1 described to the owner directly.
 - **Next, in order, each waiting on the step named** (D4-112 item 8; D4-113):
   1. D4's fuzz-workflow PR (D4-112 item 4.2). Then D6 runs and judges the fuzz run (design §4.5 and §4.6).
@@ -44,7 +53,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
   D4's PRs wait on D4's one-instance queue (D4-89).
 
-**Earlier checkpoint (D1), 2026-11-16 (D4-112), superseded by the checkpoint above.** Merged since the checkpoint below was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
+**Earlier checkpoint (D1), 2026-11-16 (D4-112), superseded by the checkpoints above.** Merged since the checkpoint below was written: #710, #712, #714, #716 (D4-111), #717 and #711. P4-NODE-WT is complete. Open PRs: `gh pr list`. Where each stands:
 - #715 (HR-23's build, D4): D2, D3 and D7 accept earlier heads. A fresh D4 is building option (B') for D3's M1, under D1's 6907928324. Then D2, D3 and D6 re-read the diff, and D7 confirms the new pin.
 - #718 (P4-4-HR2325S PR 1, D6): two blocking findings, on the short-129 rows and on `dnp3-mal-udp-limit`. A fresh D6 writer restates the rows from #715's amended design note once it is pushed (D1's 6907176282).
 - #719 (P4-4-INT's split, D5): G1 to G3 ruled. The order waits for D4's agreement.
@@ -190,6 +199,7 @@ What D4-98 leaves with the owner:
 16. **Switching on GitHub's private vulnerability reporting,** which `SECURITY.md` relies on (D4-85). `LICENSE.md` and `SECURITY.md` are added.
 17. **Nothing: the owner leaves the fourteen firewall rules** that the approved prompts left for temporary test programs (D4-85).
 18. **Finding 1 (D4-112 item 1):** the disclosure steps D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
+19. **The measured sensor image's offline copies** (D4-114 item 4.2; `docs/release.md` §8.4 item 4): after HR-23's counted run, two copies of the saved image and its source bundle on the owner's offline storage, outside the checkout, before the job's artifact expires.
 
 ## Test policy
 
@@ -216,6 +226,8 @@ The toolchain is Go 1.27.3 (`go.mod`), 64-bit. A 32-bit build is not a declared 
 - **Independent review means a separate subagent.** D6 reviews in its own subagent, from the requirement and the contract text. Never report a review that one context did of its own work as independent.
 - **Only the agents in `.claude/agents/` run, and one instance of each role at a time, except D6** (the owner's rule, D4-89, with D6's exception, D4-91; CLAUDE.md, "Subagents"). `.claude/settings.json` wires `.claude/hooks/agent_guard.py`, which refuses any other agent type and a second instance of a role that is running (other than D6 and the helpers), and it denies the `Workflow` tool. Two tasks for one role, other than D6, run one after the other. The helpers `ci-triage` and `records-auditor`, and D6 since 2026-11-13 (D4-91), are the exception: each may run several instances at once. Each D6 instance has one task: one review or one brief. Two D6 instances never work on the same PR or branch at the same time; a later instance may re-review a later head, or continue a branch, after the earlier one has finished. A D6 instance that writes files works in its own worktree. A D6 instance never reviews work another D6 instance wrote, and D1's brief names who wrote what it reviews. When two D6 instances write at the same time, D1's briefs give out any new F-number, H-row or GT-PCAP case id, so that no two take the same one. No tool enforces these conditions (CLAUDE.md, "Subagents"). The hook's tests run by name, with the venv's Python on the PC: `tools\venv\Scripts\python.exe -m pytest -q .claude/hooks/test_agent_guard.py`.
 - **Branches.** One branch and one PR per task, and one `git worktree` per role working at the same time. Stage by explicit path.
+- **Lessons from earlier sessions:** stopping a role's agent before relaunching it, checking a quiet agent's branch and PR, and unique scratch names (D4-114 item 6).
+- **A cloud session** (claude.ai/code) runs in a Linux container that is reclaimed when it ends. Push everything before a pause, and keep `.claude/worktrees/` in `.git/info/exclude` there too.
 - **Working files** go in the repository, or in a scratch folder outside it that no record cites. A file that a record must cite goes in the repository or in `reference/`.
 - **GitHub.** A CLI session uses the owner's own credentials and can force-push and delete branches. Never force-push a shared branch, and delete only branches on a list the owner approved.
 

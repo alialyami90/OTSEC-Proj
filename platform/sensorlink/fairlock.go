@@ -45,10 +45,12 @@ type fairLock struct {
 	// from its wait, in place of its take of mu, and returns with mu held.
 	// With them a test orders the call's check after the first check Lock
 	// makes after the last signal, so which of the two goes first is not
-	// left to the Go scheduler.
+	// left to the Go scheduler. freed, the third seam, runs under mu at
+	// each Unlock, so a test can time each holder's turn.
 	checks, signalled uint64
 	tried             func(took bool)
 	woken             func()
+	freed             func()
 }
 
 // signal wakes every waiter. The caller holds f.mu.
@@ -128,6 +130,9 @@ func (f *fairLock) lockSched(wait time.Duration) bool {
 // Unlock frees the lock.
 func (f *fairLock) Unlock() {
 	f.mu.Lock()
+	if f.freed != nil {
+		f.freed()
+	}
 	f.held = false
 	f.signal()
 	f.mu.Unlock()
