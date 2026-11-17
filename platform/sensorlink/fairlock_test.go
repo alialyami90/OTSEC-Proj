@@ -163,10 +163,32 @@ func TestSchedulerFirstOnLinkLock(t *testing.T) {
 		worst = max(worst, time.Since(from))
 		time.Sleep(30 * time.Millisecond)
 	}
+	// Wait for the read loop and TickHold to stop, failing by name when
+	// nothing commits for 5 HoldLockWait: a lock never freed (D6's N1 on
+	// #738). The bound is on progress, as a slow runner's commits take 1 s
+	// and more, and some 45 records remain after the dispatches.
 	cancel()
-	<-ticks
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	stopped := make(chan error, 1)
+	go func() { <-ticks; stopped <- <-done }()
+	for last, still := g.l.Stats().Committed, 0; ; {
+		var err error
+		select {
+		case err = <-stopped:
+		case <-time.After(HoldLockWait):
+			if c := g.l.Stats().Committed; c != last {
+				last, still = c, 0
+				continue
+			}
+			if still++; still < 5 {
+				continue
+			}
+			n, _, long, open := lk.read(&g.l.cmu)
+			t.Fatalf("the read loop and TickHold did not stop, and nothing committed for %s: the lock was not freed (a Lock turn in progress: %v; %d takes while a dispatch waited; dispatches timed out %v; turns of %s or more, with their writes: %v)", 5*HoldLockWait, open, n, timedOut, HoldLockWait/2, long)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		break
 	}
 	st := g.l.Stats()
 	n, turn, long, open := lk.read(&g.l.cmu)
@@ -215,12 +237,29 @@ func TestLinkLockTurnReadOnceEnded(t *testing.T) {
 		t.Fatalf("read with the commit still held: open %v, long turns %v; want the turn open and not yet counted", open, long)
 	}
 	release()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * HoldLockWait):
+		t.Fatalf("Serve did not return within %s of the commit's release", 5*HoldLockWait)
 	}
 	n, _, long, open := lk.read(&g.l.cmu)
 	if n != 0 || open || !heldThrough(long, from) {
 		t.Fatalf("read once Serve returned: %d takes while the dispatch waited, open %v, long turns %v; want one turn of one write held through the wait", n, open, long)
+	}
+	// Exactly one store write excuses a timeout, not at most or at least
+	// one (D1's ruling 6936986476 on #728): the same turn with 0 or with 2
+	// writes does not (D3's N1 on #738).
+	for _, w := range []int64{0, 2} {
+		u := append([]turn(nil), long...)
+		for i := range u {
+			u[i].writes = w
+		}
+		if heldThrough(u, from) {
+			t.Fatalf("the same turn with %d store writes excused the timeout; only exactly one may", w)
+		}
 	}
 }
 
