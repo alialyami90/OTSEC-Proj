@@ -2,7 +2,6 @@ package sensorlink
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -332,15 +331,16 @@ func TestOwedFailsInRunRaises(t *testing.T) {
 	}
 }
 
-// D6's condition 1, R-5's worst-case leg: the largest cursor the intake
-// can hold, built through admit and markLost (8 spans and 8 prior spans,
-// each time at 30 octets, both marks set, unclean and enrolment, every
-// number at 20 digits, gap_raised included), committed with a record
-// through Record.SourceCursor, is at most MaxLinkCursorBytes. Control:
-// the reviewed code's carry, which adds the run's owed events again
-// (asserted above the bound here).
+// D6's condition 1, R-5's worst-case leg, on section 1.4's text form
+// (D1's ruling 6948593988 on #732): the largest cursor the intake can
+// hold, built through admit and markLost (8 spans and 8 prior spans, both
+// marks set, unclean and enrolment, every number at 20 digits), committed
+// with a record through Record.SourceCursor, is at most the form's 2,032
+// bytes, under MaxLinkCursorBytes. Control: the JSON form of part 1, which
+// costs more than the form's bound for the same cursor.
 func TestCursorWorstCaseFits(t *testing.T) {
 	const top = uint64(18446744073709551615)
+	const formMax = 2032 // section 1.4, with unclean in full
 	base := time.Date(2026, 11, 7, 0, 0, 0, 123456789, time.UTC)
 	f := func(t time.Time) string { return t.Format("2006-01-02T15:04:05.000000000Z") }
 	var spans []netobs.Span
@@ -351,15 +351,13 @@ func TestCursorWorstCaseFits(t *testing.T) {
 	recv := base.Add(9 * time.Hour)
 	var cut, opened uint64
 	taken := top - 2
-	c := &Cursor{Generation: top, RunCounter: top, RunID: testRun, Taken: taken, G: top, D: top, GapRaised: top,
+	c := &Cursor{Generation: top, RunCounter: top, RunID: testRun, Taken: taken, G: top, D: top,
 		Refused: top, Dropped: top, Ds: top, NewestSeq: top, Digest: testDigest,
 		Spans: admit(nil, spans, f(recv), recv, &cut, &opened),
 		Prior: &HeldPrior{RunsSkipped: top, RecordsLost: top, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
 			Spans: admit(nil, spans, f(recv), recv, &cut, &opened)}}
 	r := newRig(t, nil)
-	if err := r.cs.SaveSourceCursor(bg, mustJSON(t, c)); err != nil {
-		t.Fatal(err)
-	}
+	saveTestCursor(t, r, c)
 	r.mu.Lock()
 	r.owedE = errors.New("test: keep the owed marks")
 	r.mu.Unlock()
@@ -383,27 +381,21 @@ func TestCursorWorstCaseFits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got Cursor
-	if err := json.Unmarshal(b, &got); err != nil {
+	got, err := decodeCursor(b)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(storedObs(t, r.s)) != 2 || !got.Spans[7].Marked || !got.Prior.Spans[7].Marked || !got.Spans[0].Owed {
 		t.Fatalf("not the worst case: %s", b)
 	}
-	t.Logf("worst-case cursor %d bytes (MaxLinkCursorBytes %d)", len(b), MaxLinkCursorBytes)
-	if len(b) > MaxLinkCursorBytes {
+	t.Logf("worst-case cursor %d bytes (the form's bound %d, MaxLinkCursorBytes %d)", len(b), formMax, MaxLinkCursorBytes)
+	if len(b) > formMax {
 		t.Fatalf("%d bytes", len(b))
 	}
-	// The control: the reviewed code's Carried held the run's owed events
-	// a second time.
-	o5, _ := owedOf(&got)
-	carried := struct {
-		Cursor
-		Carried []Owed `json:"carried"`
-	}{got, []Owed{o5}}
-	if n := len(mustJSON(t, carried)); n <= MaxLinkCursorBytes {
-		t.Fatalf("with one carried run %d bytes, under the bound", n)
+	// The control: part 1's JSON form of the same cursor.
+	if n := len(mustJSON(t, got)); n <= formMax {
+		t.Fatalf("the JSON form is %d bytes, within the form's bound", n)
 	} else {
-		t.Logf("with one carried run (the reviewed code) %d bytes", n)
+		t.Logf("the JSON form (part 1) %d bytes", n)
 	}
 }
