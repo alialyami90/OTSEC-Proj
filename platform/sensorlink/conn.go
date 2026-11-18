@@ -146,37 +146,23 @@ type HeldPrior struct {
 // Cursor is the part of CH-18's cursor this intake keeps: the position,
 // G and D, the run's totals, Ds, the last newest_seq, the run's digest,
 // and its spans and prior. It holds one run: what an earlier run owed is
-// written before row 6's save replaces it (D1's ruling on #732).
+// written before row 6's save replaces it (D1's ruling on #732). Its
+// stored form is section 1.4's text form (cursorform.go); the JSON tags
+// serve clone only.
 type Cursor struct {
-	Generation uint64 `json:"generation"`
-	RunCounter uint64 `json:"run_counter"`
-	RunID      string `json:"run_id"`
-	Taken      uint64 `json:"taken"`
-	G          uint64 `json:"g"`
-	D          uint64 `json:"d"`
-	// GapRaised is the excess of G over D last raised, so the alarm rises
-	// once for each rise of it (CH-15).
-	GapRaised uint64     `json:"gap_raised,omitempty"`
-	Refused   uint64     `json:"refused"`
-	Dropped   uint64     `json:"dropped"`
-	Ds        uint64     `json:"ds"`
-	NewestSeq uint64     `json:"newest_seq"`
-	Digest    string     `json:"digest"`
-	Spans     []HeldSpan `json:"spans,omitempty"`
-	Prior     *HeldPrior `json:"prior,omitempty"`
-}
-
-// encodeCursor is the cursor's stored form, refused above
-// MaxLinkCursorBytes.
-func encodeCursor(c *Cursor) ([]byte, error) {
-	b, err := json.Marshal(c)
-	if err != nil {
-		return nil, err
-	}
-	if err := checkCursorBytes(b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	Generation uint64     `json:"generation"`
+	RunCounter uint64     `json:"run_counter"`
+	RunID      string     `json:"run_id"`
+	Taken      uint64     `json:"taken"`
+	G          uint64     `json:"g"`
+	D          uint64     `json:"d"`
+	Refused    uint64     `json:"refused"`
+	Dropped    uint64     `json:"dropped"`
+	Ds         uint64     `json:"ds"`
+	NewestSeq  uint64     `json:"newest_seq"`
+	Digest     string     `json:"digest"`
+	Spans      []HeldSpan `json:"spans,omitempty"`
+	Prior      *HeldPrior `json:"prior,omitempty"`
 }
 
 func checkCursorBytes(b []byte) error {
@@ -271,6 +257,7 @@ func (l *Link) ServeConn(ctx context.Context, c Conn, en Enrolment) string {
 	stop := context.AfterFunc(ctx, func() { l.CloseConn(netobs.CloseShutdown) })
 	defer func() {
 		stop()
+		l.closeCursor()
 		g.mu.Lock()
 		g.live = nil
 		g.mu.Unlock()
@@ -400,7 +387,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 		if r := l.decided(ctx); r != "" {
 			return r // a decision made while the frame was read
 		}
-		cur, err := l.loadCursor(ctx)
+		cur, err := l.openCursor(ctx) // from the read on, a release records its change for this connection
 		if err != nil {
 			return netobs.CloseStateUnread // the position cannot be read (CH-18)
 		}
@@ -427,6 +414,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 				if r := l.decided(ctx); r != "" {
 					return r // a decision made while the frame was read
 				}
+				l.foldLive(cn)
 				if r := l.frame(ctx, cn, b); r != "" {
 					return r
 				}
@@ -484,20 +472,137 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 	if err != nil || b == nil {
 		return nil, err
 	}
-	var c Cursor
-	if err := json.Unmarshal(b, &c); err != nil {
-		return nil, err
-	}
-	return &c, nil
+	return decodeCursor(b)
 }
 
-// saveCursor saves c on its own.
+// saveCursor saves c on its own, with what releases moved since the 0.2
+// path's cursor last took it and what their own saves did not write, under
+// cmu so that no release writes between the two. Only a save that
+// succeeds puts the releases' changes in c.
 func (l *Link) saveCursor(ctx context.Context, c *Cursor) error {
-	b, err := encodeCursor(c)
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	next := c
+	if l.moved != nil || l.unsaved != nil {
+		next = c.clone()
+		l.moved.apply(next)
+		l.unsaved.apply(next)
+	}
+	b, err := encodeCursor(next)
 	if err != nil {
 		return err
 	}
-	return l.opt.Cursor.SaveSourceCursor(ctx, b)
+	if err := l.opt.Cursor.SaveSourceCursor(ctx, b); err != nil {
+		return err
+	}
+	l.moved.apply(c)
+	l.unsaved.apply(c)
+	l.moved, l.unsaved = nil, nil
+	l.pos, l.posRead = c.clone(), true
+	return nil
+}
+
+// posMove is what releases changed in the position while the 0.2 path
+// held its cursor in memory (section 1.4 items 2 and 3; D4's N3 on #732).
+type posMove struct {
+	run              string // the position's run when the release ran
+	taken            uint64 // the highest seq of run the releases disposed of
+	refused, dropped uint64 // what the releases refused and dropped
+	unmark           []netobs.Span
+}
+
+// apply puts m in c: T moves only within m's run, the totals go to c's run
+// (a newer one's included), and a window that a dropped record carried is
+// unmarked, so the run's next stored observation carries it. A nil m
+// changes nothing.
+func (m *posMove) apply(c *Cursor) {
+	if m == nil {
+		return
+	}
+	if c.RunID == m.run {
+		c.Taken = max(c.Taken, m.taken)
+		for _, w := range m.unmark {
+			unmark(c, w)
+		}
+	}
+	c.Refused += m.refused
+	c.Dropped += m.dropped
+}
+
+func (m *posMove) empty() bool {
+	return m == nil || (m.taken == 0 && m.refused == 0 && m.dropped == 0 && len(m.unmark) == 0)
+}
+
+// merge is m followed by n, in n's run: m's T and unmarks carry only when
+// m is of n's run, its totals always.
+func (m *posMove) merge(n *posMove) *posMove {
+	out := *n
+	out.unmark = slices.Clone(n.unmark)
+	if m == nil {
+		return &out
+	}
+	out.refused += m.refused
+	out.dropped += m.dropped
+	if m.run == n.run {
+		out.taken = max(out.taken, m.taken)
+		out.unmark = append(slices.Clone(m.unmark), out.unmark...)
+	}
+	return &out
+}
+
+// unmark clears the mark of the held span whose node.lost window is w.
+func unmark(c *Cursor, w netobs.Span) {
+	f := func(list []HeldSpan) {
+		for i := range list {
+			s := &list[i]
+			if s.Marked && parseUTC(s.FromUTC).Equal(parseUTC(w.FromUTC)) && parseUTC(s.CutUTC).Equal(parseUTC(w.ToUTC)) {
+				s.Marked = false
+			}
+		}
+	}
+	if c.Prior != nil {
+		f(c.Prior.Spans)
+	}
+	f(c.Spans)
+}
+
+// foldLive puts what releases moved in the connection's cursor before a
+// frame is acted on, so the duplicate check reads the position saved now
+// (section 1.4 item 4). l.moved holds only what the releases wrote, so
+// those writes are durable already; what they did not write is in
+// l.unsaved, which raises no cn.saved (D3's B1 on #742).
+func (l *Link) foldLive(cn *conn) {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	if l.moved == nil || cn.cur == nil {
+		return
+	}
+	l.moved.apply(cn.cur)
+	if cn.cur.RunID == l.moved.run {
+		cn.saved = max(cn.saved, l.moved.taken)
+	}
+	l.moved, cn.pending = nil, true
+}
+
+// openCursor begins the time the 0.2 path holds a cursor in memory, and
+// reads that cursor in the same hold of cmu: a release is either in what
+// it reads or recorded in l.moved for it, never both (D6's B3 on #742).
+func (l *Link) openCursor(ctx context.Context) (*Cursor, error) {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	l.curOpen, l.moved = true, nil
+	c, err := l.loadCursor(ctx)
+	if err == nil {
+		l.pos, l.posRead = c, true
+	}
+	return c.clone(), err
+}
+
+// closeCursor ends it: every release since writes its own change.
+func (l *Link) closeCursor() {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	l.curOpen, l.moved = false, nil
 }
 
 // flush saves a pending cursor on its own, at most once a second unless
@@ -736,10 +841,16 @@ func owedOf(c *Cursor) (Owed, int) {
 // checkGap is CH-15's check: G at most D. The alarm rises once for each
 // rise of the excess in a run.
 func (l *Link) checkGap(c *Cursor) {
-	if c == nil || c.G <= c.D || c.G-c.D <= c.GapRaised {
+	if c == nil || c.G <= c.D {
 		return
 	}
-	c.GapRaised = c.G - c.D
+	if l.gapRun != c.RunID {
+		l.gapRun, l.gapRaised = c.RunID, 0
+	}
+	if c.G-c.D <= l.gapRaised {
+		return
+	}
+	l.gapRaised = c.G - c.D
 	l.raise(AlarmGapUndeclared, fmt.Sprintf("sensor %s: reason %s: run %s has %d records never read beyond the %d declared",
 		l.cfg.SensorID, gapReasonSeq, c.RunID, c.G, c.D))
 }
@@ -757,7 +868,7 @@ func admit(held []HeldSpan, stated []netobs.Span, sensorUTC string, recv time.Ti
 			return !from.After(parseUTC(h.ToUTC)) && !to.Before(parseUTC(h.FromUTC))
 		})
 		if i < 0 {
-			out = append(out, HeldSpan{FromUTC: s.FromUTC, ToUTC: s.ToUTC, CutUTC: cutEnd(to, sensorUTC, recv, cut), Owed: true})
+			out = append(out, HeldSpan{FromUTC: canonUTC(from), ToUTC: canonUTC(to), CutUTC: cutEnd(to, sensorUTC, recv, cut), Owed: true})
 			*opened++
 			continue
 		}
@@ -767,13 +878,13 @@ func admit(held []HeldSpan, stated []netobs.Span, sensorUTC string, recv time.Ti
 			continue // inside: neither new nor wider
 		}
 		if from.Before(hFrom) {
-			h.FromUTC = s.FromUTC
+			h.FromUTC = canonUTC(from)
 		}
 		if to.After(hTo) {
 			if parseUTC(h.CutUTC).Equal(hTo) { // not cut: the window reaches the new part's cut end (times, not strings: D4's B1 on #732)
 				h.CutUTC = cutEnd(to, sensorUTC, recv, cut)
 			}
-			h.ToUTC = s.ToUTC
+			h.ToUTC = canonUTC(to)
 		}
 		h.Owed, h.Marked = true, false
 		*opened++
@@ -808,8 +919,13 @@ func cutEnd(to time.Time, sensorUTC string, recv time.Time, cut *uint64) string 
 	if end.Before(to) {
 		*cut++
 	}
-	return end.UTC().Format(time.RFC3339Nano)
+	return canonUTC(end)
 }
+
+// canonUTC is the one form the node writes a span's times in, so that an
+// owed event written again is the same event byte for byte, whether its
+// span was read from the sensor or from the saved cursor.
+func canonUTC(t time.Time) string { return t.UTC().Format(time.RFC3339Nano) }
 
 func laterUTC(a, b string) string {
 	if parseUTC(b).After(parseUTC(a)) {
@@ -943,6 +1059,13 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 		l.takeRefused(cn, n, string(netobs.CodeConflict)) // CH-32
 		return ""
 	}
+	// The flush runs before the record's cursor is built, so what a
+	// release moved is either in cn.cur now or in l.moved after the encode,
+	// where commitOne folds it; never taken by a flush after the encode and
+	// then written back (D6's B2 on #742).
+	if l.hold.on() && !l.flush(ctx, cn, true) {
+		return netobs.CloseStore // T through n-1 is saved before n can be held
+	}
 	marked := cn.cur.clone()
 	lost := markLost(marked)
 	marked.Taken = max(marked.Taken, n)
@@ -954,10 +1077,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the position with record %d of run %s was not saved: %v", o.SensorID, n, o.RunID, err))
 		return netobs.ClosePositionNotSaved
 	}
-	if l.hold.on() && !l.flush(ctx, cn, true) {
-		return netobs.CloseStore // T through n-1 is saved before n can be held
-	}
-	f := &inflight{run: o.RunID, seq: n, cursor: mb}
+	f := &inflight{run: o.RunID, seq: n, cursor: mb, marked: marked}
 	l.cmu.Lock()
 	l.inflight = f
 	l.cmu.Unlock()
@@ -972,7 +1092,10 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	case outStoreError:
 		return netobs.CloseStore // not final: T stays, the record is resent
 	case outCommitted:
-		cn.cur, cn.saved, cn.pending = marked, marked.Taken, false
+		cn.cur, cn.saved, cn.pending = f.marked, f.marked.Taken, false // with what releases moved (commitOne)
+	case outDuplicate:
+		// A release disposed of n after it was placed: a duplicate by the
+		// position saved now (section 1.4 item 4). T moves at the next fold.
 	case outRefused:
 		cn.cur.Refused++
 		cn.cur.Taken, cn.pending = n, true
@@ -1041,7 +1164,10 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 		var cuts, opened uint64
 		next.Spans, next.Ds = admit(next.Spans, t.Lost, t.SensorUTC, l.now(), &cuts, &opened), drops
 		if err := l.saveCursor(ctx, next); err != nil {
-			return netobs.CloseStore // nothing admitted that is not saved with its D
+			// Nothing admitted that is not saved with its D (D6's N4 item 5
+			// on #742: raised as at the hello).
+			l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the spans of run %s were not saved: %v", t.SensorID, t.RunID, err))
+			return netobs.CloseStore
 		}
 		l.mu.Lock()
 		l.conn.SpansCut += cuts
@@ -1069,7 +1195,8 @@ func (l *Link) WriteOwed(ctx context.Context) error {
 	if live {
 		return nil // the live connection writes what it admits, and its own cursor is newer
 	}
-	cur, err := l.loadCursor(ctx)
+	defer l.closeCursor()
+	cur, err := l.openCursor(ctx)
 	if err != nil || cur == nil {
 		return err
 	}
@@ -1111,6 +1238,7 @@ const (
 	outRefused                   // refused, counted
 	outDropped                   // dropped, counted
 	outStoreError                // a store error that is not final (CH-17)
+	outDuplicate                 // released since it was placed: a duplicate
 )
 
 // inflight is the record the 0.2 path is taking: its commit carries the
@@ -1120,6 +1248,7 @@ type inflight struct {
 	run     string
 	seq     uint64
 	cursor  []byte
+	marked  *Cursor // the cursor encoded in cursor
 	outcome outcome
 }
 

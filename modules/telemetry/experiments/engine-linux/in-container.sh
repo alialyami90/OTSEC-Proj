@@ -1,10 +1,13 @@
 #!/bin/sh
 # Runs inside a pinned engine container with no network (run.sh starts it
-# with --network none): one engine configuration over every capture in
-# /pcaps, each into /out/<capture>/<config>/, with the engine's exit code in
-# exit-code. A failure on one capture is printed with the tail of the
-# engine's stderr, and the loop goes on: that capture reads "not run".
-# Usage: in-container.sh zeek|zeek-pipe|suricata|suricata-fifo CONFIG [engine arguments...]
+# with --network none): one engine configuration over one capture in
+# /pcaps, or over every capture there when CAPTURE is `all`, each into
+# /out/<capture>/<config>/, with the engine's exit code in exit-code. A
+# failure on one capture is printed with the tail of the engine's stderr,
+# and the loop goes on: that capture reads "not run". run.sh gives each Zeek
+# container one capture, so that mountcheck.py's rules are read before every
+# Zeek process (D1's ruling 6955678741 on #744); Suricata's take `all`.
+# Usage: in-container.sh zeek|zeek-pipe|suricata|suricata-fifo CONFIG CAPTURE|all [engine arguments...]
 #   zeek-pipe:     the capture reaches Zeek on stdin through a pipe,
 #                  `cat FILE | zeek -r -`. run.sh records the pinned image's
 #                  own `zeek --help` line for -r, which is the citation.
@@ -15,7 +18,8 @@
 #                  most a minute and never the job (D6 on #630).
 eng=$1
 cfg=$2
-shift 2
+cap=$3
+shift 3
 fifo() {
   rm -f in.fifo
   mkfifo in.fifo || return 125
@@ -31,6 +35,7 @@ fifo() {
 timed_out=
 for p in /pcaps/*; do
   case "$p" in *.pcap|*.pcapng|*.cap) ;; *) continue ;; esac
+  [ "$cap" = all ] || [ "$p" = "$cap" ] || continue
   n=$(basename "$p")
   n=${n%.*}
   d=/out/$n/$cfg
