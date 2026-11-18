@@ -25,8 +25,9 @@
 # rows only when every campaign has a result, every report was replayed and
 # every report is against the patch alone (it reproduces on C2 and not on
 # C1p), and otherwise the totals only; and it prints no coverage condition
-# when a coverage replay exited non-zero. The job fails unless the verdict
-# is `pass`. Evidence class: CI-Linux.
+# when a coverage replay exited non-zero or left no exit code, or when the
+# rows are withheld (D1's ruling 6993117978 on #746). The job fails unless
+# the verdict is `pass`. Evidence class: CI-Linux.
 name: d4-zeek-dnp3-fuzz
 on:
   workflow_dispatch:

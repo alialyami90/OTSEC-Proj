@@ -33,9 +33,12 @@ C1p). Otherwise it withholds every campaign's row and prints the totals
 only, so that the summary does not show which target found a report that
 may be in stock Zeek 9.0.1's source (D4-116 item 2.4 (b); D1's ruling 1 on
 #744 and ruling 1 on #746, D6's form). It prints the coverage conditions
-only when every coverage replay exited 0; otherwise it withholds them, since
-`replay-path` reads the `packet` target's coverage alone and would show
-that target (ruling 2 on #746). The verdict is:
+only when every coverage replay exited 0 and the rows are printed;
+otherwise it withholds them, since `replay-path` reads the `packet`
+target's coverage alone and would show that target (ruling 2 on #746; D1's
+ruling 6993117978 on #746, D6's B1 and case K: a `packet` campaign stopped
+early on a stock report leaves a thin corpus whose coverage replay exits 0
+and whose `replay-path` is `no`). The verdict is:
 - `fail` when an input reproduces on C2 and not on C1p;
 - `unknown` when an input does not reproduce on its own build, a report
   left no input, a campaign left no result, a campaign stopped on a report
@@ -234,7 +237,8 @@ def summary(f):
     out = ["## HR-23 sanitizer fuzz run (design section 4.6)", "",
            f"Verdict: **{verdict}**", "",
            f"Corpus SHA-256: `{corpus}`", ""]
-    if unknown or replayed != total_reports or classes["against"] != total_reports:
+    withheld = unknown or replayed != total_reports or classes["against"] != total_reports
+    if withheld:
         out += ["Each campaign's row is withheld: a campaign left no result, or a report is not against the "
                 "patch alone (it reproduces on C1p, stock Zeek 9.0.1's source, or on neither build alone, "
                 "or has no replay), and the rows would show its target. The totals follow."]
@@ -253,9 +257,9 @@ def summary(f):
             f"- Campaigns ended by a report before their time: {early}; campaigns with no result: {unknown}.",
             f"- Coverage replays with no exit code or a non-zero one: {cov_bad}.",
             ""]
-    if cov_bad:
+    if cov_bad or withheld:
         out += ["The coverage conditions are withheld: a coverage replay exited non-zero or left no exit "
-                "code, and `replay-path` would show its target."]
+                "code, or the campaigns' rows are withheld, and `replay-path` would show a target."]
     else:
         out += ["| coverage condition (C2's final corpus) | met |", "| --- | --- |"]
         out += [f"| {c} | {'-' if c not in cov else ('yes' if cov[c] else 'no')} |" for c in CONDITIONS]

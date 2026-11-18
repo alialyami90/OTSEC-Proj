@@ -549,13 +549,14 @@ def test_judge_withholds_rows_unless_every_report_is_against_the_patch(tmp_path,
 # The controls: a judge that prints the rows anyway, one with #746's first
 # rule (C1p or not replayed), and one without each term of the rule, must
 # fail the check.
-ROWS_RULE = '    if unknown or replayed != total_reports or classes["against"] != total_reports:\n'
+ROWS_RULE = '    withheld = unknown or replayed != total_reports or classes["against"] != total_reports\n'
 ROWS_CONTROLS = [
-    ("rows-always", (ROWS_RULE, "    if False:\n")),
-    ("c1p-or-not-replayed", (ROWS_RULE, '    if classes["both"] + classes["c1p-only"] or replayed < total_reports:\n')),
-    ("no-result-term-dropped", ("    if unknown or replayed != total_reports", "    if replayed != total_reports")),
-    ("replayed-term-dropped", ("    if unknown or replayed != total_reports or ", "    if unknown or ")),
-    ("against-term-dropped", (' or classes["against"] != total_reports:\n', ":\n")),
+    ("rows-always", ("    if withheld:\n", "    if False:\n")),
+    ("c1p-or-not-replayed",
+     (ROWS_RULE, '    withheld = classes["both"] + classes["c1p-only"] or replayed < total_reports\n')),
+    ("no-result-term-dropped", ("    withheld = unknown or replayed", "    withheld = replayed")),
+    ("replayed-term-dropped", ("    withheld = unknown or replayed != total_reports or ", "    withheld = unknown or ")),
+    ("against-term-dropped", (' or classes["against"] != total_reports\n', "\n")),
 ]
 
 
@@ -569,12 +570,23 @@ def test_judge_withheld_rows_control_fails(tmp_path, capsys, name, edit):
 def check_cov_withheld(judge, tmp_path, capsys):
     """D1's ruling 2 on #746 (D3's N2, D6's N1 item 3): when a coverage
     replay exits non-zero or leaves no exit code, the summary prints no
-    coverage condition, so `replay-path` cannot point at `packet`. With
-    every coverage replay at 0, the conditions are printed."""
-    for name, rc in (("packet-report", 134), ("packet-missing", None), ("tcp-report", 1)):
+    coverage condition, so `replay-path` cannot point at `packet`. D1's
+    ruling 6993117978 on #746 (D6's B1): nor does it while the campaigns'
+    rows are withheld. Case K: C2's `packet` campaign stopped at 5 s on a
+    report that reproduces on both builds (K2: on C1p only), every coverage
+    replay exited 0, and the thin corpus gives `replay-path` `no`. With
+    every coverage replay at 0 and the rows printed, the conditions are
+    printed."""
+    thin = {"rc": 77, "secs": 5, "artifacts": (ART,)}
+    cases = (("packet-report", {"packet": 134}, (), ()), ("packet-missing", {"packet": None}, (), ()),
+             ("tcp-report", {"dnp3_tcp": 1}, (), ()),
+             ("K-stock-on-c2-packet", None, [("c2", "packet", thin)], [("packet", "c2", "77", "77")]),
+             ("K2-c1p-only-on-c2-packet", None, [("c2", "packet", thin)], [("packet", "c2", "77", "0")]))
+    for name, cov_rc, specs, replay in cases:
         f = tmp_path / name
-        t = "dnp3_tcp" if name == "tcp-report" else "packet"
-        run_judge(f, cov_rc={t: rc})
+        run_judge(f, *specs, cov_rc=cov_rc)
+        if replay:
+            write_replay(f, *replay)
         (f / "coverage.tsv").write_text("condition\tmet\n" + "".join(
             f"{c}\t{'no' if c == 'replay-path' else 'yes'}\n" for c in judge.CONDITIONS))
         judge.summary(str(f))
@@ -586,14 +598,30 @@ def check_cov_withheld(judge, tmp_path, capsys):
     judge.summary(str(tmp_path / "ok"))
     out = capsys.readouterr().out
     assert "| replay-path | yes |" in out and "withheld" not in out
+    # A report against the patch alone: the rows and the conditions print.
+    f = tmp_path / "against"
+    run_judge(f, ("c2", "packet", thin))
+    write_replay(f, ("packet", "c2", "0", "77"))
+    judge.summary(str(f))
+    out = capsys.readouterr().out
+    assert "| replay-path | yes |" in out and "withheld" not in out and "Verdict: **fail**" in out
 
 
 def test_judge_withholds_coverage_conditions_after_a_coverage_report(tmp_path, capsys):
     check_cov_withheld(load(JUDGE, "fuzz_judge"), tmp_path, capsys)
 
 
-def test_judge_coverage_withheld_control_fails(tmp_path, capsys):
-    judge = load(JUDGE, "fuzz_judge_covheld", ("    if cov_bad:\n        out += [", "    if False:\n        out += ["))
+# The controls: a judge that always prints the conditions, and one that
+# withholds them only after a coverage report (case K), must fail the check.
+COV_WITHHELD_CONTROLS = [
+    ("conditions-always", ("    if cov_bad or withheld:\n        out += [", "    if False:\n        out += [")),
+    ("rows-term-dropped", ("    if cov_bad or withheld:\n", "    if cov_bad:\n")),
+]
+
+
+@pytest.mark.parametrize("name,edit", COV_WITHHELD_CONTROLS, ids=[c[0] for c in COV_WITHHELD_CONTROLS])
+def test_judge_coverage_withheld_control_fails(tmp_path, capsys, name, edit):
+    judge = load(JUDGE, "fuzz_judge_covheld_" + name.replace("-", "_"), edit)
     with pytest.raises(AssertionError):
         check_cov_withheld(judge, tmp_path, capsys)
 
@@ -945,6 +973,20 @@ def check_fuzz_sh(src):
     # Every fuzzer run is bounded inside nonet (D1's ruling 3 on #746).
     assert re.search(r'^    timeout -k "\$HR23_FUZZ_KILL_SECONDS" "\$fz_lim" \\\n    "\$f/\$fz_b/zeek-9\.0\.1/', body, re.M)
     assert src.count("zeek-$fz_t-fuzzer") == 1 and "zeek-$fz_t-fuzzer" in body
+    # Each call site passes its own limit, which check_pad_bounds sets
+    # against its pad (D3's N4 and D6's N1 on #746, D1's ruling 6993117978).
+    for want in ('fuzzer $b $t $((HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS / 2)) -max_total_time=',
+                 'fuzzer $rb $t "$HR23_FUZZ_RUN_LIMIT" "$a" ',
+                 'fuzzer c2 $t "$HR23_FUZZ_COVERAGE_LIMIT" -runs=0 '):
+        assert sum(want in x for x in calls) == 1, want
+    # Both coverage tools are bounded by the tool limit, and nothing else is.
+    tool = 'timeout -k "$HR23_FUZZ_KILL_SECONDS" "$HR23_FUZZ_TOOL_LIMIT" \\\n               llvm-'
+    assert src.count("      if ! { " + tool + "profdata-$V merge ") == 1
+    assert src.count(" &&\n             " + tool + "cov-$V export ") == 1
+    assert src.count('"$HR23_FUZZ_TOOL_LIMIT"') == 2
+    # The coverage step's judge runs inside the pad: the pad follows it.
+    assert ('  python3 -I "$here/fuzz_judge.py" coverage "$f" "$s/src/analyzer/protocol/dnp3/DNP3.cc"\n'
+            '  pad $((step0 + HR23_FUZZ_COVERAGE_PAD_SECONDS))\n  echo "fuzz.sh: coverage done"\n') in src
     assert src.count("./configure") == 1 and '(cd "$s" && nonet env CC=clang-$V ' in src
     ninja = [x for x in lines if re.search(r"\bninja -C ", x)]
     assert ninja and all(x.lstrip().startswith("nonet env ") for x in ninja), ninja
@@ -986,6 +1028,28 @@ FUZZ_SH_CONTROLS = [
                             "    env ASAN_OPTIONS=detect_leaks=0:detect_odr_violation=1 ninja")),
     ("no-flags-check", ('python3 -I "$here/fuzz_judge.py" flags', 'true')),
     ("fuzzer-without-timeout", ('    timeout -k "$HR23_FUZZ_KILL_SECONDS" "$fz_lim" \\\n', "")),
+    # Each call site's limit, and the tools' (D3's M1 to M4 and M6 in N4,
+    # D6's four in N1 and the pad above the judge, on #746 at 3054d6bf).
+    ("d3-m1-campaign-limit-seconds-plus-pad", ("$((HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS / 2))",
+                                               "$((HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS))")),
+    ("d3-m2-campaign-limit-seconds", ("$((HR23_FUZZ_SECONDS + HR23_FUZZ_PAD_SECONDS / 2))",
+                                      "$((HR23_FUZZ_SECONDS))")),
+    ("d3-m3-replay-limit-coverage", ('fuzzer $rb $t "$HR23_FUZZ_RUN_LIMIT"', 'fuzzer $rb $t "$HR23_FUZZ_COVERAGE_LIMIT"')),
+    ("d3-m4-coverage-limit-run", ('fuzzer c2 $t "$HR23_FUZZ_COVERAGE_LIMIT"', 'fuzzer c2 $t "$HR23_FUZZ_RUN_LIMIT"')),
+    # D3's M6 and D6's third mutant are the same edit.
+    ("d3-m6-d6-profdata-unbounded",
+     ('if ! { timeout -k "$HR23_FUZZ_KILL_SECONDS" "$HR23_FUZZ_TOOL_LIMIT" \\\n               llvm-profdata',
+      'if ! { \\\n               llvm-profdata')),
+    ("llvm-cov-unbounded", ('&&\n             timeout -k "$HR23_FUZZ_KILL_SECONDS" "$HR23_FUZZ_TOOL_LIMIT" \\\n',
+                            "&&\n             \\\n")),
+    ("d6-replay-limit-100000", ('fuzzer $rb $t "$HR23_FUZZ_RUN_LIMIT"', 'fuzzer $rb $t "100000"')),
+    ("d6-coverage-limit-100000", ('fuzzer c2 $t "$HR23_FUZZ_COVERAGE_LIMIT"', 'fuzzer c2 $t "100000"')),
+    ("d6-tools-coverage-limit", ('"$HR23_FUZZ_TOOL_LIMIT"', '"$HR23_FUZZ_COVERAGE_LIMIT"', 2)),
+    ("d6-pad-above-the-judge",
+     ('  python3 -I "$here/fuzz_judge.py" coverage "$f" "$s/src/analyzer/protocol/dnp3/DNP3.cc"\n'
+      '  pad $((step0 + HR23_FUZZ_COVERAGE_PAD_SECONDS))\n',
+      '  pad $((step0 + HR23_FUZZ_COVERAGE_PAD_SECONDS))\n'
+      '  python3 -I "$here/fuzz_judge.py" coverage "$f" "$s/src/analyzer/protocol/dnp3/DNP3.cc"\n')),
 ]
 
 
@@ -999,10 +1063,11 @@ def test_workflow_disclosure_control_fails(name, edit):
 
 @pytest.mark.parametrize("name,edit", FUZZ_SH_CONTROLS, ids=[c[0] for c in FUZZ_SH_CONTROLS])
 def test_fuzz_sh_disclosure_control_fails(name, edit):
+    # An edit's third item, when present, is how many times its text occurs.
     src = read(FUZZ_SH)
-    assert src.count(edit[0]) == 1, edit[0]
+    assert src.count(edit[0]) == (edit[2] if len(edit) > 2 else 1), edit[0]
     with pytest.raises(AssertionError):
-        check_fuzz_sh(src.replace(*edit))
+        check_fuzz_sh(src.replace(edit[0], edit[1]))
 
 
 # --- fuzz.sh's replay: each input keeps the build whose campaign found it --
