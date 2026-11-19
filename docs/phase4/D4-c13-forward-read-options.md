@@ -28,11 +28,11 @@ Each option is answered on the same five points: does it close the fail-open for
 
 Each C13 minor states, key by key and value by value, what a forward-reading build does with it (drops the key; refuses a new value in a closed set, as it refused `sa: unknown`) and whether the record then reads less restrictively. A key that does is not added as an ignorable key: it is carried in a form every reader in the rollback set refuses (a new value of a closed set the older reader already checks, or a new major), or the minor takes a `docs/release.md` §7.1 floor at its first strict reader.
 
-- **Closes it?** Only by review, minor by minor. Nothing in code checks the statement. §15.8 (b)'s "would refuse" was wrong for seven builds and was found by D6's probe, not by review (D6's finding 1 on #762), so this is exactly the mistake the option relies on people not making. A floor taken under it holds only by the release record until AP-10 is built (§7.3).
+- **Closes it?** Only by review, minor by minor. Nothing in code checks the statement. §15.8 (b)'s "would refuse" was wrong for seven builds and was found by D6's probe, not by review (D6's finding 1 on #762), so this is exactly the mistake the option relies on people not making. A floor taken under it holds only by the release record until AP-10 is built (`docs/release.md` §7.3).
 - **Readers.** No code change. A harmless key stays harmless after a rollback (CH-35's purpose).
 - **The sensor.** None. Which keys the sensor emits is fixed by the minor.
 - **Tests.** Per minor, an old-reader leg (the shape of D6's leg in 7001264083 item 7): the previous release's `DecodeStored` over each new key's record, asserting refusal or a stated harmless drop. It proves each minor's statement, not that the next minor will have one.
-- **When.** A text rule in C13, before the next minor is approved. It costs every later minor a review that §7.2's "Rules that will add rows" already partly asks for.
+- **When.** A text rule in C13, before the next minor is approved. It costs every later minor a review that `docs/release.md` §7.2's "Rules that will add rows" already partly asks for.
 
 ### (b) `DecodeStored` and `DecodeBaseline` refuse any later minor
 
@@ -43,7 +43,7 @@ C13's stored observation and `netbaseline` declare themselves strict, as contrac
   - After a rollback across a C13 minor, every stored observation of the newer minor still to be judged is refused, harmless keys or not. It is the same set the fail-open reaches (§1), so the loss is bounded by the same window.
   - After a rollback across a `netbaseline` minor, the approved baseline is refused: `NewDetector` fails and `startDetector` returns the error. What the node shows then is not traced in this note; D5 states it. Detection on that node stops until a baseline the older build reads is approved. `netbaseline` is its own identifier (0.1 today), so this happens only when the baseline form changes, not at every C13 minor.
   - It reverses CH-35's "forward for a later one" for these two forms. Bridge item 4 (an unknown `coverage.degraded` value read as degraded) then no longer reaches a stored observation; it stays for alerts.
-- **The sensor.** None. The channel is strict already: a sensor whose minor the node does not list fails the hello (`channelIdentifiers`), and its records wait in its buffer (CH-20). The upgrade order in §7.2 (node first, sensor second) is unchanged.
+- **The sensor.** None. The channel is strict already: a sensor whose minor the node does not list fails the hello (`channelIdentifiers`), and its records wait in its buffer (CH-20). The upgrade order in `docs/release.md` §7.2 (node first, sensor second) is unchanged.
 - **Tests.**
   - Contract (`contracts/netobs`): a stored observation stamped one minor above `self`, with no unknown key, is refused as `schema`; the same record at `self` is accepted. The minor is computed from `self`, not written as `0.4`, so the test does not break at the next minor (self-check item 11). *Mutant:* the forward branch restored, which accepts it. The same pair for `DecodeBaseline` over `baselineSelf`.
   - Node (D5's): a replayed later-minor observation is refused, counted and raises the alarm of D5's open item; *control:* the refusal not alarmed.
@@ -56,7 +56,7 @@ C13's stored observation and `netbaseline` declare themselves strict, as contrac
 The node writes a key in the store's `meta` table (for example the lowest C13 minor a reader needs), in the same transaction as the first record that needs it. At start, the network detector compares the stamp with its own `self`, and if the stamp is higher it does not restore or judge, and raises an alarm; collection and SER forwarding go on, as under D4-61.
 
 - **Closes it?** Yes, for builds that carry the check. An older build ignores an unknown `meta` key: at `2dde13b6` the store compares only `format`, `node_id` and `database` (`platform/store/db.go`). Bumping the store's `format` instead would refuse the whole store, SER included, which is too broad.
-- **How it relates to AP-10.** AP-10 is checked by the newer build, against an update package, before the downgrade is installed; it needs a signed release and an updater, neither designed (§7.3). (c) is checked by the older build, from the data, after the downgrade, and also covers a hand install of any build that carries it. They complement each other. Neither binds a build that predates it.
+- **How it relates to AP-10.** AP-10 is checked by the newer build, against an update package, before the downgrade is installed; it needs a signed release and an updater, neither designed (`docs/release.md` §7.3). (c) is checked by the older build, from the data, after the downgrade, and also covers a hand install of any build that carries it. They complement each other. Neither binds a build that predates it.
 - **Readers.** Coarser than (b): a stamp turns off all judging on the node, not only the later records. A stamp has to be cleared when no record needing it remains, which needs retention to be tracked, or it stays until an operator acts. It adds a writer duty and a transactional ordering in `platform/` (D5's code).
 - **The sensor.** None.
 - **Tests.** Store and node (D5's): a stamp above `self` leaves the detector off with the alarm while SER continues; *control:* an equal stamp starts it. A crash test between the stamp and the first record shows that neither commits without the other.
@@ -89,7 +89,7 @@ A change that adds a key the detector depends on is a new major (C13 1.0). Every
   1. **D5's open item (7001264083 item 4) lands with it or before it,** so a refused stored record is durable and alarmed, not only an in-memory count (P5).
   2. **C13's text declares the stored observation and `netbaseline` strict,** and states that CH-35's forward read for these two forms is superseded; the change goes through D1 as a contract change, reviewed by D5, D6 and D3.
   3. **D5 states what the node shows when the detector cannot start on a refused baseline** (§2 (b), "Readers"). If it is not an alarm, that is fixed in the same change.
-  4. **Each later minor's §7.1 row still states its rollback cost** (§7.2, "Rules that will add rows"): under (b) that cost is "refused, alarmed", not a fail-open.
+  4. **Each later minor's `docs/release.md` §7.1 row still states its rollback cost** (`docs/release.md` §7.2, "Rules that will add rows"): under (b) that cost is "refused, alarmed", not a fail-open.
   5. **Timing:** before the next C13 minor is approved, before P4-4-DE (D1's item 3), and in every case before the first release.
 - **Not (a)** alone: nothing checks it. **Not (c):** coarser, more machinery in `platform/`, and no record here lacks its own schema stamp, which is what a store stamp would add. **Not (d):** its precision saves records only inside the window (b) refuses, at the cost of (a)'s judgement in code. **Not (e):** a major at each such change, to bind builds that were never released.
 - **Residual under (b):** the hand install of a build below it, as under every option; and AP-10 is still owed before the first release (D1's 7001264083 item 2).
