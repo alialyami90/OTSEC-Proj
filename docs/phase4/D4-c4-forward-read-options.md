@@ -1,6 +1,6 @@
 # C4: how the network path reads a later C4 minor's event (options)
 
-**Status: proposed, not approved.** Owner D4. Brief P4-4-C4-FWD-OPT. This is the open item that D3's F4 on #763 (7009793907) raised and D1's approval on #763 (7010466389) assigned to D4: options before the next C4 minor that changes a field read on the network path, and before P4-4-DE, under D4-99 (a new mechanism is settled as options first). No code is changed here, and C13's approved option (b) (`docs/phase4/D4-c13-forward-read-options.md`) is not changed.
+**Status: proposed, not approved.** Owner D4. Brief P4-4-C4-FWD-OPT. This is the open item that D3's F4 on #763 (7009793907) raised and D1's approval on #763 (7010466389) assigned to D4: options before the next C4 minor that changes a field read on the network path, and before P4-4-DE, under D4-99 (a new mechanism is settled as options first). No code is changed here, and C13's option (b) (`docs/phase4/D4-c13-forward-read-options.md`), approved in D1's 7010466389 on #763 (to be recorded in D4-120), is not changed. That note on `main` still says "proposed" until D1's records PR.
 
 **Evidence class: `desk`.** Read at `main` `5938aec8`. Nothing in this note was run. The functions cited are in `contracts/event` (`Decode`, `Event.Validate`, `checkNetobs`, `checkObservedAddress`, `checkSensorCounters`), `contracts/internal/strictjson` (`Forward`, `checker.check`), `contracts/netobs` (`ObservationFromEvent`, `DecodeStored`, `AlertFromEvent`), `platform/node/netdetector.go` (`observationOf`, `alertsAfter`, `rebuildFrameIndex`, `observeTo`) and `platform/sensorlink/link.go` (`Link.record`).
 
@@ -12,7 +12,7 @@ The product code calls `event.Decode` in twelve places (`git grep -n "event.Deco
 
 | Reader | C4 kind and type | What it does with the event | Judged? |
 | --- | --- | --- | --- |
-| `observationOf` (`netdetector.go`), called by `observeTo`, `rebuildFrameIndex` and the stored-capture lookup | `network-observation` | `event.Decode`, then `netobs.ObservationFromEvent`, then the detector's rules | **Yes** |
+| `observationOf` (`netdetector.go`), called by `observeTo` and `rebuildFrameIndex` (whose loop keeps a first sight with `node.stored_capture`) | `network-observation` | `event.Decode`, then `netobs.ObservationFromEvent`, then the detector's rules | **Yes** |
 | `alertsAfter` (`netdetector.go`) | `telemetry-health`, type `netobs.alert` | `event.Decode`, then `AlertFromEvent`, to hold back alerts a replay raises again | No: an alert records a judgement already made (as in the C13 note, §1) |
 | none in the node | `telemetry-health`, type `sensor.counters` | Written by `sensorlink` (`health.go`) and forwarded; no product code reads one back | No |
 | `runSessionOf` and the two run lookups (`netintake.go`) | `telemetry-health`, `collection.run` and related | Rebuild a run's session for the hold | No rule of the detector reads the envelope from it; outside this note |
@@ -46,8 +46,8 @@ So **the one C4 kind the network path judges is `network-observation`**, through
   2. **An ignored flag value** with the same meaning, for example a flag that marks the observation as not to be judged as complete.
 
   In both, the older build judges the observation as if the qualifier were not there. C13's (b) does not stop it, because the body's own `schema` is still within the reader's C13 minor.
-- **Which records.** The same window as C13's §1: stored observations after the detector's restored `Through`, replayed by `observeTo` after a rollback, and the stored-capture lookup. **Held records are not in it:** `Link.record` builds the envelope when it commits, with `event.Identifier`, so a held record released by an older build carries the older build's C4 minor, and only its body can be of a later minor (C13 (b) then decides).
-- **Why C4 moves separately.** `Identifier` is one constant (`doc.go`, 0.4 and 0.5 entries), so every C4 minor restamps every event the node writes, `network-observation` included, even when it changes only `sensor.counters`. C4 moved three minors (0.3, 0.4, 0.5) while C13 moved two.
+- **Which records.** A narrower window than C13's §1. C13's window has two parts: the stored observations after the detector's restored `Through`, which `observeTo` replays after a rollback (and which `rebuildFrameIndex` reads for first sights at or below `Through`), and the held records, which the older build commits and then judges. C4's window is the first part only. **Held records are not in it:** `Link.record` builds the envelope when it commits, with `event.Identifier`, so a held record released by an older build carries the older build's C4 minor, and only its body can be of a later minor (C13 (b) then decides).
+- **Why C4 moves separately.** `Identifier` is one constant (`doc.go`, 0.4 and 0.5 entries), so every C4 minor restamps every event the node writes, `network-observation` included, even when it changes only `sensor.counters`. `network-observation` entered at C4 0.3, beside C13 0.1. Since then each has moved two minors, not in step: C4 0.4 came with C13 0.2 (D4-92), C13 0.3 came without a C4 minor (D4-102), and C4 0.5 came without a C13 minor (#755).
 
 ## 2. The options
 
@@ -77,7 +77,18 @@ Each C4 minor states, for the `network-observation` envelope, each key and flag 
   - Placement controls (D4): a SER, a Syslog and a `netobs.alert` event one C4 minor later still pass `event.Decode`, and the alert still passes `AlertFromEvent`. *Mutant:* the refusal moved into `event.Decode` or `Event.Validate`, which refuses them; `TestCCD2ForwardE47` and `TestCCD0E47StoredEvents` (`tests/contract`, D6's) would fail too.
   - Node (D5): a replayed observation of a later C4 minor is refused, counted under `later-minor` and alarmed once, and the count survives a restart. *Control:* the same event at the node's own minor is judged. Link (D5): a held record released by the build is stamped `event.Identifier` and judged, which shows held records are outside the cost.
   - Old-reader leg (D6): the commit that lands (b) as reader R3 reads a head `network-observation` event restamped to R3's C4 minor + 1 and refuses it as `schema`; *control:* at R3's own minor it is accepted; the leg's own control is R3 with the refusal removed, which must fail.
-  - **Tests that change: none known.** No test on `main` passes a `network-observation` event of a later C4 minor through `ObservationFromEvent` or `observationOf`. The `git grep` of `otsec.event/0.[6-9]` in `_test.go` files finds SER, health, `sensor.counters` and store tests, which go through `event.Decode` or the store only; `TestCCD2ForwardR3Observation` calls `ObservationFromEvent` on 0.4 events, below C4's 0.5. The implementer re-checks this when writing the code.
+  - **Tests that change: none known.** No test on `main` passes a `network-observation` event of a later C4 minor through `ObservationFromEvent` or `observationOf`. `TestCCD2ForwardR3Observation` calls `ObservationFromEvent` on 0.4 events, below C4's 0.5. The `git grep -n "otsec.event/0\.[6-9]" -- '*_test.go'` hits at `5938aec8`, each unaffected because it never reaches `ObservationFromEvent`:
+    - `contracts/event/counters05_test.go`, `TestCounters05RunsFoldedForm` and `TestIdentifier05` (two hits): `sensor.counters` events through `Validate` or `Decode`.
+    - `contracts/event/event_test.go`: `TestDecode`'s "later minor" cases (two hits, SER), `TestReaderAcceptsLaterMinorAndUnknownFields` (SER), `TestSimulated` (a device event's evidence class), `TestSensorCounters` (`sensor.counters`); all through `Decode` or `Validate`.
+    - `contracts/version/version_test.go`: a version string only.
+    - `platform/node/sensorcounters_test.go`, `TestSensorCountersEventFits` and `TestSensorCountersWorstCaseFits`: `sensor.counters` size.
+    - `platform/node/sensortest/health_test.go`, `TestHeldPoolEventBuiltAtWrite`: a held health event refused at its write.
+    - `platform/store/c4v04_test.go` (`TestEvent04Commits`) and `platform/store/store_test.go` (`TestRefusalsWriteNothing`): the store's refusal of a pending later event.
+    - `tests/contract/c4c6_evidence_class_test.go`, `TestD123EvidenceClassDecode`: a device event's evidence class.
+    - `tests/contract/c4_v05_d6_test.go`, `TestC4v05E51RunsFolded`: `sensor.counters` through `Decode`.
+    - `tests/contract/cc_d2_forward_d6_test.go`, `TestCCD2ForwardE47`: six kinds, `network-observation` among them, through `event.Decode` only.
+
+    The implementer re-checks this when writing the code.
 - **Floors and AP-10.** (b)'s merge commit becomes a `docs/release.md` §7.1 floor for a node that has stored a `network-observation` event of a C4 minor above the one current at that commit: every build below it reads such an event forward. If it lands in the same commit as C13's (b), it is the same floor, with this condition added to that row. AP-10's floor must be at least that commit, as for C13's (b). (b) is checked by the older build after a downgrade; AP-10 by the newer build before one. They complement each other, and (b) does not replace AP-10.
 - **When.** Before the next C4 minor is approved, before P4-4-DE, and in every case before the first release. Best in the same change as C13's (b) code, which edits the same function's path and needs the same D5 condition.
 
@@ -108,7 +119,7 @@ Making `event.Decode` refuse every later minor would refuse SER and Syslog after
 ## 3. Recommendation: (b), with C13's (b)
 
 - **Why (b).** It closes the latent fail-open in code for every later C4 minor, without a per-key review, with one comparison in a function D4 drafts, and it reuses C13's (b) sentinel, D5's reason and alarm, and the old-reader leg. It refuses nothing that SER, Syslog or alerts read.
-- **Its cost, stated plainly.** Because `Identifier` is one constant, a rollback across any C4 minor, including one that changes only `sensor.counters`, refuses the replay window's network observations, refused and alarmed. That is the same window and the same kind of loss C13's (b) accepts, and held records are outside it.
+- **Its cost, stated plainly.** Because `Identifier` is one constant, a rollback across any C4 minor, including one that changes only `sensor.counters`, refuses the replay window's network observations, refused and alarmed. That is the same kind of loss C13's (b) accepts, over the replay part of its window only; held records are outside it (§1.4).
 - **Not (c):** its precision saves records only inside that window, at the cost of a per-kind stamp in C4 and C6 and a per-minor judgement in code. If a later C4 minor's rollback cost proves too high, (c) can be added on top of (b) without undoing it.
 - **Not (a) or (d) alone:** nothing checks them.
 - **Its conditions.**
