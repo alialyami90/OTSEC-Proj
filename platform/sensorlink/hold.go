@@ -1235,7 +1235,11 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 			tie, rec.WindowTaken = TieWindow, true
 		}
 		skewed := l.standing() != ""
-		if c := l.laterRefusal(r, f.Start); tie != "" && c != "" {
+		switch c := l.laterRefusal(r, f.Start); {
+		case tie == "":
+		case r.onset:
+			tie, skewed = "", true // refused and counted at the onset (D6's B4 on #748)
+		case c != "":
 			l.countRefusal(c)
 			tie, skewed = "", true
 		}

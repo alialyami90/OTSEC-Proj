@@ -940,6 +940,53 @@ func TestSkewOnsetReleasesHeld(t *testing.T) {
 	})
 }
 
+// D6's B4 on #748 (its probe P10): a run the onset refused ties nothing
+// through part (c) either. After the onset, with no cause standing, a new
+// flow to the run's endpoint is held; the run's Result, a 0.8 session that
+// connected with no local address, sets it to wait, and its end, read
+// later, is committed untied and marked, the run counted once. Control
+// (mutant B4): a waiting branch that does not read the onset, which ties
+// both records by window.
+func TestSkewOnsetRunWaitsUntied(t *testing.T) {
+	r, _ := holdRig02(t)
+	p := r.accepted(r.agreeHello(hello02()))
+	r.tickO(p, 0, 20, 0)
+	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+		t.Fatal(err)
+	}
+	start := r.now()
+	p.send(ownFlow02(1, 40001, start.Add(time.Second), false))
+	p.taken()
+	r.tickO(p, 3*time.Second, 20, 1) // the onset
+	r.tickO(p, 0, 20, 1)             // the clock put right
+	if c := r.l.standing(); c != "" {
+		t.Fatalf("standing %q, want none", c)
+	}
+	at := r.now()
+	p.send(ownFlow02(2, 40002, at, false))
+	p.taken()
+	r.pass(5 * time.Second)
+	s := Session{InvocationID: inv1, StartedAt: at.Add(-time.Second), ConnectedAt: at, EndedAt: at.Add(2 * time.Second), Connected: true}
+	rel, err := r.l.Result(bg, "req-1", s)
+	if err != nil || !rel.Skewed {
+		t.Fatalf("released %+v, %v", rel, err)
+	}
+	p.send(ownFlow02(3, 40002, r.now(), true))
+	p.taken()
+	got := storedObs(t, r.s)
+	if len(got) != 3 {
+		t.Fatalf("stored %d, want 3", len(got))
+	}
+	for _, o := range got {
+		if o.Node.PlatformSession != nil || !o.Node.Skewed {
+			t.Fatalf("stored tied or unmarked: %+v", o.Node)
+		}
+	}
+	if w := windows(r.l.SkewStats()); w != [5]uint64{1, 0, 0, 0, 0} {
+		t.Fatalf("window counts %v, want the onset's one", w)
+	}
+}
+
 // D4's F3 (a), D6's N3 on #748: the onset ends a holding run whose empty
 // record is then not saved. Its Result still reports the window refused.
 // N3 (b): a run refused at Dispatch and then abandoned leaves nothing for
