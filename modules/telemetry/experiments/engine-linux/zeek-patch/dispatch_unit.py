@@ -34,9 +34,16 @@ quotes, for each configuration, the exit code, conn.log's rows, every
 analyzer.log row with no filter on the analyzer's name, and weird.log's and
 reporter.log's rows. The inputs are D4's own synthetic bytes.
 
+D4-116 item 6: `write` also writes one GT-PCAP capture of #718's,
+dnp3-tcp-master-short, rebuilt by hr23_cases.py and refused unless it equals
+its pin in hr23.sha256; `check` quotes it under C0, C1 (`zeek-probe`, the
+stock image with part (a)), C1p and C2, not judged, and fails if any of the
+four did not run on it.
+
 Usage: python -I dispatch_unit.py write OUT
        python -I dispatch_unit.py check OUT
 """
+import hashlib
 import json
 import os
 import struct
@@ -45,6 +52,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "..", "..", "tests", "integration", "gt_pcap"))
 import dnp3  # noqa: E402
+import hr23_cases  # noqa: E402
 import pcapfile  # noqa: E402
 import synth  # noqa: E402
 
@@ -235,10 +243,38 @@ def cases():
     return out
 
 
+# D4-116 item 6 (P4-4-HR23-TCPSHORT): one GT-PCAP capture of #718's, measured
+# here and not judged, since `run.sh dnp3` does not feed hr23_cases.py's
+# captures to the engines. It is rebuilt by D6's builder and must equal its
+# pin in the committed hr23.sha256, or nothing is written.
+GT_CASE = "dnp3-tcp-master-short"
+GT_SUMS = os.path.join(HERE, "..", "..", "..", "..", "..", "tests", "fixtures", "network", "gt-pcap", "hr23",
+                       "hr23.sha256")
+
+
+def gt_capture(outdir, sums=GT_SUMS):
+    """Writes GT_CASE's capture as hr23_cases.py builds it, and returns its
+    frames' times in ns, in packet order. Refuses (SystemExit, no file left)
+    when its SHA-256 differs from the pin in `sums`."""
+    pin = next((ln.split()[0] for ln in open(sums, encoding="utf-8") if ln.split()[1:] == [GT_CASE + ".pcap"]),
+               None)
+    cap = next(c for c in hr23_cases.captures() if c.name == GT_CASE)
+    frames = hr23_cases.frames_of(cap)
+    path = os.path.join(outdir, GT_CASE + ".pcap")
+    pcapfile.write(path, frames)
+    with open(path, "rb") as fh:
+        got = hashlib.sha256(fh.read()).hexdigest()
+    if got != pin:
+        os.remove(path)
+        raise SystemExit(f"{GT_CASE}.pcap is {got}, not its pin {pin} in {sums}; not written")
+    return [fr.ns for fr in frames]
+
+
 def write(outdir):
     os.makedirs(outdir, exist_ok=True)
     for name, f in cases().items():
         pcapfile.write(os.path.join(outdir, name + ".pcap"), f.conv.frames)
+    gt_capture(outdir)
 
 
 def rows(path):
@@ -592,7 +628,49 @@ def check(out):
     print("\n### D1's experiment on #715: measured, not judged")
     for case in EXPERIMENT:
         quote(out, case)
-    return 1 if bad else 0
+    unrun = quote_gt(out)
+    return 1 if bad or unrun else 0
+
+
+C1 = "zeek-probe"
+GT_CFGS = (C0, C1, C1P, C2)
+
+
+def gt_not_run(out):
+    """The configurations of GT_CFGS that left no exit code on GT_CASE: a
+    measurement that did not happen fails `check`, never reads as quiet."""
+    return [cfg for cfg in GT_CFGS if exit_code(os.path.join(out, GT_CASE, cfg)) is None]
+
+
+def quote_gt(out):
+    """GT_CASE under C0, C1, C1p and C2, measured and not judged: the
+    builder's packet times, then every row of each log quote() reads, with
+    the probe's own rows (time, side, kind, code, object, DIR; no payload).
+    Returns gt_not_run(out)."""
+    print(f"\n### {GT_CASE} (#718's capture, hr23_cases.py, equal to its pin): measured, not judged\n")
+    print("D4-116 item 6. Packet times as built, 1-based: " + ", ".join(
+        f"{n}: {ns // 1_000_000_000}.{ns % 1_000_000_000:09d}"
+        for n, ns in enumerate((fr.ns for fr in hr23_cases.frames_of(
+            next(c for c in hr23_cases.captures() if c.name == GT_CASE))), 1)))
+    for cfg in GT_CFGS:
+        d = os.path.join(out, GT_CASE, cfg)
+        print(f"\n#### {GT_CASE} under {cfg}\n")
+        print(f"- exit code: {exit_code(d)}")
+        for log in ("conn", "analyzer", "otsec_viol", "weird", "reporter"):
+            rs = rows(os.path.join(d, log + ".log"))
+            print(f"- {log}.log: " + ("no file" if rs is None else f"{len(rs)} row(s)"))
+            for r in rs or []:
+                print("  - `" + json.dumps(r, sort_keys=True) + "`")
+        probe = rows(os.path.join(d, "otsec_probe.log"))
+        print("- otsec_probe.log (DNP3 rows): " + ("no file" if probe is None else ""))
+        keep = ("ts", "is_orig", "kind", "ev", "fc", "group", "variation", "link_dir", "link_src", "link_dst")
+        for r in probe or []:
+            if r.get("kind") in ("fc", "obj", "link", "done"):
+                print("  - `" + json.dumps({k: r[k] for k in keep if k in r}, sort_keys=True) + "`")
+    unrun = gt_not_run(out)
+    if unrun:
+        print(f"\n**Not run under {', '.join(unrun)}: `check` fails.**")
+    return unrun
 
 
 if __name__ == "__main__":

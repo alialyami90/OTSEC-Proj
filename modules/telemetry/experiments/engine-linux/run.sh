@@ -141,7 +141,11 @@ if [ "$mode" = hr23-unit ]; then
   done
   # Every configuration also loads zeek-patch/viol.zeek, which logs each
   # violation as raised (otsec_viol.log), for the check's three-state judge.
-  for c in "zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F" "zeek-probe-c1p=$HR23_C1P_IMAGE" "zeek-probe-c2=$HR23_C2_IMAGE" $ctl; do
+  # C1 (`zeek-probe`, the stock image with part (a)) runs for the one GT-PCAP
+  # capture that dispatch_unit.py writes, dnp3-tcp-master-short (D4-116
+  # item 6), whose pinned cells name C1; it runs over the d4u-* inputs too,
+  # which `check` does not read under C1.
+  for c in "zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F" "zeek-probe=$ZEEK_IMAGE" "zeek-probe-c1p=$HR23_C1P_IMAGE" "zeek-probe-c2=$HR23_C2_IMAGE" $ctl; do
     cfg=${c%%=*}
     rest=${c#*=}
     im=${rest%%=*}

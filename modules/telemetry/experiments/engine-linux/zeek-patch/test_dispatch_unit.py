@@ -296,3 +296,31 @@ def test_tcp_stop_inputs_follow_the_orders_of_718s_tcp_cells():
     # message and its bare ACK, then FIN, FIN and ACK.
     for case in du.EXPERIMENT[-6:]:
         assert len(flows[case].conv.frames) == 3 + 2 * 5 + 3
+
+
+# D4-116 item 6: #718's dnp3-tcp-master-short, written only when it equals
+# its pin in the committed hr23.sha256 (test), and refused, leaving no file,
+# under a pin it does not equal (control).
+def test_gt_capture_equals_its_pin_and_is_refused_under_another(tmp_path):
+    times = du.gt_capture(str(tmp_path))
+    assert (tmp_path / (du.GT_CASE + ".pcap")).exists()
+    assert len(times) == 24 and times == sorted(times)
+    wrong = tmp_path / "wrong.sha256"
+    wrong.write_text("0" * 64 + "  " + du.GT_CASE + ".pcap\n")
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(SystemExit):
+        du.gt_capture(str(other), str(wrong))
+    assert not (other / (du.GT_CASE + ".pcap")).exists()
+
+
+# A configuration with no exit code on the capture is named, and fails
+# `check` (test); with all four present, none is (control).
+def test_gt_not_run_names_each_missing_configuration(tmp_path):
+    for cfg in du.GT_CFGS:
+        d = tmp_path / du.GT_CASE / cfg
+        d.mkdir(parents=True)
+        (d / "exit-code").write_text("0\n")
+    assert du.gt_not_run(str(tmp_path)) == []
+    (tmp_path / du.GT_CASE / du.C1 / "exit-code").unlink()
+    assert du.gt_not_run(str(tmp_path)) == [du.C1]
