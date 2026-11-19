@@ -36,9 +36,9 @@ reporter.log's rows. The inputs are D4's own synthetic bytes.
 
 D4-116 item 6: `write` also writes one GT-PCAP capture of #718's,
 dnp3-tcp-master-short, rebuilt by hr23_cases.py and refused unless it equals
-its pin in hr23.sha256; `check` quotes it under C0, C1 (`zeek-probe`, the
-stock image with part (a)), C1p and C2, not judged, and fails if any of the
-four did not run on it.
+its pin in hr23.sha256; `check` prints, under C0, C1 (`zeek-probe`, the
+stock image with part (a)), C1p and C2, only whether each ran on it and its
+exit code, and fails if any of the four did not run or exited non-zero.
 
 Usage: python -I dispatch_unit.py write OUT
        python -I dispatch_unit.py check OUT
@@ -637,39 +637,22 @@ GT_CFGS = (C0, C1, C1P, C2)
 
 
 def gt_not_run(out):
-    """The configurations of GT_CFGS that left no exit code on GT_CASE: a
-    measurement that did not happen fails `check`, never reads as quiet."""
-    return [cfg for cfg in GT_CFGS if exit_code(os.path.join(out, GT_CASE, cfg)) is None]
+    """The configurations of GT_CFGS that left no exit code on GT_CASE, or a
+    non-zero one: a measurement that did not happen, or a crash, fails
+    `check`, never reads as quiet."""
+    return [cfg for cfg in GT_CFGS if exit_code(os.path.join(out, GT_CASE, cfg)) != "0"]
 
 
 def quote_gt(out):
-    """GT_CASE under C0, C1, C1p and C2, measured and not judged: the
-    builder's packet times, then every row of each log quote() reads, with
-    the probe's own rows (time, side, kind, code, object, DIR; no payload).
-    Returns gt_not_run(out)."""
-    print(f"\n### {GT_CASE} (#718's capture, hr23_cases.py, equal to its pin): measured, not judged\n")
-    print("D4-116 item 6. Packet times as built, 1-based: " + ", ".join(
-        f"{n}: {ns // 1_000_000_000}.{ns % 1_000_000_000:09d}"
-        for n, ns in enumerate((fr.ns for fr in hr23_cases.frames_of(
-            next(c for c in hr23_cases.captures() if c.name == GT_CASE))), 1)))
+    """GT_CASE under C0, C1, C1p and C2: only whether each configuration ran
+    and its exit code. No row of any log is printed. Returns gt_not_run(out)."""
+    print(f"\n### {GT_CASE} (#718's capture, hr23_cases.py, equal to its pin): ran or not\n")
     for cfg in GT_CFGS:
-        d = os.path.join(out, GT_CASE, cfg)
-        print(f"\n#### {GT_CASE} under {cfg}\n")
-        print(f"- exit code: {exit_code(d)}")
-        for log in ("conn", "analyzer", "otsec_viol", "weird", "reporter"):
-            rs = rows(os.path.join(d, log + ".log"))
-            print(f"- {log}.log: " + ("no file" if rs is None else f"{len(rs)} row(s)"))
-            for r in rs or []:
-                print("  - `" + json.dumps(r, sort_keys=True) + "`")
-        probe = rows(os.path.join(d, "otsec_probe.log"))
-        print("- otsec_probe.log (DNP3 rows): " + ("no file" if probe is None else ""))
-        keep = ("ts", "is_orig", "kind", "ev", "fc", "group", "variation", "link_dir", "link_src", "link_dst")
-        for r in probe or []:
-            if r.get("kind") in ("fc", "obj", "link", "done"):
-                print("  - `" + json.dumps({k: r[k] for k in keep if k in r}, sort_keys=True) + "`")
+        code = exit_code(os.path.join(out, GT_CASE, cfg))
+        print(f"- {cfg}: " + ("not run" if code is None else f"ran, exit code {code}"))
     unrun = gt_not_run(out)
     if unrun:
-        print(f"\n**Not run under {', '.join(unrun)}: `check` fails.**")
+        print(f"\n**Not run, or a non-zero exit, under {', '.join(unrun)}: `check` fails.**")
     return unrun
 
 

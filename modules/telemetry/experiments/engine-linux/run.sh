@@ -159,7 +159,8 @@ if [ "$mode" = hr23-unit ]; then
   done
   rc=0
   { echo "# HR-23: D4's unit and negative tests of option (i)'s patch"; echo
-    echo "D4's own inputs (\`d4u-*\`), not GT-PCAP or stage 2's cases; no counted measurement reads them. Each test's"
+    echo "D4's own inputs (\`d4u-*\`), and one GT-PCAP capture (dnp3-tcp-master-short, whether each configuration ran"
+    echo "and its exit code only); no counted measurement reads them. Each test's"
     echo "control is C1p, the same tree without the patch. C0 (the stock image) runs for D1's experiment on #715."
     echo "(B')'s controls are C2 with one control patch each (zeek-patch/controls/)."; echo
     python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?; } > "$work/hr23-unit.md"

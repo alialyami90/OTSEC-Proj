@@ -314,8 +314,8 @@ def test_gt_capture_equals_its_pin_and_is_refused_under_another(tmp_path):
     assert not (other / (du.GT_CASE + ".pcap")).exists()
 
 
-# A configuration with no exit code on the capture is named, and fails
-# `check` (test); with all four present, none is (control).
+# A configuration with no exit code, or a non-zero one, on the capture is
+# named, and fails `check` (tests); with all four at 0, none is (control).
 def test_gt_not_run_names_each_missing_configuration(tmp_path):
     for cfg in du.GT_CFGS:
         d = tmp_path / du.GT_CASE / cfg
@@ -324,3 +324,24 @@ def test_gt_not_run_names_each_missing_configuration(tmp_path):
     assert du.gt_not_run(str(tmp_path)) == []
     (tmp_path / du.GT_CASE / du.C1 / "exit-code").unlink()
     assert du.gt_not_run(str(tmp_path)) == [du.C1]
+    (tmp_path / du.GT_CASE / du.C2 / "exit-code").write_text("139\n")
+    assert du.gt_not_run(str(tmp_path)) == [du.C1, du.C2]
+
+
+# quote_gt prints, per configuration, only whether it ran and its exit code,
+# never a log or probe row (test); the control is that the same logs, read
+# by rows(), do hold rows, so their absence from the output is the filter's.
+def test_quote_gt_prints_no_row(tmp_path, capsys):
+    marker = "otsec-row-marker"
+    for cfg in du.GT_CFGS:
+        d = tmp_path / du.GT_CASE / cfg
+        d.mkdir(parents=True)
+        (d / "exit-code").write_text("0\n")
+        for log in ("conn", "analyzer", "otsec_viol", "weird", "reporter", "otsec_probe"):
+            (d / (log + ".log")).write_text(json.dumps({"ts": 1.0, "kind": "fc", "note": marker}) + "\n")
+    assert du.rows(str(tmp_path / du.GT_CASE / du.C2 / "conn.log"))
+    assert du.quote_gt(str(tmp_path)) == []
+    out = capsys.readouterr().out
+    assert marker not in out and "{" not in out
+    for cfg in du.GT_CFGS:
+        assert f"- {cfg}: ran, exit code 0" in out
