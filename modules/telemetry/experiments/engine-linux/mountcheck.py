@@ -64,7 +64,7 @@ The rules, each named in the message of a failure:
 `read-only`, and any mount that is not hashed fails `every-mount-hashed`.
 
 Usage: python3 -I mountcheck.py run DIR [--] DOCKER-CREATE-ARGS...
-       python3 -I mountcheck.py summary DIR
+       python3 -I mountcheck.py summary DIR [--no-count]
        python3 -I mountcheck.py selftest IMAGE EXPDIR DIR
 `selftest` shows, on this runner's Docker, the pass case and one control
 per rule, each failing on its own rule and no other; it exits 1 otherwise.
@@ -570,11 +570,12 @@ def output_changes(d):
     return msgs
 
 
-def summary(d):
+def summary(d, counts=True):
     """The check's record of a mode, for its table file: the search path
     read from each image, one line per mount destination with each distinct
     SHA-256 of its hash set, `output-unchanged`, and one line per container
-    (D6's N5). Returns 1 if a rule failed."""
+    (D6's N5). With counts False (`hr23-unit`), each output folder's hash is
+    printed without its entry count. Returns 1 if a rule failed."""
     sets, n, rows = {}, 0, []
     for x in containers(d):
         p = os.path.join(d, x, "before.json")
@@ -596,7 +597,8 @@ def summary(d):
         out = after.get("lines")
         rows.append(f"container {x}: exit {after.get('exit')}; "
                     + "".join(f"{k} {digest(v)[:16]}; " for k, v in sorted(rec.items()))
-                    + (f"output {digest(out)[:16]} ({len(out)} entries); " if out is not None else "")
+                    + (f"output {digest(out)[:16]}" + (f" ({len(out)} entries)" if counts else "") + "; "
+                       if out is not None else "")
                     + "docker create " + shlex.join(line))
     failed = os.path.exists(os.path.join(d, "FAILED"))
     changed = output_changes(d)
@@ -749,6 +751,8 @@ def main(argv):
         return rc
     if len(argv) == 2 and argv[0] == "summary":
         return summary(argv[1])
+    if len(argv) == 3 and argv[0] == "summary" and argv[2] == "--no-count":
+        return summary(argv[1], counts=False)
     if len(argv) == 4 and argv[0] == "selftest":
         return selftest(argv[1], argv[2], argv[3])
     sys.stderr.write(__doc__.split("Usage:")[1])

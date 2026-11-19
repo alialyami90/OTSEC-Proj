@@ -459,6 +459,24 @@ def test_run_hashes_the_output_folder_and_summary_reads_it_again(tmp_path, tree,
     assert "a rule FAILED" in capsys.readouterr().out
 
 
+# `summary DIR --no-count` (run.sh's hr23-unit) prints each output folder's
+# hash and no entry count (test); without it the count is printed (control),
+# and the hash is the same in both.
+def test_summary_no_count_prints_the_output_hash_without_its_entry_count(tmp_path, tree, monkeypatch, capsys):
+    d = str(tmp_path / "checks")
+    line = fake(monkeypatch, tree, start=lambda: write_output(tree))
+    monkeypatch.setenv("MOUNTCHECK_LOG", str(tmp_path / "log"))
+    assert mc.run(d, line) == (0, {})
+    capsys.readouterr()
+    assert mc.main(["summary", d]) == 0
+    ctl = capsys.readouterr().out
+    assert mc.main(["summary", d, "--no-count"]) == 0
+    out = capsys.readouterr().out
+    h = ctl.split("; output ")[1].split()[0]
+    assert f"; output {h} (" in ctl and "entries)" in ctl
+    assert f"; output {h}; " in out and "entries" not in out
+
+
 def test_control_no_output_folder_when_the_container_exits_fails_output_unchanged(tmp_path, tree, monkeypatch):
     d = str(tmp_path / "checks")
     line = fake(monkeypatch, tree)

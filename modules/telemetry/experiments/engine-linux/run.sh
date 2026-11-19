@@ -101,7 +101,10 @@ mc_selftest() {
 # uploads (D6's N5): the controls, and mountcheck.py's summary, which reads
 # every output folder again (output-unchanged) and fails on a rule failed.
 mc_record() {
-  { echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } >> "$1" || {
+  # hr23-unit prints each output folder's hash without its entry count.
+  mc_count=
+  [ "$mode" != hr23-unit ] || mc_count=--no-count
+  { echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc" $mc_count; } >> "$1" || {
     cat "$1" >&9
     echo "the script-hash check (docs/release.md section 8.4 item 3) failed; the run stops" >&9
     exit 1
