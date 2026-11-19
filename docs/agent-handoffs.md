@@ -2713,4 +2713,85 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: no sensor script, no capture, none of §15.10's measurements.
 - Uncertainty or safety risks: nothing refused may become accepted except as §15 says; stored records still decode.
 - Scratch files: `d4-c13abs-*`
-- Result: #760, in review at D4-119 (item 7.1).
+- Result: #760, merged (D4-120 item 1.1).
+## After D4-119: options notes, the TCP case and part 2d (issued 2026-11-19, D4-120)
+
+Each brief below was issued in the agent's prompt in this form; the full text, and each finding it answers, are on its PR.
+
+### P4-4-HR23-TCPSHORT (D4; D6, D2 and D3 review): `dnp3-tcp-master-short`, measured or excluded
+- Objective and rationale: D4-116 item 6's open item, before HR-23's counted run.
+- Required inputs: `docs/phase4/D4-hr23-design.md` §2.3; `modules/telemetry/experiments/engine-linux/`; the held-rows rule (D4-112 item 1.3), which this brief did not name (D4-120 item 4).
+- Files: `modules/telemetry/experiments/engine-linux/` and its tests; design §2.3.
+- Expected interfaces: none changed.
+- Deliverable: one PR: why it was `not run`, and a branch rehearsal or a stated exclusion.
+- Acceptance tests: the self-check list; harness changes with controls.
+- Owed: D4-120 item 3.7.
+- Exclusions: no counted run; no change to #718's cells.
+- Uncertainty or safety risks: disclosure (D4-120 item 4).
+- Scratch files: `d4-tcpshort-*`
+- Result: #764, merged (D4-120 item 1.4).
+
+### P4-4-C13-FWD-OPT (D4; D3, D5, D6 and D7 review; records-auditor first): later C13 minors read forward
+- Objective and rationale: D1's ruling 7001264083 on #760, item 3. Options first (D4-99).
+- Required inputs: D6's finding 1 on #762; D3's and D6's comments on #760.
+- Files: `docs/phase4/D4-c13-forward-read-options.md`.
+- Expected interfaces: none changed.
+- Deliverable: one documents-only PR with options and a recommendation.
+- Acceptance tests: each option's tests with controls named.
+- Owed: the code (D4-120 item 3.2).
+- Exclusions: no code.
+- Uncertainty or safety risks: none beyond the text.
+- Scratch files: none
+- Result: #763, merged, option (b) approved (D4-120 items 1.3, 2.2).
+
+### P4-NODE-REFUSE-OPT (D5; D3, D4 and D6 review; records-auditor first): the alarmed refusals
+- Objective and rationale: #763's conditions 1 and 3 (D4-120 item 2.2). Options first.
+- Required inputs: `docs/phase4/D4-c13-forward-read-options.md`; `platform/node`.
+- Files: `docs/phase4/D5-refusal-alarms-options.md`.
+- Expected interfaces: two new C4 health types (a C4 minor).
+- Deliverable: one documents-only PR with options and a recommendation.
+- Acceptance tests: T1 to T10 named with controls.
+- Owed: the code (D4-120 item 3.1).
+- Exclusions: no code.
+- Uncertainty or safety risks: none beyond the text.
+- Scratch files: `d5-refuse-*`
+- Result: #766, merged, approved (D4-120 items 1.6, 2.5).
+
+### P4-4-C4-FWD-OPT (D4; D3, D5, D6 and D7 review; records-auditor first): later C4 minors read forward
+- Objective and rationale: D3's F4 on #763; options first.
+- Required inputs: `contracts/event`; `ObservationFromEvent`; the approved C13 note.
+- Files: `docs/phase4/D4-c4-forward-read-options.md`.
+- Expected interfaces: none changed.
+- Deliverable: one documents-only PR with options and a recommendation.
+- Acceptance tests: each option's tests with controls named.
+- Owed: the code (D4-120 item 3.2).
+- Exclusions: no code.
+- Uncertainty or safety risks: none beyond the text.
+- Scratch files: `d4-c4fwd-*`
+- Result: #765, merged, option (b) approved (D4-120 items 1.7, 2.6).
+
+### P4-4-INT-D5P2D (D5; D6, D3 and D4 review): INT-D5 part 2d
+- Objective and rationale: D1's 6992578863 (option (a)): the late index (§1.6 part (e)) and CH-39's break rule, with the end rule of D1's 7011321374 (option (c)).
+- Required inputs: `docs/phase4/D5-sensor-node.md` §1.5, §1.6, §1.14, CH-39; #748's rulings.
+- Files: `platform/sensorlink/`, `platform/node/` and their tests; §1.14.
+- Expected interfaces: the node's design (D4-92); C13 as on `main`.
+- Deliverable: one PR, or a split proposed first.
+- Acceptance tests: T-8 and every T-13 leg by name in both `go` jobs; D6's X2 to X4, X6, X9, X10 killed; probe P9 as a test.
+- Owed: 2e.
+- Exclusions: 2e; INT-D5b's alert-key legs; any wiring (F-027).
+- Uncertainty or safety risks: size; the stall stays fail-closed.
+- Scratch files: `d5-2d-*`
+- Result: running at D4-120.
+
+### P4-4-C4-06-DRAFT (D4; D3, D5, D6 and D7 review; records-auditor first): the C4 0.6 proposal
+- Objective and rationale: one C4 minor for D4-120 items 2.2, 2.5 and 2.6.
+- Required inputs: the three approved notes.
+- Files: `docs/phase4/D4-c4-0.6-proposal.md`.
+- Expected interfaces: C4 0.6 (proposed).
+- Deliverable: one documents-only PR.
+- Acceptance tests: E6 rows with controls named; D6's independent rows named.
+- Owed: the code.
+- Exclusions: no code.
+- Uncertainty or safety risks: compatibility with 0.4 and 0.5 readers.
+- Scratch files: none
+- Result: running at D4-120.
