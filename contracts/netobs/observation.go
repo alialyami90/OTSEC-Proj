@@ -708,6 +708,11 @@ func (f *Function) check(c *checker, protocol string) {
 		if (f.SA != "" || (c.need >= 2 && c.keys["function.sa"])) && !contains(SAOutcomes, f.SA) {
 			c.fail(CodeForm, "function.sa", "%q is not an SA outcome", f.SA)
 		}
+		// unknown is new in 0.2 (§15.2), refused in a 0.1 record as the
+		// 0.1 reader refused it (D4-103 ruling 2; D3's F2 on #760).
+		if f.SA == SAUnknown && c.minor < 2 {
+			c.fail(CodeForm, "function.sa", "%q is not an SA outcome in a 0.%d record", f.SA, c.minor)
+		}
 		// objects_unread is required on the 0.2 and 0.3 channels (§15.3).
 		// sa none says every header was read and none was SA's, so it is
 		// never beside true, on both paths: only a record carrying the new
@@ -825,7 +830,9 @@ func (e *Encrypted) check(c *checker) {
 // check applies C13 0.3 §15.5. usm_parsed is required on the 0.2 and 0.3
 // channels, and absent reads as true. With true, the channel requires the
 // four USM fields and bounds boots and time at MaxUSMInteger; a stored
-// record reads as it did. With false, the four are refused if present, on
+// record reads as it did, so engine_id, which every record needed before
+// §15, stays required on every path unless usm_parsed is false (D3's F1
+// on #760). With false, the four are refused if present, on
 // both paths, since only a record carrying the new key can be refused.
 func (s *SNMPv3) check(c *checker) {
 	const p = "encrypted.snmpv3."
@@ -840,7 +847,7 @@ func (s *SNMPv3) check(c *checker) {
 		switch present := f.set || c.keys[p+f.name]; {
 		case s.UsmParsed != nil && !*s.UsmParsed && present:
 			c.fail(CodeConflict, p+f.name, "absent with usm_parsed false: the USM block was not parsed")
-		case (s.UsmParsed == nil || *s.UsmParsed) && !present && c.need >= 2:
+		case (s.UsmParsed == nil || *s.UsmParsed) && !present && (c.need >= 2 || f.name == "engine_id"):
 			c.fail(CodeMissing, p+f.name, "required with usm_parsed true")
 		}
 	}
@@ -981,6 +988,8 @@ func (o *Observation) checkNode(c *checker) {
 	} else if n.FunctionTable != "" {
 		c.table("node.function_table", n.FunctionTable)
 	}
+	// dnp3_sa_unknown is new in 0.2, as sa unknown is (D3's F2 on #760).
+	c.new02("node.dnp3_sa_unknown", n.DNP3SAUnknown != nil)
 	for _, x := range []struct {
 		field, sa string
 		flag      *bool

@@ -126,6 +126,25 @@ func TestDoubleTagSpoof(t *testing.T) {
 		c.L2.VLAN, c.L2.InnerVLANs = ptr(o.L2.InnerVLANs[len(o.L2.InnerVLANs)-1]), nil
 		return nodeAddressSpoofed(d, &c)
 	}
+	// D6's B1 on #760: the rule read with only the first inner VID, with
+	// only the last, or with none when the outer VID is nil.
+	firstInnerOnly := func(d *Detector, o *netobs.Observation) bool {
+		c := *o
+		c.L2.InnerVLANs = o.L2.InnerVLANs[:min(1, len(o.L2.InnerVLANs))]
+		return nodeAddressSpoofed(d, &c)
+	}
+	lastInnerOnly := func(d *Detector, o *netobs.Observation) bool {
+		c := *o
+		c.L2.InnerVLANs = o.L2.InnerVLANs[max(0, len(o.L2.InnerVLANs)-1):]
+		return nodeAddressSpoofed(d, &c)
+	}
+	innerSkippedUnderNil := func(d *Detector, o *netobs.Observation) bool {
+		c := *o
+		if c.L2.VLAN == nil {
+			c.L2.InnerVLANs = nil
+		}
+		return nodeAddressSpoofed(d, &c)
+	}
 	for _, c := range []struct {
 		name     string
 		untagged bool
@@ -136,6 +155,10 @@ func TestDoubleTagSpoof(t *testing.T) {
 		{"outer nil, inner not the node's, node untagged", true, func() *netobs.Observation { return stacked(t, nil, 30) }, ignoreOuterWhenStacked},
 		{"inner 0 under a tagged outer not the node's, node untagged", true, func() *netobs.Observation { return stacked(t, ptr(30), 0) }, innerZeroNoSegment},
 		{"outer the node's, inner VIDs added", false, func() *netobs.Observation { return stacked(t, ptr(10), 30, 40) }, innermost},
+		{"the node's VID in the middle of three, first read only", false, func() *netobs.Observation { return stacked(t, ptr(30), 40, 10, 50) }, firstInnerOnly},
+		{"the node's VID in the middle of three, last read only", false, func() *netobs.Observation { return stacked(t, ptr(30), 40, 10, 50) }, lastInnerOnly},
+		{"the node's VID third of three", false, func() *netobs.Observation { return stacked(t, ptr(30), 40, 50, 10) }, firstInnerOnly},
+		{"outer nil, inner the node's, node not untagged", false, func() *netobs.Observation { return stacked(t, nil, 10) }, innerSkippedUnderNil},
 	} {
 		if !spoofed(t, spoofDetector(t, c.untagged), c.o()) {
 			t.Errorf("%s: no node-address-spoofed", c.name)

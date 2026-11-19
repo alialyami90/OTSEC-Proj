@@ -2,6 +2,8 @@ package netobs
 
 import (
 	"encoding/json"
+	"errors"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -120,6 +122,7 @@ func TestKeySweep15(t *testing.T) {
 	for name, f := range sweepRecords() {
 		recs[name] = obs(f)
 	}
+	swept := map[string]map[string]bool{"heartbeat": {}, "observation": {}}
 	for _, schema := range channelIdentifiers {
 		for name, rec := range recs {
 			if _, err := DecodeFromSensorIn(mustJSON(t, rec(schema)), schema); err != nil {
@@ -128,6 +131,11 @@ func TestKeySweep15(t *testing.T) {
 			}
 			for _, p := range keyPathsOf(docOf(t, rec(schema))) {
 				f := field(p)
+				kind := "observation"
+				if name == "heartbeat" {
+					kind = name
+				}
+				swept[kind][listIndex.ReplaceAllString(f, "[]")] = true
 				if f == "schema" || f == "type" {
 					continue
 				}
@@ -143,6 +151,56 @@ func TestKeySweep15(t *testing.T) {
 			}
 		}
 	}
+	// The records carry every key path of the two types, so a key added
+	// later is swept (D6's N2 on #760). node is never on the channel, and
+	// sweptExempt names each other path left out, with its reason.
+	for kind, typ := range map[string]reflect.Type{"heartbeat": reflect.TypeFor[Heartbeat](), "observation": reflect.TypeFor[Observation]()} {
+		for _, p := range jsonPaths(typ, "") {
+			if p != "node" && !strings.HasPrefix(p, "node.") && !slices.Contains(sweptExempt, p) && !swept[kind][p] {
+				t.Errorf("%s: no sweep record carries %s", kind, p)
+			}
+		}
+	}
+}
+
+// sweptExempt are the channel key paths no sweep record carries:
+// flow.incomplete is optional by design (CH-53) and in no record of the
+// sweep.
+var sweptExempt = []string{"flow.incomplete"}
+
+// jsonPaths lists every JSON key path of t as field gives it, a list of
+// structs walked with [].
+func jsonPaths(t reflect.Type, at string) []string {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
+		if t.Kind() == reflect.Slice {
+			if e := t.Elem(); e.Kind() != reflect.Struct && !(e.Kind() == reflect.Pointer && e.Elem().Kind() == reflect.Struct) {
+				return nil
+			}
+			at += "[]"
+		}
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var out []string
+	for i := range t.NumField() {
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if !f.IsExported() || name == "-" {
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		p := name
+		if at != "" {
+			p = at + "." + name
+		}
+		out = append(out, p)
+		out = append(out, jsonPaths(f.Type, p)...)
+	}
+	return out
 }
 
 // The deletions of the sweep's stored records that DecodeStored accepted
@@ -338,6 +396,15 @@ func TestVLAN15(t *testing.T) {
 			t.Errorf("stored l2.%s %v: accepted", name, v)
 		}
 	}
+	// Four inner VIDs are refused on the stored path too (D6's N1 on
+	// #760). Control: three decode.
+	for n, ok := range map[int]bool{3: true, 4: false} {
+		s := sweepStored(sweepFlow(Identifier03))
+		s.L2.InnerVLANs = []int{1, 2, 3, 4}[:n]
+		if _, err := DecodeStored(mustJSON(t, s)); (ok && err != nil) || (!ok && !refusedOnly(err, CodeRange, "l2.inner_vlans")) {
+			t.Errorf("stored, %d inner VIDs: %v, want accepted %v", n, err, ok)
+		}
+	}
 }
 
 // §15.4 (D1's 6993015611, D2's N1): a frame with five or more tags, and a
@@ -520,6 +587,121 @@ func TestLogin15(t *testing.T) {
 			_, err := DecodeFromSensorIn(mustJSON(t, o), schema)
 			if (c.field == "" && err != nil) || (c.field != "" && !refusedOnly(err, CodeConflict, c.field)) {
 				t.Errorf("%s, %s: %v, want conflict at %q", schema, c.name, err, c.field)
+			}
+		}
+	}
+}
+
+// errAt reports whether err holds a failure of code at field.
+func errAt(err error, code Code, field string) bool {
+	all := []error{err}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		all = j.Unwrap()
+	}
+	for _, e := range all {
+		var x *Error
+		if errors.As(e, &x) && x.Code == code && x.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+// snmp01 is an SNMPv3 record on the 0.1 channel, without usm_parsed.
+func snmp01() *Observation { return as01(nullSNMPv3(Identifier02)) }
+
+// D3's F1 on #760: an absent usm_parsed reads as true, and true requires
+// engine_id on the 0.1 channel and on the stored path, as before §15. A
+// record with neither key is refused there; with engine_id it decodes.
+// usm_parsed true without engine_id is refused when stored too. Mutant:
+// the engine_id requirement made channel-only again (c.need >= 2 alone).
+func TestUSMAbsentEngineID15(t *testing.T) {
+	const f = "encrypted.snmpv3.engine_id"
+	for _, withID := range []bool{false, true} {
+		o := snmp01()
+		if !withID {
+			o.Encrypted.SNMPv3.EngineID = nil
+		}
+		if _, err := DecodeChannel(mustJSON(t, o)); withID != (err == nil) || (!withID && !refusedOnly(err, CodeMissing, f)) {
+			t.Errorf("0.1 channel, engine_id %v: %v", withID, err)
+		}
+		for _, s := range []*Observation{sweepStored(snmp01()), sweepStored(nullSNMPv3(Identifier02)), sweepStored(nullSNMPv3(Identifier03))} {
+			s.Encrypted.SNMPv3.UsmParsed = nil
+			if !withID {
+				s.Encrypted.SNMPv3.EngineID = nil
+			}
+			if _, err := DecodeStored(mustJSON(t, s)); withID != (err == nil) || (!withID && !refusedOnly(err, CodeMissing, f)) {
+				t.Errorf("stored %s, no usm_parsed, engine_id %v: %v", s.Schema, withID, err)
+			}
+		}
+	}
+	for _, schema := range channelIdentifiers {
+		s := sweepStored(nullSNMPv3(schema))
+		s.Encrypted.SNMPv3.EngineID = nil
+		if _, err := DecodeStored(mustJSON(t, s)); !refusedOnly(err, CodeMissing, f) {
+			t.Errorf("stored %s, usm_parsed true, no engine_id: %v, want missing", schema, err)
+		}
+	}
+}
+
+// D3's F2 on #760: sa unknown and node.dnp3_sa_unknown are new in 0.2,
+// and a 0.1 record refuses them as the 0.1 reader did (D4-103 ruling 2).
+// Controls: the 0.1 records with sa challenged, and a 0.2 stored record
+// with unknown and the flag, decode. Mutants: either gate removed.
+func TestSAUnknown01(t *testing.T) {
+	o := fxFunction()
+	if _, err := DecodeChannel(mustJSON(t, o)); err != nil {
+		t.Errorf("control, 0.1 channel, sa challenged: %v", err)
+	}
+	o.Function.SA = SAUnknown
+	if _, err := DecodeChannel(mustJSON(t, o)); !refusedOnly(err, CodeForm, "function.sa") {
+		t.Errorf("0.1 channel, sa unknown: %v, want form", err)
+	}
+	s := fxStored()
+	if _, err := DecodeStored(mustJSON(t, s)); err != nil {
+		t.Errorf("control, 0.1 stored, sa challenged: %v", err)
+	}
+	s.Function.SA, s.Node.DNP3SAUnknown = SAUnknown, ptr(true)
+	_, err := DecodeStored(mustJSON(t, s))
+	if !errAt(err, CodeForm, "function.sa") {
+		t.Errorf("0.1 stored, sa unknown: %v, want form at function.sa", err)
+	}
+	if !errAt(err, CodeDecode, "node.dnp3_sa_unknown") {
+		t.Errorf("0.1 stored, dnp3_sa_unknown: %v, want decode at the flag", err)
+	}
+	c := sweepStored(sweepDNP3(Identifier02))
+	c.Function.SA, c.Node.DNP3NoSA, c.Node.DNP3SAUnknown = SAUnknown, nil, ptr(true)
+	if _, err := DecodeStored(mustJSON(t, c)); err != nil {
+		t.Errorf("control, 0.2 stored, sa unknown with the flag: %v", err)
+	}
+}
+
+// D6's N1 on #760: inner_vlans, objects_unread and usm_parsed are new in
+// 0.2, refused as decode in a 0.1 record on the channel and when stored.
+// Controls: the same records without the key decode. Mutant: any one of
+// the three new02 calls made newAt(1, ...).
+func TestNew15At01(t *testing.T) {
+	channel := func(b []byte) (*Observation, error) { _, err := DecodeChannel(b); return nil, err }
+	for _, c := range []struct {
+		field string
+		rec   func() *Observation
+		set   func(o *Observation)
+	}{
+		{"l2.inner_vlans", fxFlow, func(o *Observation) { o.L2.InnerVLANs = []int{20} }},
+		{"function.objects_unread", fxFunction, func(o *Observation) { o.Function.ObjectsUnread = ptr(false) }},
+		{"encrypted.snmpv3.usm_parsed", snmp01, func(o *Observation) { o.Encrypted.SNMPv3.UsmParsed = ptr(true) }},
+	} {
+		for path, decode := range map[string]func([]byte) (*Observation, error){"channel": channel, "stored": DecodeStored} {
+			o := c.rec()
+			if path == "stored" {
+				o = sweepStored(o)
+			}
+			if _, err := decode(mustJSON(t, o)); err != nil {
+				t.Errorf("control, 0.1 %s, without %s: %v", path, c.field, err)
+			}
+			c.set(o)
+			if _, err := decode(mustJSON(t, o)); !refusedOnly(err, CodeDecode, c.field) {
+				t.Errorf("0.1 %s with %s: %v, want decode", path, c.field, err)
 			}
 		}
 	}
