@@ -11,6 +11,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -621,7 +622,7 @@ func TestDetectorAlertAlarmRearmed(t *testing.T) {
 	}
 }
 
-// B4 on the node (D1 on #590, C13 §14 item 19): a connected session
+// B4 on the node (D1 on #590, C13 آ§14 item 19): a connected session
 // handed over before any observation, as when a collection runs before the
 // sensor has sent anything, is checkpointed with no clock, restored, and
 // judged once an observation moves the clock past its window: one
@@ -869,23 +870,43 @@ func prunedStart(t *testing.T) (*Runtime, *Status, *Config, event.Event) {
 // store's prune step really pruned, with records still retained after the
 // detector's Through and with none; a restore at the stream's head finds
 // it not pruned. Desk: the restore fails on a checkpoint renamed to
-// another node's.
+// another node's. P4-NODE-PRUNE1: the prune waits for the detector's
+// cursor to reach both observations (checkpointed). The slow case's first
+// observation outlasts DriveTime, so the step Tick asked for checkpoints
+// at 1 and a drive between steps, which never checkpoints, takes 2, as a
+// slow Windows runner did on #757. Control: one tick before the prune,
+// under which the slow case finds the cursor at 1.
 func TestDetectorPrunedFromStream(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		step  int
 		first c5.Seq
-	}{{"some retained", 1, 2}, {"none retained", 1000, 0}} {
+		slow  bool
+	}{{"some retained", 1, 2, false}, {"none retained", 1000, 0, false}, {"none retained slow detector", 1000, 0, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, dir := holdConfig(t)
-			r, _, _ := start(t, c, dir)
+			var (
+				r  *Runtime
+				st *Status
+				n  atomic.Int32
+			)
+			t.Cleanup(func() { r.Close() }) // a Close after a Close does nothing
+			if tc.slow {
+				r, _ = startSeams(t, c, dir, SensorSeams{Observe: func() {
+					if n.Add(1) == 1 {
+						time.Sleep(DriveTime + 50*time.Millisecond)
+					}
+				}})
+			} else {
+				r, _, _ = start(t, c, dir)
+			}
 			if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1), ownFlow(2))); err != nil {
 				t.Fatal(err)
 			}
-			tick(t, r)
+			checkpointed(t, r, 2)
 			pruneObservations(t, r, c, tc.step)
-			if f := firstRetained(t, r); f != tc.first || detectorCursor(t, r) != 2 {
-				t.Fatalf("first retained %d, cursor %d", f, detectorCursor(t, r))
+			if f, k := firstRetained(t, r), detectorCursor(t, r); f != tc.first || k != 2 {
+				t.Fatalf("first retained %d, cursor %d", f, k)
 			}
 			r.Close()
 			r, _, _ = start(t, c, dir)
@@ -894,14 +915,32 @@ func TestDetectorPrunedFromStream(t *testing.T) {
 			}
 			foreignCheckpoint(t, r)
 			r.Close()
-			r, st, _ := start(t, c, dir)
-			defer r.Close()
+			r, st, _ = start(t, c, dir)
 			if nd := r.detector; nd.restored || !nd.pruned || countAlarms(st, AlarmDetectorNotRestored) != 1 {
 				t.Fatalf("a first start: restored %v, pruned %v, %d alarms", nd.restored, nd.pruned, countAlarms(st, AlarmDetectorNotRestored))
 			}
 		})
 	}
 }
+
+// checkpointed ticks until the detector consumer's stored cursor is at
+// least want, at most checkpointTicks times. Only a step Tick asks for
+// checkpoints, and tick waits for the drives that step leaves, so what a
+// step's own drive did not take is checkpointed at the next tick.
+func checkpointed(t *testing.T, r *Runtime, want c5.Seq) {
+	t.Helper()
+	for range checkpointTicks {
+		tick(t, r)
+		if detectorCursor(t, r) >= want {
+			return
+		}
+	}
+	t.Fatalf("the detector's cursor is %d after %d ticks, want %d", detectorCursor(t, r), checkpointTicks, want)
+}
+
+// checkpointTicks bounds checkpointed. Two ticks suffice: the drives the
+// first leaves take the rest before the second begins.
+const checkpointTicks = 5
 
 // guardRun stores a connected collection.run of the relay's endpoint for
 // inv, started at from and ended a second later, after after.
@@ -928,7 +967,7 @@ func unseenAlerts(t *testing.T, r *Runtime) (n int) {
 
 // D6's R2 to R4 on #590, from the CommittedAt bound: after a pruned start
 // the first record read, stored or refused, sets the bound at its commit
-// time T. A session that starts at T + 2g, so start − g equals T + g, is
+// time T. A session that starts at T + 2g, so start âˆ’ g equals T + g, is
 // judged, and alerts own-session-unseen once its window passes with no
 // flow; one that starts a nanosecond earlier is skipped, for
 // before-retained. D6's R8: own-session-unseen has no capture. Desk: the
