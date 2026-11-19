@@ -146,12 +146,12 @@ func TestCCD2ForwardE44(t *testing.T) {
 }
 
 // E4-7, forward contract leg: the identifier this code stamps on every
-// event is 0.4, and a stored 0.4 event of each type validates under the 0.4
-// reader, strictly at its own minor (the 0.3 reader passed a later minor's
-// field over).
+// event is 0.5 (C4 0.5 §2), and a stored 0.4 event of each type validates
+// under the 0.5 reader, strictly at its own earlier minor (the 0.3 reader
+// passed a later minor's field over).
 func TestCCD2ForwardE47(t *testing.T) {
-	if event.Identifier != "otsec.event/0.4" {
-		t.Errorf("event.Identifier %q, C4 0.4 §3: every event this code stamps says 0.4", event.Identifier)
+	if event.Identifier != "otsec.event/0.5" {
+		t.Errorf("event.Identifier %q, C4 0.5 §2: every event this code stamps says 0.5", event.Identifier)
 	}
 	for _, c := range []struct {
 		file string
@@ -170,7 +170,7 @@ func TestCCD2ForwardE47(t *testing.T) {
 			if err != nil {
 				t.Fatalf("event.Decode: %v", err)
 			}
-			if e.Schema != event.Identifier || e.Kind != c.kind {
+			if e.Schema != "otsec.event/0.4" || e.Kind != c.kind {
 				t.Errorf("schema %q, kind %q", e.Schema, e.Kind)
 			}
 			if _, err := event.Decode(ccD2With(t, b, "", "added_in_0_5")); !slices.Contains(event.Codes(err), event.CodeDecode) {
@@ -181,13 +181,13 @@ func TestCCD2ForwardE47(t *testing.T) {
 			if err := json.Unmarshal(ccD2With(t, b, "", "added_in_0_5"), &m); err != nil {
 				t.Fatal(err)
 			}
-			m["schema"] = "otsec.event/0.5"
+			m["schema"] = "otsec.event/0.6"
 			fwd, err := json.Marshal(m)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := event.Decode(fwd); err != nil {
-				t.Errorf("stamped 0.5 with a field 0.5 adds: %v", err)
+				t.Errorf("stamped 0.6 with a field 0.6 adds: %v", err)
 			}
 		})
 	}
