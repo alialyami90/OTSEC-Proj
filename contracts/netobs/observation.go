@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"slices"
 
@@ -79,14 +80,29 @@ type Observation struct {
 	Node *Node `json:"node,omitempty"`
 }
 
-// L2 is the frame's link layer. EtherType is the inner type after any
-// 802.1Q tag, as "0x" and four lowercase hex digits.
+// L2 is the frame's link layer. EtherType is the type after every 802.1Q,
+// 802.1ad and HSR tag, as "0x" and four lowercase hex digits (C13 0.3
+// §15.4). VLAN is the outermost tag's VID, nil for an untagged frame: on
+// the 0.2 and 0.3 channels the key is required and 0, the null VID, is
+// decoded to nil, so it is never stored. InnerVLANs are the VIDs of the
+// tags after the outer one, in wire order, present exactly when the frame
+// carried more than one tag; only the spoofing check reads them (§15.4).
 type L2 struct {
-	SrcMAC    string `json:"src_mac"`
-	DstMAC    string `json:"dst_mac"`
-	VLAN      *int   `json:"vlan,omitempty"`
-	EtherType string `json:"ethertype"`
+	SrcMAC     string `json:"src_mac"`
+	DstMAC     string `json:"dst_mac"`
+	VLAN       *int   `json:"vlan,omitempty"`
+	InnerVLANs []int  `json:"inner_vlans,omitempty"`
+	EtherType  string `json:"ethertype"`
 }
+
+// MaxInnerVLANs bounds l2.inner_vlans: the frame stage reads at most four
+// tags (C13 0.3 §15.4).
+const MaxInnerVLANs = 3
+
+// MaxUSMInteger is the upper bound of the USM's msgAuthoritativeEngineBoots
+// and msgAuthoritativeEngineTime, INTEGER (0..2147483647) (RFC 3414 §2.4;
+// C13 0.3 §15.5).
+const MaxUSMInteger = 2147483647
 
 // IP is absent for a layer-2-only frame. Ports are present exactly for TCP
 // and UDP.
@@ -166,24 +182,41 @@ type Service struct {
 }
 
 // Function is a request's application function (C13 §4.3). Sub is Modbus
-// 8's sub-function or 43's MEI type (C13 §14). SA and SAErrorFrom are DNP3
-// only; SA absent means not known.
+// 8's sub-function or 43's MEI type (C13 §14). SA, SAErrorFrom and
+// ObjectsUnread are DNP3 only. On the 0.2 and 0.3 channels a DNP3 function
+// carries SA and ObjectsUnread; in a stored record an absent SA reads as
+// not determined, and an absent ObjectsUnread as true (C13 0.3 §15.2,
+// §15.3).
 type Function struct {
-	Code        int      `json:"code"`
-	Sub         *int     `json:"sub,omitempty"`
-	Objects     []string `json:"objects"`
-	Unit        *int     `json:"unit,omitempty"`
-	SA          string   `json:"sa,omitempty"`
-	SAErrorFrom string   `json:"sa_error_from,omitempty"`
+	Code    int      `json:"code"`
+	Sub     *int     `json:"sub,omitempty"`
+	Objects []string `json:"objects"`
+	// ObjectsUnread says that Objects holds only the headers read before
+	// the first one that could not be read (§15.3).
+	ObjectsUnread *bool  `json:"objects_unread,omitempty"`
+	Unit          *int   `json:"unit,omitempty"`
+	SA            string `json:"sa,omitempty"`
+	SAErrorFrom   string `json:"sa_error_from,omitempty"`
 }
 
-// SA outcomes. Closed.
+// ObjectsRead reports whether a DNP3 function's object headers were read to
+// the end of the request: objects_unread present as false. Present as true,
+// or absent in a stored record, they may not have been, and every reader
+// takes the record fail-closed (C13 0.3 §15.3).
+func (f *Function) ObjectsRead() bool { return f.ObjectsUnread != nil && !*f.ObjectsUnread }
+
+// SA outcomes. Closed. SAUnknown is a DNP3 request whose SA the sensor
+// could not determine (C13 0.3 §15.2).
 const (
 	SAChallenged = "challenged"
 	SAAggressive = "aggressive"
 	SAFailed     = "failed"
 	SANone       = "none"
+	SAUnknown    = "unknown"
 )
+
+// SAOutcomes lists every SA outcome.
+var SAOutcomes = []string{SAChallenged, SAAggressive, SAFailed, SANone, SAUnknown}
 
 // Insecure is a use of a protocol on V-M6's insecure list.
 type Insecure struct {
@@ -213,13 +246,19 @@ type TLS struct {
 	SNI     *Text  `json:"sni,omitempty"`
 }
 
-// SNMPv3 is an SNMPv3 message header's fields in clear.
+// SNMPv3 is an SNMPv3 message header's fields in clear. UsmParsed says the
+// UsmSecurityParameters were parsed and the engine ID is at most 32
+// octets: with true, EngineID, User, Boots and Time are its fields; with
+// false, all four are absent. On the 0.2 and 0.3 channels UsmParsed is
+// required; in a stored record an absent one reads as true (C13 0.3
+// §15.5).
 type SNMPv3 struct {
-	EngineID string `json:"engine_id"`
-	User     Text   `json:"user"`
-	Level    string `json:"level"`
-	Boots    *int64 `json:"boots,omitempty"`
-	Time     *int64 `json:"time,omitempty"`
+	UsmParsed *bool   `json:"usm_parsed,omitempty"`
+	EngineID  *string `json:"engine_id,omitempty"`
+	User      *Text   `json:"user,omitempty"`
+	Level     string  `json:"level"`
+	Boots     *int64  `json:"boots,omitempty"`
+	Time      *int64  `json:"time,omitempty"`
 }
 
 // Identity is a value read in clear from the server end.
@@ -253,6 +292,10 @@ type Node struct {
 	FunctionClass   string           `json:"function_class,omitempty"`
 	FunctionTable   string           `json:"function_table,omitempty"`
 	DNP3NoSA        *bool            `json:"dnp3_no_sa,omitempty"`
+	// DNP3SAUnknown is set exactly on a DNP3 function of a NoSAClasses
+	// class whose sa is unknown: not shown protected, and never a
+	// dnp3_no_sa (C13 0.3 §15.2).
+	DNP3SAUnknown *bool `json:"dnp3_sa_unknown,omitempty"`
 	// The node's marks, new in 0.2, each absent in a 0.1 record (C13 0.2
 	// §11): Late, a record later than late_bound_s (CH-23); Backlog, a
 	// backlog record committed untied (CH-39); Skewed, committed while no
@@ -290,14 +333,17 @@ var FunctionClasses = []string{ClassRead, ClassWrite, ClassControl, ClassSession
 const FunctionTable = "fc-classes/1"
 
 // NoSAClasses are the classes whose DNP3 function with sa none sets
-// dnp3_no_sa (C13 §5).
+// dnp3_no_sa, and with sa unknown dnp3_sa_unknown (C13 §5, 0.3 §15.2).
 var NoSAClasses = []string{ClassWrite, ClassControl, ClassSessionSetup}
 
 var (
 	macForm       = regexp.MustCompile(`^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$`)
 	etherTypeForm = regexp.MustCompile(`^0x[0-9a-f]{4}$`)
 	objectForm    = regexp.MustCompile(`^g(?:0|[1-9][0-9]{0,2})v(?:0|[1-9][0-9]{0,2})$`)
-	engineIDForm  = regexp.MustCompile(`^(?:[0-9a-f]{2}){5,32}$`)
+	engineIDForm  = regexp.MustCompile(`^(?:[0-9a-f]{2}){0,32}$`)
+	// engineIDForm01 is 0.1's form, kept for a 0.1 record (D4-103 ruling
+	// 2; D6's finding 2 on #762).
+	engineIDForm01 = regexp.MustCompile(`^(?:[0-9a-f]{2}){5,32}$`)
 )
 
 // Validate checks an observation of the 0.1 channel, the one main's intake
@@ -313,11 +359,17 @@ func (o *Observation) validateChannel(want string, keys, nulls map[string]bool) 
 	c := &checker{keys: keys, nulls: nulls}
 	c.strictSchema(o.Schema, want)
 	o.check(c)
+	c.requireKeys("", reflect.ValueOf(o).Elem())
 	if o.Node != nil {
 		c.fail(CodeConflict, "node", "a sensor's record never carries node")
 	}
 	o.checkFrames(c)
 	c.refuseNulls()
+	// The null VID is read as untagged, so no reader and no stored record
+	// sees 0 (C13 0.3 §15.4).
+	if c.need >= 2 && o.L2.VLAN != nil && *o.L2.VLAN == 0 {
+		o.L2.VLAN = nil
+	}
 	return c.err()
 }
 
@@ -367,6 +419,18 @@ func (o *Observation) check(c *checker) {
 	if o.IP != nil {
 		l4 = o.IP.check(c)
 	}
+	// ip is required exactly on an IP frame: the type after every tag is
+	// IPv4 or IPv6. Channel only, so a stored record reads as it did (C13
+	// 0.3 §15.1, §15.4).
+	if c.need >= 2 {
+		isIP := o.L2.EtherType == "0x0800" || o.L2.EtherType == "0x86dd"
+		switch {
+		case isIP && o.IP == nil && !c.keys["ip"]:
+			c.fail(CodeMissing, "ip", "required on an IP frame, ethertype %s", o.L2.EtherType)
+		case !isIP && o.IP != nil:
+			c.fail(CodeConflict, "ip", "on a frame whose type after its tags is %s, not IPv4 or IPv6", o.L2.EtherType)
+		}
+	}
 	switch {
 	case l4 == "tcp" && o.Direction != DirectionClientServer && o.Direction != DirectionMidstream:
 		c.fail(CodeConflict, "direction", "%q: a TCP observation is client-server or midstream", o.Direction)
@@ -389,8 +453,28 @@ func (l *L2) check(c *checker) {
 	if !macForm.MatchString(l.DstMAC) {
 		c.fail(CodeForm, "l2.dst_mac", "%q is not a lowercase MAC", l.DstMAC)
 	}
-	if l.VLAN != nil && (*l.VLAN < 1 || *l.VLAN > 4094) {
-		c.fail(CodeRange, "l2.vlan", "%d not in [1, 4094]", *l.VLAN)
+	// On the 0.2 and 0.3 channels vlan is required, and 0, the null VID,
+	// is untagged; a stored record never carries 0 (C13 0.3 §15.4).
+	low := 1
+	if c.need >= 2 {
+		low = 0
+		c.required("l2.vlan")
+	}
+	if l.VLAN != nil && (*l.VLAN < low || *l.VLAN > 4094) {
+		c.fail(CodeRange, "l2.vlan", "%d not in [%d, 4094]", *l.VLAN, low)
+	}
+	if (l.InnerVLANs != nil || c.keys["l2.inner_vlans"]) && c.new02("l2.inner_vlans", true) {
+		switch n := len(l.InnerVLANs); {
+		case n == 0 && !c.nulls["l2.inner_vlans"]:
+			c.fail(CodeConflict, "l2.inner_vlans", "present only for a frame with more than one tag, so never []")
+		case n > MaxInnerVLANs:
+			c.fail(CodeRange, "l2.inner_vlans", "%d inner VIDs, above %d", n, MaxInnerVLANs)
+		}
+		for i, v := range l.InnerVLANs {
+			if v < 0 || v > 4094 {
+				c.fail(CodeRange, fmt.Sprintf("l2.inner_vlans[%d]", i), "%d not in [0, 4094]", v)
+			}
+		}
 	}
 	if !etherTypeForm.MatchString(l.EtherType) {
 		c.fail(CodeForm, "l2.ethertype", "%q is not 0x and four lowercase hex digits", l.EtherType)
@@ -460,6 +544,7 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 				c.fail(CodeConflict, "flow.syn_only", "only on the end phase")
 			}
 		case "end":
+			c.required("flow.end")
 			if !contains([]string{"fin", "rst", "idle", "sensor-stop"}, f.End) {
 				c.fail(CodeForm, "flow.end", "%q is not fin, rst, idle or sensor-stop", f.End)
 			}
@@ -507,6 +592,14 @@ func (o *Observation) checkKind(c *checker, l4 string) {
 	case o.Undecoded != nil:
 		if !contains([]string{"port", "ethertype", "none"}, o.Undecoded.Basis) {
 			c.fail(CodeForm, "undecoded.basis", "%q is not port, ethertype or none", o.Undecoded.Basis)
+		}
+		// Channel only (C13 0.3 §15.1).
+		switch {
+		case c.need < 2:
+		case o.Undecoded.Basis == "port" && o.IP == nil:
+			c.fail(CodeConflict, "undecoded.basis", "port needs ip")
+		case o.Undecoded.Basis == "ethertype" && o.IP != nil:
+			c.fail(CodeConflict, "undecoded.basis", "ethertype never with ip")
 		}
 		if o.Undecoded.Packets < 1 {
 			c.fail(CodeRange, "undecoded.packets", "%d: at least one", o.Undecoded.Packets)
@@ -612,10 +705,28 @@ func (f *Function) check(c *checker, protocol string) {
 		if f.Unit != nil || f.Sub != nil {
 			c.fail(CodeConflict, "function.unit", "unit and sub are Modbus only")
 		}
-		if f.SA != "" && !contains([]string{SAChallenged, SAAggressive, SAFailed, SANone}, f.SA) {
+		// sa is required on the 0.2 and 0.3 channels, unknown when not
+		// determined (C13 0.3 §15.2); a stored record may leave it out.
+		c.required("function.sa")
+		if (f.SA != "" || (c.need >= 2 && c.keys["function.sa"])) && !contains(SAOutcomes, f.SA) {
 			c.fail(CodeForm, "function.sa", "%q is not an SA outcome", f.SA)
 		}
+		// unknown is new in 0.2 (§15.2), refused in a 0.1 record as the
+		// 0.1 reader refused it (D4-103 ruling 2; D3's F2 on #760).
+		if f.SA == SAUnknown && c.minor < 2 {
+			c.fail(CodeForm, "function.sa", "%q is not an SA outcome in a 0.%d record", f.SA, c.minor)
+		}
+		// objects_unread is required on the 0.2 and 0.3 channels (§15.3).
+		// sa none says every header was read and none was SA's, so it is
+		// never beside true, on both paths: only a record carrying the new
+		// key is refused.
+		if c.new02("function.objects_unread", f.ObjectsUnread != nil || c.keys["function.objects_unread"]) &&
+			f.ObjectsUnread != nil && *f.ObjectsUnread && f.SA == SANone {
+			c.fail(CodeConflict, "function.objects_unread", "true never beside sa none")
+		}
 		switch {
+		case f.SA == SAFailed && f.SAErrorFrom == "" && c.need >= 2 && !c.keys["function.sa_error_from"]:
+			c.fail(CodeMissing, "function.sa_error_from", "required with sa failed")
 		case f.SA == SAFailed && f.SAErrorFrom != "master" && f.SAErrorFrom != "outstation":
 			c.fail(CodeForm, "function.sa_error_from", "%q is not master or outstation", f.SAErrorFrom)
 		case f.SA != SAFailed && f.SAErrorFrom != "":
@@ -625,6 +736,7 @@ func (f *Function) check(c *checker, protocol string) {
 		if len(f.Objects) > 0 {
 			c.fail(CodeConflict, "function.objects", "empty for Modbus")
 		}
+		c.required("function.unit")
 		if f.Unit == nil || *f.Unit < 0 || *f.Unit > 255 {
 			c.fail(CodeRange, "function.unit", "required for Modbus, in [0, 255]")
 		}
@@ -641,6 +753,9 @@ func (f *Function) check(c *checker, protocol string) {
 		}
 		if f.SA != "" || f.SAErrorFrom != "" {
 			c.fail(CodeConflict, "function.sa", "DNP3 only")
+		}
+		if f.ObjectsUnread != nil || c.keys["function.objects_unread"] {
+			c.fail(CodeConflict, "function.objects_unread", "DNP3 only")
 		}
 	default:
 		c.fail(CodeConflict, "protocol", "%q: function observations are dnp3 or modbus", protocol)
@@ -673,6 +788,17 @@ func (in *Insecure) check(c *checker) {
 		if l.Why != "" {
 			c.token("insecure.login.why", l.Why)
 		}
+		// Channel only, so a stored record reads as it did (C13 0.3 §15.6):
+		// a user name only where the slot was placed, and why exactly where
+		// it was not.
+		if c.need >= 2 {
+			if (l.User != nil || c.keys["insecure.login.user"]) && l.Slot != "placed" {
+				c.fail(CodeConflict, "insecure.login.user", "only with slot placed, not %q", l.Slot)
+			}
+			if (l.Why != "" || c.keys["insecure.login.why"]) != (l.Slot == "not-placed") {
+				c.fail(CodeConflict, "insecure.login.why", "present exactly with slot not-placed, not %q", l.Slot)
+			}
+		}
 	}
 	if in.RedirectOnly != nil && (!*in.RedirectOnly || in.Reason != "http-plain") {
 		c.fail(CodeConflict, "insecure.redirect_only", "present only as true, on http-plain")
@@ -700,16 +826,57 @@ func (e *Encrypted) check(c *checker) {
 	case s != nil && e.Scheme != "snmpv3":
 		c.fail(CodeConflict, "encrypted.snmpv3", "only with scheme snmpv3")
 	case s != nil:
-		if !engineIDForm.MatchString(s.EngineID) {
-			c.fail(CodeForm, "encrypted.snmpv3.engine_id", "%q is not 5 to 32 octets in lowercase hex", s.EngineID)
+		s.check(c)
+	}
+}
+
+// check applies C13 0.3 §15.5. usm_parsed is required on the 0.2 and 0.3
+// channels, and absent reads as true. With true, the channel requires the
+// four USM fields and bounds boots and time at MaxUSMInteger; a stored
+// record reads as it did, so engine_id, which every record needed before
+// §15, stays required on every path unless usm_parsed is false (D3's F1
+// on #760). With false, the four are refused if present, on
+// both paths, since only a record carrying the new key can be refused.
+func (s *SNMPv3) check(c *checker) {
+	const p = "encrypted.snmpv3."
+	c.new02(p+"usm_parsed", s.UsmParsed != nil || c.keys[p+"usm_parsed"])
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{
+		{"engine_id", s.EngineID != nil}, {"user", s.User != nil},
+		{"boots", s.Boots != nil}, {"time", s.Time != nil},
+	} {
+		switch present := f.set || c.keys[p+f.name]; {
+		case s.UsmParsed != nil && !*s.UsmParsed && present:
+			c.fail(CodeConflict, p+f.name, "absent with usm_parsed false: the USM block was not parsed")
+		case (s.UsmParsed == nil || *s.UsmParsed) && !present && (c.need >= 2 || f.name == "engine_id"):
+			c.fail(CodeMissing, p+f.name, "required with usm_parsed true")
 		}
-		c.required("encrypted.snmpv3.user")
-		s.User.check(c, "encrypted.snmpv3.user")
-		if !contains([]string{"noAuthNoPriv", "authNoPriv", "authPriv"}, s.Level) {
-			c.fail(CodeForm, "encrypted.snmpv3.level", "%q is not a security level", s.Level)
-		}
-		if (s.Boots != nil && *s.Boots < 0) || (s.Time != nil && *s.Time < 0) {
-			c.fail(CodeRange, "encrypted.snmpv3.boots", "boots and time are not negative")
+	}
+	switch {
+	case s.EngineID == nil:
+	case c.minor < 2 && !engineIDForm01.MatchString(*s.EngineID):
+		c.fail(CodeForm, p+"engine_id", "%q is not 5 to 32 octets in lowercase hex in a 0.1 record", *s.EngineID)
+	case !engineIDForm.MatchString(*s.EngineID):
+		c.fail(CodeForm, p+"engine_id", "%q is not 0 to 32 octets in lowercase hex", *s.EngineID)
+	}
+	if s.User != nil {
+		s.User.check(c, p+"user")
+	}
+	if !contains([]string{"noAuthNoPriv", "authNoPriv", "authPriv"}, s.Level) {
+		c.fail(CodeForm, p+"level", "%q is not a security level", s.Level)
+	}
+	for _, f := range []struct {
+		name string
+		v    *int64
+	}{{"boots", s.Boots}, {"time", s.Time}} {
+		switch {
+		case f.v == nil:
+		case *f.v < 0:
+			c.fail(CodeRange, p+f.name, "%d is negative", *f.v)
+		case *f.v > MaxUSMInteger && c.need >= 2:
+			c.fail(CodeRange, p+f.name, "%d above %d", *f.v, MaxUSMInteger)
 		}
 	}
 }
@@ -723,6 +890,10 @@ func (o *Observation) checkFrames(c *checker) {
 		if len(o.Frames) > 0 {
 			c.fail(CodeConflict, "frames", "bytes travel only with a first sight")
 		}
+		return
+	}
+	if len(o.Frames) == 0 && c.need >= 2 && !c.keys["frames"] {
+		c.fail(CodeMissing, "frames", "required on a first sight")
 		return
 	}
 	if len(o.Frames) != len(o.Citation.Frames) {
@@ -824,12 +995,19 @@ func (o *Observation) checkNode(c *checker) {
 	} else if n.FunctionTable != "" {
 		c.table("node.function_table", n.FunctionTable)
 	}
-	want := isFunc && o.Function != nil && o.Protocol == "dnp3" && o.Function.SA == SANone && contains(NoSAClasses, n.FunctionClass)
-	switch {
-	case n.DNP3NoSA != nil && !*n.DNP3NoSA:
-		c.fail(CodeForm, "node.dnp3_no_sa", "present only as true")
-	case want != (n.DNP3NoSA != nil):
-		c.fail(CodeConflict, "node.dnp3_no_sa", "set exactly on a DNP3 %v function with sa none", NoSAClasses)
+	// dnp3_sa_unknown is new in 0.2, as sa unknown is (D3's F2 on #760).
+	c.new02("node.dnp3_sa_unknown", n.DNP3SAUnknown != nil)
+	for _, x := range []struct {
+		field, sa string
+		flag      *bool
+	}{{"node.dnp3_no_sa", SANone, n.DNP3NoSA}, {"node.dnp3_sa_unknown", SAUnknown, n.DNP3SAUnknown}} {
+		want := isFunc && o.Function != nil && o.Protocol == "dnp3" && o.Function.SA == x.sa && contains(NoSAClasses, n.FunctionClass)
+		switch {
+		case x.flag != nil && !*x.flag:
+			c.fail(CodeForm, x.field, "present only as true")
+		case want != (x.flag != nil):
+			c.fail(CodeConflict, x.field, "set exactly on a DNP3 %v function with sa %s", NoSAClasses, x.sa)
+		}
 	}
 	c.new02("node.late", n.Late)
 	c.new02("node.backlog", n.Backlog)

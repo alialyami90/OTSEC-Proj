@@ -54,10 +54,12 @@ func v2Stored(t *testing.T) v2Msg {
 }
 
 // v2Observation is the same observation as the sensor sends it on the 0.2
-// channel: no node object.
+// channel: no node object, and l2.vlan 0, the untagged frame's required
+// key (C13 0.3 §15.1, §15.4), which the stored fixture never carries.
 func v2Observation(t *testing.T) v2Msg {
 	m := v2Stored(t)
 	delete(m, "node")
+	v2Set(m, "l2.vlan", 0)
 	return m
 }
 
@@ -461,6 +463,7 @@ func TestC13v02Readers01StayStrict(t *testing.T) {
 		v2Del(m, "made_utc")
 		v2Del(m, "coverage.config_digest")
 		v2Del(m, "coverage.settings.prp_window_ms")
+		v2Del(m, "l2.vlan") // at 0.1 an untagged frame has no vlan
 		return m
 	}
 	hb01 := func() v2Msg {

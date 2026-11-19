@@ -1009,7 +1009,10 @@ func (r *Runtime) detectorStatus(nd *netDetector) {
 	missing := int64(r.intake.sessionMissing)
 	r.intake.mu.Unlock()
 	nd.st.Through, nd.st.Checkpointed, nd.st.Restored, nd.st.AlertsPending = d.Through(), nd.written, nd.restored, len(nd.unsent)
-	nd.st.NotJudged = map[string]int64{"pending-full": d.PendingFull(), "tied-evicted": d.TiedEvicted(), "before-retained": d.BeforeRetained(), "session-missing": missing}
+	// not-covered: sessions the coverage did not cover, a statement of
+	// blindness included, dropped unjudged (C13 0.3 §15.6).
+	nd.st.NotJudged = map[string]int64{"pending-full": d.PendingFull(), "tied-evicted": d.TiedEvicted(), "before-retained": d.BeforeRetained(), "session-missing": missing,
+		"not-covered": d.Uncovered()}
 	nd.st.OpenFlowSeen, nd.st.EarlyCloses, nd.st.Mismatches, nd.st.OrderingFaults = d.OpenFlowSeen(), d.EarlyCloses(), d.Mismatches(), d.OrderingFaults()
 	if h := (r.opt.Mono() - nd.start).Hours(); h > 0 {
 		nd.st.EarlyClosesPerHour = float64(nd.st.EarlyCloses) / h

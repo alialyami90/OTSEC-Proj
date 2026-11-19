@@ -108,7 +108,7 @@ func worstObservations(t testing.TB) []*Observation {
 		case KindInsecure:
 			o.Insecure = &Insecure{Reason: "http-plain", Login: &Login{User: &worstText, Attempts: 1 << 62, Slot: "not-placed", Why: worstToken("w")}, RedirectOnly: ptr(true)}
 		case KindEncrypted:
-			o.Encrypted = &Encrypted{Scheme: "snmpv3", SNMPv3: &SNMPv3{EngineID: strings.Repeat("ab", 32), User: worstText, Level: "noAuthNoPriv", Boots: ptr(int64(1 << 62)), Time: ptr(int64(1 << 62))}}
+			o.Encrypted = &Encrypted{Scheme: "snmpv3", SNMPv3: &SNMPv3{EngineID: ptr(strings.Repeat("ab", 32)), User: &worstText, Level: "noAuthNoPriv", Boots: ptr(int64(1 << 62)), Time: ptr(int64(1 << 62))}}
 		case KindIdentity:
 			o.Identity = &Identity{Attribute: "snmp-sysdescr", Value: worstText, Via: worstToken("v")}
 		case KindUndecoded:

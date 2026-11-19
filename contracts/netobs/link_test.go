@@ -21,6 +21,7 @@ func fxCoverage02() Coverage {
 func fxObservation02() *Observation {
 	o := fxFunction()
 	o.Schema, o.MadeUTC, o.Coverage = Identifier02, "2026-11-07T10:00:00.200000Z", fxCoverage02()
+	o.Function.ObjectsUnread = ptr(false)
 	return o
 }
 

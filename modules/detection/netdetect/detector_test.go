@@ -56,8 +56,9 @@ func dxID(seq uint64) event.EventID {
 func dxFn(t testing.TB, o *netobs.Observation, code int, objects []string, sa, from string) *netobs.Observation {
 	t.Helper()
 	o.Kind, o.Flow, o.Service = netobs.KindFunction, nil, nil
-	o.Function = &netobs.Function{Code: code, Objects: objects, SA: sa, SAErrorFrom: from}
-	row := Classify("dnp3", code, nil, objects)
+	o.Schema = netobs.Identifier02 // a 0.2 record, whose headers were read to the end (C13 0.3 §15.3)
+	o.Function = &netobs.Function{Code: code, Objects: objects, ObjectsUnread: ptr(false), SA: sa, SAErrorFrom: from}
+	row := ClassifyFunction("dnp3", o.Function)
 	o.Node.FunctionClass, o.Node.FunctionTable, o.Node.DNP3NoSA = row.Class, Table, nil
 	if sa == netobs.SANone && slices.Contains(netobs.NoSAClasses, row.Class) {
 		o.Node.DNP3NoSA = ptr(true)

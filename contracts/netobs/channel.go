@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 
 	"otsec.local/otsec/contracts/internal/strictjson"
 )
@@ -196,8 +197,9 @@ func (a *Agent) counts() []struct {
 }
 
 // Counters are totals since the run began, and never decrease within a run.
-// DropsDriver is absent when the capture driver reports nothing, which
-// means unknown, never zero.
+// DropsDriver is required on the 0.2 and 0.3 channels (C13 0.3 §15.7); on
+// the 0.1 channel it is absent when the capture driver reports nothing,
+// which means unknown, never zero.
 type Counters struct {
 	Packets              uint64  `json:"packets"`
 	Bytes                uint64  `json:"bytes"`
@@ -277,10 +279,11 @@ func (h *Heartbeat) validateChannel(want string, keys, nulls map[string]bool) er
 		c.fail(CodeForm, "interface_check", "%q is not ok, bound or unknown", h.InterfaceCheck)
 	}
 	// An absent 0.1 count decodes as 0. On the 0.2 channel it is refused,
-	// not read as 0; only drops_driver may be absent (C13 §6; D3's N1 on
-	// #687). The 0.1 channel reads as it did.
+	// not read as 0 (C13 §6; D3's N1 on #687), and so is an absent
+	// drops_driver, which reads as unknown only on the 0.1 channel (C13
+	// 0.3 §15.7). The 0.1 channel reads as it did.
 	if c.need >= 2 && c.keys != nil {
-		for _, name := range counters01 {
+		for _, name := range append([]string{"drops_driver"}, counters01...) {
 			if !c.keys["counters."+name] {
 				c.fail(CodeMissing, "counters."+name, "required")
 			}
@@ -323,6 +326,7 @@ func (h *Heartbeat) validateChannel(want string, keys, nulls map[string]bool) er
 	if h.FrameStage != nil && h.FrameStage.OverlapTableFull == nil {
 		c.fail(CodeMissing, "frame_stage.overlap_table_full", "required")
 	}
+	c.requireKeys("", reflect.ValueOf(h).Elem())
 	c.refuseNulls()
 	return c.err()
 }

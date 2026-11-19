@@ -85,10 +85,14 @@ func v3Without(m v2Msg) v2Msg {
 }
 
 // v3Stored is m as the node stores it, at schema: the node object of the
-// cc-d0 fixture back on, and at 0.1 without 0.2's fields.
+// cc-d0 fixture back on, l2.vlan 0 left out (the node reads it as nil and
+// never stores 0, C13 0.3 §15.4), and at 0.1 without 0.2's fields.
 func v3Stored(t *testing.T, m v2Msg, schema string) v2Msg {
 	m["schema"] = schema
 	m["node"] = v2Stored(t)["node"]
+	if l2, _ := m["l2"].(map[string]any); l2["vlan"] == 0 {
+		delete(l2, "vlan")
+	}
 	if schema == "otsec.netobs/0.1" {
 		for _, p := range []string{"made_utc", "coverage.config_digest", "coverage.settings.prp_window_ms", "node.late", "node.backlog", "node.lost"} {
 			v2Del(m, p)

@@ -46,6 +46,28 @@ func Classify(protocol string, code int, sub *int, objects []string) Row {
 	return Row{netobs.ClassOther, Unknown, "no table for protocol " + protocol}
 }
 
+// ClassifyFunction returns the fc-classes/1 row for a function
+// observation's body. A DNP3 request whose object headers were not shown
+// read to the end (objects_unread true, or absent in a stored record)
+// takes its code's most restrictive row, as an absent Modbus sub does:
+// function 2 is then write, never time-sync or session-setup (C13 0.3
+// §15.3).
+func ClassifyFunction(protocol string, f *netobs.Function) Row {
+	if protocol == "dnp3" && !f.ObjectsRead() {
+		r := dnp3(f.Code, nil)
+		r.Status, r.Source = Ruling, "objects not read to the end: the most restrictive row for its code (C13 0.3 §15.3); "+r.Source
+		return r
+	}
+	return Classify(protocol, f.Code, f.Sub, f.Objects)
+}
+
+// objectsUnread reports whether o is a DNP3 function whose object headers
+// were not shown read to the end (C13 0.3 §15.3): the learner does not
+// learn its objects, and new-function judges it as not in the baseline.
+func objectsUnread(o *netobs.Observation) bool {
+	return o.Protocol == "dnp3" && o.Function != nil && !o.Function.ObjectsRead()
+}
+
 func dnp3(code int, objects []string) Row {
 	switch code {
 	case 1:
