@@ -51,6 +51,7 @@ func TestWorstStored03Fits(t *testing.T) {
 	worstBody, worstRecord, worstFrame := 0, 0, 0
 	for _, o := range worstObservations(t) {
 		o.Schema, o.MadeUTC = Identifier03, "2026-11-07T10:00:01.123456789Z"
+		worstChannel02(o)
 		o.Coverage.ConfigDigest, o.Coverage.Settings.PRPWindowMS = fxDigest, MaxPRPWindowMS
 		for {
 			if b, _ := json.Marshal(o.Coverage); len(b) <= MaxCoverageBytes {

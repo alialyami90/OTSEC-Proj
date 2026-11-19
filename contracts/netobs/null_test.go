@@ -64,7 +64,15 @@ func nullService(schema string) *Observation {
 
 func nullTelnet(schema string) *Observation {
 	return nullOther(schema, KindInsecure, "telnet", func(o *Observation) {
-		o.Insecure = &Insecure{Reason: "telnet", Login: &Login{User: nullText("operator"), Attempts: 1, Slot: "none", Why: "no-slot"}}
+		o.Insecure = &Insecure{Reason: "telnet", Login: &Login{User: nullText("operator"), Attempts: 1, Slot: "placed"}}
+	})
+}
+
+// nullTelnetNotPlaced is a login whose slot was not placed: why, and no
+// user (C13 0.3 §15.6).
+func nullTelnetNotPlaced(schema string) *Observation {
+	return nullOther(schema, KindInsecure, "telnet", func(o *Observation) {
+		o.Insecure = &Insecure{Reason: "telnet", Login: &Login{Attempts: 1, Slot: "not-placed", Why: "no-prompt"}}
 	})
 }
 
@@ -76,7 +84,7 @@ func nullHTTP(schema string) *Observation {
 
 func nullSNMPv3(schema string) *Observation {
 	return nullOther(schema, KindEncrypted, "snmp", func(o *Observation) {
-		o.Encrypted = &Encrypted{Scheme: "snmpv3", SNMPv3: &SNMPv3{EngineID: "8000000001", User: *nullText("monitor"),
+		o.Encrypted = &Encrypted{Scheme: "snmpv3", SNMPv3: &SNMPv3{UsmParsed: ptr(true), EngineID: ptr("8000000001"), User: nullText("monitor"),
 			Level: "authPriv", Boots: ptr(int64(3)), Time: ptr(int64(1000))}}
 	})
 }
@@ -162,7 +170,7 @@ func nullRows() []nullRow {
 		{29, []any{"insecure", "login"}, obs(nullTelnet)},
 		{30, []any{"insecure", "login", "user"}, obs(nullTelnet)},
 		{31, []any{"insecure", "login", "user", "truncated"}, obs(nullTelnet)},
-		{32, []any{"insecure", "login", "why"}, obs(nullTelnet)},
+		{32, []any{"insecure", "login", "why"}, obs(nullTelnetNotPlaced)},
 		{33, []any{"insecure", "redirect_only"}, obs(nullHTTP)},
 		// Row group: the heartbeat.
 		{34, []any{"ring_oldest_utc"}, hbRec},
@@ -233,7 +241,9 @@ func TestChannelNullRefusedAt34Paths(t *testing.T) {
 			if _, err := DecodeFromSensorIn(b, schema); !refusedOnly(err, CodeForm, f) {
 				t.Errorf("%s null: %v, want only form at %s", name, err, f)
 			}
-			if err := decodeRuleOff(b, schema, r.rec(schema)); !onlyTextKeysMissing(err, f) {
+			// sa "" is refused by its own check too, as not an SA outcome on
+			// the channel (C13 0.3 §15.2).
+			if err := decodeRuleOff(b, schema, r.rec(schema)); !onlyTextKeysMissing(err, f) && !(f == "function.sa" && refusedOnly(err, CodeForm, f)) {
 				t.Errorf("control, rule off, %s null: %v, want accepted", name, err)
 			}
 		}
@@ -292,7 +302,7 @@ func nullPaths(v any, at []any, out *[][]any) {
 // errors (N2).
 func TestChannelNullRefusedEverywhere(t *testing.T) {
 	recs := []func(string) any{hbRec}
-	for _, f := range []func(string) *Observation{nullFunction, nullRepeat, nullModbus, nullModbus3, nullService, nullTelnet,
+	for _, f := range []func(string) *Observation{nullFunction, nullRepeat, nullModbus, nullModbus3, nullService, nullTelnet, nullTelnetNotPlaced,
 		nullHTTP, nullSNMPv3, nullTLS, nullIdentity, nullUndecoded} {
 		recs = append(recs, obs(f))
 	}
@@ -381,8 +391,6 @@ func TestChannelAbsentAndEmptyStillDecode(t *testing.T) {
 			mut  func(m map[string]any)
 		}{
 			{"sub left out", nullModbus(schema), func(m map[string]any) { delete(m["function"].(map[string]any), "sub") }},
-			{"sa left out", nullFunction(schema), func(m map[string]any) { delete(m["function"].(map[string]any), "sa") }},
-			{"vlan left out", nullFunction(schema), func(m map[string]any) { delete(m["l2"].(map[string]any), "vlan") }},
 			{"login left out", nullTelnet(schema), func(m map[string]any) { delete(m["insecure"].(map[string]any), "login") }},
 			{"sni left out", nullTLS(schema), func(m map[string]any) {
 				delete(m["encrypted"].(map[string]any)["tls"].(map[string]any), "sni")
@@ -531,6 +539,12 @@ func as01(o *Observation) *Observation {
 	cv := fxCoverage()
 	cv.PRP.LANsSeen = o.Coverage.PRP.LANsSeen
 	o.Schema, o.MadeUTC, o.Coverage = Identifier, "", cv
+	if o.Function != nil {
+		o.Function.ObjectsUnread = nil // new in 0.2 (C13 0.3 §15.3)
+	}
+	if o.Encrypted != nil && o.Encrypted.SNMPv3 != nil {
+		o.Encrypted.SNMPv3.UsmParsed = nil // new in 0.2 (§15.5)
+	}
 	return o
 }
 
