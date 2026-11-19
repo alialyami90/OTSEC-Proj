@@ -112,7 +112,7 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 	if c.M.IsZero() {
 		f = append(f, cursorAbsent)
 	} else {
-		n, err := unixNano(canonUTC(c.M))
+		n, err := mNano(c.M)
 		if err != nil {
 			return nil, err
 		}
@@ -192,6 +192,27 @@ func unixNano(s string) (int64, error) {
 		return 0, fmt.Errorf("sensorlink: the time %q cannot be saved in Unix nanoseconds", s)
 	}
 	return t.UnixNano(), nil
+}
+
+// mNoClamp: the control of M's clamp, a node that writes M unclamped and
+// fails the save past the field's range. False in the node.
+var mNoClamp bool
+
+// mNano is M in Unix nanoseconds, clamped to the field's range, 1970 to
+// 2262 (D1's ruling on D3's B2 on #748, option (a)): a later M is written
+// as the largest, an earlier one as 0. The floor in memory is not
+// clamped, so a floor past 2262 still refuses every tie, and after a
+// start an M of 2262 does.
+func mNano(m time.Time) (int64, error) {
+	switch {
+	case mNoClamp:
+		return unixNano(canonUTC(m))
+	case m.Before(time.Unix(0, 0)):
+		return 0, nil
+	case m.After(time.Unix(0, math.MaxInt64)):
+		return math.MaxInt64, nil
+	}
+	return m.UnixNano(), nil
 }
 
 // spanOrdered is CH-40's from at or before to, and a cut end never past

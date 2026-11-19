@@ -2,6 +2,7 @@ package sensorlink
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -155,12 +156,22 @@ func (l *Link) skewOn() bool { return l.opt.Cursor != nil }
 // offNow is the node's wall clock less its monotonic clock, in ns.
 func (l *Link) offNow() int64 { return l.now().UnixNano() - int64(l.opt.Monotonic()) }
 
+// absDur is |d|. math.MinInt64, where time.Time.Sub saturates for a
+// sensor clock about 292 years or more ahead, has no negation: it is taken
+// as math.MaxInt64 (D3's B1 on #748), so the alarm, the latest sample and
+// K's move each see it. absDurWraps is the control, a negation that
+// wraps; false in the node.
 func absDur(d time.Duration) time.Duration {
-	if d < 0 {
+	switch {
+	case d == math.MinInt64 && !absDurWraps:
+		return math.MaxInt64
+	case d < 0:
 		return -d
 	}
 	return d
 }
+
+var absDurWraps bool
 
 // minE is the least sample.
 func (s *skew) minE() time.Duration {

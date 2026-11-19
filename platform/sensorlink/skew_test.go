@@ -2,6 +2,7 @@ package sensorlink
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -531,6 +532,29 @@ func TestSkewBounds(t *testing.T) {
 			t.Errorf("a step of %s: %d samples after a hold", c.step, got)
 		}
 	}
+	// A sensor clock 300 years ahead, past what a Duration holds (D3's B1
+	// on #748): the alarm, the latest sample and K's move. Control: an
+	// absDur that wraps, which sees none of them.
+	far := func(t *testing.T) (SkewStats, string) {
+		r := newRig(t, nil)
+		p := r.accepted(r.agreeHello(hello02()))
+		p.taken()
+		r.pass(netobs.TickMinSpacing + time.Second)
+		tk := tick02(20, 0, 0)
+		tk.SensorUTC = canonUTC(r.now().AddDate(300, 0, 0))
+		p.send(tk)
+		p.taken()
+		return r.l.SkewStats(), r.l.standing()
+	}
+	if st, c := far(t); !st.Alarm || c != skewLatest || st.FloorBy != skewMoved {
+		t.Errorf("300 years ahead: alarm %v, standing %q, floor by %q", st.Alarm, c, st.FloorBy)
+	}
+	t.Run("control: an absDur that wraps", func(t *testing.T) {
+		withSeam(t, &absDurWraps)
+		if st, c := far(t); st.Alarm || c != "" {
+			t.Fatalf("the control saw it: alarm %v, standing %q", st.Alarm, c)
+		}
+	})
 	r := newRig(t, nil)
 	f := t0.Add(time.Hour)
 	r.l.skew.floor, r.l.skew.floorBy, r.l.skew.startBound = f, skewSpan, f.Add(-time.Minute)
@@ -636,4 +660,80 @@ func TestSkewOnsetReleasesHeld(t *testing.T) {
 			t.Fatalf("the control committed %d at the onset", n)
 		}
 	})
+}
+
+// helloAnswer dials, sends h, and returns "" when the node acks it, or
+// the reason it closed.
+func (r *rig) helloAnswer(h *netobs.SensorHello) string {
+	r.t.Helper()
+	p := r.dial(enrolment())
+	p.send(h)
+	select {
+	case _, ok := <-p.acks:
+		if ok {
+			p.end()
+			return ""
+		}
+		return p.closed()
+	case <-time.After(20 * time.Second):
+		r.t.Fatal("the hello was neither acked nor closed")
+		return ""
+	}
+}
+
+// D3's B2 on #748, option (a) (D1's ruling): one time from the sensor past
+// what M's field holds (Unix nanoseconds, to 2262), a tick's sensor_utc
+// 300 years ahead or a stated span's upper end 250 years ahead. M is
+// clamped when written, so once the sensor's clock is put right its next
+// hello is acked; the floor in memory stays past 2262 and refuses every
+// tie. Control: M written unclamped, whose save fails, so the corrected
+// hello closes position-not-saved.
+func TestSkewFarClockRecovers(t *testing.T) {
+	type leg struct {
+		name string
+		tick func(r *rig) *netobs.Tick
+	}
+	legs := []leg{
+		{"a tick 300 years ahead", func(r *rig) *netobs.Tick {
+			tk := tick02(20, 0, 0)
+			tk.SensorUTC = canonUTC(r.now().AddDate(300, 0, 0))
+			return tk
+		}},
+		{"a span to 250 years ahead", func(r *rig) *netobs.Tick {
+			tk := r.agreeTick(tick02(20, 0, 1))
+			tk.Lost = []netobs.Span{{FromUTC: canonUTC(r.now().Add(-time.Minute)), ToUTC: canonUTC(r.now().AddDate(250, 0, 0))}}
+			return tk
+		}},
+	}
+	run := func(t *testing.T, l leg) (answer string, r *rig) {
+		r = newRig(t, nil)
+		p := r.accepted(r.agreeHello(hello02()))
+		p.taken()
+		r.pass(netobs.TickMinSpacing + time.Second)
+		p.send(l.tick(r))
+		p.taken()
+		p.end()
+		r.pass(time.Minute)
+		return r.helloAnswer(r.agreeHello(resume(1, 20))), r
+	}
+	for _, l := range legs {
+		t.Run(l.name, func(t *testing.T) {
+			answer, r := run(t, l)
+			if answer != "" {
+				t.Fatalf("the corrected hello closed %q", answer)
+			}
+			if m := cursorNow(t, r.cs).M; !m.Equal(time.Unix(0, math.MaxInt64)) {
+				t.Fatalf("M saved %s, want the field's largest", m)
+			}
+			if r.l.floorRefusal(r.now()) == "" {
+				t.Fatalf("the floor %s refuses nothing now", r.l.SkewStats().Floor)
+			}
+		})
+		t.Run(l.name+", control: M unclamped", func(t *testing.T) {
+			withSeam(t, &mNoClamp)
+			if answer, _ := run(t, l); answer != netobs.ClosePositionNotSaved {
+				t.Fatalf("the control's corrected hello: %q", answer)
+			}
+		})
+	}
 }
