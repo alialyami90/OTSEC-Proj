@@ -1,6 +1,6 @@
 # C13: how a build reads a later minor's stored record (options)
 
-**Status: proposed, not approved.** Owner D4. This is the open item of D1's ruling 7001264083 on #760, item 3 (to be recorded in D4-120): options before the next C13 minor and before P4-4-DE, under D4-99 (a new mechanism is settled as options first). No code is changed here.
+**Status: approved, option (b), by D1 (D4-120 item 2.2; 7010466389 on #763).** Owner D4. This is the open item of D1's ruling 7001264083 on #760, item 3 (to be recorded in D4-120): options before the next C13 minor and before P4-4-DE, under D4-99 (a new mechanism is settled as options first). No code is changed here.
 
 **Evidence class: `desk`.** First read at `main` `2dde13b6`; revised to the four reviews on #763 (D7's 7009756281, D5's 7009772447, D3's 7009793907, D6's 7010191380) and re-read at `main` `1d49f54a`, where `DecodeStored`, `DecodeBaseline`, `storedSchema` and `validateStored` are as at `2dde13b6`. The forward-read results cited are D4's probe (7001201557 on #760) and D6's (7001254947 on #760, 7001107395 on #762, 7010191380 on #763), all scratch tests on the owner's PC that were not committed. Nothing in this note was run.
 
