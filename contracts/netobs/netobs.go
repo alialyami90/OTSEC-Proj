@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"maps"
 	"net/netip"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"otsec.local/otsec/contracts/version"
@@ -188,6 +190,14 @@ type checker struct {
 }
 
 func (c *checker) fail(code Code, field, format string, a ...any) {
+	// A key is missing once, however many rules require it (requireKeys
+	// and a rule's own check may both name it).
+	if code == CodeMissing && slices.ContainsFunc(c.errs, func(e error) bool {
+		x, ok := e.(*Error)
+		return ok && x.Code == CodeMissing && x.Field == field
+	}) {
+		return
+	}
 	c.errs = append(c.errs, &Error{Code: code, Field: field, Detail: fmt.Sprintf(format, a...)})
 }
 
@@ -355,6 +365,48 @@ func (c *checker) null(field string, isNil bool) {
 func (c *checker) required(field string) {
 	if c.need >= 2 && c.keys != nil && !c.keys[field] {
 		c.fail(CodeMissing, field, "required")
+	}
+}
+
+// requireKeys refuses as missing, on the 0.2 and 0.3 channels, every key
+// of v's Go type whose tag does not mark it omitempty and that the decoded
+// document leaves out, at any depth under a key that is present and not
+// null (C13 0.3 §15.1, §15.9's key sweep). An omitempty key is optional
+// here, and a rule that requires it names it itself. path is v's path; a
+// stored record and the 0.1 channel are not read by it.
+func (c *checker) requireKeys(path string, v reflect.Value) {
+	if c.need < 2 || c.keys == nil {
+		return
+	}
+	switch v.Kind() {
+	case reflect.Pointer:
+		if !v.IsNil() {
+			c.requireKeys(path, v.Elem())
+		}
+	case reflect.Slice:
+		for i := range v.Len() {
+			if p := fmt.Sprintf("%s[%d]", path, i); !c.nulls[p] {
+				c.requireKeys(p, v.Index(i))
+			}
+		}
+	case reflect.Struct:
+		t := v.Type()
+		for i := range t.NumField() {
+			name, opts, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			p := name
+			if path != "" {
+				p = path + "." + name
+			}
+			switch {
+			case !c.keys[p] && opts != "omitempty":
+				c.fail(CodeMissing, p, "required")
+			case c.keys[p] && !c.nulls[p]:
+				c.requireKeys(p, v.Field(i))
+			}
+		}
 	}
 }
 

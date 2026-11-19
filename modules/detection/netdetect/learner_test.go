@@ -68,8 +68,11 @@ func lxObs(t testing.TB, k netobs.Kind, src, dst string, dport int) *netobs.Obse
 	case netobs.KindService:
 		o.Service = &netobs.Service{Basis: "content"}
 	case netobs.KindFunction:
-		o.Function = &netobs.Function{Code: 5, Objects: []string{"g12v1"}, SA: netobs.SANone}
-		row := Classify("dnp3", 5, nil, o.Function.Objects)
+		// A function is a 0.2 record, so that it can say its headers were
+		// read to the end (C13 0.3 §15.3).
+		o.Schema = netobs.Identifier02
+		o.Function = &netobs.Function{Code: 5, Objects: []string{"g12v1"}, ObjectsUnread: ptr(false), SA: netobs.SANone}
+		row := ClassifyFunction("dnp3", o.Function)
 		nd.FunctionClass, nd.FunctionTable = row.Class, Table
 		nd.DNP3NoSA = ptr(true)
 	}
@@ -410,7 +413,7 @@ func TestLearnerOverflow(t *testing.T) {
 	// draft room, and its end is refused like any new entry.
 	read := lxObs(t, netobs.KindFunction, "192.0.2.10", "192.0.2.20", 1)
 	read.Function.Code, read.Function.Objects = 1, []string{"g60v1"}
-	read.Node.FunctionClass, read.Node.DNP3NoSA = Classify("dnp3", 1, nil, read.Function.Objects).Class, nil
+	read.Node.FunctionClass, read.Node.DNP3NoSA = ClassifyFunction("dnp3", read.Function).Class, nil
 	start := lxObs(t, netobs.KindFlow, "192.0.2.10", "192.0.2.20", 2)
 	for i, step := range []struct {
 		o    *netobs.Observation

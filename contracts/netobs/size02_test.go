@@ -21,6 +21,27 @@ func worstSpans() []Span {
 	return s
 }
 
+// worstChannel02 sets on a worst 0.1 observation what the 0.2 and 0.3
+// channels add or bound (C13 0.3 §15): three inner VIDs, the DNP3
+// function's objects_unread, the SNMPv3 usm_parsed with boots and time at
+// their bound, and a login whose slot was placed, so it carries a user
+// and no why; an undecoded record with ip has basis port. D6's recount of
+// the stored sizes is owed (§15.8).
+func worstChannel02(o *Observation) {
+	o.L2.VLAN, o.L2.InnerVLANs = ptr(4094), []int{4094, 4094, 4094}
+	switch {
+	case o.Function != nil:
+		o.Function.ObjectsUnread = ptr(false)
+	case o.Encrypted != nil && o.Encrypted.SNMPv3 != nil:
+		s := o.Encrypted.SNMPv3
+		s.UsmParsed, s.Boots, s.Time = ptr(true), ptr(int64(MaxUSMInteger)), ptr(int64(MaxUSMInteger))
+	case o.Undecoded != nil:
+		o.Undecoded.Basis = "port" // ethertype never with ip on the channel
+	case o.Insecure != nil && o.Insecure.Login != nil:
+		o.Insecure.Login.Slot, o.Insecure.Login.Why = "placed", ""
+	}
+}
+
 // TestWorstStored02Fits (R-5's contract leg): the worst 0.2 stored body,
 // with made_utc, every node mark and MaxLostSpans windows, is within C4
 // 0.3's MaxNetobsBytes, the bound a 0.1 DecodeStored checks first (CH-35);
@@ -30,6 +51,7 @@ func TestWorstStored02Fits(t *testing.T) {
 	worstBody, worstRecord := 0, 0
 	for _, o := range worstObservations(t) {
 		o.Schema, o.MadeUTC = Identifier02, "2026-11-07T10:00:01.123456789Z"
+		worstChannel02(o)
 		o.Coverage.ConfigDigest, o.Coverage.Settings.PRPWindowMS = fxDigest, MaxPRPWindowMS
 		for {
 			if b, _ := json.Marshal(o.Coverage); len(b) <= MaxCoverageBytes {
