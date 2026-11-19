@@ -15,12 +15,15 @@ while IFS="$(printf '\t')" read -r name sha url proto label; do
   if [ ! -s "$out" ] || ! echo "$sha  $out" | sha256sum -c --status; then
     curl -fsSL --retry 3 -o "$out.part" "$url" && mv "$out.part" "$out"
   fi
+  # Only a capture that checked is unpacked: gunzip on a failed fetch would
+  # stop the script under set -e before the captures after it are tried
+  # (D6's N1 on #751).
   if echo "$sha  $out" | sha256sum -c --status; then
     echo "ok       $name"
+    case "$name" in *.gz) gunzip -kf "$out" ;; esac
   else
     echo "MISMATCH $name (expected $sha)"; fail=1
   fi
-  case "$name" in *.gz) gunzip -kf "$out" ;; esac
 done < "$list"
 rm -f "$list"
 exit $fail
