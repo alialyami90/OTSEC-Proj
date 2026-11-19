@@ -296,3 +296,94 @@ def test_tcp_stop_inputs_follow_the_orders_of_718s_tcp_cells():
     # message and its bare ACK, then FIN, FIN and ACK.
     for case in du.EXPERIMENT[-6:]:
         assert len(flows[case].conv.frames) == 3 + 2 * 5 + 3
+
+
+# D4-116 item 6: #718's dnp3-tcp-master-short, written only when it equals
+# its pin in the committed hr23.sha256 (test), and refused, leaving no file,
+# under a pin it does not equal (control).
+def test_gt_capture_equals_its_pin_and_is_refused_under_another(tmp_path):
+    times = du.gt_capture(str(tmp_path))
+    assert (tmp_path / (du.GT_CASE + ".pcap")).exists()
+    assert len(times) == 24 and times == sorted(times)
+    wrong = tmp_path / "wrong.sha256"
+    wrong.write_text("0" * 64 + "  " + du.GT_CASE + ".pcap\n")
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(SystemExit):
+        du.gt_capture(str(other), str(wrong))
+    assert not (other / (du.GT_CASE + ".pcap")).exists()
+
+
+# A configuration with no exit code, or a non-zero one, on the capture is
+# named, and fails `check` (tests); with all four at 0, none is (control).
+def test_gt_not_run_names_each_missing_configuration(tmp_path):
+    for cfg in du.GT_CFGS:
+        d = tmp_path / du.GT_CASE / cfg
+        d.mkdir(parents=True)
+        (d / "exit-code").write_text("0\n")
+    assert du.gt_not_run(str(tmp_path)) == []
+    (tmp_path / du.GT_CASE / du.C1 / "exit-code").unlink()
+    assert du.gt_not_run(str(tmp_path)) == [du.C1]
+    (tmp_path / du.GT_CASE / du.C2 / "exit-code").write_text("139\n")
+    assert du.gt_not_run(str(tmp_path)) == [du.C1, du.C2]
+
+
+# quote_gt prints, per configuration, only whether it ran and its exit code,
+# never a log or probe row (test); the control is that the same logs, read
+# by rows(), do hold rows, so their absence from the output is the filter's.
+def test_quote_gt_prints_no_row(tmp_path, capsys):
+    marker = "otsec-row-marker"
+    for cfg in du.GT_CFGS:
+        d = tmp_path / du.GT_CASE / cfg
+        d.mkdir(parents=True)
+        (d / "exit-code").write_text("0\n")
+        for log in ("conn", "analyzer", "otsec_viol", "weird", "reporter", "otsec_probe"):
+            (d / (log + ".log")).write_text(json.dumps({"ts": 1.0, "kind": "fc", "note": marker}) + "\n")
+    assert du.rows(str(tmp_path / du.GT_CASE / du.C2 / "conn.log"))
+    assert du.quote_gt(str(tmp_path)) == []
+    out = capsys.readouterr().out
+    assert marker not in out and "{" not in out
+    for cfg in GT_FOUR:
+        assert f"- {cfg}: ran, exit code 0" in out
+
+
+# The four configurations, named here and not taken from du.GT_CFGS, so that
+# dropping one there is caught.
+GT_FOUR = ("zeek-probe-c0", "zeek-probe", "zeek-probe-c1p", "zeek-probe-c2")
+
+
+def _gt_out(tmp_path, codes):
+    for cfg, code in codes.items():
+        d = tmp_path / du.GT_CASE / cfg
+        d.mkdir(parents=True, exist_ok=True)
+        if code is not None:
+            (d / "exit-code").write_text(code + "\n")
+
+
+# Each configuration, missing or exiting non-zero, is returned by quote_gt
+# and printed with its own line (tests); the control is all four at 0, which
+# returns nothing and prints each one's "ran, exit code 0".
+@pytest.mark.parametrize("cfg", GT_FOUR)
+@pytest.mark.parametrize("code,line", [(None, "not run"), ("139", "ran, exit code 139")])
+def test_quote_gt_names_each_configuration_not_run_or_crashed(tmp_path, capsys, cfg, code, line):
+    _gt_out(tmp_path, {c: "0" for c in GT_FOUR})
+    assert du.quote_gt(str(tmp_path)) == []
+    ctl = capsys.readouterr().out
+    for c in GT_FOUR:
+        assert f"- {c}: ran, exit code 0" in ctl
+    other = tmp_path / "other"
+    _gt_out(other, {c: (code if c == cfg else "0") for c in GT_FOUR})
+    assert du.quote_gt(str(other)) == [cfg]
+    out = capsys.readouterr().out
+    assert f"- {cfg}: {line}" in out and "`check` fails" in out
+
+
+# check's exit code obeys quote_gt: with every other table emptied, check
+# returns 0 when all four ran with 0 (control) and 1 when one did not (test).
+def test_check_fails_when_the_gt_capture_did_not_run(tmp_path, monkeypatch):
+    for name in ("EXPECT", "STOPS", "CONTROLS", "EXPERIMENT"):
+        monkeypatch.setattr(du, name, [])
+    _gt_out(tmp_path, {c: "0" for c in GT_FOUR})
+    assert du.check(str(tmp_path)) == 0
+    (tmp_path / du.GT_CASE / "zeek-probe-c2" / "exit-code").unlink()
+    assert du.check(str(tmp_path)) == 1

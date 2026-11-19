@@ -101,7 +101,10 @@ mc_selftest() {
 # uploads (D6's N5): the controls, and mountcheck.py's summary, which reads
 # every output folder again (output-unchanged) and fails on a rule failed.
 mc_record() {
-  { echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc"; } >> "$1" || {
+  # hr23-unit prints each output folder's hash without its entry count.
+  mc_count=
+  [ "$mode" != hr23-unit ] || mc_count=--no-count
+  { echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc" $mc_count; } >> "$1" || {
     cat "$1" >&9
     echo "the script-hash check (docs/release.md section 8.4 item 3) failed; the run stops" >&9
     exit 1
@@ -141,7 +144,11 @@ if [ "$mode" = hr23-unit ]; then
   done
   # Every configuration also loads zeek-patch/viol.zeek, which logs each
   # violation as raised (otsec_viol.log), for the check's three-state judge.
-  for c in "zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F" "zeek-probe-c1p=$HR23_C1P_IMAGE" "zeek-probe-c2=$HR23_C2_IMAGE" $ctl; do
+  # C1 (`zeek-probe`, the stock image with part (a)) runs for the one GT-PCAP
+  # capture that dispatch_unit.py writes, dnp3-tcp-master-short (D4-116
+  # item 6), whose pinned cells name C1; it runs over the d4u-* inputs too,
+  # which `check` does not read under C1.
+  for c in "zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F" "zeek-probe=$ZEEK_IMAGE" "zeek-probe-c1p=$HR23_C1P_IMAGE" "zeek-probe-c2=$HR23_C2_IMAGE" $ctl; do
     cfg=${c%%=*}
     rest=${c#*=}
     im=${rest%%=*}
@@ -155,7 +162,8 @@ if [ "$mode" = hr23-unit ]; then
   done
   rc=0
   { echo "# HR-23: D4's unit and negative tests of option (i)'s patch"; echo
-    echo "D4's own inputs (\`d4u-*\`), not GT-PCAP or stage 2's cases; no counted measurement reads them. Each test's"
+    echo "D4's own inputs (\`d4u-*\`), and one GT-PCAP capture (dnp3-tcp-master-short, whether each configuration ran"
+    echo "and its exit code only); no counted measurement reads them. Each test's"
     echo "control is C1p, the same tree without the patch. C0 (the stock image) runs for D1's experiment on #715."
     echo "(B')'s controls are C2 with one control patch each (zeek-patch/controls/)."; echo
     python3 -I "$here/zeek-patch/dispatch_unit.py" check "$u/out" || rc=$?; } > "$work/hr23-unit.md"
