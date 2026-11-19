@@ -161,7 +161,7 @@ func TestDetectorAlertCapture(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""), spoofFlow(2, nil, gone), spoofFlow(3, nil, hashOf(f1)), laterFlow(4, gone))); err != nil {
 		t.Fatal(err)
 	}
-	tick(t, r)
+	statusThrough(t, r, st, 4)
 	got := committedAlerts(t, r)
 	type want struct {
 		rule    netobs.Rule
@@ -418,7 +418,9 @@ func TestDetectorAlertRetried(t *testing.T) {
 	tick(t, r)
 	tick(t, r)
 	d := detectorStatus(t, st)
-	if n := len(committedAlerts(t, r)); n != 0 || d.Through != 1 || d.AlertsPending != 2 || d.AlertCommitFailures != 2 ||
+	// At least the two ticks' tries: a drive between steps also tries
+	// (driveOnce flushes), on the manager's 1 s ticker (D6's N3 on #759).
+	if n := len(committedAlerts(t, r)); n != 0 || d.Through != 1 || d.AlertsPending != 2 || d.AlertCommitFailures < 2 ||
 		d.CheckpointsWritten != 1 || detectorCursor(t, r) != 0 || countAlarms(st, AlarmAlertNotStored) != 1 {
 		t.Fatalf("%d alerts, cursor %d, status %+v, %d alarms", n, detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
 	}
@@ -484,7 +486,7 @@ func TestDetectorGuardCommitTime(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 		t.Fatal(err)
 	}
-	tick(t, r)
+	statusThrough(t, r, st, 2)
 	for _, a := range committedAlerts(t, r) {
 		if a.alert.Rule == netobs.RuleOwnSessionUnseen {
 			t.Errorf("the session at 08:15 alerted: %+v", a.alert)
@@ -622,7 +624,7 @@ func TestDetectorAlertAlarmRearmed(t *testing.T) {
 	}
 }
 
-// B4 on the node (D1 on #590, C13 آ§14 item 19): a connected session
+// B4 on the node (D1 on #590, C13 §14 item 19): a connected session
 // handed over before any observation, as when a collection runs before the
 // sensor has sent anything, is checkpointed with no clock, restored, and
 // judged once an observation moves the clock past its window: one
@@ -890,7 +892,11 @@ func TestDetectorPrunedFromStream(t *testing.T) {
 				st *Status
 				n  atomic.Int32
 			)
-			t.Cleanup(func() { r.Close() }) // a Close after a Close does nothing
+			t.Cleanup(func() { // a Close after a Close does nothing
+				if r != nil {
+					r.Close()
+				}
+			})
 			if tc.slow {
 				r, _ = startSeams(t, c, dir, SensorSeams{Observe: func() {
 					if n.Add(1) == 1 {
@@ -938,8 +944,24 @@ func checkpointed(t *testing.T, r *Runtime, want c5.Seq) {
 	t.Fatalf("the detector's cursor is %d after %d ticks, want %d", detectorCursor(t, r), checkpointTicks, want)
 }
 
-// checkpointTicks bounds checkpointed. Two ticks suffice: the drives the
-// first leaves take the rest before the second begins.
+// statusThrough ticks until the detector's Through in status is at least
+// want, at most checkpointTicks times. Only a step Tick asks for publishes
+// the detector's status, so what the drives after a step took shows at the
+// next tick.
+func statusThrough(t *testing.T, r *Runtime, st *Status, want uint64) {
+	t.Helper()
+	for range checkpointTicks {
+		tick(t, r)
+		if detectorStatus(t, st).Through >= want {
+			return
+		}
+	}
+	t.Fatalf("the detector's status Through is %d after %d ticks, want %d", detectorStatus(t, st).Through, checkpointTicks, want)
+}
+
+// checkpointTicks bounds checkpointed and statusThrough. Two ticks
+// suffice: the drives the first leaves take the rest before the second
+// begins.
 const checkpointTicks = 5
 
 // guardRun stores a connected collection.run of the relay's endpoint for
@@ -967,7 +989,7 @@ func unseenAlerts(t *testing.T, r *Runtime) (n int) {
 
 // D6's R2 to R4 on #590, from the CommittedAt bound: after a pruned start
 // the first record read, stored or refused, sets the bound at its commit
-// time T. A session that starts at T + 2g, so start âˆ’ g equals T + g, is
+// time T. A session that starts at T + 2g, so start − g equals T + g, is
 // judged, and alerts own-session-unseen once its window passes with no
 // flow; one that starts a nanosecond earlier is skipped, for
 // before-retained. D6's R8: own-session-unseen has no capture. Desk: the
@@ -1029,7 +1051,7 @@ func TestDetectorGuardEdge(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 				t.Fatal(err)
 			}
-			tick(t, r)
+			statusThrough(t, r, st, 3)
 			d := detectorStatus(t, st)
 			refused := int64(0)
 			if first == "refused" || first == "undecodable" {
