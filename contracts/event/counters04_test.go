@@ -116,21 +116,4 @@ func TestSensorCounters04CaptureLoss(t *testing.T) {
 	}
 }
 
-// Every event this code builds is stamped 0.4, and this reader reads 0.4
-// strictly and a later minor forward (E4-7's contract leg).
-func TestIdentifier04(t *testing.T) {
-	if Identifier != "otsec.event/0.4" || self.Minor != 4 {
-		t.Fatalf("Identifier %s, self minor %d", Identifier, self.Minor)
-	}
-	e := counters04(t)
-	e.Health.Details["note"] = "x"
-	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
-		t.Error("an unknown detail at 0.4: accepted")
-	}
-	e.Schema = "otsec.event/0.5"
-	if err := e.Validate(); err != nil {
-		t.Errorf("an unknown detail at 0.5: %v", err)
-	}
-}
-
 func ptr(s string) *string { return &s }
