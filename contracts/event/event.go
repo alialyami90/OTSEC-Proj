@@ -12,7 +12,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every event's schema field.
-const Identifier = "otsec.event/0.4"
+const Identifier = "otsec.event/0.5"
 
 // NodeID names a platform node: a lowercase DNS label, defined in
 // contracts/node (A1 decision D1-1) so that C1 and C4 share one definition.
@@ -492,6 +492,13 @@ var CaptureLossCounters = []string{"drops_driver", "drops_holder", "frames_overl
 // DetailCaptureLoss is the sensor.counters detail that names the capture
 // losses, present exactly when one of CaptureLossCounters rose (since 0.4).
 const DetailCaptureLoss = "capture_loss"
+
+// DetailRunsFolded is the sensor.counters detail that counts the earlier
+// runs whose rises the event carries beside run_id's, present exactly when
+// there is more than one run (since 0.5, C4-0.5-1). Without it the event
+// covers one run, as in 0.4. A diff.<name> or runs_folded at 2^64 - 1 is a
+// lower bound (C4-0.5-3).
+const DetailRunsFolded = "runs_folded"
 
 // SensorReported is the reported_by detail of a sensor.counters event: the
 // counts are the sensor's own report, not the node's measurement.

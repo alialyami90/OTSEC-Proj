@@ -1,4 +1,4 @@
-// Package event is contract C4, otsec.event/0.4: the event every module
+// Package event is contract C4, otsec.event/0.5: the event every module
 // produces and the timestamp model every other contract imports.
 //
 // # What it covers
@@ -112,4 +112,15 @@
 //     which needs one of its own counters, reads every 0.4 event
 //     (C4-0.4-3). Identifier is one constant, so every event this code
 //     stamps says 0.4; no rule of any other event type changes.
+//   - 0.5 (D4, approved by D1 on #753, docs/phase4/D4-c4-0.5-proposal.md):
+//     sensor.counters may fold the rises of several runs of one sensor
+//     into one event. From 0.5 it takes runs_folded, the number of earlier
+//     runs whose rises it carries beside run_id's, a decimal from 1 to
+//     2^64 - 1, present exactly when there is more than one run
+//     (C4-0.5-1); run_id then names the latest run and each diff.<name> is
+//     the sum since the previous report (C4-0.5-2); a value at 2^64 - 1 is
+//     a lower bound (C4-0.5-3). C4-0.4-2 and C4-0.4-3 apply to the summed
+//     values. Every earlier reader accepts a 0.5 event. Identifier is one
+//     constant, so every event this code stamps says 0.5; no rule of any
+//     other event type changes.
 package event

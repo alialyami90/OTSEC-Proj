@@ -475,7 +475,10 @@ case $mode in
     mkdir -p "$work/public"
     # Each MANIFEST capture is checked against its SHA-256 here, whatever
     # fetch_captures.sh left in the cache; a capture that fails is dropped,
-    # and its rows read "not run" (D7 on #625).
+    # and its rows read "not run (not fetched)" (D7 on #625). table.py lists
+    # every capture of both lists, fetched or not; on refs/heads/main, where
+    # every counted run is made, a capture not fetched fails the job after
+    # public.md is written (D6's finding on #744, D4-118 item 2.5).
     grep -v '^#' "$root/tests/fixtures/network/public-ot-captures/MANIFEST.tsv" | while IFS="$(printf '\t')" read -r n sha url proto label; do
       if echo "$sha  $cache/$n" | sha256sum -c --status; then
         case $n in
@@ -491,7 +494,17 @@ case $mode in
       echo "$sha  $work/public/$n" | sha256sum -c --status || { echo "MISMATCH or missing: $n"; rm -f "$work/public/$n"; }
     done
     engines "$work/public" "$work/out-public"
-    { header; python3 -I "$here/table.py" public "$work/out-public"; python3 -I "$here/table.py" hr23 "$work/out-public"; } > "$work/public.md"
+    counted=
+    if [ "${GITHUB_REF:-local}" = refs/heads/main ]; then counted=--counted; fi
+    pubrc=0
+    { header
+      python3 -I "$here/table.py" public "$work/out-public" "$work/public" \
+        "$root/tests/fixtures/network/public-ot-captures/MANIFEST.tsv" "$here/extra-captures.tsv" $counted || pubrc=$?
+      python3 -I "$here/table.py" hr23 "$work/out-public"; } > "$work/public.md"
+    if [ "$pubrc" != 0 ]; then
+      echo "table.py public exited $pubrc (3: a listed capture was not fetched on a counted run; see public.md); the job fails" >&2
+      exit 1
+    fi
     ;;
   prp)
     cache=$3

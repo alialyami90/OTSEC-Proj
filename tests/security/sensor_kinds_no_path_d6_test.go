@@ -16,7 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -45,24 +45,47 @@ func d6KindsPin(s string) string {
 }
 
 // d6SeenHandler is the collector's pipeline, with a record of the kind of
-// every request that reached it.
+// every request that reached it and of how long the pipeline took to
+// decide it (P4-D6-EOF1).
 type d6SeenHandler struct {
 	collector.Handler
 	mu    sync.Mutex
 	kinds []authz.RequestKind
+	took  []string
 }
 
 func (h *d6SeenHandler) Handle(ctx context.Context, req *authz.CollectorRequest) (authz.CollectorReply, collector.Work) {
 	h.mu.Lock()
 	h.kinds = append(h.kinds, req.Kind)
 	h.mu.Unlock()
-	return h.Handler.Handle(ctx, req)
+	start := time.Now()
+	reply, work := h.Handler.Handle(ctx, req)
+	h.mu.Lock()
+	h.took = append(h.took, fmt.Sprintf("%s in %s", req.Kind, time.Since(start).Round(time.Millisecond)))
+	h.mu.Unlock()
+	return reply, work
 }
 
 func (h *d6SeenHandler) seen(k authz.RequestKind) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return slices.Contains(h.kinds, k)
+}
+
+// decided lists each request the pipeline has decided, with the time it took.
+func (h *d6SeenHandler) decided() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return strings.Join(h.took, ", ")
+}
+
+// d6TestLog writes the collector server's log to the test's own log, where
+// the server says why it closed a connection without a reply (P4-D6-EOF1).
+type d6TestLog struct{ t *testing.T }
+
+func (l d6TestLog) Write(p []byte) (int, error) {
+	l.t.Log(strings.TrimSuffix(string(p), "\n"))
+	return len(p), nil
 }
 
 // d6KindsCollector is the repeat rig's collector, its administrator key
@@ -79,7 +102,7 @@ func d6KindsCollector(t *testing.T) (*rptRig, *d6SeenHandler, *collectorclient.C
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &collector.Server{Handler: h, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	srv := &collector.Server{Handler: h, Log: slog.New(slog.NewTextHandler(d6TestLog{t}, nil))}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
 	addr := ln.Addr().String()
@@ -136,6 +159,7 @@ func TestD6SensorKindsRefusedByCollector(t *testing.T) {
 	send := func(kind authz.RequestKind) authz.CollectorReply {
 		t.Helper()
 		resp, err := client.Do(ctx, rptRequest(kind, d6KindsSigned(t, r, kind), authz.ContractID, "d6-kinds-"+string(kind)))
+		t.Logf("decided so far: %s", h.decided())
 		if err != nil {
 			t.Fatalf("%s: %v", kind, err)
 		}

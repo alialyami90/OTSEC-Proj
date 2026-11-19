@@ -179,7 +179,7 @@ def got(tmp_path_factory):
     need(shutil.which("go"), "go not on PATH (needed to build the binaries)")
     s = Slice(str(tmp_path_factory.mktemp("slice-unknown-restart")))
     s.build()
-    udp = harness.free_port()
+    udp = harness.free_port(udp=True)
     out = {}
     try:
         s.start(setup_extra=("-syslog-udp", str(udp)))

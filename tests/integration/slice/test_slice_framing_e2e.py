@@ -191,7 +191,7 @@ def run(tmp_path_factory):
     need(harness.rsyslogd() and harness.imrelp(), "rsyslogd with imrelp not installed (rsyslog and rsyslog-relp)")
     s = RsyslogSlice(str(tmp_path_factory.mktemp("slice-framing")))
     s.build()
-    udp, tcp, tls = harness.free_port(), harness.free_port(), harness.free_port()
+    udp, tcp, tls = harness.free_port(udp=True), harness.free_port(), harness.free_port()
     try:
         s.start(setup_extra=("-syslog-udp", str(udp), "-syslog-tcp", str(tcp), "-syslog-tls", str(tls)))
         up = lambda: all(f"listener a6-{name}" in s.health() for name in STREAMS)

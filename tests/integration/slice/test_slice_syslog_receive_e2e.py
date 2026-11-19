@@ -196,7 +196,7 @@ def got(tmp_path_factory):
     d = str(tmp_path_factory.mktemp("slice-syslog"))
     s = Slice(d)
     s.build()
-    udp, tls_port = harness.free_port(), harness.free_port()
+    udp, tls_port = harness.free_port(udp=True), harness.free_port()
     out = {}
     try:
         s.start(setup_extra=("-syslog-udp", str(udp), "-syslog-tls", str(tls_port)))

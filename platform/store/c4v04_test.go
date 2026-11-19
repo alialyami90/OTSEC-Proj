@@ -56,13 +56,15 @@ func e47Pending(t *testing.T, file string) (c5.StreamID, []byte) {
 }
 
 // TestEvent04Commits: with this code, whose event.Identifier is
-// otsec.event/0.4, a pending event of each type stamped 0.4 commits and
-// is stored at 0.4, and a pending event stamped otsec.event/0.5 is refused
-// as invalid, with nothing written. The controls: a store whose
-// eventVersion stays at 0.3 refuses every 0.4 event; a store that accepts
-// any minor commits the 0.5 event.
+// otsec.event/0.5, a pending event of each type stamped 0.4, an earlier
+// minor, commits and is stored at 0.4, one restamped event.Identifier
+// commits and is stored at 0.5, and a pending event stamped
+// otsec.event/0.6 is refused as invalid, with nothing written (E5-7's
+// store leg). The controls: a store whose eventVersion stays at 0.3
+// refuses every 0.4 event; one whose eventVersion stays at 0.4 refuses the
+// 0.5 event; a store that accepts any minor commits the 0.6 event.
 func TestEvent04Commits(t *testing.T) {
-	if event.Identifier != "otsec.event/0.4" {
+	if event.Identifier != "otsec.event/0.5" {
 		t.Fatalf("event.Identifier is %s", event.Identifier)
 	}
 	// The network classes have a database of their own (C5 0.9).
@@ -114,17 +116,35 @@ func TestEvent04Commits(t *testing.T) {
 		t.Fatalf("%d committed, want %d", n, len(e47Fixtures))
 	}
 
+	// E5-7's store leg: an event stamped event.Identifier (0.5) commits and
+	// reads back at 0.5. A store whose eventVersion stays at 0.4 refuses it.
 	s := c5.StreamID("platform/health")
+	current := bytes.Replace(pending04, []byte(`"otsec.event/0.4"`), []byte(`"`+event.Identifier+`"`), 1)
+	if bytes.Equal(current, pending04) {
+		t.Fatal("no schema to restamp")
+	}
+	r, err := healthLog.Append(bg, c5.Record{Stream: s, Class: c5.ClassPlatform, Event: current})
+	if err != nil {
+		t.Fatalf("a pending %s event: %v", event.Identifier, err)
+	}
+	got, err := health.Read(bg, s, r.Key().Seq-1, 1)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%s stored: %d, %v", event.Identifier, len(got), err)
+	}
+	if e, err := event.Decode(got[0].Event); err != nil || e.Schema != "otsec.event/0.5" {
+		t.Fatalf("%s read back: %v", event.Identifier, err)
+	}
+
 	before, err := health.LastCommitted(bg, s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	later := bytes.Replace(pending04, []byte(`"otsec.event/0.4"`), []byte(`"otsec.event/0.5"`), 1)
+	later := bytes.Replace(pending04, []byte(`"otsec.event/0.4"`), []byte(`"otsec.event/0.6"`), 1)
 	if bytes.Equal(later, pending04) {
 		t.Fatal("no schema to restamp")
 	}
 	if _, err := healthLog.Append(bg, c5.Record{Stream: s, Class: c5.ClassPlatform, Event: later}); !isCode(err, c5.CodeInvalid) {
-		t.Fatalf("a pending 0.5 event: %v, want %s", err, c5.CodeInvalid)
+		t.Fatalf("a pending 0.6 event: %v, want %s", err, c5.CodeInvalid)
 	}
 	if after, err := health.LastCommitted(bg, s); err != nil || after != before {
 		t.Fatalf("after the refusal: last %d, was %d: %v", after, before, err)
