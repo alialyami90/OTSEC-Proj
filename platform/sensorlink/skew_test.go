@@ -652,6 +652,21 @@ func TestSkewBounds(t *testing.T) {
 	if st, c := far(t); !st.Alarm || c != skewLatest || st.FloorBy != skewMoved {
 		t.Errorf("300 years ahead: alarm %v, standing %q, floor by %q", st.Alarm, c, st.FloorBy)
 	}
+	// The time Go reads as zero, 0001-01-01T00:00:00Z, is sampled too
+	// (D3's B2 on #748). Control (mutant Z1): no sample at a zero time.
+	{
+		r := newRig(t, nil)
+		p := r.accepted(r.agreeHello(hello02()))
+		p.taken()
+		r.pass(netobs.TickMinSpacing + time.Second)
+		tk := tick02(20, 0, 0)
+		tk.SensorUTC = "0001-01-01T00:00:00Z"
+		p.send(tk)
+		p.taken()
+		if st := r.l.SkewStats(); !st.Alarm || r.l.standing() != skewLatest {
+			t.Errorf("a tick at year 1: alarm %v, standing %q", st.Alarm, r.l.standing())
+		}
+	}
 	t.Run("control: an absDur that wraps", func(t *testing.T) {
 		withSeam(t, &absDurWraps)
 		if st, c := far(t); st.Alarm || c != "" {

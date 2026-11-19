@@ -229,8 +229,10 @@ func (l *Link) mNow() time.Time {
 // saves at once, and whether no tie can be made now where one could
 // before (the onset).
 func (l *Link) sample(sensorUTC string, hello, held bool) (raised, onset bool) {
-	su := parseUTC(sensorUTC)
-	if su.IsZero() {
+	// A parse, not IsZero: 0001-01-01T00:00:00Z is a time a sensor may
+	// state, and is sampled as any other (D3's B2 on #748).
+	su, err := time.Parse(time.RFC3339Nano, sensorUTC)
+	if err != nil {
 		return false, false
 	}
 	wall, mono := l.now(), l.opt.Monotonic()
