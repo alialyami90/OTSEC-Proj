@@ -212,7 +212,7 @@ def _run(tmp_path_factory, events, end):
     s.node_tags = ("otsec_testclock",)
     s.node_args = ("-test-clock", clock.path)
     s.build()
-    udp = harness.free_port()
+    udp = harness.free_port(udp=True)
     # The node's tickers (the admin relay, health) wait on the test clock,
     # so it moves a second each 20 ms until the listener is up, all well
     # before the series' first event.
@@ -466,7 +466,7 @@ def untagged(tmp_path_factory):
     s.build()
     out = {}
     try:
-        s.start(setup_extra=("-syslog-udp", str(harness.free_port()), "-gtinj-events", params))
+        s.start(setup_extra=("-syslog-udp", str(harness.free_port(udp=True)), "-gtinj-events", params))
         assert harness.wait_for(lambda: "listener a6-udp" in s.health(), 60, step=0.5), s.health() + s.text("node")
         layout = out["layout"] = s.layout
         host, port = layout["syslog_udp"].rsplit(":", 1)
