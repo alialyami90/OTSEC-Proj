@@ -35,7 +35,7 @@ Drawn from the defects D6's reviews found most often. The implementer runs it an
 8. **Gates:** owed tests are listed by name, F-027's merge-check greps are shown, and no approved bound changes.
 9. **Claims:** every rate, bound and "never" in the PR body or a note is what the code does, and is tested.
 10. **Encoding (D4-119):** the diff has no unintended non-ASCII change; files are read and written as UTF-8.
-11. **Contract minors (D4-119):** a PR that changes a contract's minor greps the tree for every literal of the old and next minor and lists each hit with why it is or isn't affected.
+11. **Contract minors (D4-119):** a PR that changes a contract's minor, or merges a `main` that does, greps the tree for every literal of the old and next minor and lists each hit with why it is or isn't affected.
 
 The review pairs are in CLAUDE.md section 5.6.
 
