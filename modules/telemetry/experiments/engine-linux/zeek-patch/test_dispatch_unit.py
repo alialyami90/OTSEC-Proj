@@ -343,5 +343,47 @@ def test_quote_gt_prints_no_row(tmp_path, capsys):
     assert du.quote_gt(str(tmp_path)) == []
     out = capsys.readouterr().out
     assert marker not in out and "{" not in out
-    for cfg in du.GT_CFGS:
+    for cfg in GT_FOUR:
         assert f"- {cfg}: ran, exit code 0" in out
+
+
+# The four configurations, named here and not taken from du.GT_CFGS, so that
+# dropping one there is caught.
+GT_FOUR = ("zeek-probe-c0", "zeek-probe", "zeek-probe-c1p", "zeek-probe-c2")
+
+
+def _gt_out(tmp_path, codes):
+    for cfg, code in codes.items():
+        d = tmp_path / du.GT_CASE / cfg
+        d.mkdir(parents=True, exist_ok=True)
+        if code is not None:
+            (d / "exit-code").write_text(code + "\n")
+
+
+# Each configuration, missing or exiting non-zero, is returned by quote_gt
+# and printed with its own line (tests); the control is all four at 0, which
+# returns nothing and prints each one's "ran, exit code 0".
+@pytest.mark.parametrize("cfg", GT_FOUR)
+@pytest.mark.parametrize("code,line", [(None, "not run"), ("139", "ran, exit code 139")])
+def test_quote_gt_names_each_configuration_not_run_or_crashed(tmp_path, capsys, cfg, code, line):
+    _gt_out(tmp_path, {c: "0" for c in GT_FOUR})
+    assert du.quote_gt(str(tmp_path)) == []
+    ctl = capsys.readouterr().out
+    for c in GT_FOUR:
+        assert f"- {c}: ran, exit code 0" in ctl
+    other = tmp_path / "other"
+    _gt_out(other, {c: (code if c == cfg else "0") for c in GT_FOUR})
+    assert du.quote_gt(str(other)) == [cfg]
+    out = capsys.readouterr().out
+    assert f"- {cfg}: {line}" in out and "`check` fails" in out
+
+
+# check's exit code obeys quote_gt: with every other table emptied, check
+# returns 0 when all four ran with 0 (control) and 1 when one did not (test).
+def test_check_fails_when_the_gt_capture_did_not_run(tmp_path, monkeypatch):
+    for name in ("EXPECT", "STOPS", "CONTROLS", "EXPERIMENT"):
+        monkeypatch.setattr(du, name, [])
+    _gt_out(tmp_path, {c: "0" for c in GT_FOUR})
+    assert du.check(str(tmp_path)) == 0
+    (tmp_path / du.GT_CASE / "zeek-probe-c2" / "exit-code").unlink()
+    assert du.check(str(tmp_path)) == 1
