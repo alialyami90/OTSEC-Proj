@@ -73,6 +73,16 @@ func TestCounters05RunsFoldedForm(t *testing.T) {
 			t.Errorf("runs_folded %q: %v, want [enum]", bad, got)
 		}
 	}
+	// The form is checked at 0.5 "or later" (C4-0.5-1): at 0.6 too.
+	for v, want := range map[string]Code{"1": "", "0": CodeEnum, "01": CodeEnum} {
+		e := counters05(t)
+		e.Schema = "otsec.event/0.6"
+		e.Health.Details[DetailRunsFolded] = v
+		got := Codes(e.Validate())
+		if (want == "" && len(got) != 0) || (want != "" && !slices.Equal(got, []Code{want})) {
+			t.Errorf("runs_folded %q at 0.6: %v, want %q", v, got, want)
+		}
+	}
 	// The fixture without runs_folded reads as one run and is accepted:
 	// its absence is not checked here (the writer's rule, E5-5).
 	if err := counters05(t).Validate(); err != nil {

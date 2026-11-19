@@ -5,11 +5,12 @@ package contract
 // written from the approved text and read by main's old readers there, are
 // read here by the new code at its own minor. R-3's stored 0.2 observation
 // and 0.2 alert validate under the 0.2 readers, E4-4's 0.4 sensor.counters
-// and E4-7's four stored events under the 0.4 reader, and E4-4's fixture
-// without diff.packets is still refused, now by C4-0.4-3. Each fixture is
-// also read strictly, as a reader's own minor is: what the old reader
-// passed over as a later minor's field is refused here. With E4-7's
-// forward contract leg: the identifier this code stamps is 0.4.
+// and E4-7's four stored events under the 0.5 reader, as 0.4 events, an
+// earlier minor (C4 0.5), and E4-4's fixture without diff.packets is still
+// refused, by C4-0.4-3. Each fixture is also read strictly, as a reader's
+// own minor and earlier are: what the old reader passed over as a later
+// minor's field is refused here. With E4-7's forward contract leg: the
+// identifier this code stamps is 0.5 (C4 0.5 §2).
 //
 // The fixtures are #683's files, unchanged (their meaning is #683's).
 // Ground truth: independent (the approved text). Evidence class: desk.
