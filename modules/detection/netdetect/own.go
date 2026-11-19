@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,19 +174,60 @@ func explainOwnSessionOutsideRecord(_ *Detector, o *netobs.Observation) (string,
 // node's own layer-2 segments, whose source MAC is not one of the node's.
 // Its first frame is the source's, so the MAC is the sender's (C13 §4.1).
 // Across a router a frame carries the router's MAC, so only the node's own
-// segments are judged (§4).
+// segments are judged (§4). On a stacked frame the inner VIDs are matched
+// too (ownSegment).
 func nodeAddressSpoofed(d *Detector, o *netobs.Observation) bool {
 	if !flowStart(o) || !d.fromNode(o) {
 		return false
 	}
-	onSegment := (o.L2.VLAN == nil && d.own.untagged) || (o.L2.VLAN != nil && d.own.vlans[*o.L2.VLAN])
-	return onSegment && !d.own.macs[o.L2.SrcMAC]
+	return d.ownSegment(o) >= 0 && !d.own.macs[o.L2.SrcMAC]
 }
 
-func explainNodeAddressSpoofed(_ *Detector, o *netobs.Observation) (string, string) {
+// ownSegment returns the index of the first of o's tags on one of the
+// node's segments, 0 for the outer VID and i for the i-th inner VID, or -1.
+// The outer VID is matched as before, nil as the untagged segment; an
+// inner VID of 0 names the untagged segment too. Only this check reads the
+// inner VIDs, and only to add a match: the sender chooses them, so they
+// never make a frame covered or seen (C13 0.3 §15.4; D3's B1 and D6's B1
+// on #741).
+func (d *Detector) ownSegment(o *netobs.Observation) int {
+	if (o.L2.VLAN == nil && d.own.untagged) || (o.L2.VLAN != nil && d.own.vlans[*o.L2.VLAN]) {
+		return 0
+	}
+	for i, v := range o.L2.InnerVLANs {
+		if (v == 0 && d.own.untagged) || (v != 0 && d.own.vlans[v]) {
+			return i + 1
+		}
+	}
+	return -1
+}
+
+func vlanText(v int) string {
+	if v == 0 {
+		return "untagged"
+	}
+	return fmt.Sprintf("VLAN %d", v)
+}
+
+func explainNodeAddressSpoofed(d *Detector, o *netobs.Observation) (string, string) {
 	seg := "untagged"
 	if o.L2.VLAN != nil {
-		seg = fmt.Sprintf("VLAN %d", *o.L2.VLAN)
+		seg = vlanText(*o.L2.VLAN)
+	}
+	// A stacked frame names its inner tags and the one that matched.
+	if len(o.L2.InnerVLANs) > 0 {
+		inner := make([]string, len(o.L2.InnerVLANs))
+		for i, v := range o.L2.InnerVLANs {
+			inner[i] = strconv.Itoa(v)
+		}
+		match := "no tag"
+		switch i := d.ownSegment(o); {
+		case i == 0:
+			match = "the outer tag"
+		case i > 0:
+			match = fmt.Sprintf("inner tag %d, %s", i, vlanText(o.L2.InnerVLANs[i-1]))
+		}
+		seg += fmt.Sprintf(" with inner VIDs %s, matched by %s", strings.Join(inner, " "), match)
 	}
 	return "the node's own addresses are sent only from the node's MACs",
 		fmt.Sprintf("flow from the node's address %s sent from MAC %s on %s, to %s", o.IP.Src, o.L2.SrcMAC, seg, hostPort(o.IP.Dst, o.IP.Dport))
@@ -320,6 +362,13 @@ func (d *Detector) Skip(s Session, afterSeq uint64) error {
 // and raises the alarm (D1 in D4-72 and D4-74).
 func (d *Detector) PendingFull() int64 { return d.pendingFull }
 
+// Uncovered counts, since this detector was built or restored, the due
+// sessions dropped unjudged because the coverage did not cover them: a
+// degraded interval, an endpoint the record does not hold, or a coverage
+// statement that reports the sensor blind to it. The node shows it in
+// status beside PendingFull (C13 0.3 §15.6).
+func (d *Detector) Uncovered() int64 { return d.uncovered }
+
 // TiedEvicted counts, since this detector was built or restored, the tied
 // invocation IDs dropped past MaxTiedSessions before their session came:
 // sessions not judged for tied-evicted (D1 in D4-74).
@@ -442,7 +491,8 @@ func (d *Detector) take(id string) {
 	}
 }
 
-// see records that a was seen on vlan, and on the frames' PRP LANs.
+// see records that a was seen on vlan, the frame's outer VID, and on the
+// frames' PRP LANs. An inner VID is never read here (C13 0.3 §15.4).
 func (d *Detector) see(a netip.Addr, vlan int, frames []netobs.CitedFrame) {
 	e := d.seen[a]
 	if e == nil {
@@ -533,6 +583,7 @@ func (d *Detector) judge(out []netobs.Alert) []netobs.Alert {
 	for _, p := range due {
 		d.take(p.InvocationID)
 		if !d.covers(&p, g) {
+			d.uncovered++
 			continue
 		}
 		bv := "each connected session of the node's own is seen by the sensor while its coverage covers the asset"

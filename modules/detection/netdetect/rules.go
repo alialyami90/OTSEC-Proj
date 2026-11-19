@@ -88,11 +88,12 @@ func newService(d *Detector, o *netobs.Observation) bool {
 
 // newFunction: a function on a known pair whose code, sub and objects are
 // not in functions for that pair, and whose class is not write or control,
-// which the writer list judges (§4).
+// which the writer list judges (§4). A DNP3 function whose headers were not
+// read to the end is never in the baseline (C13 0.3 §15.3).
 func newFunction(d *Detector, o *netobs.Observation) bool {
 	p, ok := pairOf(o)
 	return o.Kind == netobs.KindFunction && o.Function != nil && ok && !writeClass(o.Node.FunctionClass) &&
-		d.pairs[p] && !d.functions[functionKey(functionOf(p, o.Function))]
+		d.pairs[p] && (objectsUnread(o) || !d.functions[functionKey(functionOf(p, o.Function))])
 }
 
 // unauthorizedWrite: a write-class or control-class function whose client,

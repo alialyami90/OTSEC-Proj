@@ -213,7 +213,11 @@ func (l *Learner) Observe(seq uint64, o *netobs.Observation) error {
 				delete(l.held, key)
 				fits = l.pair(p) && fits
 			}
-			fits = l.function(functionOf(pair, o.Function)) && fits
+			// A DNP3 request whose headers were not read to the end teaches
+			// no function: its objects may be cut short (C13 0.3 §15.3).
+			if !objectsUnread(o) {
+				fits = l.function(functionOf(pair, o.Function)) && fits
+			}
 		}
 	}
 	if !fits && l.period.Overflow < netobs.MaxOverflow {

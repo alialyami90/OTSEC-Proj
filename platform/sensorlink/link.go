@@ -826,12 +826,18 @@ func (l *Link) nodeObject(o *netobs.Observation) (*netobs.Node, bool) {
 		}
 	}
 	if f := o.Function; o.Kind == netobs.KindFunction && f != nil {
-		row := netdetect.Classify(o.Protocol, f.Code, f.Sub, f.Objects)
+		row := netdetect.ClassifyFunction(o.Protocol, f)
 		nd.FunctionClass, nd.FunctionTable = row.Class, netdetect.Table
-		// An absent sa is "" and never sets the flag; failed never does.
-		if o.Protocol == "dnp3" && f.SA == netobs.SANone && slices.Contains(netobs.NoSAClasses, row.Class) {
+		// An absent sa is "" and never sets a flag; failed never does. sa
+		// unknown sets dnp3_sa_unknown, never dnp3_no_sa (C13 0.3 §15.2).
+		if o.Protocol == "dnp3" && slices.Contains(netobs.NoSAClasses, row.Class) {
 			t := true
-			nd.DNP3NoSA = &t
+			switch f.SA {
+			case netobs.SANone:
+				nd.DNP3NoSA = &t
+			case netobs.SAUnknown:
+				nd.DNP3SAUnknown = &t
+			}
 		}
 	}
 	return nd, nd.SrcAsset == netobs.AssetUnresolved && nd.DstAsset == netobs.AssetUnresolved
