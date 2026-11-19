@@ -1512,7 +1512,11 @@ if __name__ == "__main__":
     elif sys.argv[1] == "sig":
         sig(*sys.argv[2:5])
     else:
-        # public OUT PCAPS MANIFEST EXTRA [--counted]
+        # public OUT PCAPS MANIFEST EXTRA [--counted]; any other trailing
+        # argument is refused, never read as "not counted" (D3's N1 on #751).
+        if len(sys.argv) < 6 or sys.argv[6:] not in ([], ["--counted"]):
+            print("usage: table.py public OUT PCAPS MANIFEST EXTRA [--counted]", file=sys.stderr)
+            sys.exit(2)
         counted = sys.argv[6:] == ["--counted"]
         if public(sys.argv[2], sys.argv[3], sys.argv[4:6], counted) and counted:
             sys.exit(3)

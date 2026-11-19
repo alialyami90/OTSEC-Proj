@@ -54,6 +54,10 @@ def test_lists_hold_every_capture():
     assert len(names) == 23 and len(set(names)) == 23
     assert ("mms.pcap", "mms") in WANT and ("goose-disturbance-underfrequency.pcapng",
                                            "goose-disturbance-underfrequency") in WANT
+    # zeek_run and in-container.sh run only these; a listed capture with any
+    # other extension would be fetched, never run, and pass --counted (D6's
+    # N2 on #751).
+    assert all(n.endswith((".pcap", ".pcapng", ".cap")) for n, _ in WANT), WANT
 
 
 @pytest.mark.parametrize("skip", [set(), {"goose-disturbance-underfrequency"}, {d for _, d in WANT}],
@@ -86,6 +90,20 @@ def test_fetched_capture_with_no_output_is_not_run_not_unfetched(tmp_path, capsy
     assert table.public(out, pcaps, LISTS) == 0
     r = rows(capsys.readouterr().out, "modbus")
     assert len(r) == len(table.CONFIGS) and all(l.endswith("| not run |") for l in r)
+
+
+@pytest.mark.parametrize("extra,rc", [([], 0), (["--counted"], 3), (["--count"], 2), (["--counted", "extra"], 2)],
+                         ids=["none", "counted", "misspelt", "trailing"])
+def test_only_exactly_counted_is_accepted(tmp_path, extra, rc):
+    """Any trailing argument other than exactly `--counted` exits 2, so a
+    later edit to run.sh's call cannot turn a counted run into an uncounted
+    one (D3's N1 on #751). The first two cases are the controls: with one
+    capture missing, no flag exits 0 and `--counted` exits 3."""
+    out, pcaps = run_dir(tmp_path, {"goose-disturbance-underfrequency"})
+    r = main(out, pcaps, *extra)
+    assert r.returncode == rc, r.stderr
+    if rc == 2:
+        assert "usage: table.py public" in r.stderr and r.stdout == ""
 
 
 def test_an_unreadable_list_fails_every_run(tmp_path):
