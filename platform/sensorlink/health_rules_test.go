@@ -155,18 +155,21 @@ func TestRunFileWriteFailsLoud(t *testing.T) {
 }
 
 // D6's B3, P6, and M-AO: the cursor keeps its write number across a start
-// whose file write fails and a new run's row 6. (i) The file current: row
-// 6 skips the file (it holds the run's totals), and the new cursor carries
-// the number the start read. (ii) The file behind: the start's failed
-// write does not count it as written, so row 6 writes it, above the
-// cursor's number. Controls: a link that takes the write number only from
-// a file write in this process (i: the cursor falls to 0); a behind file
-// counted as written at the start (ii: row 6 writes nothing).
+// whose file write fails and a new run's row 6, the file's writes still
+// failing. (i) The file current: row 6 skips the file (it holds the run's
+// totals), and the new cursor carries the number the start read. (ii) The
+// file behind: the start's failed write does not count it as written, so
+// row 6 must write it first, and closes position-not-saved while it
+// cannot; once it can, the file is written above the cursor's number.
+// Controls: a link that takes the write number only from a file write in
+// this process (i: the cursor falls to 0); a behind file counted as
+// written at the start (ii: row 6 skips the file and accepts).
 func TestWriteNoKeptAcrossFailedStart(t *testing.T) {
 	setup := func() (*healthRig, uint64, []byte) {
 		r := newHealthRig(t)
 		p := r.accepted(helloRun(0))
 		r.beat(p, hbRun(0, 1, 100, outgoing(0)))
+		r.settleFile() // the old copy holds the run and its totals
 		old, err := os.ReadFile(r.path)
 		if err != nil {
 			t.Fatal(err)
@@ -185,13 +188,13 @@ func TestWriteNoKeptAcrossFailedStart(t *testing.T) {
 		if err := r.file.Start(bg, r.l); err == nil {
 			t.Fatal("the start's write did not fail")
 		}
-		runFileFault = nil
 	}
 	t.Cleanup(func() { runFileFault = nil })
 	r, w, _ := setup()
 	failedStart(r)
 	p := r.accepted(helloRun(1))
 	p.end()
+	runFileFault = nil
 	if c := cursorNow(t, r.cs); c.RunID != runN(1) || c.WriteNo < w {
 		t.Fatalf("(i): the new run's cursor carries write number %d, below %d", c.WriteNo, w)
 	}
@@ -201,6 +204,12 @@ func TestWriteNoKeptAcrossFailedStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	failedStart(r)
+	p = r.dial(enrolment())
+	p.send(helloRun(1))
+	if why := p.closed(); why != netobs.ClosePositionNotSaved {
+		t.Fatalf("(ii): row 6 with the behind file not written: closed %q", why)
+	}
+	runFileFault = nil
 	p = r.accepted(helloRun(1))
 	p.end()
 	if g := OpenRunFile(r.path); g.readErr != nil || g.doc.WriteNo <= w {
