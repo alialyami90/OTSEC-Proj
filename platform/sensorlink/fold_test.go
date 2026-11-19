@@ -184,19 +184,27 @@ func newFoldRig(t *testing.T) *foldRig {
 }
 
 // E5-8 (C4-0.5-3): sums never wrap. (a) Folded rises summing to exactly
-// 2^64 - 1 give that value. (b) Two runs, each with a drops_holder rise of
-// 2^63, sum past it: the waiting entry holds 2^64 - 1, status names the
-// saturation until the entry is written, and runs_folded and run_id still
-// move with a third run. (c) In both, capture_loss names drops_holder.
-// Controls (named mutants): plain uint64 addition, which writes 0 with no
-// capture_loss; the maximum held without the status line.
+// 2^64 - 1 give that value, and status names no saturation. (b1) Two
+// runs, each with a drops_holder rise of 2^63, sum past it: the waiting
+// entry holds 2^64 - 1, status names the saturation until the entry is
+// written, and runs_folded and run_id still move with a third run whose
+// only rise is on drops_holder. (b2) A fourth run with rises on
+// frames_overlong and packets: they are summed into the entry,
+// capture_loss is "drops_holder frames_overlong", runs_folded is 3, and
+// status still names only drops_holder. (c) In each, capture_loss names
+// drops_holder. Controls (named mutants): plain uint64 addition, which
+// writes 0 with no capture_loss; the maximum held without the status
+// line; for (a), a saturation check one too early (sum >= max, X-12's
+// opposite, D6's B7 on #747); for (b2), the entry's rises frozen once any
+// value saturates while run_id and runs_folded still move (X-13, D6's B8).
 func TestCountersFoldSaturates(t *testing.T) {
 	const half = uint64(1) << 63
-	leg := func(rises ...uint64) (map[string]string, HealthStatus) {
+	dh := func(v uint64) map[string]uint64 { return map[string]uint64{"drops_holder": v} }
+	leg := func(rises ...map[string]uint64) (map[string]string, HealthStatus) {
 		f := newFoldRig(t)
 		f.h.counters(bg, "1", runN(0), map[string]uint64{"packets": 1}, [3]*uint64{}) // written: the spacing starts
-		for i, v := range rises {
-			f.h.counters(bg, "1", runN(1+i), map[string]uint64{"drops_holder": v}, [3]*uint64{})
+		for i, r := range rises {
+			f.h.counters(bg, "1", runN(1+i), r, [3]*uint64{})
 		}
 		st := f.h.Status()
 		f.clk.add(CountersSpacing)
@@ -213,23 +221,50 @@ func TestCountersFoldSaturates(t *testing.T) {
 		return c[1], st
 	}
 	top := strconv.FormatUint(math.MaxUint64, 10)
-	d, _ := leg(half, half-1)
+	d, st := leg(dh(half), dh(half-1))
 	if d["diff.drops_holder"] != top || d[event.DetailCaptureLoss] != "drops_holder" || d[DetailRunsFolded] != "1" {
 		t.Fatalf("(a): %v", d)
 	}
-	d, st := leg(half, half, 1)
+	if len(st.Saturated) != 0 {
+		t.Fatalf("(a): exactly 2^64 - 1, status names %v", st.Saturated)
+	}
+	d, st = leg(dh(half), dh(half), dh(1))
 	if d["diff.drops_holder"] != top || d[event.DetailCaptureLoss] != "drops_holder" || d[DetailRunsFolded] != "2" || d["run_id"] != runN(3) {
-		t.Fatalf("(b): %v", d)
+		t.Fatalf("(b1): %v", d)
 	}
 	if !slices.Equal(st.Saturated, []string{"diff.drops_holder"}) {
-		t.Fatalf("(b): status names %v", st.Saturated)
+		t.Fatalf("(b1): status names %v", st.Saturated)
 	}
-	// runs_folded at its maximum is named too.
+	d, st = leg(dh(half), dh(half), dh(1), map[string]uint64{"frames_overlong": 7, "packets": 3})
+	if d["diff.drops_holder"] != top || d["diff.frames_overlong"] != "7" || d["diff.packets"] != "3" ||
+		d[event.DetailCaptureLoss] != "drops_holder frames_overlong" || d[DetailRunsFolded] != "3" || d["run_id"] != runN(4) {
+		t.Fatalf("(b2): %v", d)
+	}
+	if !slices.Equal(st.Saturated, []string{"diff.drops_holder"}) {
+		t.Fatalf("(b2): status names %v", st.Saturated)
+	}
+	// runs_folded carried past its maximum is named, and the names are
+	// kept in the run file's entry: a waiting entry read back from its
+	// JSON names them still. One that only reaches the maximum is not.
 	p := NewPool()
 	p.Due(HeldEvent{Name: EventCounters, Key: "1", Run: runN(1), Folded: math.MaxUint64 - 1, Rises: map[string]uint64{"packets": 1}})
-	p.Due(HeldEvent{Name: EventCounters, Key: "1", Run: runN(2), Folded: 5, Rises: map[string]uint64{"packets": 1}})
-	if w := p.Waiting(); w[0].Folded != math.MaxUint64 {
-		t.Fatalf("runs_folded wrapped: %d", w[0].Folded)
+	p.Due(HeldEvent{Name: EventCounters, Key: "1", Run: runN(2), Rises: map[string]uint64{"packets": 1}})
+	if w := p.Waiting(); w[0].Folded != math.MaxUint64 || len(w[0].Saturated) != 0 {
+		t.Fatalf("runs_folded at exactly the maximum: %d, named %v", w[0].Folded, w[0].Saturated)
+	}
+	p.Due(HeldEvent{Name: EventCounters, Key: "1", Run: runN(3), Rises: map[string]uint64{"packets": 1}})
+	b, err := json.Marshal(p.Waiting()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back HeldEvent
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatal(err)
+	}
+	q := NewPool()
+	q.Due(back)
+	if w := q.Waiting(); w[0].Folded != math.MaxUint64 || !slices.Equal(w[0].Saturated, []string{DetailRunsFolded}) {
+		t.Fatalf("runs_folded past the maximum, read back: %d, named %v", w[0].Folded, w[0].Saturated)
 	}
 }
 

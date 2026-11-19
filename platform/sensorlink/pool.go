@@ -76,7 +76,12 @@ type HeldEvent struct {
 	// and how many earlier runs' rises are in it (runs_folded).
 	Run    string `json:"run,omitempty"`
 	Folded uint64 `json:"runs_folded,omitempty"`
-	waited bool
+	// Saturated names, in order, each value (diff.<name>, runs_folded)
+	// that a rise would have carried past 2^64 - 1, so it is held there;
+	// a sum of exactly 2^64 - 1 is not in it (E5-8 (a); D1's ruling
+	// 6997499075 on #747).
+	Saturated []string `json:"saturated,omitempty"`
+	waited    bool
 }
 
 func (e *HeldEvent) id() string { return e.Name + "\x00" + e.Key }
@@ -136,7 +141,7 @@ func (p *Pool) Due(e HeldEvent) {
 	h, ok := p.held[e.id()]
 	if !ok {
 		c := e
-		c.Details, c.Rises = maps.Clone(e.Details), maps.Clone(e.Rises)
+		c.Details, c.Rises, c.Saturated = maps.Clone(e.Details), maps.Clone(e.Rises), slices.Clone(e.Saturated)
 		p.held[e.id()] = &c
 		return
 	}
@@ -151,22 +156,47 @@ func (p *Pool) Due(e HeldEvent) {
 		if h.Rises == nil {
 			h.Rises = map[string]uint64{}
 		}
-		h.Rises[k] = satAdd(h.Rises[k], v)
+		var over bool
+		if h.Rises[k], over = addHeld(h.Rises[k], v); over {
+			h.saturate("diff." + k)
+		}
+	}
+	for _, n := range e.Saturated {
+		h.saturate(n)
 	}
 	// A run other than the latest folds in: it counts once, and run_id
 	// moves to it.
-	h.Folded = satAdd(h.Folded, e.Folded)
+	f, over := addHeld(h.Folded, e.Folded)
 	if e.Run != h.Run {
-		h.Folded, h.Run = satAdd(h.Folded, 1), e.Run
+		var once bool
+		f, once = addHeld(f, 1)
+		over, h.Run = over || once, e.Run
 	}
+	if h.Folded = f; over {
+		h.saturate(DetailRunsFolded)
+	}
+}
+
+// saturate records name as held at 2^64 - 1, once, in order.
+func (h *HeldEvent) saturate(name string) {
+	if i, ok := slices.BinarySearch(h.Saturated, name); !ok {
+		h.Saturated = slices.Insert(h.Saturated, i, name)
+	}
+}
+
+// addHeld is a + b, held at 2^64 - 1 (C4-0.5-3), and whether the sum
+// would have passed it.
+func addHeld(a, b uint64) (uint64, bool) {
+	if s := a + b; s >= a {
+		return s, false
+	}
+	return math.MaxUint64, true
 }
 
 // satAdd is a + b, held at 2^64 - 1 (C4-0.5-3).
 func satAdd(a, b uint64) uint64 {
-	if s := a + b; s >= a {
-		return s
-	}
-	return math.MaxUint64
+	s, _ := addHeld(a, b)
+	return s
 }
 
 // waiting reports whether an event of name and key waits.
@@ -224,7 +254,7 @@ func (p *Pool) Waiting() []HeldEvent {
 	var out []HeldEvent
 	for _, e := range p.held {
 		c := *e
-		c.Details, c.Rises = maps.Clone(e.Details), maps.Clone(e.Rises)
+		c.Details, c.Rises, c.Saturated = maps.Clone(e.Details), maps.Clone(e.Rises), slices.Clone(e.Saturated)
 		out = append(out, c)
 	}
 	slices.SortFunc(out, func(a, b HeldEvent) int { return p.before(&a, &b) })

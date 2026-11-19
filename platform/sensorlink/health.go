@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -130,9 +129,10 @@ type HealthStatus struct {
 	// StartCopies counts the owed events written at a start, each
 	// possibly a second copy (section 1.4).
 	StartCopies uint64
-	// Saturated names each waiting sensor.counters value held at 2^64 - 1
-	// (diff.<name> or runs_folded), a lower bound until it is written
-	// (C4-0.5-3).
+	// Saturated names each waiting sensor.counters value that a rise would
+	// have carried past 2^64 - 1 (diff.<name> or runs_folded), held there
+	// as a lower bound until it is written (C4-0.5-3); a sum of exactly
+	// 2^64 - 1 is not named (E5-8 (a)).
 	Saturated []string
 	// NotDurable is the run file's failing write, "" while it writes.
 	NotDurable string
@@ -150,14 +150,7 @@ func (h *Health) Status() HealthStatus {
 		if w.Name != EventCounters {
 			continue
 		}
-		for _, n := range slices.Sorted(maps.Keys(w.Rises)) {
-			if w.Rises[n] == math.MaxUint64 {
-				st.Saturated = append(st.Saturated, "diff."+n)
-			}
-		}
-		if w.Folded == math.MaxUint64 {
-			st.Saturated = append(st.Saturated, DetailRunsFolded)
-		}
+		st.Saturated = append(st.Saturated, w.Saturated...)
 	}
 	if h.fileErr != nil {
 		st.NotDurable = h.fileErr.Error()
