@@ -3,6 +3,7 @@ package collector
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -87,16 +88,26 @@ func TestSlowDecisionStillAnswered(t *testing.T) {
 			t.Fatalf("reply %+v, want accepted req-2 with collector_seq 1", r)
 		}
 	})
-	t.Run("refused before Handle", func(t *testing.T) {
-		// Refuse numbers its decision too (Pipeline.Refuse calls NextSeq).
-		h := newSlowHandler(&fakeHandler{})
-		ln := startServerRT(t, h, testRT, io.Discard)
-		r, c := exchange(t, ln, frame(`not JSON`))
-		c.Close()
-		if r.Accepted() || r.Refusal == nil || r.Refusal.Code != authz.RefuseMalformed || r.CollectorSeq != 1 {
-			t.Fatalf("reply %+v, want refused malformed with collector_seq 1", r)
-		}
-	})
+	// Refuse numbers its decision too (Pipeline.Refuse calls NextSeq), on
+	// each of its three paths (D6's N1 on #758).
+	for name, c := range map[string]struct {
+		frame []byte
+		want  authz.RefusalCode
+	}{
+		"refused before Handle": {frame(`not JSON`), authz.RefuseMalformed},
+		"refused oversize":      {binary.BigEndian.AppendUint32(nil, uint32(authz.MaxRequestBytes+1)), authz.RefuseOversize},
+		"refused empty frame":   {frame(""), authz.RefuseMalformed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newSlowHandler(&fakeHandler{})
+			ln := startServerRT(t, h, testRT, io.Discard)
+			r, conn := exchange(t, ln, c.frame)
+			conn.Close()
+			if r.Accepted() || r.Refusal == nil || r.Refusal.Code != c.want || r.CollectorSeq != 1 {
+				t.Fatalf("reply %+v, want refused %s with collector_seq 1", r, c.want)
+			}
+		})
+	}
 	t.Run("accepted run", func(t *testing.T) {
 		w := newTrackedWork()
 		h := newSlowHandler(&fakeHandler{decide: acceptRun(w)})
