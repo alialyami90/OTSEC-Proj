@@ -9,7 +9,8 @@ package contract
 // without diff.packets is still refused, now by C4-0.4-3. Each fixture is
 // also read strictly, as a reader's own minor is: what the old reader
 // passed over as a later minor's field is refused here. With E4-7's
-// forward contract leg: the identifier this code stamps is 0.4.
+// forward contract leg: the identifier this code stamps is its own minor,
+// 0.4 and, from C4 0.5's code, 0.5.
 //
 // The fixtures are #683's files, unchanged (their meaning is #683's).
 // Ground truth: independent (the approved text). Evidence class: desk.
@@ -145,14 +146,42 @@ func TestCCD2ForwardE44(t *testing.T) {
 	}
 }
 
-// E4-7, forward contract leg: the identifier this code stamps on every
-// event is 0.4, and a stored 0.4 event of each type validates under the 0.4
-// reader, strictly at its own minor (the 0.3 reader passed a later minor's
-// field over).
-func TestCCD2ForwardE47(t *testing.T) {
-	if event.Identifier != "otsec.event/0.4" {
-		t.Errorf("event.Identifier %q, C4 0.4 §3: every event this code stamps says 0.4", event.Identifier)
+// ccD2CodeMinor is the minor this code reads as its own: the highest minor
+// whose events Decode reads strictly, refusing a field it does not know; a
+// later minor's event is read forward (C4's Decode). It is 4 until C4
+// 0.5's code merges, and 5 after (C4 0.5 §2).
+func ccD2CodeMinor(t *testing.T) int {
+	t.Helper()
+	b := ccD2With(t, ccD2File(t, "event-0.4-health-node.json"), "", "added_later")
+	for minor := 4; minor < 100; minor++ {
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		m["schema"] = fmt.Sprintf("otsec.event/0.%d", minor)
+		v, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := event.Decode(v); !slices.Contains(event.Codes(err), event.CodeDecode) {
+			return minor - 1
+		}
 	}
+	t.Fatal("Decode reads every minor strictly")
+	return 0
+}
+
+// E4-7, forward contract leg: the identifier this code stamps on every
+// event is its own minor (0.4, and 0.5 from C4 0.5's code), and a stored
+// 0.4 event of each type validates under this reader, strictly (the 0.3
+// reader passed a later minor's field over).
+func TestCCD2ForwardE47(t *testing.T) {
+	own := ccD2CodeMinor(t)
+	if want := fmt.Sprintf("otsec.event/0.%d", own); own < 4 || event.Identifier != want {
+		t.Errorf("event.Identifier %q, and this code reads 0.%d as its own: every event it stamps says its own minor, from 0.4 (C4 0.4 §3, C4 0.5 §2)", event.Identifier, own)
+	}
+	later := fmt.Sprintf("0.%d", own+1)
+	added := fmt.Sprintf("added_in_0_%d", own+1)
 	for _, c := range []struct {
 		file string
 		kind event.Kind
@@ -170,24 +199,24 @@ func TestCCD2ForwardE47(t *testing.T) {
 			if err != nil {
 				t.Fatalf("event.Decode: %v", err)
 			}
-			if e.Schema != event.Identifier || e.Kind != c.kind {
+			if e.Schema != "otsec.event/0.4" || e.Kind != c.kind {
 				t.Errorf("schema %q, kind %q", e.Schema, e.Kind)
 			}
-			if _, err := event.Decode(ccD2With(t, b, "", "added_in_0_5")); !slices.Contains(event.Codes(err), event.CodeDecode) {
+			if _, err := event.Decode(ccD2With(t, b, "", added)); !slices.Contains(event.Codes(err), event.CodeDecode) {
 				t.Errorf("with an unknown field at 0.4: %v, want decode", err)
 			}
 			// A later minor is read forward.
 			var m map[string]any
-			if err := json.Unmarshal(ccD2With(t, b, "", "added_in_0_5"), &m); err != nil {
+			if err := json.Unmarshal(ccD2With(t, b, "", added), &m); err != nil {
 				t.Fatal(err)
 			}
-			m["schema"] = "otsec.event/0.5"
+			m["schema"] = "otsec.event/" + later
 			fwd, err := json.Marshal(m)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := event.Decode(fwd); err != nil {
-				t.Errorf("stamped 0.5 with a field 0.5 adds: %v", err)
+				t.Errorf("stamped %s with a field %s adds: %v", later, later, err)
 			}
 		})
 	}
