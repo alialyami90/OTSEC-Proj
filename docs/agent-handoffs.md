@@ -2713,4 +2713,4 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: no sensor script, no capture, none of §15.10's measurements.
 - Uncertainty or safety risks: nothing refused may become accepted except as §15 says; stored records still decode.
 - Scratch files: `d4-c13abs-*`
-- Result: #760, in review at D4-119 (item 7.2).
+- Result: #760, in review at D4-119 (item 7.1).
