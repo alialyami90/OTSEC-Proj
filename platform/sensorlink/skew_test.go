@@ -142,8 +142,95 @@ func TestSkewEstimateTakesLeastDelay(t *testing.T) {
 	for _, o := range []time.Duration{4 * time.Second, 300 * time.Millisecond, 3 * time.Second} {
 		r.tickO(p, o, 20, 0)
 	}
-	if s := r.l.SkewStats(); s.E != 300*time.Millisecond || s.Latest != 3*time.Second {
-		t.Fatalf("the least delay: %+v", s)
+	// Raised once for each crossing (X8 of D6's B3 on #748): the 4 s tick
+	// came while the alarm stood.
+	if s := r.l.SkewStats(); s.E != 300*time.Millisecond || s.Latest != 3*time.Second || r.al.count(AlarmClockSkew) != 2 {
+		t.Fatalf("the least delay: %+v, %d raises", s, r.al.count(AlarmClockSkew))
+	}
+}
+
+// E is the connection's (X7 and X16 of D6's B3 on #748): the first tick
+// replaces the hello's o, and a hello starts the samples afresh, whatever
+// the previous connection took. Controls (mutants X7, X16): a first tick
+// that adds to the hello's o, and a hello that adds to the last
+// connection's samples, each of which keeps E at 0.
+func TestSkewSamplesPerConnection(t *testing.T) {
+	r := newRig(t, nil)
+	p := r.accepted(r.agreeHello(hello02()))
+	r.tickO(p, 2500*time.Millisecond, 20, 0)
+	if s := r.l.SkewStats(); s.E != 2500*time.Millisecond || !s.Alarm {
+		t.Fatalf("after the first tick: %+v", s)
+	}
+	r.tickO(p, 0, 20, 0)
+	p.end()
+	h := resume(1, 20)
+	h.SensorUTC = canonUTC(r.now().Add(-2500 * time.Millisecond))
+	r.accepted(h)
+	if s := r.l.SkewStats(); s.E != 2500*time.Millisecond {
+		t.Fatalf("after the next connection's hello: %+v", s)
+	}
+}
+
+// F3 (b) of D4's review of #748: a heartbeat is never a skew sample
+// (CH-22): one whose at_utc is an hour off leaves E, the latest sample,
+// the alarm and K as they were. Control (mutant H1): a node that samples
+// heartbeats, which raises the alarm.
+func TestSkewIgnoresHeartbeat(t *testing.T) {
+	r := newRig(t, nil)
+	p := r.accepted(r.agreeHello(hello02()))
+	r.tickO(p, 0, 20, 0)
+	k := func() [2]time.Time {
+		r.l.skew.mu.Lock()
+		defer r.l.skew.mu.Unlock()
+		return [2]time.Time{r.l.skew.base, r.l.skew.maxK}
+	}
+	before, kBefore := r.l.SkewStats(), k()
+	hb := heartbeat02(1, 10)
+	hb.AtUTC = canonUTC(r.now().Add(time.Hour))
+	p.send(hb)
+	p.taken()
+	after := r.l.SkewStats()
+	if after.E != before.E || after.Latest != before.Latest || after.Alarm || k() != kBefore {
+		t.Fatalf("a heartbeat moved the estimate: %+v to %+v, K %v to %v", before, after, kBefore, k())
+	}
+}
+
+// X1 of D6's B3 on #748, and section 1.5's TestSkewTiesNothing: while a
+// cause stands at Dispatch, here the alarm alone (the latest sample
+// inside), nothing is held, and the run's own flow, which comes after the
+// alarm clears, is committed untied; the Result reports the window refused
+// and the run is counted once, under skew_alarm_windows. Control (mutant
+// X1): a Dispatch that holds while a cause stands, which ties the flow.
+func TestSkewTiesNothing(t *testing.T) {
+	r, _ := holdRig02(t)
+	p := r.accepted(r.helloO(2500 * time.Millisecond))
+	r.tickO(p, 1800*time.Millisecond, 20, 0)
+	if c := r.l.standing(); c != skewAlarm {
+		t.Fatalf("standing %q, want the alarm alone", c)
+	}
+	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+		t.Fatal(err)
+	}
+	r.tickO(p, 1400*time.Millisecond, 20, 0) // E 1.4 s: the alarm clears
+	if c := r.l.standing(); c != "" {
+		t.Fatalf("standing %q, want none", c)
+	}
+	start := r.now()
+	p.send(ownFlow02(1, 40001, start.Add(time.Second), false))
+	p.taken()
+	r.pass(30 * time.Second)
+	s := session09(inv1, 40001, 0)
+	s.StartedAt, s.ConnectedAt, s.EndedAt = start, start, start.Add(20*time.Second)
+	rel, err := r.l.Result(bg, "req-1", s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := storedObs(t, r.s)
+	if len(got) != 1 || got[0].Node.PlatformSession != nil || !rel.Skewed {
+		t.Fatalf("stored %d, the first %+v; released %+v", len(got), got[0].Node, rel)
+	}
+	if w := windows(r.l.SkewStats()); w != [5]uint64{0, 1, 0, 0, 0} {
+		t.Fatalf("window counts %v, want one skew_alarm_windows", w)
 	}
 }
 
@@ -630,6 +717,138 @@ func TestCaptureFloorRefusesHeldFlow(t *testing.T) {
 			t.Fatal("the control made no tie")
 		}
 	})
+}
+
+// A hello's stated spans raise the floor, prior.lost included (X11 and
+// X12 of D6's B3 on #748; section 1.5): each to its upper end plus
+// HeartbeatGapMax plus max_skew_ms, by span. Controls (mutants X11, X12):
+// a hello whose prior.lost, or whose lost, raises nothing.
+func TestCaptureFloorFromHello(t *testing.T) {
+	for _, prior := range []bool{false, true} {
+		name := map[bool]string{false: "lost", true: "prior.lost"}[prior]
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, nil)
+			h := r.agreeHello(hello02())
+			sp := lspan("09:30:00", "09:31:00")
+			if prior {
+				h.Prior.RecordsLost, h.Prior.Lost = "3", []netobs.Span{sp}
+			} else {
+				h.DropsChannel, h.Lost = "1", []netobs.Span{sp}
+			}
+			r.accepted(h)
+			want := parseUTC(sp.ToUTC).Add(HeartbeatGapMax + MaxSkew)
+			if st := r.l.SkewStats(); !st.Floor.Equal(want) || st.FloorBy != skewSpan {
+				t.Fatalf("floor %s by %q, want %s by span", st.Floor, st.FloorBy, want)
+			}
+		})
+	}
+}
+
+// A raise of the floor is saved at once (X14 and X15 of D6's B3 on #748;
+// section 1.5), by a heartbeat of the first break and by a tick, each read
+// inside cursorSpacing of the cursor's last save, so no flush after the
+// frame saves it: M carries the new floor before any other write.
+// Controls (mutants X14, X15): a raise not saved at once.
+func TestCaptureFloorSavedAtOnce(t *testing.T) {
+	t.Run("a heartbeat of the first break", func(t *testing.T) {
+		r := newRig(t, nil)
+		p := r.accepted(r.agreeHello(hello02()))
+		hb := heartbeat02(1, 10)
+		hb.AtUTC = canonUTC(r.now().Add(time.Hour))
+		hb2 := heartbeat02(2, 20)
+		hb2.AtUTC = canonUTC(r.now().Add(2 * time.Hour))
+		p.send(hb, hb2)
+		p.taken()
+		st := r.l.SkewStats()
+		if want := parseUTC(hb2.AtUTC).Add(HeartbeatGapMax + MaxSkew); !st.Floor.Equal(want) {
+			t.Fatalf("floor %s, want %s", st.Floor, want)
+		}
+		if m := cursorNow(t, r.cs).M; m.Before(st.Floor) {
+			t.Fatalf("M %s saved below the floor %s", m, st.Floor)
+		}
+	})
+	t.Run("a tick", func(t *testing.T) {
+		r := newRig(t, nil)
+		p := r.accepted(r.agreeHello(hello02()))
+		// The first tick after the hello, read with no time passed since
+		// the hello's save: the sensor's clock alone stepped back.
+		tk := tick02(20, 0, 0)
+		tk.SensorUTC = canonUTC(r.now().Add(-300 * time.Second))
+		p.send(tk)
+		p.taken()
+		st := r.l.SkewStats()
+		if st.FloorBy != skewMoved {
+			t.Fatalf("floor %s by %q, want moved", st.Floor, st.FloorBy)
+		}
+		if m := cursorNow(t, r.cs).M; m.Before(st.Floor) {
+			t.Fatalf("M %s saved below the floor %s", m, st.Floor)
+		}
+	})
+}
+
+// sensor-records-late is raised once for each connection, and a late
+// heartbeat is counted (X17 and X18 of D6's B3 on #748; CH-23): a late
+// observation and a late heartbeat on one connection, then a late
+// observation on the next. Controls (mutants X17, X18): raised once for
+// the process, and a heartbeat not judged.
+func TestLateRaisedPerConnection(t *testing.T) {
+	r := newRig(t, nil)
+	p := r.accepted(r.agreeHello(hello02()))
+	old := canonUTC(r.now().Add(-10 * time.Minute))
+	o := obs02(1)
+	o.MadeUTC = old
+	hb := heartbeat02(2, 10)
+	hb.AtUTC = old
+	p.send(o, hb)
+	p.taken()
+	if st := r.l.SkewStats(); st.Late != 2 || r.al.count(AlarmRecordsLate) != 1 {
+		t.Fatalf("the first connection: %d late, %d raises", st.Late, r.al.count(AlarmRecordsLate))
+	}
+	p.end()
+	p = r.accepted(r.agreeHello(resume(3, 20)))
+	o = obs02(3)
+	o.MadeUTC = canonUTC(r.now().Add(-10 * time.Minute))
+	p.send(o)
+	p.taken()
+	if st := r.l.SkewStats(); st.Late != 3 || r.al.count(AlarmRecordsLate) != 2 {
+		t.Fatalf("the second connection: %d late, %d raises", st.Late, r.al.count(AlarmRecordsLate))
+	}
+}
+
+// Part (b)'s window at a later record's read uses t_sensor + E (X13 of
+// D6's B3 on #748): a sensor 1.5 s behind, a tie grace of 1 s; a dial of a
+// 0.8 run that connected with no local address waits, and its end, read
+// after the Result, takes the window tie, its start stamped 1.5 s before
+// the session's start. Control (mutant X13): f.Start without E, 1.5 s
+// before the session and outside the 1 s grace, which ties nothing.
+func TestSkewLaterWindowAddsE(t *testing.T) {
+	r, _ := holdRig02With(t, func(o *Options) { o.Hold.TieGrace = time.Second })
+	p := r.accepted(r.helloO(1500 * time.Millisecond))
+	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+		t.Fatal(err)
+	}
+	start := r.now().Add(time.Second)
+	p.send(ownFlow02(1, 40001, start.Add(-1500*time.Millisecond), false))
+	p.taken()
+	r.pass(5 * time.Second)
+	s := Session{InvocationID: inv1, StartedAt: start, ConnectedAt: start, EndedAt: start.Add(2 * time.Second), Connected: true}
+	if _, err := r.l.Result(bg, "req-1", s); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(storedObs(t, r.s)); n != 0 {
+		t.Fatalf("%d stored at the Result: the dial does not wait", n)
+	}
+	p.send(ownFlow02(2, 40001, r.now(), true))
+	p.taken()
+	got := storedObs(t, r.s)
+	if len(got) != 2 {
+		t.Fatalf("stored %d after the end, want the flow's 2", len(got))
+	}
+	for _, o := range got {
+		if ps := o.Node.PlatformSession; ps == nil || ps.Tie != TieWindow || ps.InvocationID != inv1 {
+			t.Fatalf("stored %+v, want the window tie", o.Node)
+		}
+	}
 }
 
 // Section 1.5 item 2: at the onset of a cause that refuses every tie,
