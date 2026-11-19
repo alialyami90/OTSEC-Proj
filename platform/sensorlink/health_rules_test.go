@@ -290,6 +290,24 @@ func TestEgressFromStartLost(t *testing.T) {
 			r.beat(p, hb(2, noEgress))
 			return p
 		}},
+		// D6's B9: each of the tick's two clauses alone. drops_channel
+		// rises and sent_seq does not pass taken (X-7's control), and the
+		// heartbeat's equal drops_channel clears nothing itself.
+		{"tick drops_channel rises", func(r *healthRig) *peer {
+			p := r.accepted(hello02())
+			r.tickAfter(p, tick02(20, 0, 1))
+			r.beat(p, hb(1, func(h *netobs.Heartbeat) { noEgress(h); h.Counters.DropsChannel = 1 }))
+			return p
+		}},
+		// sent_seq passes taken with drops_channel unchanged (X-8's
+		// control): the link moves with it, so the heartbeat at 2 is no
+		// placement gap.
+		{"tick sent_seq passes taken", func(r *healthRig) *peer {
+			p := r.accepted(hello02())
+			r.tickAfter(p, tick02(20, 1, 0))
+			r.beat(p, hb(2, noEgress))
+			return p
+		}},
 		{"placement gap", func(r *healthRig) *peer {
 			p := r.accepted(hello02())
 			r.beat(p, hb(2, noEgress))
