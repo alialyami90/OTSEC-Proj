@@ -5,11 +5,12 @@ package contract
 // written from the approved text and read by main's old readers there, are
 // read here by the new code at its own minor. R-3's stored 0.2 observation
 // and 0.2 alert validate under the 0.2 readers, E4-4's 0.4 sensor.counters
-// and E4-7's four stored events under the 0.4 reader, and E4-4's fixture
-// without diff.packets is still refused, now by C4-0.4-3. Each fixture is
-// also read strictly, as a reader's own minor is: what the old reader
-// passed over as a later minor's field is refused here. With E4-7's
-// forward contract leg: the identifier this code stamps is 0.4.
+// and E4-7's four stored events under the 0.5 reader, as 0.4 events, an
+// earlier minor (C4 0.5), and E4-4's fixture without diff.packets is still
+// refused, by C4-0.4-3. Each fixture is also read strictly, as a reader's
+// own minor and earlier are: what the old reader passed over as a later
+// minor's field is refused here. With E4-7's forward contract leg: the
+// identifier this code stamps is 0.5 (C4 0.5 §2).
 //
 // The fixtures are #683's files, unchanged (their meaning is #683's).
 // Ground truth: independent (the approved text). Evidence class: desk.
@@ -146,12 +147,12 @@ func TestCCD2ForwardE44(t *testing.T) {
 }
 
 // E4-7, forward contract leg: the identifier this code stamps on every
-// event is 0.4, and a stored 0.4 event of each type validates under the 0.4
-// reader, strictly at its own minor (the 0.3 reader passed a later minor's
-// field over).
+// event is 0.5 (C4 0.5 §2), and a stored 0.4 event of each type validates
+// under the 0.5 reader, strictly at its own earlier minor (the 0.3 reader
+// passed a later minor's field over).
 func TestCCD2ForwardE47(t *testing.T) {
-	if event.Identifier != "otsec.event/0.4" {
-		t.Errorf("event.Identifier %q, C4 0.4 §3: every event this code stamps says 0.4", event.Identifier)
+	if event.Identifier != "otsec.event/0.5" {
+		t.Errorf("event.Identifier %q, C4 0.5 §2: every event this code stamps says 0.5", event.Identifier)
 	}
 	for _, c := range []struct {
 		file string
@@ -170,7 +171,7 @@ func TestCCD2ForwardE47(t *testing.T) {
 			if err != nil {
 				t.Fatalf("event.Decode: %v", err)
 			}
-			if e.Schema != event.Identifier || e.Kind != c.kind {
+			if e.Schema != "otsec.event/0.4" || e.Kind != c.kind {
 				t.Errorf("schema %q, kind %q", e.Schema, e.Kind)
 			}
 			if _, err := event.Decode(ccD2With(t, b, "", "added_in_0_5")); !slices.Contains(event.Codes(err), event.CodeDecode) {
@@ -181,13 +182,13 @@ func TestCCD2ForwardE47(t *testing.T) {
 			if err := json.Unmarshal(ccD2With(t, b, "", "added_in_0_5"), &m); err != nil {
 				t.Fatal(err)
 			}
-			m["schema"] = "otsec.event/0.5"
+			m["schema"] = "otsec.event/0.6"
 			fwd, err := json.Marshal(m)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := event.Decode(fwd); err != nil {
-				t.Errorf("stamped 0.5 with a field 0.5 adds: %v", err)
+				t.Errorf("stamped 0.6 with a field 0.6 adds: %v", err)
 			}
 		})
 	}

@@ -70,9 +70,10 @@ var (
 	utcForm        = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d{1,9}))?Z$`)
 	offsetForm     = regexp.MustCompile(`^([+-])(0\d|1[0-4]):([0-5]\d)$`)
 	hexForm        = regexp.MustCompile(`^(?:[0-9a-f]{2})+$`)
+	runsFoldedForm = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 )
 
-var self = version.ID{Name: "event", Major: 0, Minor: 4}
+var self = version.ID{Name: "event", Major: 0, Minor: 5}
 
 // Validate checks every rule of the contract that can be checked on one
 // event. It returns nil or a join of *Error values.
@@ -304,7 +305,10 @@ func checkObservedAddress(c *checker, e *Event) {
 // as is any detail the event's minor doesn't define, unless the event is
 // of a later minor than this reader's. From 0.4 (C4-0.4-1 to C4-0.4-3) the
 // counters of SensorCounters04 are accepted too, diff.packets is required,
-// and capture_loss names exactly the CaptureLossCounters that rose.
+// and capture_loss names exactly the CaptureLossCounters that rose. From
+// 0.5 (C4-0.5-1) runs_folded is accepted, a decimal from 1 to 2^64 - 1
+// with no leading zero; whether it is present when it should be is the
+// writer's rule, not checked here.
 func checkSensorCounters(c *checker, e *Event) {
 	if e.Kind != KindHealth || e.Health == nil || e.Health.Type != HealthSensorCounters {
 		return
@@ -314,6 +318,7 @@ func checkSensorCounters(c *checker, e *Event) {
 		c.fail(CodeForbidden, "health.type", "%s is new in otsec.event/0.3; this event is %s", HealthSensorCounters, e.Schema)
 	}
 	at4 := err == nil && v.Minor >= 4
+	at5 := err == nil && v.Minor >= 5
 	later := err == nil && v.Minor > self.Minor
 	counters := SensorCounters
 	if at4 {
@@ -334,6 +339,10 @@ func checkSensorCounters(c *checker, e *Event) {
 		switch {
 		case k == "reported_by" || k == "sensor_id" || k == "run_id":
 		case k == DetailCaptureLoss && at4:
+		case k == DetailRunsFolded && at5:
+			if _, err := strconv.ParseUint(val, 10, 64); err != nil || !runsFoldedForm.MatchString(val) {
+				c.fail(CodeEnum, "health.details."+k, "%q is not a count of earlier runs from 1 to 2^64 - 1 (C4-0.5-1)", val)
+			}
 		case isDiff && slices.Contains(counters, name):
 			diffs++
 			if n, err := strconv.ParseUint(val, 10, 64); err != nil || strconv.FormatUint(n, 10) != val {

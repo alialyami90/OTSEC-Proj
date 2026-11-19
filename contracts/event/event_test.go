@@ -459,21 +459,21 @@ func TestSimulated(t *testing.T) {
 	// The enum is open to later minors (A6 D1-23 review change 1): a later
 	// minor's class is kept and read as simulated; an event of this
 	// reader's minor or earlier takes only the two, at 0.1 and, as each
-	// minor moves the boundary, up to this reader's minor, now 0.4 (A6).
+	// minor moves the boundary, up to this reader's minor, now 0.5 (A6).
 	e.Source.EvidenceClass = "lab-replay"
-	for _, schema := range []string{"otsec.event/0.1", "otsec.event/0.2", "otsec.event/0.3", "otsec.event/0.4"} {
+	for _, schema := range []string{"otsec.event/0.1", "otsec.event/0.2", "otsec.event/0.3", "otsec.event/0.4", "otsec.event/0.5"} {
 		e.Schema = schema
 		if !slices.Contains(Codes(e.Validate()), CodeEnum) {
 			t.Errorf("%s event with an unknown class validated", schema)
 		}
 	}
-	e.Schema = "otsec.event/0.5"
+	e.Schema = "otsec.event/0.6"
 	if err := e.Validate(); err != nil || !e.Source.Simulated() {
-		t.Errorf("0.5 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
+		t.Errorf("0.6 event with an unknown class: err=%v simulated=%v", err, e.Source.Simulated())
 	}
 	e.Source.EvidenceClass = "Not A Token"
 	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
-		t.Error("0.5 event with a malformed class validated")
+		t.Error("0.6 event with a malformed class validated")
 	}
 }
 
@@ -603,7 +603,7 @@ func TestSensorCounters(t *testing.T) {
 		t.Errorf("every counter: %v", err)
 	}
 	e = fresh()
-	e.Schema, e.Health.Details["since_utc"] = "otsec.event/0.5", "2026-10-24T12:05:00Z"
+	e.Schema, e.Health.Details["since_utc"] = "otsec.event/0.6", "2026-10-24T12:05:00Z"
 	if err := e.Validate(); slices.Contains(Codes(err), CodeEnum) {
 		t.Errorf("a later minor's detail: %v", err)
 	}
