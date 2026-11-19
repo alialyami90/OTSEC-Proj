@@ -83,8 +83,10 @@ func first(cs ...string) string {
 // skewMarkAlarmOnly marks only while the alarm stands; skewNoMarkAlarm
 // marks nothing for the alarm; skewSubtractE places a sensor time at
 // t - E; lateWithoutE judges lateness without E; skewNoFloor makes no
-// refusal by the capture floor or the start bound.
-var skewGateEOnly, skewMarkAlarmOnly, skewNoMarkAlarm, skewSubtractE, lateWithoutE, skewNoFloor bool
+// refusal by the capture floor or the start bound; skewNoStored has no
+// first half, its stored times compared as they are (storedRefusal and
+// windowRefusal refuse nothing).
+var skewGateEOnly, skewMarkAlarmOnly, skewNoMarkAlarm, skewSubtractE, lateWithoutE, skewNoFloor, skewNoStored bool
 
 // afterMarkSeam runs in observe after the record's mark is read and
 // before the hold takes it; skewTakeHeldUnmarked is its control, a hold
@@ -115,8 +117,10 @@ type SkewStats struct {
 	// The refusals by cause, one count each (section 1.5 item 5), and the
 	// samples read after a held read loop (item 6).
 	AlarmWindows, LatestWindows, MovedWindows, PrestartWindows, SpanWindows, SamplesAfterHold uint64
-	// Late counts the records later than late_bound_s (CH-23).
-	Late uint64
+	// Late counts the records later than late_bound_s (CH-23), and
+	// Backlog the backlog records committed untied with node.backlog
+	// (CH-39).
+	Late, Backlog uint64
 }
 
 // skew is the link's estimate. Its mutex is a leaf: taken last.
@@ -140,12 +144,9 @@ type skew struct {
 	floorBy         string
 	startBound      time.Time
 	mRead           bool
-	// The first break after the start: its heartbeats raise the floor
-	// until the newest_seq of the first hello whose current is true is read.
-	firstBreak   bool
-	fbKnown      bool
-	fbRun        string
-	fbEnd        uint64
+	// bl is the break and its backlog (backlog.go): the first backlog
+	// after the start is the first break, whose heartbeats raise the floor.
+	bl           backlog
 	lateRaisedAt *conn // the connection sensor-records-late was raised for
 	stats        SkewStats
 }
@@ -200,7 +201,7 @@ func (l *Link) takeM(m time.Time) {
 	if s.mRead {
 		return
 	}
-	s.mRead, s.firstBreak = true, true
+	s.mRead = true
 	if !m.IsZero() {
 		s.raiseFloor(m, skewPrestart)
 		s.startBound = m.Add(HeartbeatGapMax + MaxSkew)
@@ -358,7 +359,7 @@ func (l *Link) floorRefusal(capt time.Time) string {
 // off, and known since the start (live), ties nothing now.
 func (l *Link) storedRefusal(off int64, live bool) string {
 	switch {
-	case !l.skewOn():
+	case !l.skewOn() || skewNoStored:
 		return ""
 	case !live:
 		return skewPrestart
@@ -376,6 +377,11 @@ func (l *Link) toNode(t time.Time) time.Time {
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.toNodeLocked(t)
+}
+
+// toNodeLocked is toNode with s.mu held.
+func (s *skew) toNodeLocked(t time.Time) time.Time {
 	if len(s.samples) == 0 {
 		return t
 	}
@@ -425,56 +431,24 @@ func (l *Link) spansRaise(lists ...[]netobs.Span) bool {
 	return raised
 }
 
-// helloRead notes an accepted hello for the first break: the newest_seq of
-// the first hello after the start whose current is true ends it.
-func (l *Link) helloRead(h *netobs.SensorHello, taken uint64) {
-	s := &l.skew
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.firstBreak || s.fbKnown || h.Current == nil || !*h.Current {
-		return
-	}
-	s.fbKnown, s.fbRun, s.fbEnd = true, h.RunID, num(h.NewestSeq)
-	if s.fbEnd <= taken {
-		s.firstBreak = false
-	}
-}
-
 // heartbeatRaise raises the floor from a heartbeat of the first break
-// (prestart's cause) and ends the break at its end. It reports whether
-// the floor rose.
-func (l *Link) heartbeatRaise(h *netobs.Heartbeat, n uint64) bool {
+// (prestart's cause); the frame's position ends the break (positionRead).
+// It reports whether the floor rose.
+func (l *Link) heartbeatRaise(h *netobs.Heartbeat) bool {
 	if !l.skewOn() {
 		return false
 	}
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.firstBreak {
+	if !s.firstBreakLocked() {
 		return false
 	}
 	raised := false
 	if t := parseUTC(h.AtUTC); !t.IsZero() {
 		raised = s.raiseFloor(t.Add(HeartbeatGapMax+MaxSkew), skewPrestart)
 	}
-	s.recordRead(h.RunID, n)
 	return raised
-}
-
-// recordRead ends the first break once its end is read. The caller holds
-// s.mu.
-func (s *skew) recordRead(run string, n uint64) {
-	if s.fbKnown && run == s.fbRun && n >= s.fbEnd {
-		s.firstBreak = false
-	}
-}
-
-// observationRead is recordRead for an observation.
-func (l *Link) observationRead(run string, n uint64) {
-	s := &l.skew
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.recordRead(run, n)
 }
 
 // late judges a record's lateness against late_bound_s: the node's wall

@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"otsec.local/otsec/contracts/asset"
@@ -70,6 +71,9 @@ type Options struct {
 	Timeouts ConnTimeouts
 	// LateBound is late_bound_s (CH-23); zero is DefaultLateBound.
 	LateBound time.Duration
+	// BacklogTie is backlog_tie_s (CH-39); zero is DefaultBacklogTie, and
+	// it is at most MaxBacklogTie.
+	BacklogTie time.Duration
 	// Health is the sensor's health events (health.go): with it, Owed
 	// defaults to its WriteOwed, the heartbeat baselines are judged, and
 	// the pool's alarms make their event due.
@@ -203,6 +207,9 @@ type Link struct {
 	// none, so a resume with no gap keeps it (CH-27; D4's N1 on #747).
 	// Under curMu.
 	startRun string
+	// lateShortDue: sensor-late-index-short is due, raised by Result
+	// once it has left the link's lock.
+	lateShortDue atomic.Bool
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).
@@ -216,6 +223,8 @@ func New(cfg Config, opt Options) (*Link, error) {
 		return nil, errors.New("sensorlink: no observation quota")
 	case opt.Store == nil || opt.Monotonic == nil || opt.Received == nil:
 		return nil, errors.New("sensorlink: Store, Monotonic and Received are required")
+	case opt.BacklogTie > MaxBacklogTie:
+		return nil, fmt.Errorf("sensorlink: backlog_tie_s %s is above %s", opt.BacklogTie, MaxBacklogTie)
 	}
 	h, err := newHold(opt.Hold)
 	if err != nil {
@@ -384,10 +393,18 @@ func codeOf(err error) string {
 func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, lost []netobs.Span, late bool) {
 	nd, _ := l.nodeObject(o)
 	nd.Lost, nd.Late = lost, late
+	// A backlog record the break refuses takes no tie and carries
+	// node.backlog, and not node.skewed, whatever else refuses it (CH-39).
+	bk := l.breakRefuses(o.MadeUTC)
 	// Committed while no tie is made for skew: marked, whatever the hold
 	// does with it (CH-41). A record held now and released later is marked
 	// by its release instead.
-	nd.Skewed = l.marks(l.standing())
+	nd.Backlog, nd.Skewed = bk, !bk && l.marks(l.standing())
+	if bk {
+		l.skew.mu.Lock()
+		l.skew.stats.Backlog++
+		l.skew.mu.Unlock()
+	}
 	if afterMarkSeam != nil {
 		afterMarkSeam()
 	}
@@ -431,7 +448,7 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, l
 	if degraded(o.Coverage) {
 		l.giveWay(ctx, false)
 	}
-	if l.takeHeld(ctx, &stored, hr) {
+	if l.takeHeld(ctx, &stored, hr, bk) {
 		return
 	}
 	l.commitOne(ctx, hr, nil, "")

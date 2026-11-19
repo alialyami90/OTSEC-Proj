@@ -41,7 +41,7 @@ func (r *rig) pass(d time.Duration) {
 // helloO is run 5's hello from a sensor whose clock reads o behind the
 // node's (CH-22's sign: o is the node's time less the sensor's).
 func (r *rig) helloO(o time.Duration) *netobs.SensorHello {
-	h := hello02()
+	h := live02()
 	h.SensorUTC = canonUTC(r.now().Add(-o))
 	return h
 }
@@ -156,7 +156,7 @@ func TestSkewEstimateTakesLeastDelay(t *testing.T) {
 // connection's samples, each of which keeps E at 0.
 func TestSkewSamplesPerConnection(t *testing.T) {
 	r := newRig(t, nil)
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	r.tickO(p, 2500*time.Millisecond, 20, 0)
 	if s := r.l.SkewStats(); s.E != 2500*time.Millisecond || !s.Alarm {
 		t.Fatalf("after the first tick: %+v", s)
@@ -177,7 +177,7 @@ func TestSkewSamplesPerConnection(t *testing.T) {
 // heartbeats, which raises the alarm.
 func TestSkewIgnoresHeartbeat(t *testing.T) {
 	r := newRig(t, nil)
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	r.tickO(p, 0, 20, 0)
 	k := func() [2]time.Time {
 		r.l.skew.mu.Lock()
@@ -285,7 +285,7 @@ func TestSkewLatestSampleMarks(t *testing.T) {
 			hs.Appender = o.Store
 			o.Store = hs
 		})
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		r.tickO(p, 0, 20, 0)
 		r.tickO(p, 0, 20, 0)
 		if held {
@@ -434,7 +434,7 @@ func TestSkewCorrectionAddsE(t *testing.T) {
 func TestSkewStepBackTiesNothing(t *testing.T) {
 	run := func(t *testing.T) (*netobs.PlatformSession, SkewStats) {
 		r, _ := holdRig02(t)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		for range 5 {
 			r.tickO(p, 0, 20, 0)
 		}
@@ -482,7 +482,7 @@ func TestSkewStepBackTiesNothing(t *testing.T) {
 // raises it until the first current hello's newest_seq is read.
 func TestCaptureFloorAcrossStart(t *testing.T) {
 	r := newRig(t, nil)
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	before := r.now()
 	r.tickO(p, 300*time.Second, 20, 0) // the sensor's clock alone stepped back 300 s
 	st := r.l.SkewStats()
@@ -553,7 +553,7 @@ func TestCaptureFloorAcrossStart(t *testing.T) {
 func TestSkewCauseAfterMarkStillMarks(t *testing.T) {
 	run := func(t *testing.T) (*netobs.Observation, SkewStats) {
 		r, _ := holdRig02(t)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
 			t.Fatal(err)
 		}
@@ -599,7 +599,7 @@ func TestSkewBounds(t *testing.T) {
 		moved bool
 	}{{MaxSkew, false}, {MaxSkew + ns, true}, {-MaxSkew, false}, {-MaxSkew - ns, true}} {
 		r := newRig(t, nil)
-		r.accepted(r.agreeHello(hello02()))
+		r.accepted(r.agreeHello(live02()))
 		r.addWall(c.step)
 		if got := r.l.standing() == skewMoved; got != c.moved {
 			t.Errorf("a step of %s: moved %v", c.step, got)
@@ -610,7 +610,7 @@ func TestSkewBounds(t *testing.T) {
 		late     bool
 	}{{DefaultLateBound, false}, {DefaultLateBound + ns, true}} {
 		r := newRig(t, nil)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		o := obs02(1)
 		o.MadeUTC = canonUTC(r.now().Add(-c.lateness))
 		p.send(o)
@@ -625,7 +625,7 @@ func TestSkewBounds(t *testing.T) {
 	}{{AckMaxDelay, 0}, {AckMaxDelay + ns, 1}} {
 		hs := &holdingStore{}
 		r := newRig(t, func(o *Options) { hs.Appender = o.Store; o.Store = hs })
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		r.tickO(p, 0, 20, 0)
 		r.pass(netobs.TickMinSpacing + time.Second)
 		hs.hold(func() { r.clk.add(c.step) }) // the monotonic clock alone: the sample's o is unchanged
@@ -640,7 +640,7 @@ func TestSkewBounds(t *testing.T) {
 	// absDur that wraps, which sees none of them.
 	far := func(t *testing.T) (SkewStats, string) {
 		r := newRig(t, nil)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		p.taken()
 		r.pass(netobs.TickMinSpacing + time.Second)
 		tk := tick02(20, 0, 0)
@@ -656,7 +656,7 @@ func TestSkewBounds(t *testing.T) {
 	// (D3's B2 on #748). Control (mutant Z1): no sample at a zero time.
 	{
 		r := newRig(t, nil)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		p.taken()
 		r.pass(netobs.TickMinSpacing + time.Second)
 		tk := tick02(20, 0, 0)
@@ -698,7 +698,7 @@ func TestSkewBounds(t *testing.T) {
 func TestCaptureFloorRefusesHeldFlow(t *testing.T) {
 	run := func(t *testing.T) (*netobs.Observation, Released, SkewStats) {
 		r, _ := holdRig02(t)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
 			t.Fatal(err)
 		}
@@ -743,7 +743,7 @@ func TestCaptureFloorFromHello(t *testing.T) {
 		name := map[bool]string{false: "lost", true: "prior.lost"}[prior]
 		t.Run(name, func(t *testing.T) {
 			r := newRig(t, nil)
-			h := r.agreeHello(hello02())
+			h := r.agreeHello(live02())
 			sp := lspan("09:30:00", "09:31:00")
 			if prior {
 				h.Prior.RecordsLost, h.Prior.Lost = "3", []netobs.Span{sp}
@@ -784,7 +784,7 @@ func TestCaptureFloorSavedAtOnce(t *testing.T) {
 	})
 	t.Run("a tick", func(t *testing.T) {
 		r := newRig(t, nil)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		// The first tick after the hello, read with no time passed since
 		// the hello's save: the sensor's clock alone stepped back.
 		tk := tick02(20, 0, 0)
@@ -808,7 +808,7 @@ func TestCaptureFloorSavedAtOnce(t *testing.T) {
 // the process, and a heartbeat not judged.
 func TestLateRaisedPerConnection(t *testing.T) {
 	r := newRig(t, nil)
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	old := canonUTC(r.now().Add(-10 * time.Minute))
 	o := obs02(1)
 	o.MadeUTC = old
@@ -880,7 +880,7 @@ func TestSkewOnsetReleasesHeld(t *testing.T) {
 	run := func(t *testing.T) (atOnset int, rel Released, got []*netobs.Observation) {
 		r, _ := holdRig02(t)
 		defer func() { st = r.l.SkewStats() }()
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		r.tickO(p, 0, 20, 0)
 		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
 			t.Fatal(err)
@@ -949,7 +949,7 @@ func TestSkewOnsetReleasesHeld(t *testing.T) {
 // both records by window.
 func TestSkewOnsetRunWaitsUntied(t *testing.T) {
 	r, _ := holdRig02(t)
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	r.tickO(p, 0, 20, 0)
 	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
 		t.Fatal(err)
@@ -1003,7 +1003,7 @@ func TestSkewRunMarkKept(t *testing.T) {
 				return save(ctx, rec)
 			}
 		})
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		r.tickO(p, 0, 20, 0)
 		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
 			t.Fatal(err)
@@ -1074,7 +1074,7 @@ func (r *rig) endTie(p *peer, seq int, at time.Time) *netobs.Observation {
 // ties whatever the gate says.
 func TestSkewOpenTableRefused(t *testing.T) {
 	r, _ := holdRig02(t)
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	r.tickO(p, 0, 20, 0)
 	r.openTied(p)
 	r.tickO(p, 3*time.Second, 20, 1) // the sensor's clock stepped back 3 s: the latest sample stands
@@ -1103,7 +1103,7 @@ func TestSkewRepointGated(t *testing.T) {
 	}
 	run := func(t *testing.T, onset bool) out {
 		r, _ := holdRig02(t)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		r.tickO(p, 0, 20, 0)
 		r.openTied(p)
 		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-2", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
@@ -1148,7 +1148,7 @@ func TestOpenEntryOffOnLinkClock(t *testing.T) {
 		now := o.Hold.Now
 		o.Hold.Now = func() time.Time { return now().Add(5 * time.Second) }
 	})
-	p := r.accepted(r.agreeHello(hello02()))
+	p := r.accepted(r.agreeHello(live02()))
 	r.tickO(p, 0, 20, 0)
 	r.openTied(p)
 	if o := r.endTie(p, 2, r.now()); o.Node.PlatformSession == nil || o.Node.Skewed {
@@ -1201,7 +1201,7 @@ func TestSkewFarClockRecovers(t *testing.T) {
 	}
 	run := func(t *testing.T, l leg) (answer string, r *rig) {
 		r = newRig(t, nil)
-		p := r.accepted(r.agreeHello(hello02()))
+		p := r.accepted(r.agreeHello(live02()))
 		p.taken()
 		r.pass(netobs.TickMinSpacing + time.Second)
 		p.send(l.tick(r))
