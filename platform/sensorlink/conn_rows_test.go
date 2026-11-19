@@ -979,12 +979,15 @@ func TestCursorAtMaxLinkCursorBytes(t *testing.T) {
 }
 
 // The cursor's text form (section 1.4, CH-18): every field it fills reads
-// back as written; a field of part 2b or 2c filled, a span slot past the
-// count, a mark out of range, or a time that Unix nanoseconds cannot hold,
-// is refused. Control: a decoder that reads the reserved fields loosely.
+// back as written, write_no and the baselines (2b) included, with
+// drops_driver absent (unknown); a field of part 2c filled, a span slot
+// past the count, a mark out of range, or a time that Unix nanoseconds
+// cannot hold, is refused. Control: a decoder that reads the reserved
+// fields loosely.
 func TestCursorTextForm(t *testing.T) {
 	c := &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Taken: 9, G: 3, D: 1, Refused: 4, Dropped: 6, Ds: 1,
-		NewestSeq: 20, Digest: testDigest,
+		NewestSeq: 20, Digest: testDigest, WriteNo: 7, FramesOutgoing: ptr(uint64(0)), DropsHolder: ptr(uint64(3)),
+		FramesOverlong: ptr(uint64(1)), Egress: EgressCarried,
 		Spans: []HeldSpan{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:00:05.5Z", CutUTC: "2026-11-07T09:00:05.5Z", Owed: true, Marked: true}},
 		Prior: &HeldPrior{RunsSkipped: 4, RecordsLost: 2, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
 			Spans: []HeldSpan{{FromUTC: "2026-11-07T08:00:00Z", ToUTC: "2026-11-07T08:01:00Z", CutUTC: "2026-11-07T08:00:30Z", Marked: true}}}}
@@ -1014,7 +1017,8 @@ func TestCursorTextForm(t *testing.T) {
 		i    int
 		v    string
 	}{
-		{"write_no filled", 9, "1"}, {"a baseline filled", 13, "0"}, {"W filled", 18, "0"}, {"R filled", 22, "0"},
+		{"write_no absent", 9, "-"}, {"a baseline not a decimal", 13, "x"}, {"an egress mark out of range", 17, "2"},
+		{"W filled", 18, "0"}, {"R filled", 22, "0"},
 		{"the gap held filled", 40, "0"}, {"M filled", 46, "0"}, {"a slot past the count", 52, "0"},
 		{"a mark out of range", 51, "4"}, {"a leading zero", 4, "09"}, {"a sign", 4, "+9"}, {"previous_end", 82, "x"},
 		{"started_by", 83, "someone"}, {"the tag", 0, "sp1"}, {"run_id", 3, "not-a-uuid"},

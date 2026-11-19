@@ -171,9 +171,9 @@ func TestLostSpanOneCutEnd(t *testing.T) {
 // M-10's legs other than §3's (no dial: P4-4-DE): two sensors' open
 // connections both close as state-unread when the node's state cannot be
 // read, and a cursor that cannot be parsed closes a connection at its
-// start as state-unread. The fold and its sensor-state-unread alarm are
-// P4-4-DE's (the fold is not built). Control: a node that keeps its open
-// connections.
+// start as state-unread. The fold's legs, with sensor-state-unread and
+// its cause, are platform/node's TestStateUnreadFoldRecord. Control: a
+// node that keeps its open connections.
 func TestStateUnreadClosesConnections(t *testing.T) {
 	a, b := newRig(t, nil), newRig(t, nil)
 	pa, pb := a.accepted(hello02()), b.accepted(hello02())

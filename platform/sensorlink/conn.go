@@ -23,10 +23,10 @@ import (
 // contracts/netobs's; this file acts on their verdicts.
 //
 // Not wired (F-027's gate, D4-96): nothing outside the tests calls
-// ServeConn. The dialer, node-hello, the run file (sensorrun.json), the
-// coverage gaps other than lost, the skew estimate and its marks, the
-// heartbeat baselines and the health-event pool are not here (P4-4-INT's
-// split, docs/phase4/D5-p44int-split.md).
+// ServeConn. The dialer, node-hello, the coverage gaps other than lost,
+// and the skew estimate and its marks are not here (P4-4-INT's split,
+// docs/phase4/D5-p44int-split.md); the heartbeat baselines, the run file
+// and the health-event pool are health.go's and runfile.go's.
 
 // The node's channel bounds (CH-4, CH-18, CH-40; C13 0.2 §12). They are the
 // node's constants, not C13's.
@@ -144,25 +144,35 @@ type HeldPrior struct {
 }
 
 // Cursor is the part of CH-18's cursor this intake keeps: the position,
-// G and D, the run's totals, Ds, the last newest_seq, the run's digest,
-// and its spans and prior. It holds one run: what an earlier run owed is
+// G and D, the run's totals, write_no, Ds, the last newest_seq, the run's
+// digest, the heartbeat baselines, and its spans and prior. It holds one run: what an earlier run owed is
 // written before row 6's save replaces it (D1's ruling on #732). Its
 // stored form is section 1.4's text form (cursorform.go); the JSON tags
 // serve clone only.
 type Cursor struct {
-	Generation uint64     `json:"generation"`
-	RunCounter uint64     `json:"run_counter"`
-	RunID      string     `json:"run_id"`
-	Taken      uint64     `json:"taken"`
-	G          uint64     `json:"g"`
-	D          uint64     `json:"d"`
-	Refused    uint64     `json:"refused"`
-	Dropped    uint64     `json:"dropped"`
-	Ds         uint64     `json:"ds"`
-	NewestSeq  uint64     `json:"newest_seq"`
-	Digest     string     `json:"digest"`
-	Spans      []HeldSpan `json:"spans,omitempty"`
-	Prior      *HeldPrior `json:"prior,omitempty"`
+	Generation uint64 `json:"generation"`
+	RunCounter uint64 `json:"run_counter"`
+	RunID      string `json:"run_id"`
+	Taken      uint64 `json:"taken"`
+	G          uint64 `json:"g"`
+	D          uint64 `json:"d"`
+	Refused    uint64 `json:"refused"`
+	Dropped    uint64 `json:"dropped"`
+	Ds         uint64 `json:"ds"`
+	NewestSeq  uint64 `json:"newest_seq"`
+	Digest     string `json:"digest"`
+	// WriteNo is the run file's write number as last saved here (section
+	// 1.1): 0 when no file has been written.
+	WriteNo uint64 `json:"write_no"`
+	// The run's heartbeat baselines (section 1.8): each counter as last
+	// taken, nil when none is held, and the egress mark, "" when none.
+	FramesOutgoing *uint64    `json:"frames_outgoing,omitempty"`
+	DropsHolder    *uint64    `json:"drops_holder,omitempty"`
+	FramesOverlong *uint64    `json:"frames_overlong,omitempty"`
+	DropsDriver    *uint64    `json:"drops_driver,omitempty"`
+	Egress         string     `json:"egress,omitempty"`
+	Spans          []HeldSpan `json:"spans,omitempty"`
+	Prior          *HeldPrior `json:"prior,omitempty"`
 }
 
 func checkCursorBytes(b []byte) error {
@@ -224,6 +234,13 @@ type conn struct {
 	ackSent  bool
 	lastTick *netobs.Tick
 	tickAt   time.Duration
+	// fromStart: the run was accepted as new on this connection, and every
+	// seq of it has been read with no loss declared (CH-27).
+	fromStart bool
+	// owedTry is when the owed events were last tried, on the monotonic
+	// clock; owedFailed, that the try failed, raised once a connection.
+	owedTry    time.Duration
+	owedFailed bool
 }
 
 // connGuard is the link's one live connection (CH-3) and the close a
@@ -329,6 +346,9 @@ func (l *Link) raise(alarm, detail string) {
 	if l.opt.Raise != nil {
 		l.opt.Raise(alarm, detail)
 	}
+	if l.opt.Health != nil && slices.Contains(poolAlarms, alarm) {
+		l.opt.Health.alarm(alarm, detail)
+	}
 }
 
 // read reads one frame with the deadline d. It returns the close reason
@@ -419,6 +439,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 					return r
 				}
 				l.flush(ctx, cn, false)
+				l.retryOwed(ctx, cn)
 				return ""
 			})
 			if reason == "" {
@@ -482,6 +503,7 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 func (l *Link) saveCursor(ctx context.Context, c *Cursor) error {
 	l.cmu.Lock()
 	defer l.cmu.Unlock()
+	c.WriteNo = max(c.WriteNo, l.writeNo)
 	next := c
 	if l.moved != nil || l.unsaved != nil {
 		next = c.clone()
@@ -594,8 +616,18 @@ func (l *Link) openCursor(ctx context.Context) (*Cursor, error) {
 	c, err := l.loadCursor(ctx)
 	if err == nil {
 		l.pos, l.posRead = c, true
+		l.tookWriteNo(c)
 	}
 	return c.clone(), err
+}
+
+// tookWriteNo takes the write number a cursor read holds, so every later
+// write of the position carries it, row 6's new cursor included (D6's B3
+// on #747). The caller holds cmu.
+func (l *Link) tookWriteNo(c *Cursor) {
+	if c != nil {
+		l.writeNo = max(l.writeNo, c.WriteNo)
+	}
 }
 
 // closeCursor ends it: every release since writes its own change.
@@ -603,6 +635,65 @@ func (l *Link) closeCursor() {
 	l.cmu.Lock()
 	defer l.cmu.Unlock()
 	l.curOpen, l.moved = false, nil
+}
+
+// saveWriteNo saves the run file's write number n in the position, as
+// last written, once the file is renamed (section 1.1). Every later write
+// of the position carries it. A sensor with no cursor has nothing to
+// carry it: its database reads as lost at the next start.
+func (l *Link) saveWriteNo(ctx context.Context, n uint64) error {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	l.writeNo = max(l.writeNo, n)
+	if l.opt.Cursor == nil {
+		return nil
+	}
+	if err := l.readPos(ctx); err != nil {
+		return err
+	}
+	if l.pos == nil || l.pos.WriteNo >= n {
+		return nil
+	}
+	c := l.pos.clone()
+	c.WriteNo = l.writeNo
+	b, err := encodeCursor(c)
+	if err != nil {
+		return err
+	}
+	if err := l.opt.Cursor.SaveSourceCursor(ctx, b); err != nil {
+		return err
+	}
+	l.pos = c
+	return nil
+}
+
+// readCursor reads the position for RunFile.Start, nil when none.
+func (l *Link) readCursor(ctx context.Context) (*Cursor, error) {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	if l.opt.Cursor == nil {
+		return nil, errors.New("sensorlink: no cursor store")
+	}
+	if err := l.readPos(ctx); err != nil {
+		return nil, err
+	}
+	return l.pos.clone(), nil
+}
+
+// saveStart saves the position the start changed (RunFile.Start).
+func (l *Link) saveStart(ctx context.Context, c *Cursor) error {
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	c.WriteNo = max(c.WriteNo, l.writeNo)
+	b, err := encodeCursor(c)
+	if err != nil {
+		return err
+	}
+	if err := l.opt.Cursor.SaveSourceCursor(ctx, b); err != nil {
+		return err
+	}
+	l.pos = c.clone()
+	return nil
 }
 
 // flush saves a pending cursor on its own, at most once a second unless
@@ -698,6 +789,15 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		// save below overwrites G and D (D5's N9 on #634).
 		if cur != nil {
 			l.checkGap(cur)
+			// The replaced run's last capture loss and the totals it counts
+			// up to are in the run file before the save forgets them
+			// (section 1.4; D1's rulings 6850475569 and 6850665387 on #655).
+			if hl := l.opt.Health; hl != nil {
+				if err := hl.beforeReplace(ctx, cur); err != nil {
+					l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: run %s's capture totals were not written to sensorrun.json: %v", h.SensorID, cur.RunID, err))
+					return netobs.ClosePositionNotSaved
+				}
+			}
 			// What the replaced cursor owes, a position that reads as none
 			// included, is written under its own identity before the save
 			// replaces it; on a failure nothing is saved or kept (CH-12,
@@ -746,6 +846,16 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 	l.mu.Unlock()
 	cn.hello, cn.cur, cn.saved, cn.l = h, next, next.Taken, first-1
 	cn.lastSave = l.opt.Monotonic()
+	// Seen from its start (CH-27): accepted as new from seq 1 with no loss
+	// declared, or resumed in this process with no gap and none declared
+	// since (D4's N1 on #747).
+	clean := drops == 0 && len(h.Lost) == 0
+	cn.fromStart = clean && (v.Accept == netobs.HelloNewRun && first == 1 ||
+		v.Accept != netobs.HelloNewRun && l.startRun == h.RunID && first <= cur.Taken+1)
+	l.startRun = ""
+	if cn.fromStart {
+		l.startRun = h.RunID
+	}
 	l.resetRun(ctx, h.RunID, v.Accept == netobs.HelloNewRun)
 	if opened > 0 {
 		l.lostOpened(h.SensorID, h.RunID, opened)
@@ -784,17 +894,36 @@ func (l *Link) writeReplaced(ctx context.Context, sensor string, cur *Cursor) st
 	return ""
 }
 
-// owedInRun writes what the run owes; a failure is raised and the
-// connection stays open, the marks kept for the next attempt (D3's
-// condition 4 on #732).
+// owedInRun writes what the run owes; a failure is raised, once a
+// connection, and the connection stays open, the marks kept for the next
+// attempt (D3's condition 4 on #732), which retryOwed makes. An event
+// that waits for its budget is not a failure.
 func (l *Link) owedInRun(ctx context.Context, cn *conn) {
 	if l.opt.Owed == nil {
 		return
 	}
+	cn.owedTry = l.opt.Monotonic()
 	_, n := owedOf(cn.cur)
-	if err := l.writeOwed(ctx, cn); err != nil {
+	switch err := l.writeOwed(ctx, cn); {
+	case err == nil:
+		cn.owedFailed = false
+	case errors.Is(err, ErrHealthHeld):
+	case !cn.owedFailed:
+		cn.owedFailed = true
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: %d owed events of run %s were not written: %v", l.cfg.SensorID, n, cn.cur.RunID, err))
 	}
+}
+
+// retryOwed tries the run's owed events again during a live connection,
+// at most once a second (D4-116 item 3.5's first limit, closed here).
+func (l *Link) retryOwed(ctx context.Context, cn *conn) {
+	if l.opt.Owed == nil || cn.cur == nil {
+		return
+	}
+	if _, n := owedOf(cn.cur); n == 0 || l.opt.Monotonic()-cn.owedTry < cursorSpacing {
+		return
+	}
+	l.owedInRun(ctx, cn)
 }
 
 // resetRun starts the link's run state for the hello's run: a new run
@@ -990,6 +1119,7 @@ func (l *Link) frame(ctx context.Context, cn *conn, b []byte) string {
 	cn.l, cn.cur.G = pl.L, cn.cur.G+pl.Gap
 	if pl.Gap > 0 {
 		cn.pending = true
+		l.notFromStart(cn)
 	}
 	switch {
 	case pl.Place == netobs.PlaceSensorID:
@@ -1004,8 +1134,7 @@ func (l *Link) frame(ctx context.Context, cn *conn, b []byte) string {
 		l.takeRefused(cn, n, codeOf(err))
 		return ""
 	case fs.Heartbeat != nil:
-		l.heartbeat(ctx, cn, fs.Heartbeat, n)
-		return ""
+		return l.heartbeat(ctx, cn, fs.Heartbeat, n)
 	}
 	return l.observation(ctx, cn, fs.Observation, n)
 }
@@ -1013,9 +1142,16 @@ func (l *Link) frame(ctx context.Context, cn *conn, b []byte) string {
 // refusedFinal counts a refusal that takes no seq: the totals rise, and
 // the tick's sent_seq makes its seq a gap.
 func (l *Link) refusedFinal(cn *conn, reason string) {
+	l.notFromStart(cn) // a seq the tick will count as a gap
 	l.refuse(reason)
 	cn.cur.Refused++
 	cn.pending = true
+}
+
+// notFromStart: a loss is declared or a seq missed, so the run is no
+// longer seen from its start (CH-27).
+func (l *Link) notFromStart(cn *conn) {
+	cn.fromStart, l.startRun = false, ""
 }
 
 // takeRefused counts record n refused and moves T past it once the totals
@@ -1025,24 +1161,35 @@ func (l *Link) takeRefused(cn *conn, n uint64, reason string) {
 	cn.cur.Taken = max(cn.cur.Taken, n)
 }
 
-func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n uint64) {
+func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n uint64) string {
 	if h.Coverage.ConfigDigest != cn.cur.Digest {
 		l.takeRefused(cn, n, string(netobs.CodeConflict)) // CH-32
-		return
+		return ""
 	}
 	l.mu.Lock()
-	if err := h.Follows(l.stats.Heartbeat); err != nil {
-		l.mu.Unlock()
+	prev := l.stats.Heartbeat
+	err := h.Follows(prev)
+	l.mu.Unlock()
+	if err != nil {
 		l.takeRefused(cn, n, RefusedCounterDecrease)
-		return
+		return ""
 	}
+	if d := h.Counters.DropsChannel; d > cn.cur.D {
+		cn.cur.D = d
+		l.notFromStart(cn)
+	}
+	if l.opt.Health != nil {
+		// A baseline save that fails closes before the heartbeat is
+		// taken here, so its resend follows (D4's B2 on #747).
+		if r := l.baselines(ctx, cn, h, prev, n); r != "" {
+			return r
+		}
+	}
+	l.mu.Lock()
 	l.stats.Heartbeat, l.stats.LastSeq = h, n
 	l.stats.Heartbeats++
 	l.stats.HeartbeatMono = l.opt.Monotonic()
 	l.mu.Unlock()
-	if d := h.Counters.DropsChannel; d > cn.cur.D {
-		cn.cur.D = d
-	}
 	cn.cur.Taken, cn.pending = max(cn.cur.Taken, n), true
 	if degraded(h.Coverage) {
 		l.cmu.Lock()
@@ -1050,7 +1197,124 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 		l.syncHold()
 		l.cmu.Unlock()
 	}
+	return ""
 }
+
+// transmitBaselineFirst is a test seam, false in the node: the control
+// that saves frames_outgoing's baseline before the run file takes the
+// raise.
+var transmitBaselineFirst bool
+
+// baselines judges heartbeat n against the run's durable baselines
+// (section 1.8): sensor-transmitted at a non-zero frames_outgoing with
+// none held or any rise, written to the run file before the baseline that
+// holds it is saved; sensor-egress-absent; and the rises of every counter
+// made due as sensor.counters, a capture loss among them. The rise of a
+// capture counter, and of frames_outgoing, is judged against the cursor's
+// baseline; any other counter's against the previous heartbeat taken in
+// this process, or the run total with none. A baseline changed is saved
+// at once, before the heartbeat is acted on; a save that fails closes
+// store, and the heartbeat is resent.
+func (l *Link) baselines(ctx context.Context, cn *conn, h *netobs.Heartbeat, prev *netobs.Heartbeat, n uint64) string {
+	hl, cur := l.opt.Health, cn.cur
+	next := cur.clone()
+	vals := counterValues(&h.Counters)
+	durable := map[string]*uint64{"frames_outgoing": cur.FramesOutgoing, "drops_holder": cur.DropsHolder,
+		"frames_overlong": cur.FramesOverlong, "drops_driver": cur.DropsDriver}
+	var pv map[string]*uint64
+	if prev != nil {
+		pv = counterValues(&prev.Counters)
+	}
+	rises := map[string]uint64{}
+	for name, v := range vals {
+		base, ok := durable[name]
+		if !ok && pv != nil {
+			base = pv[name]
+		}
+		if r := rise(v, base); r > 0 {
+			rises[name] = r
+		}
+	}
+	for _, f := range []struct {
+		to **uint64
+		v  *uint64
+	}{{&next.FramesOutgoing, h.Counters.FramesOutgoing}, {&next.DropsHolder, h.Counters.DropsHolder},
+		{&next.FramesOverlong, h.Counters.FramesOverlong}, {&next.DropsDriver, h.Counters.DropsDriver}} {
+		if f.v != nil {
+			v := *f.v
+			*f.to = &v
+		}
+	}
+	l.egress(cn, h, next)
+	next.Taken = max(next.Taken, n)
+	transmit := rises["frames_outgoing"] > 0
+	detail := fmt.Sprintf("sensor %s: run %s's frames_outgoing is %d", h.SensorID, h.RunID, deref(h.Counters.FramesOutgoing))
+	if transmit && !transmitBaselineFirst {
+		if err := hl.transmit(ctx, detail); err != nil {
+			next.FramesOutgoing = cur.FramesOutgoing // not durable: the next heartbeat raises again
+		}
+	}
+	// The capture loss is held, and the run file written within its
+	// minute, before the cursor takes the new totals (section 1.8).
+	hl.counters(ctx, countersKey(cn.en.Began), h.RunID, rises, captureTotals(next))
+	if !sameBaselines(cur, next) {
+		if err := l.saveCursor(ctx, next); err != nil {
+			l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the baselines of run %s were not saved: %v", h.SensorID, h.RunID, err))
+			return netobs.CloseStore
+		}
+		cn.saved, cn.lastSave = next.Taken, l.opt.Monotonic()
+	}
+	if transmit && transmitBaselineFirst {
+		_ = hl.transmit(ctx, detail)
+	}
+	cn.cur = next
+	return ""
+}
+
+func deref(p *uint64) uint64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func sameBaselines(a, b *Cursor) bool {
+	return a.Egress == b.Egress && sameTotals(captureTotals(a), captureTotals(b)) &&
+		sameTotals([3]*uint64{a.FramesOutgoing}, [3]*uint64{b.FramesOutgoing})
+}
+
+// egress judges egress_check against the run's baseline (CH-27): a run's
+// first heartbeat seen from its start sets it, carried or not, and raises
+// nothing; with none held otherwise, a heartbeat that omits the field
+// raises sensor-egress-absent, as does one that drops a field carried, or
+// states it absent. It raises once a run while the link runs.
+func (l *Link) egress(cn *conn, h *netobs.Heartbeat, next *Cursor) {
+	why := ""
+	switch {
+	case h.EgressCheck == "absent":
+		why = "states egress_check absent"
+		next.Egress = EgressCarried // carried, so a later omission reads as absent (CH-27; D4's B1 on #747)
+	case h.EgressCheck != "":
+		if next.Egress != EgressCarried {
+			next.Egress = EgressCarried
+		}
+	case next.Egress == EgressCarried:
+		why = "dropped egress_check within the run"
+	case next.Egress == "" && cn.fromStart:
+		next.Egress = EgressOmitted // never carried: status shows unknown
+	case next.Egress == "":
+		why = "omits egress_check, and the node holds no baseline from the run's start"
+	}
+	if why != "" && l.egressRun != h.RunID {
+		l.egressRun = h.RunID
+		l.raise(AlarmEgressAbsent, fmt.Sprintf("sensor %s: run %s %s", h.SensorID, h.RunID, why))
+	}
+}
+
+// observeFault is a test seam, nil in the node: it runs between a record's
+// cursor encode and its commit, where a run file write from another
+// goroutine can land.
+var observeFault func()
 
 // observation stores record n, with node.lost when spans are unmarked
 // (CH-40), and the cursor in the same commit (CH-17).
@@ -1069,6 +1333,9 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	marked := cn.cur.clone()
 	lost := markLost(marked)
 	marked.Taken = max(marked.Taken, n)
+	l.cmu.Lock()
+	marked.WriteNo = max(marked.WriteNo, l.writeNo)
+	l.cmu.Unlock()
 	mb, err := encodeCursor(marked)
 	if err != nil {
 		// A cursor that cannot be encoded is the node's fault, not the
@@ -1084,6 +1351,9 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	l.mu.Lock()
 	l.stats.LastSeq = n
 	l.mu.Unlock()
+	if observeFault != nil {
+		observeFault()
+	}
 	l.observe(ctx, o, n, lost)
 	l.cmu.Lock()
 	l.inflight = nil
@@ -1151,10 +1421,14 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 	}
 	cn.lastTick, cn.tickAt = t, now
 	sent, drops := num(t.SentSeq), num(t.DropsChannel)
+	if drops > cn.cur.D {
+		l.notFromStart(cn) // a declared loss (D6's B4 on #747)
+	}
 	cn.cur.D, cn.cur.NewestSeq = max(cn.cur.D, drops), num(t.NewestSeq)
 	cn.sent = max(cn.sent, sent)
 	if from := max(cn.l, cn.cur.Taken); sent > from {
 		cn.cur.G += sent - from
+		l.notFromStart(cn)
 	}
 	cn.l = max(cn.l, sent)
 	cn.cur.Taken = max(cn.cur.Taken, cn.l)
@@ -1200,7 +1474,16 @@ func (l *Link) WriteOwed(ctx context.Context) error {
 	if err != nil || cur == nil {
 		return err
 	}
-	return l.writeOwed(ctx, &conn{cur: cur})
+	o, n := owedOf(cur)
+	if gaps := len(o.Spans) + priorGaps(o.Prior); gaps > 0 {
+		// The lost gaps still owed stand, as at their admission (S-10 (d)).
+		l.raise(AlarmRecordsLost, fmt.Sprintf("sensor %s: run %s declares lost records; %d lost coverage gaps are owed at the start", l.cfg.SensorID, cur.RunID, gaps))
+	}
+	err = l.writeOwed(ctx, &conn{cur: cur})
+	if err == nil && n > 0 && l.opt.Health != nil {
+		l.opt.Health.startCopy(uint64(n))
+	}
+	return err
 }
 
 func (l *Link) writeOwed(ctx context.Context, cn *conn) error {
@@ -1227,6 +1510,19 @@ func (l *Link) writeOwed(ctx context.Context, cn *conn) error {
 	}
 	cn.cur, cn.saved, cn.pending = next, next.Taken, false
 	return nil
+}
+
+func priorGaps(p *HeldPrior) int {
+	if p == nil {
+		return 0
+	}
+	n := 0
+	for _, s := range p.Spans {
+		if s.Owed {
+			n++
+		}
+	}
+	return n
 }
 
 // outcome is what became of the record the 0.2 path is taking.
