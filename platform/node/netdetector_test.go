@@ -396,7 +396,7 @@ func TestDetectorBarrierDuringRelease(t *testing.T) {
 		t.Fatalf("run: %+v", rep)
 	}
 	r.afterRelease = nil
-	tick(t, r)
+	statusThrough(t, r, st, 2)
 	if d := detectorStatus(t, st); d.Through != 2 || d.OrderingFaults != 0 || countAlarms(st, AlarmDetectorOrdering) != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -411,7 +411,10 @@ func TestDetectorAlertRetried(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	r.alertAppend = func([]c5.Record) error { return errors.New("refused") }
+	var tries atomic.Int64
+	heldManager(r, func() {
+		r.alertAppend = func([]c5.Record) error { tries.Add(1); return errors.New("refused") }
+	})
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), laterFlow(2, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
@@ -424,7 +427,18 @@ func TestDetectorAlertRetried(t *testing.T) {
 		d.CheckpointsWritten != 1 || detectorCursor(t, r) != 0 || countAlarms(st, AlarmAlertNotStored) != 1 {
 		t.Fatalf("%d alerts, cursor %d, status %+v, %d alarms", n, detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
 	}
-	r.alertAppend = nil
+	// One retry, with the manager held so no drive runs: the batch is
+	// tried, then the first alert alone, and one failure is counted (D6's
+	// N3 on #759).
+	heldManager(r, func() {
+		nd := r.detector
+		f0, a0 := nd.st.AlertCommitFailures, tries.Load()
+		r.tickDetector(bg)
+		if f, a := nd.st.AlertCommitFailures-f0, tries.Load()-a0; f != 1 || a != 2 || len(nd.unsent) != 2 || nd.d.Through() != 1 {
+			t.Errorf("one retry: %d failures counted, %d commits tried, %d unsent, Through %d; want 1, 2, 2, 1", f, a, len(nd.unsent), nd.d.Through())
+		}
+		r.alertAppend = nil
+	})
 	tick(t, r)
 	got := committedAlerts(t, r)
 	d = detectorStatus(t, st)
