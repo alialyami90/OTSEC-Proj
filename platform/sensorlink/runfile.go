@@ -49,7 +49,10 @@ type transmitState struct {
 }
 
 type captureState struct {
-	RunID  string            `json:"run_id"`
+	RunID string `json:"run_id"`
+	// Key is the run's sensor.counters key (its position generation),
+	// "" when not known.
+	Key    string            `json:"key,omitempty"`
 	Totals map[string]uint64 `json:"totals"`
 }
 
@@ -59,7 +62,11 @@ var runFileFault func() error
 
 // RunFile is the node's sensorrun.json.
 type RunFile struct {
-	path    string
+	path string
+	// wmu makes one writer at a time, from the number taken to its
+	// rename, so an older snapshot never lands after a newer one (D6's
+	// B2 on #747).
+	wmu     sync.Mutex
 	mu      sync.Mutex
 	doc     runFileDoc
 	readErr error // the file at open: unreadable
@@ -113,6 +120,8 @@ func (f *RunFile) put(sensor string, e runFileSensor) {
 // a cursor whose save fails is behind the file, which reads as current,
 // and its next write of the position carries the number.
 func (f *RunFile) write(ctx context.Context) error {
+	f.wmu.Lock()
+	defer f.wmu.Unlock()
 	f.mu.Lock()
 	n := f.doc.WriteNo + 1
 	d := f.doc

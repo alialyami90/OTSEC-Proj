@@ -3,6 +3,7 @@ package sensorlink
 import (
 	"context"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -60,16 +61,22 @@ func rank(name string) int {
 // facts, never as built event bytes (C4 0.4 section 3; E4-7): the C4 event
 // is built at its write, by the writing binary. Events of one name and key
 // merge: the latest facts, the rises summed, Merged counting the events it
-// carries.
+// carries. Every sum holds at 2^64 - 1, never wraps (C4-0.5-3).
 type HeldEvent struct {
 	Name string `json:"name"`
-	// Key keeps apart what must not merge: the run, for sensor.counters
-	// and sensor.run-loss; empty otherwise.
+	// Key keeps apart what must not merge: the run, for sensor.run-loss;
+	// the position generation, for sensor.counters (countersKey); empty
+	// otherwise.
 	Key     string            `json:"key,omitempty"`
 	Merged  uint64            `json:"merged"`
 	Details map[string]string `json:"details,omitempty"`
 	Rises   map[string]uint64 `json:"rises,omitempty"`
-	waited  bool
+	// Run and Folded are sensor.counters' fold (C4-0.5-1, C4-0.5-2; D1's
+	// ruling 6996137498 on #747): the latest run whose rises it carries,
+	// and how many earlier runs' rises are in it (runs_folded).
+	Run    string `json:"run,omitempty"`
+	Folded uint64 `json:"runs_folded,omitempty"`
+	waited bool
 }
 
 func (e *HeldEvent) id() string { return e.Name + "\x00" + e.Key }
@@ -134,9 +141,9 @@ func (p *Pool) Due(e HeldEvent) {
 		return
 	}
 	if h.waited {
-		p.Held += e.Merged
+		p.Held = satAdd(p.Held, e.Merged)
 	}
-	h.Merged += e.Merged
+	h.Merged = satAdd(h.Merged, e.Merged)
 	if e.Details != nil {
 		h.Details = maps.Clone(e.Details)
 	}
@@ -144,8 +151,28 @@ func (p *Pool) Due(e HeldEvent) {
 		if h.Rises == nil {
 			h.Rises = map[string]uint64{}
 		}
-		h.Rises[k] += v
+		h.Rises[k] = satAdd(h.Rises[k], v)
 	}
+	// A run other than the latest folds in: it counts once, and run_id
+	// moves to it.
+	h.Folded = satAdd(h.Folded, e.Folded)
+	if e.Run != h.Run {
+		h.Folded, h.Run = satAdd(h.Folded, 1), e.Run
+	}
+}
+
+// satAdd is a + b, held at 2^64 - 1 (C4-0.5-3).
+func satAdd(a, b uint64) uint64 {
+	if s := a + b; s >= a {
+		return s
+	}
+	return math.MaxUint64
+}
+
+// waiting reports whether an event of name and key waits.
+func (p *Pool) waiting(name, key string) bool {
+	_, ok := p.held[(&HeldEvent{Name: name, Key: key}).id()]
+	return ok
 }
 
 // fits reports whether an event of name may be written at now.
@@ -186,7 +213,7 @@ func (p *Pool) Write(ctx context.Context, now time.Duration, emit func(context.C
 		}
 		if !e.waited {
 			e.waited = true
-			p.Held += e.Merged
+			p.Held = satAdd(p.Held, e.Merged)
 		}
 	}
 	return err

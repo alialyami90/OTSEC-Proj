@@ -177,8 +177,9 @@ func (r *healthRig) settleFile() {
 // carries the baseline: after the start the alarm stands, and the resumed
 // heartbeat with 1 raises it again. Controls: a node that compares within
 // a connection only, which holds no baseline across the restart and stays
-// silent; and a node that saves the baseline before the file, killed
-// between, which raises nothing after the start.
+// silent (mutant M10, the durable frames_outgoing baseline off, run
+// against this test); and a node that saves the baseline before the file,
+// killed between, which raises nothing after the start (run here).
 func TestTransmittedAfterNodeRestart(t *testing.T) {
 	r := newHealthRig(t)
 	p := r.accepted(hello02())
@@ -203,12 +204,6 @@ func TestTransmittedAfterNodeRestart(t *testing.T) {
 	r.beat(p, hb(4, outgoing(1)))
 	if r.al.count(AlarmTransmitted) != 1 {
 		t.Fatalf("no rise: raises %v", r.al.list)
-	}
-	// Control: a node comparing within a connection has no earlier
-	// heartbeat on the new connection to compare 1 with.
-	withinConnection := func(prev *uint64, v uint64) bool { return prev != nil && v > *prev }
-	if withinConnection(nil, 1) {
-		t.Fatal("control raised; the test cannot tell")
 	}
 
 	kill := func(baselineFirst bool) (atStart, afterResend int) {
@@ -249,9 +244,9 @@ func TestTransmittedAfterNodeRestart(t *testing.T) {
 
 // W-8 (b): a run's first heartbeat, carrying frames_outgoing 1, evicted
 // and declared; the first heartbeat the node takes also carries 1: the
-// alarm is raised, with no baseline held. Control: a node that compares
-// within a connection only, which has nothing to compare with and stays
-// silent (its rule computed below on the same heartbeats).
+// alarm is raised, with no baseline held. Control: mutant M13, a rise
+// raised only against a value held (a node that compares within a
+// connection), which stays silent.
 func TestTransmittedFirstHeartbeatEvicted(t *testing.T) {
 	r := newHealthRig(t)
 	h := hello02()
@@ -261,19 +256,15 @@ func TestTransmittedFirstHeartbeatEvicted(t *testing.T) {
 	if r.al.count(AlarmTransmitted) != 1 {
 		t.Fatalf("raises %v", r.al.list)
 	}
-	withinConnection := func(prev *uint64, v uint64) bool { return prev != nil && v > *prev }
-	if withinConnection(nil, 1) {
-		t.Fatal("control raised; the test cannot tell")
-	}
 }
 
 // W-8 (c) and (e): egress_check carried, the node restarted, then left
 // out: sensor-egress-absent is raised. (e): the sensor database lost, and
 // a heartbeat of the run the sensor resends from its oldest record that
 // omits the field: raised (SL-T24 (h)'s node leg; the re-arm is P4-4-DE's).
-// Controls: a node that compares within a connection only; and one that
-// reads an omitted field as never carried while it holds no baseline;
-// each stays silent (their rules computed below).
+// Controls: mutant M14, the egress mark not kept in the cursor (a node
+// that compares within a connection), and mutant M15, an omitted field
+// read as never carried while no baseline is held; each stays silent.
 func TestEgressDroppedAfterNodeRestart(t *testing.T) {
 	r := newHealthRig(t)
 	p := r.accepted(hello02())
@@ -304,19 +295,15 @@ func TestEgressDroppedAfterNodeRestart(t *testing.T) {
 	if r.al.count(AlarmEgressAbsent) != 1 {
 		t.Fatalf("(e): raises %v", r.al.list)
 	}
-	withinConnection := func(base string, carried bool) bool { return base == EgressCarried && !carried }
-	neverCarried := func(base string, carried bool) bool { return false }
-	if withinConnection("", false) || neverCarried("", false) {
-		t.Fatal("control raised; the test cannot tell")
-	}
 }
 
 // W-8 (d) (SL-26 section 11.3's quiet case, CH-27's exception): a run whose
 // every heartbeat omits egress_check, taken from its start: no
 // sensor-egress-absent, and the mark says not carried, which status shows
 // as unknown. The same run with its first heartbeat evicted and declared:
-// raised. Control: a node that raises whenever it holds no baseline, which
-// alarms in the first case.
+// raised once, not at each heartbeat (D6's M-O). Controls: mutant M8,
+// fromStart ignored (a node that raises whenever it holds no baseline),
+// which alarms in the first case; M-O, raised at every heartbeat.
 func TestEgressNeverCarriedNoAlarm(t *testing.T) {
 	r := newHealthRig(t)
 	p := r.accepted(hello02())
@@ -331,13 +318,9 @@ func TestEgressNeverCarriedNoAlarm(t *testing.T) {
 	h := hello02()
 	h.FirstSeq, h.DropsChannel = "2", "1"
 	p = r.accepted(h)
-	r.beat(p, hb(2, noEgress))
+	r.beat(p, hb(2, noEgress), hb(3, noEgress))
 	if r.al.count(AlarmEgressAbsent) != 1 {
 		t.Fatalf("first heartbeat evicted: raises %v", r.al.list)
-	}
-	raiseWithNoBaseline := func(base string) bool { return base == "" }
-	if !raiseWithNoBaseline("") {
-		t.Fatal("control silent; the test cannot tell")
 	}
 }
 
@@ -354,14 +337,14 @@ func capLoss(s *memSink) []string {
 
 // W-8 (f) and (g), D1's one rule for the three capture-loss counters, and
 // the run's boundary (D1's ruling 6850475569 on #655), each case on its own
-// node. The controls are the earlier designs' rules, computed on each
-// case's numbers below the case.
+// node. The controls are the earlier designs' rules, each run as a named
+// mutant against this test (M6, M16, M17, M18; #747's comment).
 func TestCaptureLossAcrossRestart(t *testing.T) {
 	// (g): 7 taken with no baseline held, the file's minute passed, a
 	// restart, then 11: diff 4 for each counter, all three named; the first
 	// heartbeat's diff 7, the run total. A run of zeros: no capture_loss.
-	// Control: a node with no durable baseline, which reports 11 after the
-	// restart.
+	// Control: M16, a node with no durable capture baseline, which reports
+	// 11 after the restart.
 	r := newHealthRig(t)
 	p := r.accepted(hello02())
 	r.beat(p, hb(1, capture(7, 7, 7)))
@@ -378,9 +361,6 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	d := r.sink.of(EventCounters)
 	if len(d) != 2 || d[1]["diff.drops_driver"] != "4" || d[1]["diff.drops_holder"] != "4" || d[1]["diff.frames_overlong"] != "4" {
 		t.Fatalf("after the restart: %v", d)
-	}
-	if noDurable := rise(ptr(uint64(11)), nil); noDurable == 4 {
-		t.Fatal("control reports 4; the test cannot tell")
 	}
 	z := newHealthRig(t)
 	p = z.accepted(hello02())
@@ -399,8 +379,8 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	}
 	// (i): 9 taken, the run's records after it committed, the node killed
 	// before the next file write: the start counts 4, at the start's time.
-	// Control: the cursor's counters advanced only with the file, under
-	// which the cursor holds 5 and the start counts nothing.
+	// Control: M17, the cursor's capture counters advanced only with the
+	// file, under which the cursor holds 5 and the start counts nothing.
 	r, p = base()
 	r.beat(p, hb(2, capture(9, 0, 0)))
 	p.send(obs02(3))
@@ -412,9 +392,6 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	r.restart()
 	if got := capLoss(r.sink); !slices.Equal(got, []string{"5 drops_driver", "4 drops_driver"}) {
 		t.Fatalf("(i): %v", got)
-	}
-	if withFile := rise(ptr(uint64(5)), ptr(uint64(5))); withFile != 0 {
-		t.Fatal("control counts; the test cannot tell")
 	}
 	// (ii): the same heartbeat, then the next run's hello accepted and row
 	// 6's save made, the node killed after it: the file written before the
@@ -496,17 +473,14 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 		t.Fatalf("(v): %v, status %+v", got, r.h.Status())
 	}
 	// (vi): a loss committed while the pool has room, the file write after
-	// it made, a clean stop and a start: nothing at the start. Control: the
-	// totals recorded only beside a held loss, under which the file holds
-	// none and the start counts the 5 again.
+	// it made, a clean stop and a start: nothing at the start. Control:
+	// M18, the totals recorded only beside a held loss, under which the
+	// file holds none and the start counts the 5 again.
 	r, p = base()
 	p.end()
 	r.restart()
 	if got := capLoss(r.sink); !slices.Equal(got, []string{"5 drops_driver"}) {
 		t.Fatalf("(vi): %v", got)
-	}
-	if noTotals := rise(ptr(uint64(5)), nil); noTotals == 0 {
-		t.Fatal("control counts nothing; the test cannot tell")
 	}
 	// The sustained loss: drops_driver rising at every heartbeat, one each
 	// 10 s for ten minutes: the file written at most once a minute, and
@@ -591,6 +565,9 @@ func TestRunFileRolledBack(t *testing.T) {
 				!r.raised(AlarmStateUnread, "cause run-file") || len(st.PossiblyLost) == 0 {
 				t.Fatalf("status %+v, raises %v", st, r.al.list)
 			}
+			if k.name == "cursor removed" && !slices.Contains(st.PossiblyLost, AlarmBufferSmall) {
+				t.Fatalf("the held event the file kept is not named: %v", st.PossiblyLost)
+			}
 			if k.want == "not-comparable" {
 				return
 			}
@@ -602,6 +579,12 @@ func TestRunFileRolledBack(t *testing.T) {
 			}
 			if d := r.sink.of(EventRunLoss)[0]; d["generation"] != "2" || d["run_counter"] != "5" || d["run_id"] != testRun {
 				t.Fatalf("run-loss %v", d)
+			}
+			// The start wrote the file above every cursor's number, so the
+			// next start reads it as current (D6's M-AL).
+			r.restart()
+			if st := r.h.Status(); st.RunFile != "" {
+				t.Fatalf("the next start: %+v", st)
 			}
 		})
 	}
@@ -622,14 +605,21 @@ func TestRunFileRolledBack(t *testing.T) {
 
 // D4-116 item 3.5's first limit, closed: an owed write that fails during a
 // live connection is tried again on that connection, at most once a
-// second, and its marks cleared once it is written. Control: frames within
-// the second, which make no retry, leave the marks.
+// second, its failure raised once a connection over every failed retry,
+// and its marks cleared once it is written. Controls: frames within the
+// second, which make no retry, leave the marks (run here); M-F, the
+// failure raised at every retry.
 func TestOwedRetriedInLiveConnection(t *testing.T) {
 	r := newHealthRig(t)
 	r.sink.failing(errDown, EventRunLoss, EventCoverageGap)
 	h := hello02()
 	h.DropsChannel, h.Lost = "1", []netobs.Span{lspan("09:30:00", "09:31:00")}
 	p := r.accepted(h)
+	for i := 0; i < 2; i++ { // two more failed tries, a second apart
+		r.clk.add(cursorSpacing)
+		p.send(tick02(20, 0, 1))
+		p.taken()
+	}
 	r.sink.failing(nil)
 	p.send(obs02(1))
 	p.ack(1)

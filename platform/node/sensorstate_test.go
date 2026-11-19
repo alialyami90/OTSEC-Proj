@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/netobs"
@@ -40,9 +41,10 @@ func (c *closer) closed() []string {
 // fold's cursor held before the record; once the record reads, the state
 // is read and the cursor passes it. A read that fails stands with cause
 // fold-read, closes nothing, and is retried. The live connections' close
-// is sensorlink's TestStateUnreadClosesConnections. Control: a node that
-// keeps its open connections (the fold not given the links), under which
-// neither closes.
+// is sensorlink's TestStateUnreadClosesConnections. Every page is read
+// under the 1 s deadline. Controls (named mutants run against this test,
+// results in #747's comment): M7, the fold's close removed, under which
+// neither closes; M-U, a page read with no deadline.
 func TestStateUnreadFoldRecord(t *testing.T) {
 	c, dir := schedConfig(t, nil)
 	r, _, _ := start(t, c, dir)
@@ -59,16 +61,26 @@ func TestStateUnreadFoldRecord(t *testing.T) {
 		return rec, err
 	}
 	var readErr error
+	var undeadlined int
+	deadline := func(ctx context.Context) {
+		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) > sensorFoldDeadline {
+			undeadlined++
+		}
+	}
 	newFold := func(links ...sensorCloser) (*sensorFold, *[]string) {
 		var raised []string
 		return &sensorFold{
 			read: func(ctx context.Context, after c5.Seq, max int) ([]c5.Stored, error) {
+				deadline(ctx)
 				if readErr != nil {
 					return nil, readErr
 				}
 				return db.Read(ctx, AuditStream, after, max)
 			},
-			last:  func(ctx context.Context) (c5.Seq, error) { return db.LastCommitted(ctx, AuditStream) },
+			last: func(ctx context.Context) (c5.Seq, error) {
+				deadline(ctx)
+				return db.LastCommitted(ctx, AuditStream)
+			},
 			links: links,
 			raise: func(alarm, detail string) { raised = append(raised, alarm+": "+detail) },
 		}, &raised
@@ -108,20 +120,7 @@ func TestStateUnreadFoldRecord(t *testing.T) {
 	if g.unread != "" || g.through != last {
 		t.Fatalf("retried: unread %q, through %d", g.unread, g.through)
 	}
-
-	// Control: the same bad record, folded by a node that keeps its
-	// connections.
-	parseAuditRecord = func(b []byte) (*audit.Record, error) {
-		rec, err := audit.ParseRecord(b)
-		if err == nil && rec.Action == refuse {
-			return nil, audit.ErrRecordRejected
-		}
-		return rec, err
-	}
-	k := &closer{}
-	h, _ := newFold()
-	h.fold(bg)
-	if len(k.closed()) != 0 || h.unread != StateUnreadFoldRecord {
-		t.Fatalf("control: closes %v, unread %q", k.closed(), h.unread)
+	if undeadlined != 0 {
+		t.Fatalf("%d reads without the fold's 1 s deadline", undeadlined)
 	}
 }
