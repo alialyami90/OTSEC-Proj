@@ -409,13 +409,13 @@ func TestIntakeS2GapDeclared(t *testing.T) {
 	p := r.accepted(hello02())
 	p.send(obs02(1), obs02(3)) // G 1
 	p.ack(3)
-	r.tickAfter(p, tick02(20, 3, 2)) // D 2, above G: nothing
-	p.send(obs02(6))                 // G 3
+	r.tickAfter(p, r.agreeTick(tick02(20, 3, 2))) // D 2, above G: nothing
+	p.send(obs02(6))                              // G 3
 	p.ack(6)
 	if r.al.count(AlarmGapUndeclared) != 0 {
 		t.Fatalf("raised while D covers G: %v", r.al.list)
 	}
-	r.tickAfter(p, tick02(20, 6, 2)) // G 3 above D 2: the excess, 1
+	r.tickAfter(p, r.agreeTick(tick02(20, 6, 2))) // G 3 above D 2: the excess, 1
 	hb7 := twoIfs(heartbeat02(7, 10), 6, 4)
 	hb7.Counters.DropsChannel = 2
 	p.send(hb7) // a frame after the tick, so the tick is read
@@ -812,7 +812,11 @@ func TestStoredSchemaIsChannelMinorTied(t *testing.T) {
 	o.IP.Src, o.IP.Sport, o.IP.Dport = nodeAddr, ptr(40001), ptr(22)
 	o.FirstUTC, o.LastUTC = t0.Add(time.Second).Format("2006-01-02T15:04:05.000000Z"), t0.Add(time.Second).Format("2006-01-02T15:04:05.000000Z")
 	p.send(o)
-	r.tickAfter(p, tick02(20, 1, 0)) // read once the held record is taken
+	p.taken()
+	r.addWall(netobs.TickMinSpacing + time.Second) // as tickAfter moves the monotonic clock: no move for the skew gate
+	r.tickAfter(p, r.agreeTick(tick02(20, 1, 0)))  // read once the held record is taken
+	p.taken()
+	r.pass(30 * time.Second) // the Result comes after the session's end
 	if _, err := r.l.Result(bg, "req-1", session09("0e4d8a2c-6b1f-4c3e-9a5d-7f2b1c0d9e8f", 40001, 0)); err != nil {
 		t.Fatal(err)
 	}
@@ -979,15 +983,16 @@ func TestCursorAtMaxLinkCursorBytes(t *testing.T) {
 }
 
 // The cursor's text form (section 1.4, CH-18): every field it fills reads
-// back as written, write_no and the baselines (2b) included, with
-// drops_driver absent (unknown); a field of part 2c filled, a span slot
+// back as written, write_no, the baselines (2b) and M (2c) included, with
+// drops_driver absent (unknown); a field of the gap model filled, M not a
+// decimal, a span slot
 // past the count, a mark out of range, or a time that Unix nanoseconds
 // cannot hold, is refused. Control: a decoder that reads the reserved
 // fields loosely.
 func TestCursorTextForm(t *testing.T) {
 	c := &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Taken: 9, G: 3, D: 1, Refused: 4, Dropped: 6, Ds: 1,
 		NewestSeq: 20, Digest: testDigest, WriteNo: 7, FramesOutgoing: ptr(uint64(0)), DropsHolder: ptr(uint64(3)),
-		FramesOverlong: ptr(uint64(1)), Egress: EgressCarried,
+		FramesOverlong: ptr(uint64(1)), Egress: EgressCarried, M: time.Date(2026, 11, 7, 9, 30, 0, 123456789, time.UTC),
 		Spans: []HeldSpan{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:00:05.5Z", CutUTC: "2026-11-07T09:00:05.5Z", Owed: true, Marked: true}},
 		Prior: &HeldPrior{RunsSkipped: 4, RecordsLost: 2, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
 			Spans: []HeldSpan{{FromUTC: "2026-11-07T08:00:00Z", ToUTC: "2026-11-07T08:01:00Z", CutUTC: "2026-11-07T08:00:30Z", Marked: true}}}}
@@ -1019,7 +1024,7 @@ func TestCursorTextForm(t *testing.T) {
 	}{
 		{"write_no absent", 9, "-"}, {"a baseline not a decimal", 13, "x"}, {"an egress mark out of range", 17, "2"},
 		{"W filled", 18, "0"}, {"R filled", 22, "0"},
-		{"the gap held filled", 40, "0"}, {"M filled", 46, "0"}, {"a slot past the count", 52, "0"},
+		{"the gap held filled", 40, "0"}, {"M not a decimal", 46, "x"}, {"a slot past the count", 52, "0"},
 		{"a mark out of range", 51, "4"}, {"a leading zero", 4, "09"}, {"a sign", 4, "+9"}, {"previous_end", 82, "x"},
 		{"started_by", 83, "someone"}, {"the tag", 0, "sp1"}, {"run_id", 3, "not-a-uuid"},
 	} {

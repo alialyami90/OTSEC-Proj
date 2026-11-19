@@ -68,6 +68,8 @@ type Options struct {
 	Raise    func(alarm, detail string)
 	Owed     func(ctx context.Context, o Owed) error
 	Timeouts ConnTimeouts
+	// LateBound is late_bound_s (CH-23); zero is DefaultLateBound.
+	LateBound time.Duration
 	// Health is the sensor's health events (health.go): with it, Owed
 	// defaults to its WriteOwed, the heartbeat baselines are judged, and
 	// the pool's alarms make their event due.
@@ -194,6 +196,9 @@ type Link struct {
 	// egressRun is the run for which sensor-egress-absent was last raised
 	// with no baseline held, so it rises once a run. Under curMu.
 	egressRun string
+	// skew is the 0.2 intake's skew estimate and capture floor (skew.go),
+	// under its own leaf lock.
+	skew skew
 	// startRun is the run seen from its start in this process, "" when
 	// none, so a resume with no gap keeps it (CH-27; D4's N1 on #747).
 	// Under curMu.
@@ -224,6 +229,7 @@ func New(cfg Config, opt Options) (*Link, error) {
 		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
 		conn:   ConnStats{Closes: map[string]uint64{}},
 		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}
+	h.off = l.offNow
 	if opt.Health != nil && opt.Health.cfg.File != nil {
 		opt.Health.cfg.File.addLink(l)
 	}
@@ -327,7 +333,7 @@ func (l *Link) handle(ctx context.Context, b []byte) {
 		}
 		return
 	}
-	l.observe(ctx, rec.Observation, n, nil)
+	l.observe(ctx, rec.Observation, n, nil, false)
 }
 
 // takeSeq records seq n of run, counting the seqs skipped. A new run starts
@@ -375,9 +381,16 @@ func codeOf(err error) string {
 
 // observe adds the node object to o, with lost as node.lost (CH-40), and
 // holds it (hold.go) or commits it untied, or drops and counts it.
-func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, lost []netobs.Span) {
+func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, lost []netobs.Span, late bool) {
 	nd, _ := l.nodeObject(o)
-	nd.Lost = lost
+	nd.Lost, nd.Late = lost, late
+	// Committed while no tie is made for skew: marked, whatever the hold
+	// does with it (CH-41). A record held now and released later is marked
+	// by its release instead.
+	nd.Skewed = l.marks(l.standing())
+	if afterMarkSeam != nil {
+		afterMarkSeam()
+	}
 	var capture *c5.Capture
 	if o.FirstSight {
 		c, err := firstSightCapture(o)
@@ -427,13 +440,20 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, l
 // record builds hr's C4 event with tie, if any, and reports its
 // destination asset and whether neither end resolved, so it draws on the
 // unresolved budget (C13 section 5).
-func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession) (c5.Record, string, bool, error) {
+func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession, skewed bool) (c5.Record, string, bool, error) {
 	body := hr.Observation
 	var st netobs.Observation
 	if err := json.Unmarshal(body, &st); err != nil || st.Node == nil {
 		return c5.Record{}, "", false, fmt.Errorf("sensorlink: a held record does not decode: %v", err)
 	}
 	nd := st.Node
+	if skewed && tie == nil && !nd.Skewed {
+		b, err := nodeBody(body, "skewed", true)
+		if err != nil || len(b) > event.MaxNetobsBytes {
+			return c5.Record{}, "", false, fmt.Errorf("sensorlink: the marked record does not fit: %v", err)
+		}
+		body = b
+	}
 	if tie != nil {
 		b, err := tieBody(body, tie)
 		if err != nil || len(b) > event.MaxNetobsBytes {
@@ -463,6 +483,12 @@ func (l *Link) record(hr HeldRecord, tie *netobs.PlatformSession) (c5.Record, st
 // (CH-35's bridge item 5, kept for a later minor by C13 0.3 section 1.2).
 // Re-encoding it through netobs.Observation would drop them for good.
 func tieBody(body json.RawMessage, tie *netobs.PlatformSession) ([]byte, error) {
+	return nodeBody(body, "platform_session", tie)
+}
+
+// nodeBody sets the node object's key to v in a held observation's raw
+// JSON, every other field kept as it was (tieBody).
+func nodeBody(body json.RawMessage, key string, v any) ([]byte, error) {
 	var top, node map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
 		return nil, err
@@ -470,11 +496,11 @@ func tieBody(body json.RawMessage, tie *netobs.PlatformSession) ([]byte, error) 
 	if err := json.Unmarshal(top["node"], &node); err != nil {
 		return nil, err
 	}
-	ps, err := json.Marshal(tie)
+	ps, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
-	node["platform_session"] = ps
+	node[key] = ps
 	if top["node"], err = json.Marshal(node); err != nil {
 		return nil, err
 	}
@@ -505,7 +531,7 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 			f.outcome = o
 		}
 	}
-	rec, dst, unresolved, err := l.record(hr, tie)
+	rec, dst, unresolved, err := l.record(hr, tie, false)
 	var folded *Cursor
 	if err == nil && f != nil {
 		rec.SourceCursor = f.cursor
@@ -518,7 +544,7 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 			l.moved.apply(folded)
 			l.unsaved.apply(folded)
 			folded.WriteNo = l.writeNo
-			b, err := encodeCursor(folded)
+			b, err := l.encode(folded)
 			if err != nil {
 				note(outStoreError) // not taken: T stays, the record is resent
 				return
@@ -602,7 +628,7 @@ func (l *Link) commitBatch(ctx context.Context, rel []Release, taken func(last u
 		l.mu.Lock()
 		defer l.mu.Unlock() // a recovered panic never leaves l.mu held (D3's B1 on #676)
 		for _, r := range rel {
-			rec, dst, unresolved, err := l.record(r.Record, r.Tie)
+			rec, dst, unresolved, err := l.record(r.Record, r.Tie, r.Skewed)
 			if err != nil {
 				l.stats.Refused[RefusedStored]++
 				mv.dispose(r.Record, true)
@@ -737,7 +763,7 @@ func (l *Link) moveCursor(m *posMove) []byte {
 	l.unsaved.apply(c)
 	m.apply(c)
 	c.WriteNo = max(c.WriteNo, l.writeNo)
-	b, err := encodeCursor(c)
+	b, err := l.encode(c)
 	if err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the position moved by a release was not saved: %v", l.cfg.SensorID, err))
 		return nil

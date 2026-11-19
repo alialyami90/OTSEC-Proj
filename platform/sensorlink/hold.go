@@ -156,6 +156,12 @@ type OpenFlow struct {
 	// flow_idle_s, for the clamp.
 	Expires  time.Time `json:"expires_utc"`
 	FlowIdle int64     `json:"flow_idle_s"`
+	// Off is the node's offset (wall less monotonic) when the entry was
+	// made, and Live that it was made since the node's start: in memory
+	// only, so an entry restored at a start ties nothing on the 0.2 path
+	// (section 1.5, the rule on the two clocks).
+	Off  int64 `json:"-"`
+	Live bool  `json:"-"`
 }
 
 // HoldRecordState is a saved run record's state.
@@ -193,6 +199,9 @@ type Release struct {
 	Record HeldRecord              `json:"record"`
 	Tie    *netobs.PlatformSession `json:"tie,omitempty"`
 	Asset  string                  `json:"asset_id,omitempty"`
+	// Skewed: released untied because no tie was made for skew, so the
+	// record carries node.skewed (CH-41).
+	Skewed bool `json:"skewed,omitempty"`
 }
 
 // HoldConfig configures the hold. With no NodeAddrs the link holds nothing.
@@ -234,6 +243,19 @@ type HoldStats struct {
 type holdRun struct {
 	rec   RunRecord
 	order int // dispatch order, for the open table's last record
+	// The stored-time half of the rule on the two clocks (section 1.5),
+	// in memory only: live, the run was dispatched since the node's start;
+	// the node's offset and wall time at Dispatch, and its offset at
+	// Result once one came.
+	live     bool
+	dispOff  int64
+	dispWall time.Time
+	resOff   int64
+	resulted bool
+	// skewed: the run's window was refused for skew (CH-41). onset: the
+	// onset refused it and counted it once (skewOnset), so none of the
+	// run's ties is made, or counted, after.
+	skewed, onset bool
 }
 
 // hold is the link's hold state. The link's cmu guards it.
@@ -270,6 +292,12 @@ type hold struct {
 	lastStartWall time.Time
 	started       bool
 	mono          func() time.Duration
+	// off is the link's offNow, so an open entry's offset is taken on the
+	// clock it is compared with (D6's N5 on #748).
+	off func() int64
+	// skewed is the runs not held because no tie was made for skew at
+	// their Dispatch, which their Result reports.
+	skewed map[string]bool
 }
 
 // releasePhase is how far a release has gone, for result's deferred
@@ -287,7 +315,7 @@ type releasePhase struct {
 }
 
 func newHold(cfg HoldConfig) (*hold, error) {
-	h := &hold{cfg: cfg, addrs: map[netip.Addr]bool{}, runs: map[string]*holdRun{}}
+	h := &hold{cfg: cfg, addrs: map[netip.Addr]bool{}, runs: map[string]*holdRun{}, skewed: map[string]bool{}}
 	for _, a := range cfg.NodeAddrs {
 		h.addrs[a.Unmap().WithZone("")] = true
 	}
@@ -527,6 +555,13 @@ func (l *Link) Dispatch(ctx context.Context, run HoldRun) error {
 		if !h.on() {
 			return nil
 		}
+		if c := l.standing(); c != "" {
+			// No tie is made for skew: nothing is held, and the run's window
+			// is refused, counted and reported by its Result (section 1.5).
+			l.countRefusal(c)
+			h.skewed[run.RequestID] = true
+			return nil
+		}
 		run.Endpoint = netip.AddrPortFrom(run.Endpoint.Addr().Unmap().WithZone(""), run.Endpoint.Port())
 		run.Deadline = h.now().Add(HoldRunLimit + h.grace())
 		rec := RunRecord{State: HoldHolding, Run: run}
@@ -534,7 +569,7 @@ func (l *Link) Dispatch(ctx context.Context, run HoldRun) error {
 			return fmt.Errorf("sensorlink: the hold for run %s was not saved, so its flows commit untied: %w", run.RequestID, err)
 		}
 		h.n++
-		h.runs[run.RequestID] = &holdRun{rec: *h.last, order: h.n}
+		h.runs[run.RequestID] = &holdRun{rec: *h.last, order: h.n, live: true, dispOff: l.offNow(), dispWall: l.now()}
 		return nil
 	})
 }
@@ -549,6 +584,9 @@ type Released struct {
 	// conversation). Its entry now ties to this run's invocation (D1 on
 	// #576); the node writes open_flow on collection.run.
 	OpenFlow bool
+	// Skewed: the run's window was refused for skew, so its collection.run
+	// is marked skewed (CH-41).
+	Skewed bool
 }
 
 // Result ties the run's held flows by its session and commits them in
@@ -593,31 +631,51 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	r := l.hold.runs[requestID]
 	if r == nil || r.rec.State != HoldHolding {
 		head, err := l.head(ctx)
-		return Released{AfterSeq: head}, err
+		skewed := l.hold.skewed[requestID] || (r != nil && r.skewed)
+		delete(l.hold.skewed, requestID)
+		return Released{AfterSeq: head, Skewed: skewed}, err
 	}
 	h, g, now := l.hold, l.hold.grace(), l.hold.now()
 	rec := cloneRec(r.rec)
 	rec.Session = &s
+	// The skew gate (section 1.5): a cause that stands, or the run's
+	// window refused, refuses every tie; the capture floor refuses a flow
+	// captured at or before it. Each tie refused is counted once.
+	standing, window := l.standing(), l.windowRefusal(r, s)
+	r.resOff, r.resulted = l.offNow(), true
+	r.skewed = r.skewed || standing != "" || window != ""
 	if s.Connected && s.Local.IsValid() {
 		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && !h.expired(h.open[i], now) {
-			// Staged: it takes effect only with the release's record below
-			// (D6's N1 on #576). Its expiry is unchanged.
 			o := h.open[i]
-			o.InvocationID, o.Tie, o.AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
-			h.repoint = &o
+			// The re-point ties the entry's later records to this run, so
+			// the skew gate takes it as a tie (D6's N1 on #748): refused, it
+			// is counted once and not made, and the entry keeps its tie,
+			// decided again at each later record (openTie).
+			switch c := first(standing, window, l.storedRefusal(o.Off, o.Live)); {
+			case r.onset:
+			case c != "":
+				l.countRefusal(c)
+				r.skewed = true
+			default:
+				// Staged: it takes effect only with the release's record
+				// below (D6's N1 on #576). Its expiry is unchanged.
+				o.InvocationID, o.Tie, o.AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
+				h.repoint = &o
+			}
 		}
 	}
 	var rel []Release
 	var remaining []HeldFlow
 	for _, f := range rec.Flows {
 		tie, wait := "", time.Time{}
-		failedDial := f.Key.L4 == "tcp" && !f.Other && in(f.Start, s.StartedAt.Add(-g), s.EndedAt.Add(g)) &&
+		start := l.toNode(f.Start) // t_sensor + E (CH-22's sign)
+		failedDial := f.Key.L4 == "tcp" && !f.Other && in(start, s.StartedAt.Add(-g), s.EndedAt.Add(g)) &&
 			(!s.Connected || !s.Local.IsValid() || f.Key.Node.Port() != s.Local.Port())
 		switch {
 		case s.Connected && s.Local.IsValid() && f.Key == (FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}) &&
-			in(f.Start, s.StartedAt.Add(-g), s.EndedAt.Add(g)):
+			in(start, s.StartedAt.Add(-g), s.EndedAt.Add(g)):
 			tie = TieConnection
-		case s.Connected && !s.Local.IsValid() && !rec.WindowTaken && in(f.Start, s.StartedAt.Add(-g), s.EndedAt.Add(g)) &&
+		case s.Connected && !s.Local.IsValid() && !rec.WindowTaken && in(start, s.StartedAt.Add(-g), s.EndedAt.Add(g)) &&
 			(f.Other || (f.Ended && !f.SynOnly)):
 			tie, rec.WindowTaken = TieWindow, true
 		case failedDial && f.Ended && f.SynOnly:
@@ -632,7 +690,18 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 			remaining = append(remaining, f)
 			continue
 		}
-		rel = append(rel, h.releaseFlow(f, tie, s.InvocationID, rec.Run.AssetID)...)
+		skewed := standing != ""
+		switch {
+		case tie == "":
+		case r.onset:
+			tie, skewed = "", true // refused and counted at the onset
+		default:
+			if c := first(standing, window, l.floorRefusal(f.Start)); c != "" {
+				l.countRefusal(c)
+				tie, skewed = "", true
+			}
+		}
+		rel = append(rel, markSkewed(h.releaseFlow(f, tie, s.InvocationID, rec.Run.AssetID), skewed)...)
 	}
 	after, err := l.release(ctx, r, rec, rel, remaining)
 	if err != nil {
@@ -640,7 +709,96 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	}
 	out.AfterSeq = after
 	out.OpenFlow = h.repointed
+	out.Skewed = r.skewed
 	return out, nil
+}
+
+// markSkewed marks rel's untied records as released untied for skew.
+func markSkewed(rel []Release, skewed bool) []Release {
+	if skewMarkAlarmOnly {
+		skewed = false // the control: the alarm's onset releases nothing marked
+	}
+	for i := range rel {
+		rel[i].Skewed = skewed && rel[i].Tie == nil
+	}
+	return rel
+}
+
+// windowRefusal is the stored-time half of the rule on the two clocks for
+// a run's window at its Result (section 1.5): the node's offsets at
+// Dispatch and now agree within MaxSkew, and the session's times lie
+// between the node's wall times at Dispatch and now, within MaxSkew. A run
+// held before the node's start ties nothing. "" when the window may tie,
+// and always off the 0.2 path.
+func (l *Link) windowRefusal(r *holdRun, s Session) string {
+	if !l.skewOn() {
+		return ""
+	}
+	if c := l.storedRefusal(r.dispOff, r.live); c != "" {
+		return c
+	}
+	if s.StartedAt.Before(r.dispWall.Add(-MaxSkew)) || s.EndedAt.After(l.now().Add(MaxSkew)) {
+		return skewMoved
+	}
+	return ""
+}
+
+// laterRefusal is the gate for a tie a waiting run decides at a later
+// record's read (part (c)): a cause that stands, and the window's offsets
+// at Dispatch and at Result, each against the current one.
+func (l *Link) laterRefusal(r *holdRun, capt time.Time) string {
+	if !l.skewOn() {
+		return ""
+	}
+	return first(l.standing(), l.storedRefusal(r.dispOff, r.live), l.storedRefusal(r.resOff, r.live && r.resulted),
+		l.floorRefusal(capt))
+}
+
+// skewOnset is the onset of a cause that refuses every tie: every run the
+// hold keeps gives way untied at once, its records marked, and its window
+// refused, counted once for each run under the cause that stands, as
+// Dispatch counts (section 1.5 item 2; D4's F1 and D6's B1 on #748). A
+// holding run stays, empty, so its Result reports the window refused and
+// ties nothing it holds after. The caller holds curMu and not cmu.
+func (l *Link) skewOnset(ctx context.Context) {
+	c := l.standing()
+	if skewNoOnset || c == "" {
+		return
+	}
+	l.cmu.Lock()
+	defer l.cmu.Unlock()
+	defer l.syncHold()
+	h := l.hold
+	for _, r := range h.sorted() {
+		rec := cloneRec(r.rec)
+		if rec.State != HoldHolding && rec.State != HoldWaiting {
+			continue
+		}
+		if !r.onset {
+			l.countRefusal(c)
+		}
+		r.skewed, r.onset = true, true
+		if len(rec.Flows) == 0 {
+			continue
+		}
+		keep := rec.State == HoldHolding
+		// A head not read begins nothing; the run's deadline tries again.
+		if _, err := l.release(ctx, r, rec, markSkewed(h.untied(rec.Flows), true), nil); err == nil && keep {
+			if cur := h.runs[rec.Run.RequestID]; cur == nil {
+				// release ended a holding run with nothing left: keep it
+				// holding, empty, for its Result.
+				rec.Flows, rec.State = nil, HoldHolding
+				if h.save(ctx, rec) == nil {
+					r.rec = *h.last
+					h.runs[rec.Run.RequestID] = r
+				} else {
+					// Not kept: its Result reports the window refused from
+					// here (D4's F3 (a), D6's N3 on #748).
+					h.skewed[rec.Run.RequestID] = true
+				}
+			}
+		}
+	}
 }
 
 // endPhase is a scheduler call's deferred clean-up of its release, given
@@ -705,6 +863,7 @@ func (l *Link) Abandon(ctx context.Context, requestID string) (head uint64, err 
 				panic(p)
 			}
 		}()
+		delete(l.hold.skewed, requestID) // no Result comes for it (D6's N3 (b) on #748)
 		r := l.hold.runs[requestID]
 		if r == nil {
 			head, err = l.head(ctx)
@@ -821,7 +980,8 @@ func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Releas
 	}
 	if tie != "" && !f.Ended {
 		h.pending = append(h.pending, OpenFlow{Key: f.Key, InvocationID: invocation, Tie: tie, AssetID: assetID,
-			Expires: f.Last.Add(time.Duration(f.FlowIdle)*time.Second + h.grace()), FlowIdle: f.FlowIdle})
+			Expires: f.Last.Add(time.Duration(f.FlowIdle)*time.Second + h.grace()), FlowIdle: f.FlowIdle,
+			Off: h.off(), Live: true})
 	}
 	return out
 }
@@ -1002,7 +1162,8 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 				l.commitOne(ctx, hr, nil, "")
 				return true
 			}
-			l.commitOne(ctx, hr, &netobs.PlatformSession{InvocationID: of.InvocationID, Tie: of.Tie}, of.AssetID)
+			tie := l.openTie(of, st, &hr) // before hr is read: it may mark it
+			l.commitOne(ctx, hr, tie, of.AssetID)
 			return true
 		default:
 			// The flow is still live: its expiry moves to this record's,
@@ -1013,13 +1174,30 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 			if h.last != nil {
 				_ = h.save(ctx, *h.last)
 			}
-			l.commitOne(ctx, hr, &netobs.PlatformSession{InvocationID: of.InvocationID, Tie: of.Tie}, of.AssetID)
+			tie := l.openTie(of, st, &hr) // before hr is read: it may mark it
+			l.commitOne(ctx, hr, tie, of.AssetID)
 			return true
 		}
 	}
 	r := h.runFor(k)
 	if r == nil {
 		return false
+	}
+	if c := l.standing(); c != "" {
+		// No tie is made for skew: the record commits untied, counted and
+		// marked here, since a cause read here may have come after observe
+		// read none (the closure moves with the wall clock). A run the
+		// onset refused was counted then.
+		if !r.onset {
+			l.countRefusal(c)
+		}
+		if l.marks(c) && !skewTakeHeldUnmarked {
+			if b, err := nodeBody(hr.Observation, "skewed", true); err == nil {
+				hr.Observation = b
+			}
+		}
+		l.commitOne(ctx, hr, nil, "")
+		return true
 	}
 	rec := cloneRec(r.rec)
 	fi := slices.IndexFunc(rec.Flows, func(f HeldFlow) bool { return f.Key == k })
@@ -1053,8 +1231,17 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		switch {
 		case f.Ended && f.SynOnly && !f.Other:
 			tie = TieWindow
-		case s != nil && s.Connected && !s.Local.IsValid() && !rec.WindowTaken && in(f.Start, s.StartedAt.Add(-h.grace()), s.EndedAt.Add(h.grace())):
+		case s != nil && s.Connected && !s.Local.IsValid() && !rec.WindowTaken && in(l.toNode(f.Start), s.StartedAt.Add(-h.grace()), s.EndedAt.Add(h.grace())):
 			tie, rec.WindowTaken = TieWindow, true
+		}
+		skewed := l.standing() != ""
+		switch c := l.laterRefusal(r, f.Start); {
+		case tie == "":
+		case r.onset:
+			tie, skewed = "", true // refused and counted at the onset (D6's B4 on #748)
+		case c != "":
+			l.countRefusal(c)
+			tie, skewed = "", true
 		}
 		done := *f
 		rec.Flows = slices.Delete(rec.Flows, fi, fi+1)
@@ -1062,7 +1249,7 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		if s != nil {
 			invocation = s.InvocationID
 		}
-		if _, err := l.release(ctx, r, rec, h.releaseFlow(done, tie, invocation, rec.Run.AssetID), rec.Flows); err != nil {
+		if _, err := l.release(ctx, r, rec, markSkewed(h.releaseFlow(done, tie, invocation, rec.Run.AssetID), skewed), rec.Flows); err != nil {
 			return false // as at the record cap
 		}
 		return true
@@ -1072,6 +1259,20 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 	}
 	r.rec = rec
 	return true
+}
+
+// openTie is the open table's tie for a later record of of's flow (part
+// (d)), decided at its read: nil, counted, when the gate refuses it, and
+// the record then carries node.skewed (section 1.5).
+func (l *Link) openTie(of OpenFlow, st *netobs.Observation, hr *HeldRecord) *netobs.PlatformSession {
+	if c := first(l.standing(), l.storedRefusal(of.Off, of.Live), l.floorRefusal(flowStart(st))); c != "" {
+		l.countRefusal(c)
+		if b, err := nodeBody(hr.Observation, "skewed", true); err == nil {
+			hr.Observation = b
+		}
+		return nil
+	}
+	return &netobs.PlatformSession{InvocationID: of.InvocationID, Tie: of.Tie}
 }
 
 // head is the observation stream's last committed seq.

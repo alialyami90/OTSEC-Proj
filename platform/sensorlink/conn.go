@@ -24,9 +24,10 @@ import (
 //
 // Not wired (F-027's gate, D4-96): nothing outside the tests calls
 // ServeConn. The dialer, node-hello, the coverage gaps other than lost,
-// and the skew estimate and its marks are not here (P4-4-INT's split,
+// the late index and the break rule are not here (P4-4-INT's split,
 // docs/phase4/D5-p44int-split.md); the heartbeat baselines, the run file
-// and the health-event pool are health.go's and runfile.go's.
+// and the health-event pool are health.go's and runfile.go's, and the
+// skew estimate and its marks skew.go's.
 
 // The node's channel bounds (CH-4, CH-18, CH-40; C13 0.2 §12). They are the
 // node's constants, not C13's.
@@ -173,6 +174,9 @@ type Cursor struct {
 	Egress         string     `json:"egress,omitempty"`
 	Spans          []HeldSpan `json:"spans,omitempty"`
 	Prior          *HeldPrior `json:"prior,omitempty"`
+	// M is the sensor's clock as last read (section 1.5), zero before the
+	// sensor's first K: written by Link.encode at each write.
+	M time.Time `json:"m,omitzero"`
 }
 
 func checkCursorBytes(b []byte) error {
@@ -241,6 +245,9 @@ type conn struct {
 	// clock; owedFailed, that the try failed, raised once a connection.
 	owedTry    time.Duration
 	owedFailed bool
+	// held: the read loop's step before the frame being acted on lasted
+	// longer than AckMaxDelay (section 1.5 item 6).
+	held bool
 }
 
 // connGuard is the link's one live connection (CH-3) and the close a
@@ -430,6 +437,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 			return ""
 		}
 		if reason == "" {
+			step := l.opt.Monotonic()
 			reason = l.locked(func() string {
 				if r := l.decided(ctx); r != "" {
 					return r // a decision made while the frame was read
@@ -442,6 +450,9 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 				l.retryOwed(ctx, cn)
 				return ""
 			})
+			// The next frame waits in the connection while this one is acted
+			// on: a step past AckMaxDelay delays its receipt (F4).
+			cn.held = l.opt.Monotonic()-step > AckMaxDelay
 			if reason == "" {
 				reason = l.writeAck(ctx, cn)
 			}
@@ -491,9 +502,25 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 	}
 	b, err := l.opt.Cursor.SourceCursor(ctx)
 	if err != nil || b == nil {
+		if err == nil {
+			l.takeM(time.Time{}) // no cursor: no M, and the start's first break begins
+		}
 		return nil, err
 	}
-	return decodeCursor(b)
+	c, err := decodeCursor(b)
+	if err == nil {
+		// M is the sensor's, whatever the position's generation, so it is
+		// taken before acceptHello reads a lower generation as none
+		// (section 1.4; D6's N3 on #641).
+		l.takeM(c.M)
+	}
+	return c, err
+}
+
+// encode is c's stored form with M computed afresh (section 1.4).
+func (l *Link) encode(c *Cursor) ([]byte, error) {
+	c.M = l.mNow()
+	return encodeCursor(c)
 }
 
 // saveCursor saves c on its own, with what releases moved since the 0.2
@@ -510,7 +537,7 @@ func (l *Link) saveCursor(ctx context.Context, c *Cursor) error {
 		l.moved.apply(next)
 		l.unsaved.apply(next)
 	}
-	b, err := encodeCursor(next)
+	b, err := l.encode(next)
 	if err != nil {
 		return err
 	}
@@ -656,7 +683,7 @@ func (l *Link) saveWriteNo(ctx context.Context, n uint64) error {
 	}
 	c := l.pos.clone()
 	c.WriteNo = l.writeNo
-	b, err := encodeCursor(c)
+	b, err := l.encode(c)
 	if err != nil {
 		return err
 	}
@@ -685,7 +712,7 @@ func (l *Link) saveStart(ctx context.Context, c *Cursor) error {
 	l.cmu.Lock()
 	defer l.cmu.Unlock()
 	c.WriteNo = max(c.WriteNo, l.writeNo)
-	b, err := encodeCursor(c)
+	b, err := l.encode(c)
 	if err != nil {
 		return err
 	}
@@ -830,6 +857,16 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 			next.Spans, next.Ds = admit(next.Spans, h.Lost, h.SensorUTC, recv, &cuts, &opened), drops
 		}
 	}
+	// The hello's sample and its stated spans move the floor before the
+	// save, which carries M (section 1.5).
+	_, onset := l.sample(h.SensorUTC, true, false)
+	if h.Prior != nil {
+		l.spansRaise(h.Prior.Lost)
+	}
+	l.spansRaise(h.Lost)
+	if onset {
+		l.skewOnset(ctx)
+	}
 	if err := l.saveCursor(ctx, next); err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the position for run %s was not saved: %v", h.SensorID, h.RunID, err))
 		return netobs.ClosePositionNotSaved
@@ -857,6 +894,7 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		l.startRun = h.RunID
 	}
 	l.resetRun(ctx, h.RunID, v.Accept == netobs.HelloNewRun)
+	l.helloRead(h, next.Taken)
 	if opened > 0 {
 		l.lostOpened(h.SensorID, h.RunID, opened)
 	}
@@ -1174,6 +1212,12 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 		l.takeRefused(cn, n, RefusedCounterDecrease)
 		return ""
 	}
+	l.late(cn, h.AtUTC) // counted; a heartbeat is never a skew sample (CH-23)
+	if l.heartbeatRaise(h, n) {
+		if r := l.saveFloor(ctx, cn); r != "" {
+			return r
+		}
+	}
 	if d := h.Counters.DropsChannel; d > cn.cur.D {
 		cn.cur.D = d
 		l.notFromStart(cn)
@@ -1336,7 +1380,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	l.cmu.Lock()
 	marked.WriteNo = max(marked.WriteNo, l.writeNo)
 	l.cmu.Unlock()
-	mb, err := encodeCursor(marked)
+	mb, err := l.encode(marked)
 	if err != nil {
 		// A cursor that cannot be encoded is the node's fault, not the
 		// record's refusal: the record is not taken, T stays, nothing is
@@ -1351,10 +1395,11 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	l.mu.Lock()
 	l.stats.LastSeq = n
 	l.mu.Unlock()
+	l.observationRead(o.RunID, n)
 	if observeFault != nil {
 		observeFault()
 	}
-	l.observe(ctx, o, n, lost)
+	l.observe(ctx, o, n, lost, l.late(cn, o.MadeUTC))
 	l.cmu.Lock()
 	l.inflight = nil
 	l.cmu.Unlock()
@@ -1420,6 +1465,11 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 		return ""
 	}
 	cn.lastTick, cn.tickAt = t, now
+	raised, onset := l.sample(t.SensorUTC, false, cn.held)
+	raised = l.spansRaise(t.Lost) || raised
+	if onset {
+		l.skewOnset(ctx)
+	}
 	sent, drops := num(t.SentSeq), num(t.DropsChannel)
 	if drops > cn.cur.D {
 		l.notFromStart(cn) // a declared loss (D6's B4 on #747)
@@ -1449,8 +1499,24 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 		cn.cur, cn.saved, cn.pending, cn.lastSave = next, next.Taken, false, now
 		l.lostOpened(t.SensorID, t.RunID, opened)
 		l.owedInRun(ctx, cn)
+		raised = false // saved with the spans
 	}
 	l.checkGap(cn.cur)
+	if raised {
+		return l.saveFloor(ctx, cn)
+	}
+	return ""
+}
+
+// saveFloor saves the cursor at once after the capture floor rose, so M
+// carries it (section 1.5). A save that fails closes store, as a
+// baseline's does.
+func (l *Link) saveFloor(ctx context.Context, cn *conn) string {
+	if err := l.saveCursor(ctx, cn.cur); err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the capture floor was not saved: %v", l.cfg.SensorID, err))
+		return netobs.CloseStore
+	}
+	cn.saved, cn.pending, cn.lastSave = cn.cur.Taken, false, l.opt.Monotonic()
 	return ""
 }
 
