@@ -252,8 +252,10 @@ type holdRun struct {
 	dispWall time.Time
 	resOff   int64
 	resulted bool
-	// skewed: the run's window was refused for skew (CH-41).
-	skewed bool
+	// skewed: the run's window was refused for skew (CH-41). onset: the
+	// onset refused it and counted it once (skewOnset), so none of the
+	// run's ties is made, or counted, after.
+	skewed, onset bool
 }
 
 // hold is the link's hold state. The link's cmu guards it.
@@ -675,7 +677,11 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 			continue
 		}
 		skewed := standing != ""
-		if tie != "" {
+		switch {
+		case tie == "":
+		case r.onset:
+			tie, skewed = "", true // refused and counted at the onset
+		default:
 			if c := first(standing, window, l.floorRefusal(f.Start)); c != "" {
 				l.countRefusal(c)
 				tie, skewed = "", true
@@ -736,10 +742,13 @@ func (l *Link) laterRefusal(r *holdRun, capt time.Time) string {
 
 // skewOnset is the onset of a cause that refuses every tie: every run the
 // hold keeps gives way untied at once, its records marked, and its window
-// refused (section 1.5 item 2). A holding run stays, empty, so its Result
-// reports the window refused. The caller holds curMu and not cmu.
+// refused, counted once for each run under the cause that stands, as
+// Dispatch counts (section 1.5 item 2; D4's F1 and D6's B1 on #748). A
+// holding run stays, empty, so its Result reports the window refused and
+// ties nothing it holds after. The caller holds curMu and not cmu.
 func (l *Link) skewOnset(ctx context.Context) {
-	if skewNoOnset {
+	c := l.standing()
+	if skewNoOnset || c == "" {
 		return
 	}
 	l.cmu.Lock()
@@ -751,7 +760,10 @@ func (l *Link) skewOnset(ctx context.Context) {
 		if rec.State != HoldHolding && rec.State != HoldWaiting {
 			continue
 		}
-		r.skewed = true
+		if !r.onset {
+			l.countRefusal(c)
+		}
+		r.skewed, r.onset = true, true
 		if len(rec.Flows) == 0 {
 			continue
 		}
@@ -765,6 +777,10 @@ func (l *Link) skewOnset(ctx context.Context) {
 				if h.save(ctx, rec) == nil {
 					r.rec = *h.last
 					h.runs[rec.Run.RequestID] = r
+				} else {
+					// Not kept: its Result reports the window refused from
+					// here (D4's F3 (a), D6's N3 on #748).
+					h.skewed[rec.Run.RequestID] = true
 				}
 			}
 		}
@@ -833,6 +849,7 @@ func (l *Link) Abandon(ctx context.Context, requestID string) (head uint64, err 
 				panic(p)
 			}
 		}()
+		delete(l.hold.skewed, requestID) // no Result comes for it (D6's N3 (b) on #748)
 		r := l.hold.runs[requestID]
 		if r == nil {
 			head, err = l.head(ctx)
@@ -1155,8 +1172,11 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 	if c := l.standing(); c != "" {
 		// No tie is made for skew: the record commits untied, counted and
 		// marked here, since a cause read here may have come after observe
-		// read none (the closure moves with the wall clock).
-		l.countRefusal(c)
+		// read none (the closure moves with the wall clock). A run the
+		// onset refused was counted then.
+		if !r.onset {
+			l.countRefusal(c)
+		}
 		if l.marks(c) && !skewTakeHeldUnmarked {
 			if b, err := nodeBody(hr.Observation, "skewed", true); err == nil {
 				hr.Observation = b

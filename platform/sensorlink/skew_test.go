@@ -2,8 +2,10 @@ package sensorlink
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,6 +57,20 @@ func (r *rig) tickO(p *peer, o time.Duration, newest, sent int) {
 	tk.SensorUTC = canonUTC(r.now().Add(-o))
 	p.send(tk)
 	p.taken()
+}
+
+// ownFlow02 is a record of the node's own flow from port sport to
+// endpoint, captured at at on the sensor's clock: its start, or with end
+// its end (fin, not syn-only).
+func ownFlow02(seq, sport int, at time.Time, end bool) *netobs.Observation {
+	o := nodeFlow02(seq)
+	o.IP.Sport = ptr(sport)
+	if end {
+		o.Flow.Phase, o.Flow.End, o.Flow.SynOnly = "end", "fin", ptr(false)
+	}
+	o.FirstUTC = canonUTC(at)
+	o.LastUTC = o.FirstUTC
+	return o
 }
 
 // withSeam sets a control seam for one test.
@@ -620,11 +636,16 @@ func TestCaptureFloorRefusesHeldFlow(t *testing.T) {
 // every run the hold keeps gives way untied at once: a held own flow is
 // committed at the tick that shows the step, marked node.skewed, and the
 // run's Result, which still comes, reports its window refused, ties
-// nothing and commits nothing twice. Control: a node that releases nothing
+// nothing and commits nothing twice. The run is counted once, under the
+// cause that stands (D4's F1, D6's B1 on #748): a flow to its endpoint
+// while the cause stands, and a later record of the flow held after the
+// cause clears, are committed untied and marked, and counted no more. Control: a node that releases nothing
 // at the onset, which still holds the record after that tick.
 func TestSkewOnsetReleasesHeld(t *testing.T) {
+	var st SkewStats
 	run := func(t *testing.T) (atOnset int, rel Released, got []*netobs.Observation) {
 		r, _ := holdRig02(t)
+		defer func() { st = r.l.SkewStats() }()
 		p := r.accepted(r.agreeHello(hello02()))
 		r.tickO(p, 0, 20, 0)
 		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
@@ -641,6 +662,20 @@ func TestSkewOnsetReleasesHeld(t *testing.T) {
 		}
 		r.tickO(p, 3*time.Second, 20, 1) // the sensor's clock stepped back 3 s
 		atOnset = len(storedObs(t, r.s))
+		if skewNoOnset {
+			return atOnset, Released{}, nil
+		}
+		// While the cause stands, a flow to the run's endpoint commits
+		// untied at the hold. Then the clock put right: the cause clears,
+		// and a later record of the flow, past the floor the step raised,
+		// is held by the run.
+		p.send(ownFlow02(2, 40002, r.now(), false))
+		r.tickO(p, 0, 20, 2)
+		p.send(ownFlow02(3, 40001, r.now(), false))
+		p.taken()
+		if n := len(storedObs(t, r.s)); n != 2 || r.l.Stats().Hold.Held != 1 {
+			t.Fatalf("%d stored before the Result: the later record not held: %+v", n, r.l.Stats())
+		}
 		r.pass(30 * time.Second)
 		s := session09("0e4d8a2c-6b1f-4c3e-9a5d-7f2b1c0d9e8f", 40001, 0)
 		s.StartedAt, s.ConnectedAt, s.EndedAt = start, start, start.Add(20*time.Second)
@@ -651,13 +686,74 @@ func TestSkewOnsetReleasesHeld(t *testing.T) {
 		return atOnset, rel, storedObs(t, r.s)
 	}
 	n, rel, got := run(t)
-	if n != 1 || !rel.Skewed || len(got) != 1 || got[0].Node.PlatformSession != nil || !got[0].Node.Skewed {
-		t.Fatalf("stored %d at the onset; released %+v; stored after %d: %+v", n, rel, len(got), got)
+	if n != 1 || !rel.Skewed || len(got) != 3 {
+		t.Fatalf("stored %d at the onset; released %+v; stored after %d", n, rel, len(got))
+	}
+	for _, o := range got {
+		if o.Node.PlatformSession != nil || !o.Node.Skewed {
+			t.Fatalf("stored tied or unmarked: %+v", o.Node)
+		}
+	}
+	// One run refused at the onset, while the latest sample stood.
+	if w := windows(st); w != [5]uint64{1, 0, 0, 0, 0} {
+		t.Fatalf("window counts %v, want one skew_latest_windows", w)
 	}
 	t.Run("control: no release at the onset", func(t *testing.T) {
 		withSeam(t, &skewNoOnset)
 		if n, _, _ := run(t); n != 0 {
 			t.Fatalf("the control committed %d at the onset", n)
+		}
+	})
+}
+
+// D4's F3 (a), D6's N3 on #748: the onset ends a holding run whose empty
+// record is then not saved. Its Result still reports the window refused.
+// N3 (b): a run refused at Dispatch and then abandoned leaves nothing for
+// a Result that never comes.
+func TestSkewRunMarkKept(t *testing.T) {
+	t.Run("the onset's save fails", func(t *testing.T) {
+		var failEmpty atomic.Bool
+		r, _ := holdRig02With(t, func(o *Options) {
+			save := o.Hold.Save
+			o.Hold.Save = func(ctx context.Context, rec RunRecord) error {
+				if failEmpty.Load() && rec.State == HoldHolding && len(rec.Flows) == 0 {
+					return errors.New("test: the save fails")
+				}
+				return save(ctx, rec)
+			}
+		})
+		p := r.accepted(r.agreeHello(hello02()))
+		r.tickO(p, 0, 20, 0)
+		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+			t.Fatal(err)
+		}
+		start := r.now()
+		f := nodeFlow02(1)
+		f.FirstUTC = canonUTC(start.Add(time.Second))
+		f.LastUTC = f.FirstUTC
+		p.send(f)
+		p.taken()
+		failEmpty.Store(true)
+		r.tickO(p, 3*time.Second, 20, 1)
+		failEmpty.Store(false)
+		s := session09("0e4d8a2c-6b1f-4c3e-9a5d-7f2b1c0d9e8f", 40001, 0)
+		s.StartedAt, s.ConnectedAt, s.EndedAt = start, start, start.Add(20*time.Second)
+		rel, err := r.l.Result(bg, "req-1", s)
+		if err != nil || !rel.Skewed {
+			t.Fatalf("released %+v, %v: the window's refusal lost", rel, err)
+		}
+	})
+	t.Run("abandoned", func(t *testing.T) {
+		r, _ := holdRig02(t)
+		r.accepted(r.helloO(3 * time.Second))
+		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.l.Abandon(bg, "req-1"); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(r.l.hold.skewed); n != 0 {
+			t.Fatalf("%d runs kept for a Result that never comes", n)
 		}
 	})
 }
