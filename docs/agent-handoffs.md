@@ -34,6 +34,8 @@ Drawn from the defects D6's reviews found most often. The implementer runs it an
 7. **Evidence:** each new test shows a named pass, not a skip, in the jobs that run it (both `go` jobs for Go), cited by job URL; for a job that prints no names, such as `python`, its pass and count. The `integration-long` legs' result comes after D1 adds `full-ci`, before the merge; a PR that changes the slice, its harness or `sensor_rig` asks D1 for the label early (CLAUDE.md, "Testing and merging").
 8. **Gates:** owed tests are listed by name, F-027's merge-check greps are shown, and no approved bound changes.
 9. **Claims:** every rate, bound and "never" in the PR body or a note is what the code does, and is tested.
+10. **Encoding (D4-119):** the diff has no unintended non-ASCII change; files are read and written as UTF-8.
+11. **Contract minors (D4-119):** a PR that changes a contract's minor, or merges a `main` that does, greps the tree for every literal of the old and next minor and lists each hit with why it is or isn't affected.
 
 The review pairs are in CLAUDE.md section 5.6.
 
@@ -2603,4 +2605,112 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Exclusions: INT-D5b's aggregate-key legs; P4-4-DE's dialer legs; no product wiring (F-027).
 - Uncertainty or safety risks: the size of the work; mechanisms not yet built.
 - Scratch files: `d5-p2-*`
-- Result: running at D4-116.
+- Result: 2a merged (#742, D4-118); 2b is #747 and 2c is #748 (D4-119 items 2.2 and 7).
+
+## After D4-118: findings, contracts and fixes (issued 2026-11-19, D4-119)
+
+Each brief below was issued in the agent's prompt in this form; the full text, and each finding it answers, are on its PR.
+
+### P4-4-HR23-MISS (D4; D6, D2 and D3 review): a capture whose fetch fails is a row, and fails the counted run
+- Objective and rationale: D4-118 item 2.5 (D6's finding on #744): a capture dropped with no row while the job stays green. Before HR-23's counted run.
+- Required inputs: D4-118 items 2.4, 2.5, 3; `modules/telemetry/experiments/engine-linux/` (`table.py`, `run.sh`, `extra-captures.tsv`); `tests/fixtures/network/public-ot-captures/MANIFEST.tsv`.
+- Files: `modules/telemetry/experiments/engine-linux/`, `ids-coverage/fetch_captures.sh`, the engine-run workflow.
+- Expected interfaces: none changed; one new row form, "not run (not fetched)".
+- Deliverable: one PR: every listed capture has a row; a counted run fails on a missing one.
+- Acceptance tests: the self-check list; zero, one and all missing, each with a control.
+- Owed: `run.sh public` itself, at its first dispatched run.
+- Exclusions: no dispatch; no change to #746.
+- Uncertainty or safety risks: none to devices; disclosure as "Waiting on the owner" items 18 and 20.
+- Scratch files: `d4-hr23miss-*`
+- Result: #751, merged (D4-119 item 1.6).
+
+### P4-D6-EOF1 (D6; D3 and D5 review): reproduce `TestD6SensorKindsRefusedByCollector`'s EOF on Windows
+- Objective and rationale: a failure in code #751 did not touch (HANDOFF, "Test policy").
+- Required inputs: the failed job of run 44407040278; ci-triage's reading.
+- Files: `tests/security/` only.
+- Expected interfaces: none changed.
+- Deliverable: the server-side reason, with evidence; a test PR if warranted.
+- Acceptance tests: the reason shown from a log or a reproduction.
+- Owed: none.
+- Exclusions: no change to the collector (D3's).
+- Uncertainty or safety risks: none beyond the test.
+- Scratch files: `d6-eof1-*`
+- Result: #752, merged; the cause is D4-119 item 2.4.
+
+### P4-COL-DL (D3; D6 and D5 review): the collector re-arms its write deadline after `Handle`
+- Objective and rationale: D4-119 item 2.4.
+- Required inputs: D3's 6995797823 and 6995797288, D5's 6995741447 on #752; `modules/security/collector/server.go`.
+- Files: `modules/security/collector/` and its tests.
+- Expected interfaces: C7 and C8 unchanged; `RequestTimeout`'s comment states what it bounds.
+- Deliverable: one PR with T1 to T3 and their mutants; D5's question answered.
+- Acceptance tests: the self-check list; `c2-old-reader` and `c2-netns` green.
+- Owed: none.
+- Exclusions: no change to the node; no new bound.
+- Uncertainty or safety risks: timing tests on Windows; injected slow handlers, not disk load.
+- Scratch files: `d3-coldl-*`
+- Result: #758, merged (D4-119 item 1.8).
+
+### P4-4-C4-05 (D4; D6, D5 and D3 review): the C4 0.5 validator for `sensor.counters`
+- Objective and rationale: C4 0.5 approved (D4-119 item 2.5); #747 merges after it.
+- Required inputs: `docs/phase4/D4-c4-0.5-proposal.md`; `contracts/event/validate.go`; D4-72.
+- Files: `contracts/event/` (D1 authorizes for this brief); the tests D4-119 item 2.7 names.
+- Expected interfaces: C4 0.5.
+- Deliverable: one PR with E5-1, E5-2, E5-4, E5-8's contract part and E5-7's contract leg, each with a control.
+- Acceptance tests: the self-check list; a 0.4 reader still accepts 0.5 events.
+- Owed: D6's independent rows (P4-D6-C405); E5-5, E5-6 and E5-9 in #747.
+- Exclusions: no node code; no change to C6.
+- Uncertainty or safety risks: tests that pin a minor (self-check item 11).
+- Scratch files: `d4-c405-*`
+- Result: #755, merged (D4-119 item 1.10).
+
+### P4-D6-C405 (D6; D4 and D3 review): independent contract tests for C4 0.5
+- Objective and rationale: D6's independent versions of E5-1 to E5-4 and E5-8's leg, from the contract text alone.
+- Required inputs: `docs/phase4/D4-c4-0.5-proposal.md`; the public `contracts/event` API.
+- Files: `tests/contract/` only.
+- Expected interfaces: C4 0.5.
+- Deliverable: E5-3 before P4-4-C4-05 (it passes on 0.4), the rest after.
+- Acceptance tests: each row with a control that can fail.
+- Owed: none.
+- Exclusions: no node tests.
+- Uncertainty or safety risks: none beyond the tests.
+- Scratch files: `d6-c405-*`
+- Result: #754 and #756, merged (D4-119 items 1.9 and 1.12).
+
+### P4-D6-PORT1 (D6; D4 and D5 review): the VM1 slice fixture's UDP bind collision
+- Objective and rationale: D4-119 item 4.2.
+- Required inputs: job 135244642630's log; ci-triage's reading.
+- Files: `tests/integration/slice/`.
+- Expected interfaces: none changed.
+- Deliverable: one PR: a UDP port reserved for UDP, the same pattern fixed in the other slice tests, a test whose control pre-binds the old port.
+- Acceptance tests: the self-check list; `full-ci`.
+- Owed: none.
+- Exclusions: no product code.
+- Uncertainty or safety risks: none beyond the harness.
+- Scratch files: `d6-port1-*`
+- Result: #757, merged (D4-119 item 1.7).
+
+### P4-NODE-PRUNE1 (D5; D6 and D4 review): `TestDetectorPrunedFromStream/none_retained` on CI-Windows
+- Objective and rationale: D4-119 item 4.3.
+- Required inputs: job 135270762041's log; ci-triage's reading; `tickDetector` (D4-74).
+- Files: `platform/node` tests.
+- Expected interfaces: none changed.
+- Deliverable: one PR: the test waits for the consumer's committed cursor, and closes the runtime on failure; a control under an injected delay.
+- Acceptance tests: the self-check list.
+- Owed: none.
+- Exclusions: no change to the prune boundary or the consumer.
+- Uncertainty or safety risks: a wait that hides a missed checkpoint (D6's mutants).
+- Scratch files: `d5-prune1-*`
+- Result: #759, merged (D4-119 item 1.11).
+
+### P4-4-C13-ABS (D4; D6, D2, D3 and D5 review): the C13 absent and ambiguous keys, in code
+- Objective and rationale: D4-117 item 3.9; §15 approved (D4-119 item 2.1).
+- Required inputs: §15 of `docs/phase4/D4-c13-0.3-proposal.md`; D4-117 item 3; D4-118 item 4; D1's 6955432193 and 6993015611.
+- Files: the C13 contract package and its tests (D1 authorizes for this brief); `platform/node` only for the node-side rules §15 names; `tests/fixtures/network/` if needed.
+- Expected interfaces: C13 0.2 and 0.3 in place, no new minor (D4-117 item 3.8).
+- Deliverable: one PR, or a split proposed first (D4-99).
+- Acceptance tests: the self-check list; D6's "Tests the code PR owes", points 1, 3, 4 and 7, each with a control.
+- Owed: the script halves of D6's points 3 and 11, and GT-PCAP cases that need the sensor; D6's old-reader leg.
+- Exclusions: no sensor script, no capture, none of §15.10's measurements.
+- Uncertainty or safety risks: nothing refused may become accepted except as §15 says; stored records still decode.
+- Scratch files: `d4-c13abs-*`
+- Result: #760, in review at D4-119 (item 7.1).
