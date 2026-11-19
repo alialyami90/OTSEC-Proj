@@ -68,6 +68,10 @@ type Options struct {
 	Raise    func(alarm, detail string)
 	Owed     func(ctx context.Context, o Owed) error
 	Timeouts ConnTimeouts
+	// Health is the sensor's health events (health.go): with it, Owed
+	// defaults to its WriteOwed, the heartbeat baselines are judged, and
+	// the pool's alarms make their event due.
+	Health *Health
 }
 
 // Reasons a record is refused (sensor-record-refused), beside the C13
@@ -184,6 +188,16 @@ type Link struct {
 	curOpen bool
 	moved   *posMove
 	unsaved *posMove
+	// writeNo is the run file's last write number, which every write of
+	// the position carries (section 1.1). Under cmu.
+	writeNo uint64
+	// egressRun is the run for which sensor-egress-absent was last raised
+	// with no baseline held, so it rises once a run. Under curMu.
+	egressRun string
+	// startRun is the run seen from its start in this process, "" when
+	// none, so a resume with no gap keeps it (CH-27; D4's N1 on #747).
+	// Under curMu.
+	startRun string
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).
@@ -203,10 +217,17 @@ func New(cfg Config, opt Options) (*Link, error) {
 		return nil, err
 	}
 	h.mono = opt.Monotonic
-	return &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets), hold: h,
+	if opt.Health != nil && opt.Owed == nil {
+		opt.Owed = opt.Health.WriteOwed
+	}
+	l := &Link{cfg: cfg, opt: opt, resolver: NewResolver(cfg.NodeID, opt.Assets), hold: h,
 		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
 		conn:   ConnStats{Closes: map[string]uint64{}},
-		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}, nil
+		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}
+	if opt.Health != nil && opt.Health.cfg.File != nil {
+		opt.Health.cfg.File.addLink(l)
+	}
+	return l, nil
 }
 
 // Stats returns a copy of the counts.
@@ -488,13 +509,15 @@ func (l *Link) commitOne(ctx context.Context, hr HeldRecord, tie *netobs.Platfor
 	var folded *Cursor
 	if err == nil && f != nil {
 		rec.SourceCursor = f.cursor
-		if l.moved != nil || l.unsaved != nil {
+		if l.moved != nil || l.unsaved != nil || f.marked.WriteNo < l.writeNo {
 			// A release moved the position since f's cursor was encoded, or
-			// its own save failed: the commit carries both, so it never
-			// writes T or a total back.
+			// its own save failed, or the run file was written: the commit
+			// carries each, so it never writes T, a total or the write
+			// number back.
 			folded = f.marked.clone()
 			l.moved.apply(folded)
 			l.unsaved.apply(folded)
+			folded.WriteNo = l.writeNo
 			b, err := encodeCursor(folded)
 			if err != nil {
 				note(outStoreError) // not taken: T stays, the record is resent
@@ -648,6 +671,7 @@ func (l *Link) readPos(ctx context.Context) error {
 		return err
 	}
 	l.pos, l.posRead = c, true
+	l.tookWriteNo(c)
 	return nil
 }
 
@@ -712,6 +736,7 @@ func (l *Link) moveCursor(m *posMove) []byte {
 	c := l.pos.clone()
 	l.unsaved.apply(c)
 	m.apply(c)
+	c.WriteNo = max(c.WriteNo, l.writeNo)
 	b, err := encodeCursor(c)
 	if err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: the position moved by a release was not saved: %v", l.cfg.SensorID, err))

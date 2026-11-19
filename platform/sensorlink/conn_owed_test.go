@@ -334,7 +334,8 @@ func TestOwedFailsInRunRaises(t *testing.T) {
 // D6's condition 1, R-5's worst-case leg, on section 1.4's text form
 // (D1's ruling 6948593988 on #732): the largest cursor the intake can
 // hold, built through admit and markLost (8 spans and 8 prior spans, both
-// marks set, unclean and enrolment, every number at 20 digits), committed
+// marks set, unclean and enrolment, every number at 20 digits, write_no
+// and the baselines of part 2b filled), committed
 // with a record through Record.SourceCursor, is at most the form's 2,032
 // bytes, under MaxLinkCursorBytes. Control: the JSON form of part 1, which
 // costs more than the form's bound for the same cursor.
@@ -351,8 +352,10 @@ func TestCursorWorstCaseFits(t *testing.T) {
 	recv := base.Add(9 * time.Hour)
 	var cut, opened uint64
 	taken := top - 2
+	tp := top
 	c := &Cursor{Generation: top, RunCounter: top, RunID: testRun, Taken: taken, G: top, D: top,
-		Refused: top, Dropped: top, Ds: top, NewestSeq: top, Digest: testDigest,
+		Refused: top, Dropped: top, Ds: top, NewestSeq: top, Digest: testDigest, WriteNo: top,
+		FramesOutgoing: &tp, DropsHolder: &tp, FramesOverlong: &tp, DropsDriver: &tp, Egress: EgressCarried,
 		Spans: admit(nil, spans, f(recv), recv, &cut, &opened),
 		Prior: &HeldPrior{RunsSkipped: top, RecordsLost: top, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
 			Spans: admit(nil, spans, f(recv), recv, &cut, &opened)}}
@@ -385,7 +388,8 @@ func TestCursorWorstCaseFits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(storedObs(t, r.s)) != 2 || !got.Spans[7].Marked || !got.Prior.Spans[7].Marked || !got.Spans[0].Owed {
+	if len(storedObs(t, r.s)) != 2 || !got.Spans[7].Marked || !got.Prior.Spans[7].Marked || !got.Spans[0].Owed ||
+		got.WriteNo != top || got.DropsDriver == nil || *got.DropsDriver != top {
 		t.Fatalf("not the worst case: %s", b)
 	}
 	t.Logf("worst-case cursor %d bytes (the form's bound %d, MaxLinkCursorBytes %d)", len(b), formMax, MaxLinkCursorBytes)

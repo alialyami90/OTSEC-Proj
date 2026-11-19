@@ -7,6 +7,7 @@ import (
 
 	"otsec.local/otsec/contracts/event"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/platform/sensorlink"
 )
 
 // The platform-class floor and ceiling, in bytes (docs/phase4/D5-sensor-
@@ -137,3 +138,15 @@ type sensorHealthSink struct{ rt *Runtime }
 func (h sensorHealthSink) Emit(ctx context.Context, he event.Health) (c5.Key, error) {
 	return h.rt.sensorHealth(ctx, he)
 }
+
+// WriteHealth is sensorlink.HealthSink: a sensor health event of the pool,
+// a run loss or a lost gap, built here with this binary's event.Identifier
+// and written under the ceiling (CH-45, E4-7).
+func (h sensorHealthSink) WriteHealth(ctx context.Context, typ string, details map[string]string) error {
+	_, err := h.rt.sensorHealth(ctx, event.Health{Type: typ, Details: details})
+	return err
+}
+
+// SensorHealthSink is the sensor's health writer for sensorlink.Health.
+// Not wired (F-027's gate): only the tests call it.
+func (r *Runtime) SensorHealthSink() sensorlink.HealthSink { return sensorHealthSink{rt: r} }
