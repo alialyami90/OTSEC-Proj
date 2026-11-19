@@ -147,8 +147,9 @@ func TestCountersFoldRuns(t *testing.T) {
 	}
 
 	// Each event is valid C4 as this binary stamps it. A folded event
-	// needs C4 0.5's validator, which is not on main at this head (#753;
-	// #747 merges after it): under 0.4, runs_folded is refused.
+	// needs C4 0.5's validator, on main since #755: under 0.4, runs_folded
+	// is refused. The skip below can no longer trigger (event.Identifier
+	// is otsec.event/0.5), and is kept only as that record.
 	t.Run("C4", func(t *testing.T) {
 		if event.Identifier == "otsec.event/0.4" {
 			t.Skip("needs C4 0.5's validator (#753), not on main yet: 0.4 refuses runs_folded; #747 merges only after it")

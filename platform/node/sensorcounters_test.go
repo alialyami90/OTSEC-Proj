@@ -90,8 +90,8 @@ func TestSensorCountersEventFits(t *testing.T) {
 // 2^64 - 1 in each of the 21 counters, so every capture-loss counter is
 // named, with a 63-character node ID, is valid C4 0.4 and renders within
 // the default target's 2,048 octets; and E5-6 (C4 0.5 as proposed in
-// #753): the same with runs_folded at 2^64 - 1, stamped 0.5, which this
-// build's C4 reads as a later minor's event, renders within it too. Control:
+// #753): the same with runs_folded at 2^64 - 1, stamped 0.5, this build's
+// current minor since #755, is valid and renders within it too. Control:
 // the same event with the agent's 14 counts added, under a later minor so
 // that C4 lets them pass, which Render refuses as too large; for E5-6,
 // runs_folded left out (the octets logged for both). Desk only.
