@@ -422,6 +422,8 @@ For each case and configuration, the harness reports:
 
 The judge does not read these. They show which parser ran.
 
+For the captures of `hr23_cases.py`, these readings are not printed, since some HR-23 rows are held from per-row publication (D4-112 item 1.3). `run.sh dnp3`, given the two builds, feeds every one of them, each equal to its pin in `hr23.sha256`, to C0, C1, C1p and C2 in folders of their own, and its table says only whether each configuration ran and its exit code. On `refs/heads/main` the job fails when any did not run with exit code 0 (D4-120 item 3.7; `hr23_feed.py`).
+
 ### 4.5 The build and the pin of option (i)
 
 These keep the engine that is measured the engine that ships (D4-100 item 2; O-7; AP-31; D7's answer 1; D3's N4; ruling 8).

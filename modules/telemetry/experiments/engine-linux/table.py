@@ -81,6 +81,8 @@ LABELS.update({
     "zeek-probe-c1p": "The project's Zeek build without HR-23's patch, with the project's script (HR-23's C1p)",
     "zeek-probe-c2": "The project's Zeek build with HR-23's patch, option (i), with the project's script (HR-23's C2)",
 })
+# GT-PCAP's folder of HR-23's captures, which dnp3 mode's tables leave out.
+HR23_DIR = "hr23"
 # The configurations that load probe.zeek, so read otsec_probe.log.
 PROBED = ("zeek-probe", "zeek-modbus-sig") + HR23
 # The configurations whose DNP3 servers come from the link rows' DIR bit
@@ -618,6 +620,21 @@ def evaluate(conds, loaded, cfg):
     return [(row, *out[n]) for n, row in enumerate(conds)]
 
 
+def gt_cases(gt):
+    """{capture: its label folder} for every capture a GT-PCAP hash list
+    names, but HR-23's: those are fed in their own folders, to C0, C1, C1p
+    and C2 only, and only whether each ran is printed (run.sh's hr23_feed;
+    D4-112 item 1.3), so dnp3 mode's tables do not list them."""
+    labdir = {}
+    for sums in sorted(glob.glob(os.path.join(gt, "*", "*.sha256"))):
+        if os.path.basename(os.path.dirname(sums)) == HR23_DIR:
+            continue
+        for l in open(sums):
+            if l.strip() and l.split()[1].endswith(".pcap"):
+                labdir[l.split()[1][: -len(".pcap")]] = os.path.dirname(sums)
+    return labdir
+
+
 def dnp3(out, gt, work, root):
     global CONFIGS
     CONFIGS = present(out)
@@ -630,11 +647,7 @@ def dnp3(out, gt, work, root):
     if (t["zeek_fc"].get("READ") != {1} or t["icsnpp_fc"].get("READ") != {1} or len(t["icsnpp_obj"]) < 50
             or t["zeek_modbus_fc"].get("READ_HOLDING_REGISTERS") != {3}):
         sys.exit("could not read Zeek's or ICSNPP's name tables")
-    labdir = {}
-    for sums in sorted(glob.glob(os.path.join(gt, "*", "*.sha256"))):
-        for l in open(sums):
-            if l.strip() and l.split()[1].endswith(".pcap"):
-                labdir[l.split()[1][: -len(".pcap")]] = os.path.dirname(sums)
+    labdir = gt_cases(gt)
     cases = sorted(labdir)
     cpath = os.path.join(root, CONDITIONS)
     conds = tsv(cpath) if os.path.exists(cpath) else None
@@ -654,6 +667,8 @@ def dnp3(out, gt, work, root):
           "1815's own list is not held.\n")
     source = f"`{CONDITIONS}` (D6), as D4 reads `docs/phase4/D6-engine-run-pass-conditions.md`" if conds else PENDING
     print(f"Pass conditions: {source}.\n")
+    print(f"GT-PCAP's `{HR23_DIR}/` captures are not in these tables: they run under C0, C1, C1p and C2 only, in "
+          "their own folders, and the last section of this file says only whether each ran.\n")
     loaded = {}
     for cfg in CONFIGS:
         for c in cases + [CONTROL]:
