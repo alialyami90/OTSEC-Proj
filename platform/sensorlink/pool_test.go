@@ -126,8 +126,8 @@ func fillPool(t *testing.T, p *Pool, start time.Duration) {
 // health_held, held in sensorrun.json as its facts, and written first when
 // room returns. A lost coverage gap due meanwhile is written under its own
 // budget, never held in the pool. Controls: a pool that writes in arrival
-// order (no rank), under which the alarm goes first; and the spent pool,
-// which would hold a gap put through it.
+// order (no rank), under which the alarm goes first (run here); and M19,
+// a lost gap put through the pool, which the spent pool holds.
 func TestPoolWaitOrder(t *testing.T) {
 	due := []string{EventCounters, EventRunLoss, AlarmBufferSmall, EventRedialGranted}
 	order := func(p *Pool, room int) []string {
@@ -179,12 +179,6 @@ func TestPoolWaitOrder(t *testing.T) {
 	pe.ack(1)
 	if got := r.sink.count(EventCoverageGap); got != 1 {
 		t.Fatalf("%d lost gaps written with the pool spent", got)
-	}
-	h.mu.Lock()
-	gapFits := h.pool.fits(EventCoverageGap, r.clk.mono())
-	h.mu.Unlock()
-	if gapFits {
-		t.Fatal("control: the spent pool would take a gap; the test cannot tell")
 	}
 	r.clk.add(time.Minute)
 	if err := h.Flush(bg); err != nil {

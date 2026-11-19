@@ -69,7 +69,7 @@ func TestSensorCountersEventFits(t *testing.T) {
 
 	// The control: the agent's counts (C13 0.2 CH-43), which C4 0.4 leaves
 	// out of sensor.counters.
-	e.Schema = "otsec.event/0.5"
+	e.Schema = "otsec.event/0.6"
 	max := strconv.FormatUint(math.MaxUint64, 10)
 	for _, n := range []string{"closes.handshake", "closes.node-hello", "closes.node-hello-timeout", "closes.binding", "closes.ack",
 		"closes.type", "closes.idle", "closes.frame-too-large", "closes.superseded", "closes.run-complete", "closes.shutdown",
@@ -89,9 +89,12 @@ func TestSensorCountersEventFits(t *testing.T) {
 // sensor.counters, built by sensorlink.SensorCountersDetails from a rise of
 // 2^64 - 1 in each of the 21 counters, so every capture-loss counter is
 // named, with a 63-character node ID, is valid C4 0.4 and renders within
-// the default target's 2,048 octets. Control: the same event with the
-// agent's 14 counts added, under a later minor so that C4 lets them pass,
-// which Render refuses as too large. Desk only.
+// the default target's 2,048 octets; and E5-6 (C4 0.5 as proposed in
+// #753): the same with runs_folded at 2^64 - 1, stamped 0.5, this build's
+// current minor since #755, is valid and renders within it too. Control:
+// the same event with the agent's 14 counts added, under a later minor so
+// that C4 lets them pass, which Render refuses as too large; for E5-6,
+// runs_folded left out (the octets logged for both). Desk only.
 func TestSensorCountersWorstCaseFits(t *testing.T) {
 	rises := map[string]uint64{}
 	for _, n := range append(append([]string{}, event.SensorCounters...), event.SensorCounters04...) {
@@ -111,8 +114,18 @@ func TestSensorCountersWorstCaseFits(t *testing.T) {
 		t.Fatalf("%d octets (limit %d), %+v, %v", len(msg), syslog.DefaultMaxOctets, out, err)
 	}
 	t.Logf("the node's worst sensor.counters: %d octets of %d", len(msg), syslog.DefaultMaxOctets)
-	e.Schema = "otsec.event/0.5"
 	max := strconv.FormatUint(math.MaxUint64, 10)
+	e.Schema = "otsec.event/0.5"
+	e.Health.Details[sensorlink.DetailRunsFolded] = max
+	if err := e.Validate(); err != nil {
+		t.Fatalf("E5-6: the worst folded sensor.counters is not valid: %v", err)
+	}
+	folded, out, err := syslog.Render(e, tg)
+	if err != nil || out.SummaryDropped || len(folded) > syslog.DefaultMaxOctets || len(folded) <= len(msg) {
+		t.Fatalf("E5-6: %d octets (limit %d, %d without runs_folded), %+v, %v", len(folded), syslog.DefaultMaxOctets, len(msg), out, err)
+	}
+	t.Logf("E5-6, runs_folded at its maximum: %d octets of %d", len(folded), syslog.DefaultMaxOctets)
+	e.Schema = "otsec.event/0.99" // a minor that leaves the agent's counts unchecked
 	for _, n := range []string{"closes.handshake", "closes.node-hello", "closes.node-hello-timeout", "closes.binding", "closes.ack",
 		"closes.type", "closes.idle", "closes.frame-too-large", "closes.superseded", "closes.run-complete", "closes.shutdown",
 		"taken_ahead", "sync_late", "entries_unreadable"} {

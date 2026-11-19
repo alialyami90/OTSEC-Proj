@@ -27,12 +27,20 @@ const (
 	AlarmTransmitted  = "sensor-transmitted"
 	AlarmEgressAbsent = "sensor-egress-absent"
 	AlarmStateUnread  = "sensor-state-unread"
+	// AlarmStateNotDurable: a write of sensorrun.json failed; raised once
+	// a failing stretch, status and the OS log only (section 1.9 item 5).
+	AlarmStateNotDurable = "sensor-state-not-durable"
 )
+
+// DetailRunsFolded is sensor.counters' fold count (C4-0.5-1).
+const DetailRunsFolded = "runs_folded"
 
 // HealthSink writes one sensor health event to the node's health stream,
 // building the C4 event at the write with the writing binary's
 // event.Identifier (E4-7), under the platform class's ceiling. An error is
-// an event not written: it stays held or owed.
+// an event not written: it stays held or owed. It is called with Health's
+// lock held, so it must not call back into the Health or a Link's raise
+// (D3's N2 on #747).
 type HealthSink interface {
 	WriteHealth(ctx context.Context, typ string, details map[string]string) error
 }
@@ -52,7 +60,10 @@ type HealthConfig struct {
 	// node's wall clock, for the times the events and the file carry.
 	Monotonic func() time.Duration
 	Now       func() time.Time
-	Raise     func(alarm, detail string)
+	// Raise shows an alarm in status and the OS log. It is called with
+	// Health's lock held, so it must not call back into the Health or a
+	// Link's raise (D3's N2 on #747).
+	Raise func(alarm, detail string)
 	// File is the node's sensorrun.json; nil keeps nothing across a start.
 	File *RunFile
 }
@@ -76,12 +87,16 @@ type Health struct {
 	transmitted bool
 	raisedAt    time.Time
 	run         string
+	key         string // sensor.counters' key for run, "" when not known
 	totals      [3]*uint64
 	fileRun     string
 	fileTotals  [3]*uint64
 	fileAt      time.Duration
 	fileWritten bool
 	dirty       bool
+	// fileErr is the run file's last write error while a failing stretch
+	// stands, raised once at its first failure.
+	fileErr error
 	// Status.
 	possiblyLost []string
 	runFile      string
@@ -114,14 +129,33 @@ type HealthStatus struct {
 	// StartCopies counts the owed events written at a start, each
 	// possibly a second copy (section 1.4).
 	StartCopies uint64
+	// Saturated names each waiting sensor.counters value that a rise would
+	// have carried past 2^64 - 1 (diff.<name> or runs_folded), held there
+	// as a lower bound until it is written (C4-0.5-3); a sum of exactly
+	// 2^64 - 1 is not named (E5-8 (a)).
+	Saturated []string
+	// NotDurable is the run file's failing write, "" while it writes.
+	NotDurable string
 }
 
-// Status returns a copy of the sensor's health status.
+// Status returns a copy of the sensor's health status. It waits on the
+// Health's lock, which a store append or the run file's sync holds
+// (section 1.14).
 func (h *Health) Status() HealthStatus {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return HealthStatus{HealthHeld: h.pool.Held, Waiting: h.pool.Waiting(), Transmitted: h.transmitted, RaisedAt: h.raisedAt,
+	st := HealthStatus{HealthHeld: h.pool.Held, Waiting: h.pool.Waiting(), Transmitted: h.transmitted, RaisedAt: h.raisedAt,
 		RunFile: h.runFile, PossiblyLost: slices.Clone(h.possiblyLost), StartCopies: h.startCopies}
+	for _, w := range st.Waiting {
+		if w.Name != EventCounters {
+			continue
+		}
+		st.Saturated = append(st.Saturated, w.Saturated...)
+	}
+	if h.fileErr != nil {
+		st.NotDurable = h.fileErr.Error()
+	}
+	return st
 }
 
 // raise shows alarm in status and makes its event due in the pool, written
@@ -130,6 +164,17 @@ func (h *Health) raise(alarm, detail string) {
 	if h.cfg.Raise != nil {
 		h.cfg.Raise(alarm, detail)
 	}
+	h.pool.Due(HeldEvent{Name: alarm, Details: map[string]string{"sensor_id": h.cfg.SensorID, "detail": detail}})
+	h.dirty = true
+}
+
+// alarm makes the event of an alarm the link raised due, written at the
+// pool's next write (a heartbeat's, the owed writer's, or Flush on the
+// manager's tick): no store append under the link's lock (D3's N2 on
+// #747).
+func (h *Health) alarm(alarm, detail string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.pool.Due(HeldEvent{Name: alarm, Details: map[string]string{"sensor_id": h.cfg.SensorID, "detail": detail}})
 	h.dirty = true
 }
@@ -175,12 +220,16 @@ func (h *Health) WriteOwed(ctx context.Context, o Owed) error {
 	defer h.mu.Unlock()
 	now := h.cfg.Monotonic()
 	var pending []string
-	if p := o.Prior; p != nil && declares(p) && !h.wrote(runLossKey(o.RunID)) {
+	// A run loss already waiting is not made due again: one run's loss is
+	// one event (D6's B5 on #747).
+	if p := o.Prior; p != nil && declares(p) && !h.wrote(runLossKey(o.RunID)) && !h.pool.waiting(EventRunLoss, o.RunID) {
 		h.pool.Due(HeldEvent{Name: EventRunLoss, Key: o.RunID, Details: map[string]string{
 			"sensor_id": h.cfg.SensorID, "generation": strconv.FormatUint(o.Generation, 10),
 			"run_counter": strconv.FormatUint(o.RunCounter, 10), "run_id": o.RunID,
 			"runs_skipped": strconv.FormatUint(p.RunsSkipped, 10), "records_lost": strconv.FormatUint(p.RecordsLost, 10),
 			"previous_end": p.PreviousEnd, "started_by": p.StartedBy}})
+	}
+	if p := o.Prior; p != nil && declares(p) {
 		pending = append(pending, runLossKey(o.RunID))
 	}
 	var gaps []HeldSpan
@@ -190,23 +239,29 @@ func (h *Health) WriteOwed(ctx context.Context, o Owed) error {
 	gaps = append(gaps, o.Spans...)
 	gaps = slices.DeleteFunc(gaps, func(s HeldSpan) bool { return !s.Owed || h.wrote(gapKey(o.RunID, s)) })
 	err := h.writeGaps(ctx, now, o, gaps)
-	if perr := h.pool.Write(ctx, now, h.emit); err == nil {
-		err = perr
-	}
+	perr := h.pool.Write(ctx, now, h.emit)
 	for _, s := range gaps {
 		pending = append(pending, gapKey(o.RunID, s))
 	}
+	// Only what o owes decides: the pool's error counts while the run
+	// loss is unwritten (the pass stops at its first error, and
+	// sensor.counters comes after the run loss), never for another
+	// waiting event alone.
 	if slices.ContainsFunc(pending, func(k string) bool { return !h.wrote(k) }) && err == nil {
-		err = ErrHealthHeld
+		err = perr
+		if err == nil {
+			err = ErrHealthHeld
+		}
 	}
-	h.persist(ctx, false)
+	h.persist(ctx, false) // a failure is raised there; the owed events are not the file's
 	return err
 }
 
 // writeGaps writes the lost gaps of gaps under their budget: each alone
 // while it has room, and past it the rest merged into one record (first
-// start, last end, their number), which merges lost gaps only (section 1.9
-// item 5).
+// start, last cut end, their number), which merges lost gaps only (section
+// 1.9 item 5). A gap's times are its stated from_utc and its cut end
+// (CH-40; D6's B1 on #747).
 func (h *Health) writeGaps(ctx context.Context, now time.Duration, o Owed, gaps []HeldSpan) error {
 	room := h.lost.room(now, GapLostPerHour)
 	for len(gaps) > 0 && room > 0 {
@@ -216,11 +271,10 @@ func (h *Health) writeGaps(ctx context.Context, now time.Duration, o Owed, gaps 
 		}
 		d := map[string]string{"sensor_id": h.cfg.SensorID, "generation": strconv.FormatUint(o.Generation, 10),
 			"run_counter": strconv.FormatUint(o.RunCounter, 10), "run_id": o.RunID, "cause": "lost", "causes": "lost",
-			"state": "closed", "covered": "false", "from_utc": batch[0].FromUTC, "to_utc": batch[0].ToUTC, "cut_utc": batch[0].CutUTC}
+			"state": "closed", "covered": "false", "from_utc": batch[0].FromUTC, "to_utc": batch[0].CutUTC}
 		if len(batch) > 1 {
 			for _, s := range batch[1:] {
-				d["from_utc"] = earlierUTC(d["from_utc"], s.FromUTC)
-				d["to_utc"], d["cut_utc"] = laterUTC(d["to_utc"], s.ToUTC), laterUTC(d["cut_utc"], s.CutUTC)
+				d["from_utc"], d["to_utc"] = earlierUTC(d["from_utc"], s.FromUTC), laterUTC(d["to_utc"], s.CutUTC)
 			}
 			d["merged"] = strconv.Itoa(len(batch))
 		}
@@ -247,9 +301,12 @@ func earlierUTC(a, b string) string {
 func (h *Health) emit(ctx context.Context, e *HeldEvent) error {
 	d := maps.Clone(e.Details)
 	if e.Name == EventCounters {
-		// Its rises are summed already, and C4 0.4's closed set has no
-		// merged detail.
-		d = SensorCountersDetails(h.cfg.SensorID, e.Key, e.Rises)
+		// Its rises are summed already, across runs when it folds (C4
+		// 0.5), and C4's closed set has no merged detail.
+		d = SensorCountersDetails(h.cfg.SensorID, e.Run, e.Rises)
+		if e.Folded > 0 {
+			d[DetailRunsFolded] = strconv.FormatUint(e.Folded, 10)
+		}
 	} else if e.Merged > 1 {
 		if d == nil {
 			d = map[string]string{}
@@ -266,9 +323,12 @@ func (h *Health) emit(ctx context.Context, e *HeldEvent) error {
 	return nil
 }
 
-// Event makes a pool event due: an alarm's event, or a node-only event
-// (CH-45's list), held as its facts until it is written.
-func (h *Health) Event(ctx context.Context, name string, details map[string]string) {
+// Event makes a pool event due: a node-only event (CH-45's list), held as
+// its facts until it is written. It returns the pool's or the run file's
+// error: nil means the event is written, or waits held in the run file,
+// which an event that waits writes at once (section 1.1's re-arm waits on
+// that).
+func (h *Health) Event(ctx context.Context, name string, details map[string]string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	d := maps.Clone(details)
@@ -278,8 +338,8 @@ func (h *Health) Event(ctx context.Context, name string, details map[string]stri
 	d["sensor_id"] = h.cfg.SensorID
 	h.pool.Due(HeldEvent{Name: name, Details: d})
 	h.dirty = true
-	_ = h.pool.Write(ctx, h.cfg.Monotonic(), h.emit)
-	h.persist(ctx, false)
+	err := h.pool.Write(ctx, h.cfg.Monotonic(), h.emit)
+	return errors.Join(err, h.persist(ctx, h.pool.waiting(name, "")))
 }
 
 // Flush writes what waits while the pool has room, and writes the run
@@ -289,21 +349,37 @@ func (h *Health) Flush(ctx context.Context) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	err := h.pool.Write(ctx, h.cfg.Monotonic(), h.emit)
-	h.persist(ctx, false)
-	return err
+	return errors.Join(err, h.persist(ctx, false))
 }
 
-// counters makes sensor.counters due for run with rises, and records the
-// run's capture totals, as the cursor now holds them.
-func (h *Health) counters(ctx context.Context, run string, rises map[string]uint64, totals [3]*uint64) {
+// countersKey is sensor.counters' key: the position generation, which an
+// enrolment's Began names. Runs fold within it, never across it, since a
+// new, rekey or replace begins one (C4-0.5-2). startKey is the key of a
+// run whose position generation a start cannot know: its rises wait on
+// their own, at most one entry a start.
+func countersKey(began uint64) string { return strconv.FormatUint(began, 10) }
+
+func startKey(run string) string { return "run " + run }
+
+// countersDue is the sensor.counters event due for run's rises under key.
+func countersDue(key, run string, rises map[string]uint64) HeldEvent {
+	return HeldEvent{Name: EventCounters, Key: key, Run: run, Rises: rises}
+}
+
+// counters makes sensor.counters due for run with rises, folded into the
+// waiting one of the position generation key, and records the run's
+// capture totals, as the cursor now holds them. A run file write that
+// fails is raised in persist, and the start counts the cursor's totals
+// above those the file holds (section 1.8).
+func (h *Health) counters(ctx context.Context, key, run string, rises map[string]uint64, totals [3]*uint64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.run != run || !sameTotals(h.totals, totals) {
+	if h.run != run || h.key != key || !sameTotals(h.totals, totals) {
 		h.dirty = true
 	}
-	h.run, h.totals = run, totals
+	h.run, h.key, h.totals = run, key, totals
 	if len(rises) > 0 {
-		h.pool.Due(HeldEvent{Name: EventCounters, Key: run, Rises: rises})
+		h.pool.Due(countersDue(key, run, rises))
 		h.dirty = true
 	}
 	_ = h.pool.Write(ctx, h.cfg.Monotonic(), h.emit)
@@ -338,6 +414,9 @@ func (h *Health) beforeReplace(ctx context.Context, cur *Cursor) error {
 	if h.fileWritten && h.fileRun == cur.RunID && sameTotals(h.fileTotals, t) {
 		return nil
 	}
+	if h.run != cur.RunID {
+		h.key = ""
+	}
 	h.run, h.totals, h.dirty = cur.RunID, t, true
 	return h.persist(ctx, true)
 }
@@ -355,8 +434,13 @@ func (h *Health) persist(ctx context.Context, now bool) error {
 	}
 	f.put(h.cfg.SensorID, h.entry())
 	if err := f.write(ctx); err != nil {
+		if h.fileErr == nil && h.cfg.Raise != nil {
+			h.cfg.Raise(AlarmStateNotDurable, fmt.Sprintf("sensor %s: sensorrun.json was not written: %v; what it holds is in memory only until a write succeeds", h.cfg.SensorID, err))
+		}
+		h.fileErr = err
 		return err
 	}
+	h.fileErr = nil
 	h.fileAt, h.fileWritten, h.dirty = at, true, false
 	h.fileRun, h.fileTotals = h.run, h.totals
 	return nil
@@ -375,7 +459,7 @@ func (h *Health) entry() runFileSensor {
 		}
 	}
 	if h.run != "" {
-		e.Capture = &captureState{RunID: h.run, Totals: totalsMap(h.totals)}
+		e.Capture = &captureState{RunID: h.run, Key: h.key, Totals: totalsMap(h.totals)}
 	}
 	return e
 }
@@ -486,14 +570,14 @@ func (h *Health) start(e *runFileSensor, usable, held bool, cause string, cur *C
 		h.raise(AlarmTransmitted, fmt.Sprintf("sensor %s: standing since %s, until an administrator clears it", h.cfg.SensorID, e.Transmitted.RaisedAt))
 	}
 	var base [3]*uint64
-	baseRun := ""
+	baseRun, baseKey := "", ""
 	if held && e != nil {
 		for _, w := range e.Held {
 			h.pool.Due(w)
 			h.dirty = true
 		}
 		if e.Capture != nil {
-			baseRun = e.Capture.RunID
+			baseRun, baseKey = e.Capture.RunID, e.Capture.Key
 			for i, n := range event.CaptureLossCounters {
 				if v, ok := e.Capture.Totals[n]; ok {
 					base[i] = &v
@@ -509,7 +593,13 @@ func (h *Health) start(e *runFileSensor, usable, held bool, cause string, cur *C
 	// or above none, are a loss, at the start's time (section 1.8).
 	t := captureTotals(cur)
 	if baseRun != cur.RunID {
-		base = [3]*uint64{}
+		base, baseKey = [3]*uint64{}, ""
+	}
+	// The run's key is the file's when it records the run; otherwise the
+	// start cannot know its position generation.
+	key := baseKey
+	if key == "" {
+		key = startKey(cur.RunID)
 	}
 	rises := map[string]uint64{}
 	var next *Cursor
@@ -528,10 +618,10 @@ func (h *Health) start(e *runFileSensor, usable, held bool, cause string, cur *C
 		}
 	}
 	if len(rises) > 0 {
-		h.pool.Due(HeldEvent{Name: EventCounters, Key: cur.RunID, Rises: rises})
+		h.pool.Due(countersDue(key, cur.RunID, rises))
 		h.dirty = true
 	}
-	h.run, h.totals = cur.RunID, t
+	h.run, h.key, h.totals = cur.RunID, baseKey, t
 	if next != nil {
 		h.totals = captureTotals(next)
 	}

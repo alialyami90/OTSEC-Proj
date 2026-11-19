@@ -11,6 +11,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -160,7 +161,7 @@ func TestDetectorAlertCapture(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, f1, ""), spoofFlow(2, nil, gone), spoofFlow(3, nil, hashOf(f1)), laterFlow(4, gone))); err != nil {
 		t.Fatal(err)
 	}
-	tick(t, r)
+	statusThrough(t, r, st, 4)
 	got := committedAlerts(t, r)
 	type want struct {
 		rule    netobs.Rule
@@ -395,7 +396,7 @@ func TestDetectorBarrierDuringRelease(t *testing.T) {
 		t.Fatalf("run: %+v", rep)
 	}
 	r.afterRelease = nil
-	tick(t, r)
+	statusThrough(t, r, st, 2)
 	if d := detectorStatus(t, st); d.Through != 2 || d.OrderingFaults != 0 || countAlarms(st, AlarmDetectorOrdering) != 0 {
 		t.Fatalf("status %+v", d)
 	}
@@ -410,18 +411,34 @@ func TestDetectorAlertRetried(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
-	r.alertAppend = func([]c5.Record) error { return errors.New("refused") }
+	var tries atomic.Int64
+	heldManager(r, func() {
+		r.alertAppend = func([]c5.Record) error { tries.Add(1); return errors.New("refused") }
+	})
 	if err := r.ServeSensor(bg, sensorChannel(t, spoofFlow(1, frameData(1), ""), laterFlow(2, hashOf(frameData(1))))); err != nil {
 		t.Fatal(err)
 	}
 	tick(t, r)
 	tick(t, r)
 	d := detectorStatus(t, st)
-	if n := len(committedAlerts(t, r)); n != 0 || d.Through != 1 || d.AlertsPending != 2 || d.AlertCommitFailures != 2 ||
+	// At least the two ticks' tries: a drive between steps also tries
+	// (driveOnce flushes), on the manager's 1 s ticker (D6's N3 on #759).
+	if n := len(committedAlerts(t, r)); n != 0 || d.Through != 1 || d.AlertsPending != 2 || d.AlertCommitFailures < 2 ||
 		d.CheckpointsWritten != 1 || detectorCursor(t, r) != 0 || countAlarms(st, AlarmAlertNotStored) != 1 {
 		t.Fatalf("%d alerts, cursor %d, status %+v, %d alarms", n, detectorCursor(t, r), d, countAlarms(st, AlarmAlertNotStored))
 	}
-	r.alertAppend = nil
+	// One retry, with the manager held so no drive runs: the batch is
+	// tried, then the first alert alone, and one failure is counted (D6's
+	// N3 on #759).
+	heldManager(r, func() {
+		nd := r.detector
+		f0, a0 := nd.st.AlertCommitFailures, tries.Load()
+		r.tickDetector(bg)
+		if f, a := nd.st.AlertCommitFailures-f0, tries.Load()-a0; f != 1 || a != 2 || len(nd.unsent) != 2 || nd.d.Through() != 1 {
+			t.Errorf("one retry: %d failures counted, %d commits tried, %d unsent, Through %d; want 1, 2, 2, 1", f, a, len(nd.unsent), nd.d.Through())
+		}
+		r.alertAppend = nil
+	})
 	tick(t, r)
 	got := committedAlerts(t, r)
 	d = detectorStatus(t, st)
@@ -483,7 +500,7 @@ func TestDetectorGuardCommitTime(t *testing.T) {
 	if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 		t.Fatal(err)
 	}
-	tick(t, r)
+	statusThrough(t, r, st, 2)
 	for _, a := range committedAlerts(t, r) {
 		if a.alert.Rule == netobs.RuleOwnSessionUnseen {
 			t.Errorf("the session at 08:15 alerted: %+v", a.alert)
@@ -869,23 +886,47 @@ func prunedStart(t *testing.T) (*Runtime, *Status, *Config, event.Event) {
 // store's prune step really pruned, with records still retained after the
 // detector's Through and with none; a restore at the stream's head finds
 // it not pruned. Desk: the restore fails on a checkpoint renamed to
-// another node's.
+// another node's. P4-NODE-PRUNE1: the prune waits for the detector's
+// cursor to reach both observations (checkpointed). The slow case's first
+// observation outlasts DriveTime, so the step Tick asked for checkpoints
+// at 1 and a drive between steps, which never checkpoints, takes 2, as a
+// slow Windows runner did on #757. Control: one tick before the prune,
+// under which the slow case finds the cursor at 1.
 func TestDetectorPrunedFromStream(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		step  int
 		first c5.Seq
-	}{{"some retained", 1, 2}, {"none retained", 1000, 0}} {
+		slow  bool
+	}{{"some retained", 1, 2, false}, {"none retained", 1000, 0, false}, {"none retained slow detector", 1000, 0, true}} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, dir := holdConfig(t)
-			r, _, _ := start(t, c, dir)
+			var (
+				r  *Runtime
+				st *Status
+				n  atomic.Int32
+			)
+			t.Cleanup(func() { // a Close after a Close does nothing
+				if r != nil {
+					r.Close()
+				}
+			})
+			if tc.slow {
+				r, _ = startSeams(t, c, dir, SensorSeams{Observe: func() {
+					if n.Add(1) == 1 {
+						time.Sleep(DriveTime + 50*time.Millisecond)
+					}
+				}})
+			} else {
+				r, _, _ = start(t, c, dir)
+			}
 			if err := r.ServeSensor(bg, sensorChannel(t, ownFlow(1), ownFlow(2))); err != nil {
 				t.Fatal(err)
 			}
-			tick(t, r)
+			checkpointed(t, r, 2)
 			pruneObservations(t, r, c, tc.step)
-			if f := firstRetained(t, r); f != tc.first || detectorCursor(t, r) != 2 {
-				t.Fatalf("first retained %d, cursor %d", f, detectorCursor(t, r))
+			if f, k := firstRetained(t, r), detectorCursor(t, r); f != tc.first || k != 2 {
+				t.Fatalf("first retained %d, cursor %d", f, k)
 			}
 			r.Close()
 			r, _, _ = start(t, c, dir)
@@ -894,14 +935,48 @@ func TestDetectorPrunedFromStream(t *testing.T) {
 			}
 			foreignCheckpoint(t, r)
 			r.Close()
-			r, st, _ := start(t, c, dir)
-			defer r.Close()
+			r, st, _ = start(t, c, dir)
 			if nd := r.detector; nd.restored || !nd.pruned || countAlarms(st, AlarmDetectorNotRestored) != 1 {
 				t.Fatalf("a first start: restored %v, pruned %v, %d alarms", nd.restored, nd.pruned, countAlarms(st, AlarmDetectorNotRestored))
 			}
 		})
 	}
 }
+
+// checkpointed ticks until the detector consumer's stored cursor is at
+// least want, at most checkpointTicks times. Only a step Tick asks for
+// checkpoints, and tick waits for the drives that step leaves, so what a
+// step's own drive did not take is checkpointed at the next tick.
+func checkpointed(t *testing.T, r *Runtime, want c5.Seq) {
+	t.Helper()
+	for range checkpointTicks {
+		tick(t, r)
+		if detectorCursor(t, r) >= want {
+			return
+		}
+	}
+	t.Fatalf("the detector's cursor is %d after %d ticks, want %d", detectorCursor(t, r), checkpointTicks, want)
+}
+
+// statusThrough ticks until the detector's Through in status is at least
+// want, at most checkpointTicks times. Only a step Tick asks for publishes
+// the detector's status, so what the drives after a step took shows at the
+// next tick.
+func statusThrough(t *testing.T, r *Runtime, st *Status, want uint64) {
+	t.Helper()
+	for range checkpointTicks {
+		tick(t, r)
+		if detectorStatus(t, st).Through >= want {
+			return
+		}
+	}
+	t.Fatalf("the detector's status Through is %d after %d ticks, want %d", detectorStatus(t, st).Through, checkpointTicks, want)
+}
+
+// checkpointTicks bounds checkpointed and statusThrough. Two ticks
+// suffice: the drives the first leaves take the rest before the second
+// begins.
+const checkpointTicks = 5
 
 // guardRun stores a connected collection.run of the relay's endpoint for
 // inv, started at from and ended a second later, after after.
@@ -990,7 +1065,7 @@ func TestDetectorGuardEdge(t *testing.T) {
 			if err := r.ServeSensor(bg, sensorChannel(t, later)); err != nil {
 				t.Fatal(err)
 			}
-			tick(t, r)
+			statusThrough(t, r, st, 3)
 			d := detectorStatus(t, st)
 			refused := int64(0)
 			if first == "refused" || first == "undecodable" {

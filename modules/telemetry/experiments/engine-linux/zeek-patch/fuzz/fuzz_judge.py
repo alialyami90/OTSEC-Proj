@@ -11,8 +11,9 @@ and checks that neither reaches its output.
 
 `coverage F DNP3CC` reads F/private/cov-<target>/lcov.info, written by
 llvm-cov from C2's final corpus of each target, and DNP3CC, the patched
-DNP3.cc that C2 compiled; writes F/coverage.tsv and prints it. Each
-condition is `yes` or `no`:
+DNP3.cc that C2 compiled; writes F/coverage.tsv and prints nothing (the
+summary prints the conditions, or withholds them). Each condition is `yes`
+or `no`:
 - `request-parser` and `response-parser`: DNP3_Request::Parse and
   DNP3_Response::Parse ran. Under option (i) each is reached only through
   the new dispatch in DNP3_PDU, so together they are its two arms;
@@ -25,7 +26,19 @@ condition is `yes` or `no`:
 
 `summary F` prints the run's result as Markdown: each campaign's seconds,
 executions and report count; the replay's classes; the coverage
-conditions; and the verdict:
+conditions; and the verdict. It prints the campaigns' rows only when every
+campaign has a result, every report was replayed alone on both builds, and
+every report is against the patch alone (it reproduces on C2 and not on
+C1p). Otherwise it withholds every campaign's row and prints the totals
+only, so that the summary does not show which target found a report that
+may be in stock Zeek 9.0.1's source (D4-116 item 2.4 (b); D1's ruling 1 on
+#744 and ruling 1 on #746, D6's form). It prints the coverage conditions
+only when every coverage replay exited 0 and the rows are printed;
+otherwise it withholds them, since `replay-path` reads the `packet`
+target's coverage alone and would show that target (ruling 2 on #746; D1's
+ruling 6993117978 on #746, D6's B1 and case K: a `packet` campaign stopped
+early on a stock report leaves a thin corpus whose coverage replay exits 0
+and whose `replay-path` is `no`). The verdict is:
 - `fail` when an input reproduces on C2 and not on C1p;
 - `unknown` when an input does not reproduce on its own build, a report
   left no input, a campaign left no result, a campaign stopped on a report
@@ -125,7 +138,6 @@ def coverage(f, dnp3cc):
     out += "targets with a coverage report\t" + str(sum(1 for p in per.values() if p)) + "\n"
     with open(os.path.join(f, "coverage.tsv"), "w", encoding="ascii") as fh:
         fh.write(out)
-    sys.stdout.write(out)
     return 0
 
 
@@ -224,10 +236,16 @@ def summary(f):
             corpus = hashlib.sha256(fh.read()).hexdigest()
     out = ["## HR-23 sanitizer fuzz run (design section 4.6)", "",
            f"Verdict: **{verdict}**", "",
-           f"Corpus SHA-256: `{corpus}`", "",
-           "| target | build | state | seconds | executions | reports |",
-           "| --- | --- | --- | --- | --- | --- |"]
-    out += [f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} |" for r in rows]
+           f"Corpus SHA-256: `{corpus}`", ""]
+    withheld = unknown or replayed != total_reports or classes["against"] != total_reports
+    if withheld:
+        out += ["Each campaign's row is withheld: a campaign left no result, or a report is not against the "
+                "patch alone (it reproduces on C1p, stock Zeek 9.0.1's source, or on neither build alone, "
+                "or has no replay), and the rows would show its target. The totals follow."]
+    else:
+        out += ["| target | build | state | seconds | executions | reports |",
+                "| --- | --- | --- | --- | --- | --- |"]
+        out += [f"| {r[0]} | {r[1]} | {r[2]} | {r[3]} | {r[4]} | {r[5]} |" for r in rows]
     out += ["",
             f"- Reports: {total_reports}; replayed alone on both builds: {replayed}; "
             f"reports that left no input: {reports_no_input}.",
@@ -238,8 +256,13 @@ def summary(f):
             f"- Does not reproduce on its own build (`unknown`, counted): {classes['unknown']}.",
             f"- Campaigns ended by a report before their time: {early}; campaigns with no result: {unknown}.",
             f"- Coverage replays with no exit code or a non-zero one: {cov_bad}.",
-            "", "| coverage condition (C2's final corpus) | met |", "| --- | --- |"]
-    out += [f"| {c} | {'-' if c not in cov else ('yes' if cov[c] else 'no')} |" for c in CONDITIONS]
+            ""]
+    if cov_bad or withheld:
+        out += ["The coverage conditions are withheld: a coverage replay exited non-zero or left no exit "
+                "code, or the campaigns' rows are withheld, and `replay-path` would show a target."]
+    else:
+        out += ["| coverage condition (C2's final corpus) | met |", "| --- | --- |"]
+        out += [f"| {c} | {'-' if c not in cov else ('yes' if cov[c] else 'no')} |" for c in CONDITIONS]
     out += ["", "No input, trace or log leaves the runner (design section 4.6, Disclosure)."]
     sys.stdout.write("\n".join(out) + "\n")
     return 0

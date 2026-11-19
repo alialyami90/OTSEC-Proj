@@ -415,7 +415,7 @@ func TestHeldPoolEventBuiltAtWrite(t *testing.T) {
 
 	// Control: the event built at its hold and kept as bytes, re-stamped
 	// to a later minor (a rollback's view), is refused at its write.
-	held := event.Event{Schema: "otsec.event/0.5", ID: event.EventID{NodeID: "site-a-node1", Stream: event.Stream(node.HealthStream)},
+	held := event.Event{Schema: "otsec.event/0.6", ID: event.EventID{NodeID: "site-a-node1", Stream: event.Stream(node.HealthStream)},
 		Origin: event.OriginPlatform, Kind: event.KindHealth, Source: event.Source{OriginAuth: event.AuthPlatform},
 		Received: event.Received{UTC: "2026-11-13T10:00:01.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}},
 		Health:   &event.Health{Type: sensorlink.EventRedialGranted, Details: map[string]string{"sensor_id": sensorID}}}
@@ -424,7 +424,7 @@ func TestHeldPoolEventBuiltAtWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = r.Log(node.HealthStream).Append(bg, c5.Record{Stream: node.HealthStream, Class: c5.ClassPlatform, Event: eb})
-	if err == nil || !strings.Contains(err.Error(), "0.5") {
+	if err == nil || !strings.Contains(err.Error(), "0.6") {
 		t.Fatalf("control: the store took an event of a later minor (%v); the test cannot tell", err)
 	}
 	t.Logf("control refused: %v", err)

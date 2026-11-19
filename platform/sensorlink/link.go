@@ -199,6 +199,10 @@ type Link struct {
 	// skew is the 0.2 intake's skew estimate and capture floor (skew.go),
 	// under its own leaf lock.
 	skew skew
+	// startRun is the run seen from its start in this process, "" when
+	// none, so a resume with no gap keeps it (CH-27; D4's N1 on #747).
+	// Under curMu.
+	startRun string
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).
@@ -692,6 +696,7 @@ func (l *Link) readPos(ctx context.Context) error {
 		return err
 	}
 	l.pos, l.posRead = c, true
+	l.tookWriteNo(c)
 	return nil
 }
 

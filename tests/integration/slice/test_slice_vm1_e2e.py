@@ -20,7 +20,6 @@ import os
 import glob
 import secrets
 import shutil
-import socket
 import sqlite3
 import subprocess
 import time
@@ -186,18 +185,22 @@ def vm1(tmp_path_factory):
             fd = os.open(os.environ["OTSEC_VM1_KEYS_OUT"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump([k.hex() for a in agents.values() for k in a.keys], f)
+        # V-M1 (f): a UDP socket on the SEL-751's address and port, the only
+        # place the node and the collector know for it, held for the whole
+        # run. The port is reserved for both protocols before the simulator
+        # takes it for Telnet, since the simulator's own TCP choice held
+        # nothing for UDP (#751), so the socket is bound before the node
+        # starts, and so before any SNMP run can be made.
+        sim_port, sim_hold, sel751_udp = harness.reserve_port_with_udp()
+        sel751_udp.setblocking(False)
         # The node starts with the GT-MIB assets but none of their entries,
         # so every credential is installed before any of them runs, and
         # each agent sees exactly one run (two for U15).
         t0 = time.time()
-        s.start(setup_extra=("-gtmib", spec))
-        # V-M1 (f): a UDP socket on the SEL-751's address and port, the only
-        # place the node and the collector know for it, held for the whole
-        # run. It is bound after the node starts, and before any credential
-        # is installed, so before any SNMP run can be made.
-        sel751_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sel751_udp.bind(("127.0.0.1", s.sim_port))
-        sel751_udp.setblocking(False)
+        s.start(setup_extra=("-gtmib", spec), sim_port=sim_port)
+        if sim_hold:
+            sim_hold.close()
+        assert s.sim_port == sim_port, (s.sim_port, sim_port)
         env = dict(os.environ, OTSEC_GTMIB_SECRETS_HEX=json.dumps({c: a.secret for c, a in agents.items()}))
         out = subprocess.run([s.exe("slicehelper"), "install-gtmib", "-root", s.root, "-gtmib", spec],
                              capture_output=True, env=env, text=True, timeout=900)
