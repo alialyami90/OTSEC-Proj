@@ -2877,4 +2877,9 @@ Evidence class: `desk` for the rulings, the options notes and the local runs; `C
   4. Item 3.6, D5's `alertsAfter` fix, before or with item 3.1.
   5. D4's HR-23 queue: item 3.7, `table.py`, finding 1's open item (D4-112 item 4.5), §8.4's items before the counted run, then the HR-25 design PR.
   6. HR-23's counted fuzz campaign may be dispatched (D6; D4-119 item 7.5).
+- **8. Paused at the owner's word** ("Pause work and write handoff"). No agent is running: D1 stopped the four reviews of #768 before any posted a verdict. Open PRs, none past review:
+  1. #768 (P4-4-C4-06-DRAFT, D4, C4 0.6 proposal, head `b46d90e9`): records-auditor read it; D1 ruled on its §8 choices (7011692095); its reviews by D3, D5, D6 and D7 start again together.
+  2. #770 (P4-4-INT-D5P2D, D5, INT-D5 2d, head `e9652954`): CI green except `integration-long` (no `full-ci`); D6, D3 and D4 review together. D5 argues D6's X9 is equivalent.
+  3. #769 (P4-4-HR23-FEED, D4, head `c366e2c9`): the feed of the 81 HR-23 captures, unrun with engines; D6, D3 and D2 review together, under the held-rows rule (item 4). D4's stated gaps: the 10 fp captures are not fed; two DNP3 UDP cases run without `viol.zeek`; nothing judges `out-hr23/` yet; about 324 more containers.
+  Resume with item 7, in this order: #768's reviews, then #770's and #769's (D3 reviews all three, one at a time).
 - **Next decision number:** D4-121.
