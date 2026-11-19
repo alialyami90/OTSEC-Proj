@@ -252,9 +252,13 @@ def imrelp():
                                       "/usr/lib64/rsyslog/imrelp.so"))
 
 
-def free_port():
+def free_port(udp=False):
+    """A loopback port the OS chooses among TCP ports, or among UDP ports
+    with udp, released at once. TCP and UDP ports are separate: a TCP
+    choice says nothing of the same number's UDP use, so a UDP listener's
+    port is a UDP choice (P4-D6-PORT1; see reserve_port_with_udp)."""
     import socket
-    s = socket.socket()
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM if udp else socket.SOCK_STREAM)
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
     s.close()
@@ -282,6 +286,31 @@ def reserve_port():
         s.close()
         return port, None
     return port, s
+
+
+def reserve_port_with_udp():
+    """(port, holder, udp): reserve_port's port and holder, and a UDP
+    socket bound to the same number on 127.0.0.1, for a test that receives
+    datagrams on a TCP server's address and port. The OS's choice of a TCP
+    port reserves nothing for UDP, so a UDP socket already on that number
+    refuses the bind: V-M1's fixture bound UDP to the simulator's own TCP
+    choice and failed with Errno 98 (#751's integration-long job
+    135244642630). On Windows the UDP bind was also refused with WinError
+    10013 (P4-D6-PORT1's run on the owner's PC). A number UDP refuses is
+    given up for another, and the 20th refusal is raised."""
+    import socket
+    for _ in range(20):
+        port, hold = reserve_port()
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            udp.bind(("127.0.0.1", port))
+            return port, hold, udp
+        except OSError as e:
+            udp.close()
+            if hold:
+                hold.close()
+            last = e
+    raise last
 
 
 class Rsyslog:

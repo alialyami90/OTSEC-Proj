@@ -509,15 +509,16 @@ class Slice:
         self.procs["receiver"] = relp.p
         return relp
 
-    def start(self, fid=harness.ALLOWED_FID, framed=True, sim_extra=(), sim_password=CANARY, setup_extra=()):
+    def start(self, fid=harness.ALLOWED_FID, framed=True, sim_extra=(), sim_password=CANARY, setup_extra=(), sim_port=0):
         """sim_password: the device's Level 1 password, CANARY unless a test
         wants the installed credential to be wrong. setup_extra: more
-        slicehelper setup flags."""
+        slicehelper setup flags. sim_port: the simulator's port, 0 for one
+        the OS chooses."""
         self.sim_logs = []
         self.sim_extra = tuple(sim_extra)
         self.sim_password = sim_password
         self.relp_log = os.path.join(self.d, "relp.jsonl")
-        sim = self.start_simulator(fid, framed=framed)
+        sim = self.start_simulator(fid, port=sim_port, framed=framed)
         # Held until stop(), so that the receiver can bind it now and again
         # after a test kills it, and nothing else on the runner takes it.
         self.relp_port, self.relp_hold = harness.reserve_port()

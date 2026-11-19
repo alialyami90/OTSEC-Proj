@@ -1,0 +1,20 @@
+{
+  "schema": "otsec.event/0.5",
+  "id": {"node_id": "d6-node", "stream": "platform/health", "seq": 31},
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {"origin_auth": "platform"},
+  "received": {"utc": "2026-11-19T09:30:00.000250Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "health": {
+    "type": "sensor.counters",
+    "details": {
+      "reported_by": "sensor",
+      "sensor_id": "5a3c2e10-7b4d-4c8e-9f1a-2b3c4d5e6f70",
+      "run_id": "3f2a1b0c-9d8e-4f7a-b6c5-d4e3f2a1b0c9",
+      "runs_folded": "2",
+      "diff.packets": "4800",
+      "diff.drops_holder": "3",
+      "capture_loss": "drops_holder"
+    }
+  }
+}

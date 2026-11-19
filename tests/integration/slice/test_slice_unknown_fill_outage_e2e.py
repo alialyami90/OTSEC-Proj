@@ -246,7 +246,7 @@ def got(request, tmp_path_factory):
     stream, unknown_stream = "syslog/a6-" + kind, "syslog-unknown/a6-" + kind
     s = Slice(str(tmp_path_factory.mktemp("slice-unknown-fill-" + kind)))
     s.build()
-    port = harness.free_port()
+    port = harness.free_port(udp=kind == "udp")
     out = {"kind": kind, "stream": stream, "class_max": 0}
     listener = lambda: _listener(s, kind)
     try:

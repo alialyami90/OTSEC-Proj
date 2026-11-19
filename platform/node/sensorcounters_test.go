@@ -69,7 +69,7 @@ func TestSensorCountersEventFits(t *testing.T) {
 
 	// The control: the agent's counts (C13 0.2 CH-43), which C4 0.4 leaves
 	// out of sensor.counters.
-	e.Schema = "otsec.event/0.5"
+	e.Schema = "otsec.event/0.6"
 	max := strconv.FormatUint(math.MaxUint64, 10)
 	for _, n := range []string{"closes.handshake", "closes.node-hello", "closes.node-hello-timeout", "closes.binding", "closes.ack",
 		"closes.type", "closes.idle", "closes.frame-too-large", "closes.superseded", "closes.run-complete", "closes.shutdown",

@@ -69,7 +69,15 @@ type Server struct {
 	// MaxConns bounds concurrent connections; further clients wait in the
 	// listener's backlog. Zero means 4.
 	MaxConns int
-	// RequestTimeout bounds reading the request and writing the reply.
+	// RequestTimeout bounds reading the request, counted from when the
+	// connection is accepted, and writing the reply, counted from when the
+	// decision is made. It stops a peer from holding a MaxConns slot by not
+	// sending or not reading. It does not bound the Handler: a decision is
+	// numbered and durable once Handle or Refuse returns, so the reply has
+	// its own bound and is not lost to a slow decision (#752, D4-119).
+	// Nothing in the server bounds Handle. Its time is the collector's own
+	// durable writes, which a peer cannot lengthen and which cannot be
+	// abandoned half done; a slow one holds its slot meanwhile.
 	// Zero means 5 seconds.
 	RequestTimeout time.Duration
 	// OutcomeTimeout bounds writing the outcome frame once the work has
@@ -218,6 +226,8 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn) {
 			reply, work = s.Handler.Handle(ctx, req)
 		}
 	}
+	// The decision is made and numbered; the reply gets its own bound.
+	c.SetWriteDeadline(time.Now().Add(rt))
 
 	// The server's own invariants on what the handler returned: work comes
 	// exactly with an accepted run, which also carries an invocation ID; an
