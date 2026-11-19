@@ -758,6 +758,123 @@ func TestSkewRunMarkKept(t *testing.T) {
 	})
 }
 
+// openTied has run req-1 tie the node's own flow from port 40001, whose
+// start the sensor stamps start, by its Result; the flow stays open, in the
+// open table under inv1 (part (d)).
+func (r *rig) openTied(p *peer) (start time.Time) {
+	r.t.Helper()
+	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+		r.t.Fatal(err)
+	}
+	start = r.now()
+	p.send(ownFlow02(1, 40001, start.Add(time.Second), false))
+	p.taken()
+	r.pass(30 * time.Second)
+	s := session09(inv1, 40001, 0)
+	s.StartedAt, s.ConnectedAt, s.EndedAt = start, start, start.Add(20*time.Second)
+	if rel, err := r.l.Result(bg, "req-1", s); err != nil || r.l.Stats().Hold.Open != 1 {
+		r.t.Fatalf("released %+v, %v; hold %+v: the flow is not open", rel, err, r.l.Stats().Hold)
+	}
+	return start
+}
+
+// endTie sends the end of the open flow and returns its stored record.
+func (r *rig) endTie(p *peer, seq int, at time.Time) *netobs.Observation {
+	r.t.Helper()
+	p.send(ownFlow02(seq, 40001, at, true))
+	p.taken()
+	got := storedObs(r.t, r.s)
+	return got[len(got)-1]
+}
+
+// X5 of D6's B3 on #748: a later record read through the open table while
+// a cause stands takes no tie: it is committed untied, marked and counted
+// once (section 1.5; openTie). Control (mutant X5): an open table that
+// ties whatever the gate says.
+func TestSkewOpenTableRefused(t *testing.T) {
+	r, _ := holdRig02(t)
+	p := r.accepted(r.agreeHello(hello02()))
+	r.tickO(p, 0, 20, 0)
+	r.openTied(p)
+	r.tickO(p, 3*time.Second, 20, 1) // the sensor's clock stepped back 3 s: the latest sample stands
+	o := r.endTie(p, 2, r.now())
+	if o.Node.PlatformSession != nil || !o.Node.Skewed {
+		t.Fatalf("the end through the open table: %+v", o.Node)
+	}
+	if w := windows(r.l.SkewStats()); w != [5]uint64{1, 0, 0, 0, 0} {
+		t.Fatalf("window counts %v, want one skew_latest_windows", w)
+	}
+}
+
+// D6's N1 on #748: a Result's re-point of an open entry is a tie, gated
+// as one. Run 1 ties the node's flow, which stays open, and run 2 is
+// dispatched on the same connection. Under the closure (the node's wall
+// clock alone stepped 3 s, no sample since), run 2's Result makes no
+// re-point and counts it once under skew_moved_windows; with the wall clock
+// put back, the flow's end ties to run 1's invocation, not run 2's. At an
+// onset, the run's count is the onset's alone. Control (mutant N1-a): a
+// re-point made whatever the gate says, which ties the end to run 2.
+func TestSkewRepointGated(t *testing.T) {
+	type out struct {
+		rel Released
+		end *netobs.Observation
+		w   [5]uint64
+	}
+	run := func(t *testing.T, onset bool) out {
+		r, _ := holdRig02(t)
+		p := r.accepted(r.agreeHello(hello02()))
+		r.tickO(p, 0, 20, 0)
+		r.openTied(p)
+		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-2", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+			t.Fatal(err)
+		}
+		if onset {
+			r.tickO(p, 3*time.Second, 20, 1) // the latest sample stands
+		} else {
+			r.addWall(3 * time.Second) // the closure stands
+		}
+		s := session09(inv2, 40001, 0)
+		s.StartedAt, s.ConnectedAt, s.EndedAt = r.now().Add(-time.Second), r.now(), r.now()
+		rel, err := r.l.Result(bg, "req-2", s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var end *netobs.Observation
+		if !onset {
+			r.addWall(-3 * time.Second)
+			end = r.endTie(p, 2, r.now())
+		}
+		return out{rel, end, windows(r.l.SkewStats())}
+	}
+	o := run(t, false)
+	if o.rel.OpenFlow || !o.rel.Skewed || o.w != [5]uint64{0, 0, 1, 0, 0} {
+		t.Fatalf("under the closure: released %+v, window counts %v", o.rel, o.w)
+	}
+	if ps := o.end.Node.PlatformSession; ps == nil || ps.InvocationID != inv1 {
+		t.Fatalf("the end's tie %+v, want run 1's", ps)
+	}
+	if o := run(t, true); o.rel.OpenFlow || !o.rel.Skewed || o.w != [5]uint64{1, 0, 0, 0, 0} {
+		t.Fatalf("at the onset: released %+v, window counts %v", o.rel, o.w)
+	}
+}
+
+// D6's N5 on #748: an open entry's offset is taken on the link's clock,
+// the clock offNow compares it with. With the hold's clock 5 s off the
+// link's, a flow tied and still open ties its end. Control (mutant N5):
+// the offset taken on the hold's clock, which refuses the end as a move.
+func TestOpenEntryOffOnLinkClock(t *testing.T) {
+	r, _ := holdRig02With(t, func(o *Options) {
+		now := o.Hold.Now
+		o.Hold.Now = func() time.Time { return now().Add(5 * time.Second) }
+	})
+	p := r.accepted(r.agreeHello(hello02()))
+	r.tickO(p, 0, 20, 0)
+	r.openTied(p)
+	if o := r.endTie(p, 2, r.now()); o.Node.PlatformSession == nil || o.Node.Skewed {
+		t.Fatalf("the end through the open table: %+v; window counts %v", o.Node, windows(r.l.SkewStats()))
+	}
+}
+
 // helloAnswer dials, sends h, and returns "" when the node acks it, or
 // the reason it closed.
 func (r *rig) helloAnswer(h *netobs.SensorHello) string {

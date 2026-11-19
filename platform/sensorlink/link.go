@@ -229,6 +229,7 @@ func New(cfg Config, opt Options) (*Link, error) {
 		stats:  Stats{Refused: map[string]uint64{}, Dropped: map[string]uint64{}, DroppedByAsset: map[string]uint64{}},
 		conn:   ConnStats{Closes: map[string]uint64{}},
 		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}
+	h.off = l.offNow
 	if opt.Health != nil && opt.Health.cfg.File != nil {
 		opt.Health.cfg.File.addLink(l)
 	}

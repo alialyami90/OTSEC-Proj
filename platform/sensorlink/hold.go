@@ -292,6 +292,9 @@ type hold struct {
 	lastStartWall time.Time
 	started       bool
 	mono          func() time.Duration
+	// off is the link's offNow, so an open entry's offset is taken on the
+	// clock it is compared with (D6's N5 on #748).
+	off func() int64
 	// skewed is the runs not held because no tie was made for skew at
 	// their Dispatch, which their Result reports.
 	skewed map[string]bool
@@ -643,11 +646,22 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	r.skewed = r.skewed || standing != "" || window != ""
 	if s.Connected && s.Local.IsValid() {
 		if i := h.openIndex(FlowKey{Node: s.Local, Peer: rec.Run.Endpoint, L4: rec.Run.L4}); i >= 0 && !h.expired(h.open[i], now) {
-			// Staged: it takes effect only with the release's record below
-			// (D6's N1 on #576). Its expiry is unchanged.
 			o := h.open[i]
-			o.InvocationID, o.Tie, o.AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
-			h.repoint = &o
+			// The re-point ties the entry's later records to this run, so
+			// the skew gate takes it as a tie (D6's N1 on #748): refused, it
+			// is counted once and not made, and the entry keeps its tie,
+			// decided again at each later record (openTie).
+			switch c := first(standing, window, l.storedRefusal(o.Off, o.Live)); {
+			case r.onset:
+			case c != "":
+				l.countRefusal(c)
+				r.skewed = true
+			default:
+				// Staged: it takes effect only with the release's record
+				// below (D6's N1 on #576). Its expiry is unchanged.
+				o.InvocationID, o.Tie, o.AssetID = s.InvocationID, TieConnection, rec.Run.AssetID
+				h.repoint = &o
+			}
 		}
 	}
 	var rel []Release
@@ -967,7 +981,7 @@ func (h *hold) releaseFlow(f HeldFlow, tie, invocation, assetID string) []Releas
 	if tie != "" && !f.Ended {
 		h.pending = append(h.pending, OpenFlow{Key: f.Key, InvocationID: invocation, Tie: tie, AssetID: assetID,
 			Expires: f.Last.Add(time.Duration(f.FlowIdle)*time.Second + h.grace()), FlowIdle: f.FlowIdle,
-			Off: h.cfg.Now().UnixNano() - int64(h.mono()), Live: true})
+			Off: h.off(), Live: true})
 	}
 	return out
 }
