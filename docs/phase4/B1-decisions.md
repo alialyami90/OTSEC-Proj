@@ -2786,7 +2786,7 @@ Evidence class: `desk` for the rulings and the reviewers' local runs; `CI-Linux`
   6. D7's §8 change (item 2.2).
 - **Next decision number:** D4-119.
 
-## D4-119: eleven PRs merged, C13's absent keys and C4 0.5 approved, the collector's write deadline, and test findings (D1, 2026-11-19)
+## D4-119: thirteen PRs merged, C13's absent keys and C4 0.5 approved, the collector's write deadline, and test findings (D1, 2026-11-19)
 
 Evidence class: `desk` for the rulings and the reviewers' local runs; `CI-Linux` and `CI-Windows` for the runs in item 1. Nothing was built or run against a device, and no counted run or campaign was made. Work resumed at D4-118 item 7.
 
@@ -2802,6 +2802,8 @@ Evidence class: `desk` for the rulings and the reviewers' local runs; `CI-Linux`
   9. #754 (P4-D6-C405's E5-3, D6) as `d48b2f0a` at `04f6452e`: D3 (6997854322) and D4 (6997862620) accept. `ci` 44436947630, `ci-long` 44444948209, `govulncheck` 44436947689.
   10. #755 (P4-4-C4-05, the C4 0.5 validator, D4) as `e96e01a6` at `71774f2f`: D5 (6998608836), D3 (6998611365) and D6 (6998621596) accept. `ci` 44447767625, `ci-long` 44450240648, `govulncheck` 44447767624.
   11. #759 (P4-NODE-PRUNE1, D5; test only) as `a876a7cd` at `067aa81a`: D6 (6998562743) and D4 (6998597916) accept. `ci` 44449595707, `ci-long` 44450039168, `govulncheck` 44449595722.
+  12. #756 (P4-D6-C405's other rows, D6) as `5ea7c2db` at `02205f0f`: D4 (6999734197) and D3 (6999765276) accept. `ci` 44454806611, `ci-long` 44459049962, `govulncheck` 44454806620.
+  13. #747 (INT-D5 part 2b, D5) as `9595d96c` at `8c11d55d`: D6 (7000164040), D4 (7000153667) and D3 (7000241832) accept; `TestCountersFoldRuns/C4` and `TestHeldPoolEventBuiltAtWrite` pass by name in both `go` jobs. After D5 merged `main` (`62a17e77`), `TestHeldPoolEventBuiltAtWrite`'s control still stamped 0.5 as a later minor (6999566861; self-check item 11); `1fa2c7d8` moved it to 0.6 and `8c11d55d` updated two comments. `ci` 44461221047, `ci-long` 44461220964, `govulncheck` 44461220925.
 - **2. Rulings and approvals.**
   1. **C13's absent and ambiguous keys approved** (D1's 6996105833 on #741): §15 of `docs/phase4/D4-c13-0.3-proposal.md` as merged, with D1's rulings 6955432193 and 6993015611. The five-tag ruling (6993015611): a frame with five or more tags keeps Zeek's `ip`, and the node refuses its records as `conflict` (D3's and D6's B1: a layer 2 record reaches no rule); D6's option (b), reading past every tag, is a new mechanism and is not taken (D4-99). The code change is brief P4-4-C13-ABS (item 5).
   2. **#748 is option (a)** (D1's 6992578863 on D5's 6958574117): #748 is the skew estimate and its gate; **2d** (the late index of §1.6 part (e) and CH-39's break rule) follows with T-8 and all of T-13; **2e** (the gap model) follows 2d. D4-116 item 3.1's "after 2c" for INT-D4b, INT-D5b and P4-4-DE reads "after 2e". T-8 and T-13 are owed by 2d.
@@ -2816,6 +2818,8 @@ Evidence class: `desk` for the rulings and the reviewers' local runs; `CI-Linux`
   3. **Owner D5, P4-4-DE:** the manager's `Flush` on its tick, with its owed test (D3's N3 on #747; `docs/phase4/D5-sensor-node.md` §1.14).
   4. **Owner D4, before P4-4-DE or item 4's gate as each says:** §15.10 of the C13 0.3 proposal: the driver drop count read by the socket holder under SL-3; the `objects_unread` method with its GT case and control; whether Zeek 9.0.1 gives a record for a frame with five or more tags or a `0x9100` frame (if none, the flow is silent to every rule, and D4 brings the options before any sensor is wired).
   5. **A limit, recorded:** the C4 validator cannot catch a summed counter that wraps (plain `uint64` addition gives `0` with no `capture_loss`, and the event is accepted; D6's #756); only the node's E5-8 test in #747 guards it.
+  6. **A limit, recorded** (D6's N3 on #760, 7000495856; with D4-118 item 4's limit): while `objects_unread` is `true` on every DNP3 request, the learner learns no DNP3 function, so `new-function` fires on every DNP3 function that is not a write, reads included. It ends with §15.10's `objects_unread` measurement.
+  7. **Owner D5, after #760 and before P4-4-DE** (D5's 7000405956): one PR with the two node tests §15.9 gives D5, `not-covered` in status and "ring age unknown" (a small status change: `sensor.go` passes `RingOldestUTC` through raw).
 - **4. Test findings, none called a flake.**
   1. `TestD6SensorKindsRefusedByCollector` (`no reply: EOF`, CI-Windows, #751's first run): reproduced on the owner's PC with the collector's log (#752); cause item 2.4; fixed in #758.
   2. `test_slice_vm1_e2e.py` (`Address already in use`, #751's `ci-long`): the simulator's TCP-chosen port was bound for UDP without being reserved; fixed in #757 with five other slice tests' Syslog UDP ports.
@@ -2827,10 +2831,8 @@ Evidence class: `desk` for the rulings and the reviewers' local runs; `CI-Linux`
   3. **Self-check list, two items added** (`docs/agent-handoffs.md`): 10, the diff has no unintended non-ASCII change (D5's #759 re-encoded two comment lines through PowerShell); 11, a PR that changes a contract's minor greps the tree for every literal of the old and next minor and lists each hit (#755's fourth broken test).
 - **6. Briefs issued** (`docs/agent-handoffs.md`, "After D4-118"): P4-4-HR23-MISS, P4-D6-EOF1, P4-COL-DL, P4-4-C4-05, P4-D6-C405, P4-D6-PORT1, P4-NODE-PRUNE1 and P4-4-C13-ABS.
 - **7. Next, in order:**
-  1. #747 (INT-D5 2b): D6, D3 and D4 accept `5a9b5e00`. D5 merged `main` (`62a17e77`), where `TestCountersFoldRuns/C4` passes in both `go` jobs but `TestHeldPoolEventBuiltAtWrite` failed: its control stamped 0.5 as a later minor (6999566861; self-check item 11). D5's fix moved it to 0.6. The reviewers confirm the diff since `5a9b5e00`, then the merge check.
-  2. #756 (D6's E5-1, E5-2, E5-4, E5-8 rows): D4 and D3 review together when D4 is free.
-  3. P4-4-C13-ABS (D4's code change, in progress): reviews by D6, D2, D3 and D5; D7 adds the rollback floor to `docs/release.md` §7.1 at its merge and D6's stored-size recount is due before it (D4-117 item 3.8).
-  4. #748 (2c): D5 merges `main` after #747; then D6, D3 and D4 review; then 2d and 2e (item 2.2).
-  5. D4's HR-23 queue: `dnp3-tcp-master-short` (D4-116 item 6), `table.py`, finding 1's open item (D4-112 item 4.5), §8.4's items before the counted run, D4-118 item 2.4's residual risk when §8.4 item 2's harness is built, then the HR-25 design PR with D4-114 item 5.
-  6. HR-23's counted fuzz campaign may be dispatched now that #746 is on `main` (D6 runs and judges it, design §4.5 and §4.6); its public summary withholds per-target detail until the owner decides "Waiting on the owner" item 20.
+  1. #760 (P4-4-C13-ABS): D2 (7000085469) and D5 (7000405956) accept `510817a3`; D4 fixes D3's F1 and F2 (7000229984; D1 takes F1: an absent `usm_parsed` reads `true`, which requires `engine_id`) and D6's B1, N1 and N2 (7000495856); then the reviewers re-read; D7 adds the rollback floor to `docs/release.md` §7.1 at its merge and D6's stored-size recount is due before it (D4-117 item 3.8).
+  2. #748 (2c): D5 merges `main` (base now `main`); then D6, D3 and D4 review; then 2d and 2e (item 2.2).
+  3. D4's HR-23 queue: `dnp3-tcp-master-short` (D4-116 item 6), `table.py`, finding 1's open item (D4-112 item 4.5), §8.4's items before the counted run, D4-118 item 2.4's residual risk when §8.4 item 2's harness is built, then the HR-25 design PR with D4-114 item 5.
+  4. HR-23's counted fuzz campaign may be dispatched now that #746 is on `main` (D6 runs and judges it, design §4.5 and §4.6); its public summary withholds per-target detail until the owner decides "Waiting on the owner" item 20.
 - **Next decision number:** D4-120.

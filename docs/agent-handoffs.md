@@ -2674,7 +2674,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: no node tests.
 - Uncertainty or safety risks: none beyond the tests.
 - Scratch files: `d6-c405-*`
-- Result: #754, merged (D4-119 item 1.9); #756 in review.
+- Result: #754 and #756, merged (D4-119 items 1.9 and 1.12).
 
 ### P4-D6-PORT1 (D6; D4 and D5 review): the VM1 slice fixture's UDP bind collision
 - Objective and rationale: D4-119 item 4.2.
@@ -2713,4 +2713,4 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: no sensor script, no capture, none of §15.10's measurements.
 - Uncertainty or safety risks: nothing refused may become accepted except as §15 says; stored records still decode.
 - Scratch files: `d4-c13abs-*`
-- Result: running at D4-119.
+- Result: #760, in review at D4-119 (item 7.2).
