@@ -644,6 +644,46 @@ func TestUSMAbsentEngineID15(t *testing.T) {
 	}
 }
 
+// D6's findings 2 and 4 on #762: an engine ID of "" or 1 to 4 octets
+// decodes in a stored 0.2 or 0.3 record, and a 0.1 record keeps 0.1's
+// 5-to-32-octet form on the 0.1 channel and stored (D4-103 ruling 2).
+// Controls: 5 octets decodes at every minor; 33 octets is refused at
+// every minor. Mutants: the 0.1 form dropped (the shared 0-to-32 form),
+// or the shared form narrowed back to 5 to 32.
+func TestEngineIDStored15(t *testing.T) {
+	const f = "encrypted.snmpv3.engine_id"
+	short := []string{"", "80", "80000000"}
+	with := func(o *Observation, id string) *Observation { o.Encrypted.SNMPv3.EngineID = ptr(id); return o }
+	for _, schema := range channelIdentifiers {
+		for _, id := range append(short, "8000000001") {
+			if _, err := DecodeStored(mustJSON(t, sweepStored(with(nullSNMPv3(schema), id)))); err != nil {
+				t.Errorf("stored %s, engine_id %q: %v", schema, id, err)
+			}
+		}
+		if _, err := DecodeStored(mustJSON(t, sweepStored(with(nullSNMPv3(schema), strings.Repeat("ab", 33))))); !refusedOnly(err, CodeForm, f) {
+			t.Errorf("control, stored %s, 33 octets: %v, want form", schema, err)
+		}
+	}
+	channel := func(b []byte) (*Observation, error) { _, err := DecodeChannel(b); return nil, err }
+	for path, decode := range map[string]func([]byte) (*Observation, error){"channel": channel, "stored": DecodeStored} {
+		rec := func(id string) *Observation {
+			o := with(snmp01(), id)
+			if path == "stored" {
+				o = sweepStored(o)
+			}
+			return o
+		}
+		for _, id := range append(short, strings.Repeat("ab", 33)) {
+			if _, err := decode(mustJSON(t, rec(id))); !refusedOnly(err, CodeForm, f) {
+				t.Errorf("0.1 %s, engine_id %q: %v, want form", path, id, err)
+			}
+		}
+		if _, err := decode(mustJSON(t, rec("8000000001"))); err != nil {
+			t.Errorf("control, 0.1 %s, 5 octets: %v", path, err)
+		}
+	}
+}
+
 // D3's F2 on #760: sa unknown and node.dnp3_sa_unknown are new in 0.2,
 // and a 0.1 record refuses them as the 0.1 reader did (D4-103 ruling 2).
 // Controls: the 0.1 records with sa challenged, and a 0.2 stored record

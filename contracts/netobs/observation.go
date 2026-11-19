@@ -341,6 +341,9 @@ var (
 	etherTypeForm = regexp.MustCompile(`^0x[0-9a-f]{4}$`)
 	objectForm    = regexp.MustCompile(`^g(?:0|[1-9][0-9]{0,2})v(?:0|[1-9][0-9]{0,2})$`)
 	engineIDForm  = regexp.MustCompile(`^(?:[0-9a-f]{2}){0,32}$`)
+	// engineIDForm01 is 0.1's form, kept for a 0.1 record (D4-103 ruling
+	// 2; D6's finding 2 on #762).
+	engineIDForm01 = regexp.MustCompile(`^(?:[0-9a-f]{2}){5,32}$`)
 )
 
 // Validate checks an observation of the 0.1 channel, the one main's intake
@@ -851,7 +854,11 @@ func (s *SNMPv3) check(c *checker) {
 			c.fail(CodeMissing, p+f.name, "required with usm_parsed true")
 		}
 	}
-	if s.EngineID != nil && !engineIDForm.MatchString(*s.EngineID) {
+	switch {
+	case s.EngineID == nil:
+	case c.minor < 2 && !engineIDForm01.MatchString(*s.EngineID):
+		c.fail(CodeForm, p+"engine_id", "%q is not 5 to 32 octets in lowercase hex in a 0.1 record", *s.EngineID)
+	case !engineIDForm.MatchString(*s.EngineID):
 		c.fail(CodeForm, p+"engine_id", "%q is not 0 to 32 octets in lowercase hex", *s.EngineID)
 	}
 	if s.User != nil {
