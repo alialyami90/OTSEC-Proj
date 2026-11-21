@@ -225,6 +225,12 @@ func (f *RunFile) Start(ctx context.Context, links ...*Link) error {
 		if next != nil {
 			errs = append(errs, d.l.saveStart(ctx, next))
 		}
+		// Any gap held for the floor first, then the node-start gap
+		// (CH-45, "At a start"; gapstart.go).
+		h.mu.Lock()
+		copyAt := h.copyFile
+		h.mu.Unlock()
+		d.l.nodeStart(ctx, copyAt)
 		h.mu.Lock()
 		_ = h.pool.Write(ctx, h.cfg.Monotonic(), h.emit) // what the start counted, at the start's time
 		f.put(d.l.cfg.SensorID, h.entry())

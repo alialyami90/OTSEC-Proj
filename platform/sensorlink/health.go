@@ -98,11 +98,12 @@ type Health struct {
 	// fileErr is the run file's last write error while a failing stretch
 	// stands, raised once at its first failure.
 	fileErr error
-	// watched is the link's earlier of W and R, zero when it holds none,
-	// and the steps back found since its last call; copyFile is the copy
-	// the run file had at the start, moved back by those steps and written
-	// again while the link holds none (watch.go).
-	watched  func() (time.Time, time.Duration)
+	// watched is the link's copy, zero when it holds none, the steps back
+	// found since its last call, and whether a gap is held for the floor;
+	// copyFile is the copy last written (at the start, the copy the run
+	// file had), moved back by those steps and written again while the
+	// link holds none (watch.go).
+	watched  func() (time.Time, time.Duration, bool)
 	copyFile time.Time
 	// Status.
 	possiblyLost []string
@@ -493,17 +494,23 @@ func (h *Health) entry() runFileSensor {
 		e.Capture = &captureState{RunID: h.run, Key: h.key, Totals: totalsMap(h.totals)}
 	}
 	var w time.Time
+	held := false
 	if h.watched != nil {
 		var back time.Duration
-		w, back = h.watched()
+		w, back, held = h.watched()
 		if !h.copyFile.IsZero() {
 			h.copyFile = h.copyFile.Add(-back)
 		}
 	}
+	// While a gap is held for the floor the copy never rises: each write
+	// takes the earlier of the new value and the copy it replaces, since a
+	// step back moves W, R and the copy but not the held gap's start
+	// (CH-45).
 	c := h.copyFile
-	if !w.IsZero() {
+	if !w.IsZero() && (!held || c.IsZero() || w.Before(c)) {
 		c = w
 	}
+	h.copyFile = c
 	if !c.IsZero() {
 		e.Copy = canonUTC(c)
 	}
