@@ -2904,24 +2904,25 @@ Evidence class: `desk` for the rulings and reviews; `CI-Linux` and `CI-Windows` 
   2. **#772's codes and `cause`** (D1's 7056125649): above `self`, `cause` is held to `tokenPattern`, as `evidence_class` is (D1-23); this binds later minors. D4's codes where the proposal is silent stand: `enum` for `stream`, `hash` and the baseline `schema`; `forbidden` for a seq key without its reason (D6's N1).
   3. **#770** (D1's 7054133223 and 7055260731): a failed dial's late-index entry ties only a `syn_only` end, and any other match goes in untied and spends the entry (option (a); (b), holding a late start, not adopted); a backlog record spends the entry it matches; a second break during the drain extends the backlog (CH-39); D5's X9 is an equivalent mutant. The 0.8 late rule, stricter than `Result`, stays, since it fails closed; the text says so.
   4. **#769** (D1's 7054219292): one capture list, taken from `mountcheck.py`'s `CAPTURE`, for the pin, the feed and the check; under `--no-count`, a failure names only the container.
-  5. **2e, option (a), three parts** (D1's 7056051455 on D5's 7056046636): 2e-1 (W, R, the capture check, the step check, `time.node-stepped`, the run file's copy; K-1 across a restart and D6's N2 controls on T-13), 2e-2 (the gaps while the node runs), 2e-3 (across a node start). Each is unwired and merges alone. CH-31's `sensor-blind` and CH-44's `sensor.past-blind` go to a new brief, P4-4-INT-D5-BLIND (D5), after 2e-3 and before P4-4-DE.
+  5. **2e, option (a), three parts** (D1's 7056051455 on D5's 7056046636): 2e-1 (W, R, the capture check, the step check, `time.node-stepped`, the run file's copy; K-1 across a restart and D6's N2 controls on T-13), 2e-2 (the gaps while the node runs), 2e-3 (across a node start). Each is unwired and merges alone. CH-31's `sensor-blind` and CH-44's `sensor.past-blind` go to a new brief, P4-4-INT-D5-BLIND (D5), after 2e-3 and before P4-4-DE. On (r2), D5 keeps §1.14's statement that it has nothing to order at `Dispatch`, unless D6 shows otherwise in 2e-1's review.
   6. **C4 0.6's code in three PRs** (the proposal's §6, "Order"): step 1 the types, stamp and `netobs.SelfIdentifier()` with no refusal (D4, #772); step 2 D5's alarms and counts (D4-120 item 3.1) with item 3.6's fix before it (#773); step 3 both refusals in one merge, which is §5's floor commit.
 - **3. Open items.**
   1. **Owner D5:** a durable count of refused `collection.run` records (the C4 note's condition 1; D1's 7053867485 ruling 1).
   2. **Risk, recorded:** a 0.6 → 0.5 → 0.6 hand install is not detected; AP-10 bounds it on the update path only (D7's N3 on #768).
   3. **Risk, recorded:** past `RefusedCountsWait`, the forced checkpoint loses the mark at the next restart; alarmed, and a residual of `docs/release.md` §7.1's "loss outlasts the rollback" (D7, 7055085155).
-  4. **Owner D7, after the C4 0.6 code merges:** §7.2's C4 0.6 entry with the upgrade notes D7 listed on #768 (7054800080, 7055085155).
-  5. **Owner D5, by 2e:** the T-13 controls that need the gap model's step check (D6's N2 on #770).
+  4. **Owner D7, after the C4 0.6 code merges:** §7.2's C4 0.6 entry with the upgrade notes D7 listed on #768 (7054800080, 7055085155, 7055218357).
+  5. **Owner D5, by 2e:** the T-13 controls that need the gap model's step check, (b), (h), (k) and (l) (D6's N2 on #770); (r2) as item 2.5 says.
   6. **Owner D4:** C13's T-13 (c) count against §1.6, which does not rebuild the late index at a start (D6's N3 on #770).
   7. **Owner D4, under INT-D4b:** the network learner takes untied `node.backlog` flows during learning, which loses `unknown-pair` on the node's address after a start (D4's N2 on #770).
-  8. **Owner D4, before HR-23's counted run:** `likely_server_ports` printed under every configuration (D2's N1 on #769); the `fp/` set fed, with every `= 0` bound reading an unfed class as not run (D2's N2, D6's G1). Both are in brief P4-4-HR23-JUDGE.
-  9. **Risk, recorded:** each engine container's start and end times are in the public job log (D3's N3 on #769).
-  10. **Owner D6:** E6-4 (c), the head leg, after step 1; D6's independent rows of E6-1 to E6-3.
+  8. **Owner D4, before HR-23's counted run:** `likely_server_ports` printed under every configuration (D2's N1 on #769); the `fp/` set fed, with every `= 0` bound reading an unfed class as not run (D2's N2, D6's G1). Both are in brief P4-4-HR23-JUDGE's objective.
+  9. **Risk, recorded; owner D4, before HR-23's counted run:** each engine container's start and end times are in the public job log (D3's N3 on #769; D1's 7054219292 item 4).
+  10. **Owner D6:** E6-4 (c), the head leg, after step 1; D6's independent rows of E6-1 to E6-3; D6's E6-6 row in `tests/contract`, with step 3.
   11. **Owner D5:** P4-4-INT-D5-BLIND (item 2.5). V-11, V-12 and V-15 are outside 2e; their owner is P4-4-DE. V-9's re-arm and `enrolled_at` legs go to P4-4-DE.
 - **4. Briefs issued** (`docs/agent-handoffs.md`, "After D4-120"): P4-4-C4-06-S1, P4-4-C4-06-E64A, P4-NODE-ALERTSAFTER, P4-4-INT-D5P2E and P4-4-HR23-JUDGE.
 - **5. Process.**
   1. D1 resumed a finished D3 agent for a narrow confirm on #769 while another D3 instance was reviewing #770, so two D3 instances ran at once (D4-89). D1 stopped the resumed one within about a minute; it had posted nothing, and D1 sent the confirm again once the other had finished. **Before resuming any role's agent, D1 checks that no other instance of that role is running.**
   2. Where a fix after acceptance was one line or a few words, each reviewer confirmed only that diff on a resumed agent (D4-99), so every merge is at a head each reviewer named.
+  3. A wording slip in this records PR's first commit was caught by records-auditor before review and removed before merge; D1 holds the details privately, as D4-120 item 4 provides.
 - **6. Next, in order:**
   1. #772 (step 1): D3 and D6 have confirmed `01760048`; D5's confirm when free, then D1's merge check and merge.
   2. 2e-1 (D5, #774), then 2e-2 and 2e-3, each to a fresh D5 agent; then C4 0.6 step 2 (D5), then step 3 (D4 with D5).

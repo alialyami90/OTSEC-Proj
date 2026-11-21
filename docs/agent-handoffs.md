@@ -2851,7 +2851,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Result: 2e-1 is #774.
 
 ### P4-4-HR23-JUDGE (D4; D6, D3 and D2 review; under the held-rows rule): HR-23's judge
-- Objective and rationale: `table.py` judges `out-hr23/` with the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2), before HR-23's counted run.
+- Objective and rationale: `table.py` judges `out-hr23/` with the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2), before HR-23's counted run; with `likely_server_ports` printed under every configuration and the `fp/` set fed and pin-checked (D4-121 item 3.8).
 - Required inputs: `hr23-conditions.tsv`; #769's feed; the held-rows files D1 names privately.
 - Files: `modules/telemetry/experiments/engine-linux/`; `docs/phase4/D4-hr23-design.md` (harness text).
 - Expected interfaces: none changed.
