@@ -88,6 +88,11 @@ const gapOpenAfter = 60 * time.Second
 // gapSilentEndsAtCurrent ends a silent gap's cause at the first current
 // heartbeat, whatever its lateness; gapChainAnyNames lets a chain run
 // across a change of the names.
+// gapMarkOpenOnly marks at a step only the gap open then;
+// gapMergeHeldMark keeps at a merge only the held gap's mark.
+// gapRecordFirst writes an unwatched close's record before its raise is
+// saved.
+var gapMarkOpenOnly, gapMergeHeldMark, gapRecordFirst bool
 var gapFromW, gapChainAnyRun, gapOpenNever, gapNeedsObservation, gapSilentEndsAtCurrent, gapChainAnyNames bool
 var gapChainSeqOnly, gapChainNoSpacing, gapChainNoCount, gapChainCarrierOnly, gapChainIgnoresStep, gapCloseAtReconnect bool
 
@@ -347,7 +352,9 @@ func (s *skew) mergeLocked(g *openGap, to time.Time) {
 		w.From = g.from
 	}
 	w.To, w.Causes, w.Gaps, w.covered = to, w.Causes|g.causes, w.Gaps+1, false
-	w.Stepped = w.Stepped || g.stepped
+	if !gapMergeHeldMark {
+		w.Stepped = w.Stepped || g.stepped
+	}
 }
 
 // markStepLocked marks clock_stepped on the gap open and the record that
@@ -356,7 +363,7 @@ func (s *skew) markStepLocked() {
 	if g := s.wt.open; g != nil {
 		g.stepped = true
 	}
-	if w := s.wt.wait; w != nil {
+	if w := s.wt.wait; w != nil && !gapMarkOpenOnly {
 		w.Stepped = true
 	}
 	s.wt.gapDue = true
@@ -399,9 +406,9 @@ func gapRecord(g HeldGap, state string, covered bool) map[string]string {
 // at its open for blind and sensor-failed and once it has stood
 // gapOpenAfter from W otherwise, and never while a closing record waits
 // (CH-45's order). The caller holds s.mu.
-func (s *skew) nextRecordLocked(mono time.Duration) (d map[string]string, wait bool) {
+func (s *skew) nextRecordLocked(mono time.Duration, skipWait bool) (d map[string]string, wait bool) {
 	wt := &s.wt
-	if w := wt.wait; w != nil && !wt.heldSave {
+	if w := wt.wait; w != nil && !wt.heldSave && !skipWait {
 		return gapRecord(w.HeldGap, "closed", w.covered), true
 	}
 	if wt.wait != nil && !gapWriteBehind {
@@ -428,6 +435,11 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 		return nil
 	}
 	s := &l.skew
+	if gapRecordFirst {
+		s.mu.Lock()
+		s.wt.heldSave = false
+		s.mu.Unlock()
+	}
 	s.mu.Lock()
 	save := s.wt.heldSave
 	s.mu.Unlock()
@@ -453,14 +465,19 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 	if h == nil {
 		return nil
 	}
+	skip := false
 	for {
 		s.mu.Lock()
-		d, wait := s.nextRecordLocked(l.opt.Monotonic())
+		d, wait := s.nextRecordLocked(l.opt.Monotonic(), skip)
 		s.mu.Unlock()
 		if d == nil {
 			return nil
 		}
 		if h.writeGap(ctx, d) != nil {
+			if wait && gapWriteBehind {
+				skip = true // the control: on to the later records
+				continue
+			}
 			return nil // it waits for its budget or the ceiling, and is tried again
 		}
 		s.mu.Lock()
