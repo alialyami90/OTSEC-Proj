@@ -2915,4 +2915,4 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: code; HR-23's held items.
 - Uncertainty or safety risks: none.
 - Scratch files: `d7-c406-*`
-- Result: running.
+- Result: #784, merged as `3bf5397a`.

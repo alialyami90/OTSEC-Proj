@@ -2970,3 +2970,38 @@ Evidence class: `desk` for the rulings and reviews; `CI-Linux` and `CI-Windows` 
   3. D7's P4-D7-C406.
   4. HR-25's build (D4), then deliverable 3's cases (D6).
 - **Next decision number:** D4-123.
+
+## D4-123: HR-25's design and C4 0.6's release rows merged, the rulings on #782 and #781, and one more process slip (D1, 2026-11-21)
+
+Evidence class: `desk` for the rulings, the reviews and the documents merged here. Nothing was built or run against a device, and no counted run or campaign was made. It follows D4-122 the same day.
+
+- **1. Merged** (each by D1, on review; all documents only):
+  1. #783 (D4-122's records, D1) as `92f0b8b9` at `d5320167`: records-auditor, then D6 (7060527066, 7060552300).
+  2. #782 (HR-25's design for option (a), D4, under brief P4-4-HR25) as `c3edfd8a` at `a7c26b69`: records-auditor, then D2 (7060595265), D3 (7060594994), D6 (7060595093) and D7 (7060617517), under the held-rows rule.
+  3. #784 (P4-D7-C406, D7; C4 0.6 in `docs/release.md` §7) as `3bf5397a` at `c8d40b60`: records-auditor, then D3 (7060705351, 7060723032) and D6 (7060714301, 7060725304). §7.1's floor row is at `2326f34f`.
+  4. #785 (D3; HR-25's row in `docs/threat-model.md` from the design's §8) as `26276bbb` at `8316445d`: records-auditor, then D4 (7060724480, 7060861949) and D6 (7060767821, 7060862903).
+- **2. Rulings.**
+  1. **#782** (D1's 7060412749, 7060542437):
+     - D2's option (ii): the sensor discards an identical whole segment only when it is a link-layer retry (link function 3, FCV set, FCB not toggled); any other identical repeat is `transport_seq`.
+     - Two conditional residuals under L-2, each `unknown` for SEL: a device whose link layer passes a link-layer retry up; and a device with no transport sequence check, against which a segment its link layer skips and the sensor appends, followed by segments numbered on from it, goes unseen.
+     - D3's H-row text; the whole-segment compare tested by twins of items 9 and 10, D3's item 17 and items 18 (a) to (c), each in deliverable 3; and §2.9's check against the buffer's own size.
+  2. **#781, 2e-2** (D1's 7061138495):
+     - CH-39 part 2 accepts a rise only at or before the heartbeat's own `at_utc`, and part 3 fails the chain when `at_utc` falls back (D6's B1, a gap closing early).
+     - V-6's third, V-16's fifth and eighth, and V-17's ninth cases are built in 2e-2 (D6's B2).
+     - 2e-3's acceptance carries `frozen` clearing when the `node-start` gap closes, however it closes, and D3's case of a flat start keeping that gap open with `blind`.
+- **3. Open items.**
+  1. **Owners D5 and D4, options settled in comments before 2e-3 (D4-99):** a covered close that waits for its budget is held in memory only, not in the cursor as C13's CH-45 says (D4's N1 and D3's N3 on #781). Either 2e-3 persists it, or D4's next C13 change corrects CH-45. It fails closed today.
+  2. **Owner D4, text:** the C4 0.6 proposal's §4 "Stop" leaves out the fourth way the counts begin again (a counts event this build cannot read), which `docs/release.md` §7.2 now states (D3's N1 on #784).
+  3. **Owner D5:** `platform/node` took 758.7 s on Windows in #781's run (`CI-Windows`, run 44888358298), over the 720 s budget (D4-44), though #781 does not change it.
+  4. **For the owner** ("Waiting on the owner" item 1): whether any SEL site carries several DNP3 link-address pairs on one connection (D2 on #782); until then that case stays `unknown`.
+  5. **Owner D6:** P4-4-HR2325S deliverable 3, running; then HR-25's build (D4).
+  6. **Owner D5, in 2e-3's acceptance:** `frozen` clears when the `node-start` gap closes, however it closes (D6's N6, D4's N2 on #781); after a start, with the link current and every interface flat, the `node-start` gap stays open with `blind` added (D3's N2 on #781).
+  7. **Carried:** D4-122 items 3.1 to 3.5 and 3.9 stay open; D4-122 item 3.6 is replaced by this entry's item 3.5 (deliverable 3, then HR-25's build); D4-122 item 3.7 is closed by #784.
+- **4. Process.**
+  1. D1 resumed D7's #782 reviewer for a confirm while D7's P4-D7-C406 task was running, so two D7 instances ran at once (D4-89). D1 stopped it at once; it had posted nothing, and D1 sent the confirm again after the other finished. This repeats D4-121 item 5.1; before any batch of resumes, D1 lists each role's live agents.
+  2. A wording slip in #783's branch was removed before merge; D1 holds the details privately, as D4-120 item 4 provides.
+- **5. Next, in order:**
+  1. #781's fixes (D5, running), the reviewers' confirms, then D1's merge check.
+  2. 2e-3, after #781 merges, starting with item 3.1's options; then P4-4-INT-D5-BLIND.
+  3. Deliverable 3 (D6, running), then HR-25's build (D4).
+- **Next decision number:** D4-124.
