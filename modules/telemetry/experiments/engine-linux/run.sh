@@ -364,13 +364,15 @@ fifos() {
 # file that is neither printed nor uploaded, and hr23_feed.py check prints only
 # whether each configuration ran and its exit code. Its exit code is returned:
 # 3 when, on refs/heads/main, a capture did not run cleanly under all four.
+# -B: hr23_feed.py imports mountcheck.py, and without it python3 writes
+# __pycache__ into $here, the folder mounted at /exp and hashed (D6's N1).
 hr23_feed() {
   h=$work/hr23
   rm -rf "$h" "$work/out-hr23"
   # The caller's `||` turns off set -e in here, so each step that can fail
   # returns on its own.
   python3 "$root/tests/integration/gt_pcap/hr23_cases.py" "$h" > /dev/null || return 1
-  python3 -I "$here/hr23_feed.py" pin "$h" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" || return 1
+  python3 -I -B "$here/hr23_feed.py" pin "$h" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" || return 1
   pcaps=$h
   out=$work/out-hr23
   mkdir -p "$out"
@@ -385,7 +387,7 @@ hr23_feed() {
   } > "$work/hr23-engines.txt" 2>&1
   hr23_counted=
   [ "${GITHUB_REF:-local}" != refs/heads/main ] || hr23_counted=--counted
-  python3 -I "$here/hr23_feed.py" check "$out" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" $hr23_counted
+  python3 -I -B "$here/hr23_feed.py" check "$out" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" $hr23_counted
 }
 
 # CH-53's and CH-57's requirements on the script (D4-102 item 6; D1's

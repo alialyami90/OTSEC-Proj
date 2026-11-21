@@ -402,7 +402,7 @@ FEED_MUTANTS = {
     "counted-dropped": (" $hr23_counted\n", "\n"),
     "ref-is-main": ("!= refs/heads/main ]", "!= main ]"),
     "engine-output-printed": ('} > "$work/hr23-engines.txt" 2>&1\n', "}\n"),
-    "pin-dropped": ('  python3 -I "$here/hr23_feed.py" pin', '  : python3 -I "$here/hr23_feed.py" pin'),
+    "pin-dropped": ('  python3 -I -B "$here/hr23_feed.py" pin', '  : python3 -I -B "$here/hr23_feed.py" pin'),
     # D6's N1 on #769: the five wiring mutants.
     "c1p-on-stock": ("    img=$HR23_C1P_IMAGE\n", ""),
     "c2-on-c1p": ("    img=$HR23_C2_IMAGE\n", ""),
@@ -429,6 +429,32 @@ def test_feed_control_pin_pcap_only_is_killed(tmp_path):
                                               'if not n.endswith(".pcap"):'), encoding="utf-8")
     bad = feed_failures(tmp_path / "f", function(), here=here)
     assert any("case 5:" in b for b in bad) and any("case 6:" in b for b in bad) and any("case 7:" in b for b in bad)
+
+
+# D6's N1 on #769: hr23_feed.py imports mountcheck.py, so its two calls in
+# run.sh must not write __pycache__ into $here, the folder mounted at /exp
+# and hashed for every container. The feed runs on a copy of this folder;
+# the control is the same feed with -B dropped from both calls.
+
+def here_hash_changed(tmp_path, text):
+    here = tmp_path / "here"
+    shutil.copytree(HERE, here, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+    before = mountcheck.hash_tree(str(here))
+    rc = run_feed(tmp_path, text, here=here)[0]
+    assert rc == 0
+    return mountcheck.hash_tree(str(here)) != before
+
+
+@needs_sh
+def test_feed_leaves_the_mounted_folder_unchanged(tmp_path):
+    assert not here_hash_changed(tmp_path, function())
+
+
+@needs_sh
+def test_control_feed_without_dont_write_bytecode_changes_the_folder(tmp_path):
+    text = function()
+    assert text.count('python3 -I -B "$here/hr23_feed.py"') == 2
+    assert here_hash_changed(tmp_path, text.replace('python3 -I -B "$here/hr23_feed.py"', 'python3 -I "$here/hr23_feed.py"'))
 
 
 # The dnp3 mode's call: the feed's table ends dnp3.md, and a failed feed
