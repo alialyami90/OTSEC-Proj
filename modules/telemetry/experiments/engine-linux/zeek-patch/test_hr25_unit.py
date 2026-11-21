@@ -10,6 +10,7 @@ does is what the inputs test, once a run that D1 rules reads them.
 
 Run: python -m pytest -q modules/telemetry/experiments/engine-linux/zeek-patch/test_hr25_unit.py
 """
+import functools
 import os
 import re
 
@@ -24,14 +25,20 @@ def crc_ok(b, at, n):
     return u.dnp3.crc(b[at:at + n]) == b[at + n:at + n + 2]
 
 
-def header_cause(h):
+def header_cause(h, mutant=None):
     if h[0] != 0x05 or h[1] != 0x64:
         return "magic"
     if not crc_ok(h, 0, 8):
         return "header_crc"
-    if h[2] < 5:
+    if h[2] < (6 if mutant == "link-length-lt6" else 5):
         return "link_length"
     return None
+
+
+# DNP3::max_application_layer_fragment_size, Zeek 9.0.1's default (100 *
+# 1024, init-bare.zeek), which neither the probe nor resync-unit.zeek
+# redefines.
+LIMIT = 100 * 1024
 
 
 def frame_len(length):
@@ -80,6 +87,8 @@ class Model:
         if self.mut == "cmp-shorter":
             k = min(len(s), len(e.last))
             return s[:k] == e.last[:k]
+        if self.mut == "cmp-app-only":
+            return e.last is not None and len(s) == len(e.last) and s[1:] == e.last[1:]
         return s == e.last
 
     def deliver(self, orig, data):
@@ -90,12 +99,14 @@ class Model:
         while e.buf and not self.skip:
             if len(e.buf) < 10:
                 break
-            cause = header_cause(e.buf[:10])
+            cause = header_cause(e.buf[:10], self.mut)
             if cause:
                 if not e.scanning:
+                    if self.mut == "scan-clears":
+                        e.clear()
                     e.scanning = True
                     self.count(orig, cause)
-                e.buf = e.buf[1:]
+                e.buf = e.buf[10:] if self.mut == "header-skip-10" else e.buf[1:]
                 continue
             e.scanning = False
             length, ctrl = e.buf[2], e.buf[3]
@@ -105,12 +116,17 @@ class Model:
                 elif ctrl & 0x40 and self.mut != "reset-keeps-fcb":
                     e.fcb = None
                 e.buf = e.buf[10:]
+                if self.mut == "linkonly-ends-delivery":
+                    e.buf = b""
+                    break
                 continue
             need = frame_len(length)
             if len(e.buf) < need:
                 break
             fr, e.buf = e.buf[:need], e.buf[need:]
-            self.frame(orig, fr, e.buf)
+            if self.frame(orig, fr, e.buf) == "chunk_crc" and self.mut == "chunk-crc-ends-delivery":
+                e.buf = b""
+                break
         if not self.tcp and not self.skip:
             if e.scanning:
                 e.scanning = False
@@ -132,12 +148,12 @@ class Model:
             c = min(left, 16)
             if not crc_ok(fr, at, c):
                 tail = fr + rest[:9]
-                found = any(header_cause(tail[k:k + 10]) is None for k in range(1, len(fr))
+                found = any(header_cause(tail[k:k + 10], self.mut) is None for k in range(1, len(fr))
                             if len(tail[k:k + 10]) == 10)
                 self.drop(orig, "chunk_crc")
                 if found:
                     self.count(orig, "embedded_header")
-                return
+                return "chunk_crc"
             user += fr[at:at + c]
             at += c + 2
             left -= c
@@ -162,7 +178,8 @@ class Model:
                 self.drop(orig, "transport_seq")
                 return
         elif e.open:
-            nxt = {"no-mod64": tseq + 1, "append-at-tseq": tseq}.get(m, (tseq + 1) % 64)
+            nxt = {"no-mod64": tseq + 1, "append-at-tseq": tseq,
+                   "append-at-tseq2": (tseq + 2) % 64}.get(m, (tseq + 1) % 64)
             if m == "no-seq-check" or n == nxt or (m == "append-repeat" and n == tseq):
                 pass
             elif m != "count-every-repeat" and n == tseq and retry and self.same(e, s):
@@ -180,6 +197,13 @@ class Model:
             else:
                 self.drop(orig, "first_chunk_missing")
             return
+        # The fragment-size limit, in application octets; a sum equal to
+        # the limit passes (design 2.2).
+        total = (0 if fir else len(e.app)) + len(s) - 1
+        over = total >= LIMIT if m == "limit-ge" else total > LIMIT + (1 if m == "limit-plus-one" else 0)
+        if over:
+            self.drop(orig, "fragment_limit")
+            return
         tseq_end.tseq = n
         e.last, e.after_fin = s, fin
         e.fcb = fcb if confirmed else None
@@ -191,8 +215,13 @@ class Model:
             e.open, e.app = False, b""
 
 
+@functools.lru_cache(maxsize=1)
+def all_cases():
+    return u.cases()
+
+
 def run_model(case, mutant=None):
-    f = u.cases()[case]
+    f = all_cases()[case]
     mdl = Model(isinstance(f.conv, u.synth.TCPConv), mutant)
     for from_m, data in f.sent:
         mdl.deliver(from_m, data)
@@ -248,7 +277,7 @@ def test_every_control_has_its_patch_and_build_env_lists_exactly_them():
 def test_each_control_changes_one_hunk_and_names_its_rule(name):
     p = patch_text(os.path.join("controls", name))
     assert p.count("\n@@ ") == 1
-    assert "section 3.1" in p.split("\n---", 1)[0]
+    assert re.search(r"section (3\.1|2\.[12]), '", p.split("\n---", 1)[0])
 
 
 def test_the_cause_inputs_hold_no_accidental_header():
@@ -304,3 +333,29 @@ def test_check_fails_on_a_missing_control_run(tmp_path, capsys):
     write_cfg(tmp_path / row[0] / u.C2A, fc=row[2])
     rc = u.check(str(tmp_path))
     assert rc == 1 and "not run" in capsys.readouterr().out
+
+
+def test_state_reads_a_probe_log_without_an_exit_code_as_not_run(tmp_path):
+    # D6's N3 on #789: a missing exit-code is never read as a pass.
+    want = [(True, 1)]
+    write_cfg(tmp_path / "a", code=None, fc=want)
+    assert u.state(str(tmp_path / "a"), want, {}) == "not run"
+
+
+def test_check_quotes_c2_and_never_judges_it(tmp_path, capsys):
+    # D6's N3 on #789: a row passes with C2 absent, and with C2 not met.
+    row = u.EXPECT[0]
+    base = tmp_path / row[0]
+    write_cfg(base / u.C2A, fc=row[2])
+    for m in row[4]:
+        write_cfg(base / ("zeek-hr25-m-" + m), fc=row[2][:1])
+    rows = [r for r in u.EXPECT if r[0] == row[0]]
+    orig = u.EXPECT
+    try:
+        u.EXPECT = rows
+        assert u.check(str(tmp_path)) == 0
+        write_cfg(base / u.C2, fc=row[2][:1])
+        assert u.check(str(tmp_path)) == 0
+    finally:
+        u.EXPECT = orig
+    assert "| pass |" in capsys.readouterr().out

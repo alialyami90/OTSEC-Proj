@@ -1,0 +1,14 @@
+HR-25 option A's control `scan-clears` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'A link-only frame and a failed header leave the state': a failed header that clears this end's state when its scan run starts.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -194,6 +194,7 @@
+                 // A failed header consumes 1 octet and scans. The run counts
+                 // its first cause once and raises its weird once.
+                 if ( ! endp->scanning ) {
++                    ClearEndpointState(orig);
+                     endp->scanning = true;
+                     Count(orig, cause);
+                 }

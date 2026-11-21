@@ -11,8 +11,8 @@ Every test is run under C2A (`zeek-hr25-c2a`, the (i)+A build) and under
 the mutant controls of zeek-patch/controls/hr25-*.patch (`zeek-hr25-m-<name>`,
 C2A with one control patch each). A row passes when C2A meets its
 expectation and every control the row names, each of which breaks one rule
-of docs/phase4/D4-hr25-design.md section 3.1, does not (the control is
-killed). A configuration that did not run, or whose Zeek exited non-zero,
+of docs/phase4/D4-hr25-design.md sections 2.1, 2.2 and 3.1, does not (the
+control is killed). A configuration that did not run, or whose Zeek exited non-zero,
 fails the row: a crash is never read as a kill. C2 (`zeek-hr25-c2`, the (i)
 build) is quoted beside each row, never judged.
 
@@ -40,6 +40,9 @@ import pcapfile  # noqa: E402
 import synth  # noqa: E402
 
 C2A, C2 = "zeek-hr25-c2a", "zeek-hr25-c2"
+# DNP3::max_application_layer_fragment_size, Zeek 9.0.1's default (100 *
+# 1024, init-bare.zeek); neither the probe nor resync-unit.zeek redefines it.
+LIMIT = 100 * 1024
 # The closed set of causes, in the order of dnp3_resync's `counts` (design
 # 2.8). test_hr25_unit.py checks it against the patch's own list.
 CAUSES = ["magic", "header_crc", "link_length", "chunk_crc", "embedded_header", "first_chunk_missing",
@@ -299,6 +302,46 @@ def cases():
         f.send(M, seg(M, False, True, 2, W2 + W3))
         out[name] = f.finish(3)
 
+    # A failed header inside a fragment leaves the state (design 3.1, its
+    # second half): garbage between W's frames, over UDP and TCP.
+    for name, tcp in (("d4u-hr25-failed-header-mid", False), ("d4u-hr25-failed-header-mid-tcp", True)):
+        f = Flow(tcp).start()
+        f.send(M, seg(M, True, False, 1, W1)).send(M, bytes([0x11]) * 16)
+        f.send(M, seg(M, False, True, 2, W2 + W3))
+        out[name] = f.finish(3)
+
+    # A failed header consumes 1 octet (design 2.1; T9's first case): a
+    # false 05 64, then W's frame 2 octets later, in one datagram.
+    f = Flow().start()
+    f.send(M, b"d" + whole(M, 1, W))
+    out["d4u-hr25-false-magic"] = f.finish(2)
+
+    # A link-only frame goes on with the rest of the delivery (design 2.1,
+    # R4): Test Link States, then W, in one datagram.
+    f = Flow().start()
+    f.send(M, link_only(M, TEST_M), whole(M, 1, W))
+    out["d4u-hr25-link-only-then-w"] = f.finish(2)
+
+    # Skip by length (design 2.2, R1): a frame whose chunk CRC fails, then
+    # W, in one datagram; the octets after the failed frame are parsed.
+    bad = bytearray(whole(M, 7, Q))
+    bad[10 + 1] ^= 0xFF
+    f = Flow().start()
+    f.send(M, bytes(bad) + whole(M, 1, W))
+    out["d4u-hr25-chunk-crc-then-w"] = f.finish(2)
+
+    # The fragment-size limit (design 2.2, in application octets): a
+    # fragment of exactly the limit passes, and one octet over is dropped.
+    # Code 34, whose request arm takes the rest of the data, in segments of
+    # 249 application octets, one frame per datagram.
+    for name, extra in (("d4u-hr25-limit-equal", 0), ("d4u-hr25-limit-over", 1)):
+        apdu = dnp3.request(1, 34, bytes((i * 7 + 3) & 0xFF for i in range(LIMIT + extra - 2)))
+        parts = [apdu[i:i + 249] for i in range(0, len(apdu), 249)]
+        f = Flow().start()
+        for k, part in enumerate(parts):
+            f.send(M, seg(M, k == 0, k == len(parts) - 1, (1 + k) % 64, part))
+        out[name] = f.finish((1 + len(parts)) % 64, with_r1=not extra)
+
     # One test per cause that B1 reaches with a datagram (no control): a
     # failure, then W whole.
     f = Flow().start()
@@ -349,7 +392,8 @@ def cases():
 # Expectations: (case, rule, fc rows, non-zero counts as {(end, cause): n},
 # controls). An end is "m" or "o".
 EXPECT = [
-    ("d4u-hr25-wrap", "append at tseq + 1, mod 64; off by one", ALL, {}, ["no-mod64", "append-at-tseq"]),
+    ("d4u-hr25-wrap", "append at tseq + 1, mod 64; off by one", ALL, {},
+     ["no-mod64", "append-at-tseq", "append-at-tseq2"]),
     ("d4u-hr25-f1", "drop on any other number (F1 counted)", NO_W,
      {("m", "transport_seq"): 1, ("m", "first_chunk_missing"): 1}, ["no-seq-check"]),
     ("d4u-hr25-f1-tcp", "drop on any other number, TCP, the master's own stream", NO_W,
@@ -358,7 +402,7 @@ EXPECT = [
      {("m", "transport_seq"): 1}, ["append-repeat"]),
     ("d4u-hr25-retry-middle", "a link-layer retry discarded", ALL, {}, ["count-every-repeat"]),
     ("d4u-hr25-retry-fin", "the whole segment compared: FIN differs", NO_W_R,
-     {("m", "transport_seq"): 1, ("m", "first_chunk_missing"): 1}, ["cmp-number"]),
+     {("m", "transport_seq"): 1, ("m", "first_chunk_missing"): 1}, ["cmp-number", "cmp-app-only"]),
     ("d4u-hr25-retry-octet", "the whole segment compared: one application octet differs", NO_W_R,
      {("m", "transport_seq"): 1, ("m", "first_chunk_missing"): 1}, ["cmp-number", "cmp-transport"]),
     ("d4u-hr25-retry-shorter", "the whole segment compared: one octet fewer", NO_W_R,
@@ -381,8 +425,22 @@ EXPECT = [
     ("d4u-hr25-fir-any-number", "a FIR frame accepts any number", ALL, {}, ["fir-checked"]),
     ("d4u-hr25-per-end", "per-end state", ALL, {("o", "transport_seq"): 1}, ["shared-tseq"]),
     ("d4u-hr25-per-end-tcp", "per-end state, TCP", ALL, {("o", "transport_seq"): 1}, ["shared-tseq"]),
-    ("d4u-hr25-link-only-mid", "a link-only frame leaves the state", ALL, {}, ["linkonly-clears"]),
-    ("d4u-hr25-link-only-mid-tcp", "a link-only frame leaves the state, TCP", ALL, {}, ["linkonly-clears"]),
+    ("d4u-hr25-link-only-mid", "a link-only frame leaves the state; a length of 5 passes", ALL, {},
+     ["linkonly-clears", "link-length-lt6"]),
+    ("d4u-hr25-link-only-mid-tcp", "a link-only frame leaves the state, TCP", ALL, {},
+     ["linkonly-clears", "link-length-lt6"]),
+    ("d4u-hr25-failed-header-mid", "a failed header leaves the state", ALL, {("m", "magic"): 1}, ["scan-clears"]),
+    ("d4u-hr25-failed-header-mid-tcp", "a failed header leaves the state, TCP", ALL, {("m", "magic"): 1},
+     ["scan-clears"]),
+    ("d4u-hr25-false-magic", "a failed header consumes 1 octet", ALL, {("m", "header_crc"): 1}, ["header-skip-10"]),
+    ("d4u-hr25-link-only-then-w", "a link-only frame goes on with the rest of the delivery (R4)", ALL, {},
+     ["linkonly-ends-delivery"]),
+    ("d4u-hr25-chunk-crc-then-w", "skip by length: the octets after a failed frame are parsed (R1)", ALL,
+     {("m", "chunk_crc"): 1}, ["chunk-crc-ends-delivery"]),
+    ("d4u-hr25-limit-equal", "the fragment limit: a sum equal to it passes",
+     [(M, 1), (O, 129), (M, 34), (O, 129), (M, 1), (O, 129)], {}, ["limit-ge"]),
+    ("d4u-hr25-limit-over", "the fragment limit: one octet over is dropped", NO_W, {("m", "fragment_limit"): 1},
+     ["limit-plus-one"]),
     ("d4u-hr25-magic", "cause magic, then W", ALL, {("m", "magic"): 1}, []),
     ("d4u-hr25-header-crc", "cause header_crc, the rest of the datagram scanned", ALL, {("m", "header_crc"): 1}, []),
     ("d4u-hr25-link-length", "cause link_length", ALL, {("m", "link_length"): 1}, []),
