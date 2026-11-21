@@ -84,7 +84,7 @@ func heldOne(t *testing.T, r *rig, hs *holdSaves, n int) HeldRecord {
 		t.Fatal(err)
 	}
 	h := hello02()
-	h.FirstSeq = itoa(n)
+	h.FirstSeq, h.NewestSeq = itoa(n), itoa(n-1) // nothing buffered: no backlog (CH-39)
 	p := r.accepted(h)
 	p.send(nodeFlow02(n))
 	p.taken()

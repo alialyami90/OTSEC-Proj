@@ -69,6 +69,16 @@ const (
 	// HoldDialLimit is C2's connect timeout ceiling, the longest a failed
 	// dial runs before the sensor sees no more of it.
 	HoldDialLimit = adapter.MaxConnectTimeoutMS * time.Millisecond
+	// HoldLateEntries bounds the late index (part (e)): past it the oldest
+	// entry gives way, counted. HoldLateHorizon is an entry's horizon after
+	// its session's end, on the node's wall clock: MaxFlowIdleS, plus
+	// backlog_tie_s at its ceiling, plus g, plus room for the engine's own
+	// pipeline (section 1.6; E-D4-03 unmeasured).
+	HoldLateEntries = 1024
+	HoldLateHorizon = 15 * time.Minute
+	// AlarmLateIndexShort is raised once a stretch when an entry is evicted
+	// inside its horizon (section 1.6).
+	AlarmLateIndexShort = "sensor-late-index-short"
 )
 
 // Ties (C13 node.platform_session.tie).
@@ -237,21 +247,32 @@ type HoldStats struct {
 	// as it was, and a deadline or the next TickHold tries again (D4's
 	// condition (i) on #676; D6's N3 on #742).
 	HeadUnread uint64 `json:"head_unread"`
+	// The late index (part (e)): its entries now; the flows it tied; and
+	// late_untied by reason, a record that matched an entry past its
+	// horizon, and an entry evicted by the bound.
+	Late        int    `json:"late_entries"`
+	LateTied    uint64 `json:"late_tied"`
+	LateHorizon uint64 `json:"late_untied_horizon"`
+	LateEvicted uint64 `json:"late_untied_evicted"`
+}
+
+// stamps are the stored-time half of the rule on the two clocks for a
+// run's window (section 1.5), in memory only: live, the run was dispatched
+// since the node's start; the node's offset and wall time at Dispatch, and
+// its offset at Result once one came.
+type stamps struct {
+	live     bool
+	dispOff  int64
+	dispWall time.Time
+	resOff   int64
+	resulted bool
 }
 
 // holdRun is a run in memory.
 type holdRun struct {
 	rec   RunRecord
 	order int // dispatch order, for the open table's last record
-	// The stored-time half of the rule on the two clocks (section 1.5),
-	// in memory only: live, the run was dispatched since the node's start;
-	// the node's offset and wall time at Dispatch, and its offset at
-	// Result once one came.
-	live     bool
-	dispOff  int64
-	dispWall time.Time
-	resOff   int64
-	resulted bool
+	stamps
 	// skewed: the run's window was refused for skew (CH-41). onset: the
 	// onset refused it and counted it once (skewOnset), so none of the
 	// run's ties is made, or counted, after.
@@ -298,6 +319,19 @@ type hold struct {
 	// skewed is the runs not held because no tie was made for skew at
 	// their Dispatch, which their Result reports.
 	skewed map[string]bool
+	// late is the late index (part (e)), oldest first: memory only, empty
+	// at each start. lateShort: sensor-late-index-short was raised in this
+	// stretch.
+	late      []lateEntry
+	lateShort bool
+}
+
+// lateEntry is a session released with no flow tied (part (e)): its run,
+// its session, and the stored-time half of its window.
+type lateEntry struct {
+	run HoldRun
+	s   Session
+	stamps
 }
 
 // releasePhase is how far a release has gone, for result's deferred
@@ -421,7 +455,7 @@ func (k FlowKey) String() string { return fmt.Sprintf("%s %s-%s", k.L4, k.Node, 
 // statsNow is the counts with the hold's current size.
 func (h *hold) statsNow() HoldStats {
 	s := h.stats
-	s.Runs, s.Open = len(h.runs), len(h.open)
+	s.Runs, s.Open, s.Late = len(h.runs), len(h.open), len(h.late)
 	for _, r := range h.runs {
 		for _, f := range r.rec.Flows {
 			s.Held += len(f.Records)
@@ -569,7 +603,7 @@ func (l *Link) Dispatch(ctx context.Context, run HoldRun) error {
 			return fmt.Errorf("sensorlink: the hold for run %s was not saved, so its flows commit untied: %w", run.RequestID, err)
 		}
 		h.n++
-		h.runs[run.RequestID] = &holdRun{rec: *h.last, order: h.n, live: true, dispOff: l.offNow(), dispWall: l.now()}
+		h.runs[run.RequestID] = &holdRun{rec: *h.last, order: h.n, stamps: stamps{live: true, dispOff: l.offNow(), dispWall: l.now()}}
 		return nil
 	})
 }
@@ -608,6 +642,10 @@ func (l *Link) Result(ctx context.Context, requestID string, s Session) (out Rel
 		out, err = l.result(ctx, requestID, s)
 		return err
 	})
+	if l.lateShortDue.Swap(false) {
+		// Raised outside the link's lock, as the alarms are elsewhere.
+		l.raise(AlarmLateIndexShort, fmt.Sprintf("sensor %s: a late-index entry was evicted inside its %s horizon", l.cfg.SensorID, HoldLateHorizon))
+	}
 	return out, err
 }
 
@@ -707,6 +745,12 @@ func (l *Link) result(ctx context.Context, requestID string, s Session) (out Rel
 	if err != nil {
 		return Released{}, err
 	}
+	// A session released with no flow tied, none left waiting and its
+	// window not refused enters the late index (part (e); D3's L2 (i)).
+	tied := h.repointed || slices.ContainsFunc(rel, func(x Release) bool { return x.Tie != nil })
+	if (!tied || lateIndexAll) && len(remaining) == 0 && !r.skewed {
+		l.lateAdd(lateEntry{run: rec.Run, s: s, stamps: r.stamps})
+	}
 	out.AfterSeq = after
 	out.OpenFlow = h.repointed
 	out.Skewed = r.skewed
@@ -731,7 +775,7 @@ func markSkewed(rel []Release, skewed bool) []Release {
 // held before the node's start ties nothing. "" when the window may tie,
 // and always off the 0.2 path.
 func (l *Link) windowRefusal(r *holdRun, s Session) string {
-	if !l.skewOn() {
+	if !l.skewOn() || skewNoStored {
 		return ""
 	}
 	if c := l.storedRefusal(r.dispOff, r.live); c != "" {
@@ -743,10 +787,11 @@ func (l *Link) windowRefusal(r *holdRun, s Session) string {
 	return ""
 }
 
-// laterRefusal is the gate for a tie a waiting run decides at a later
-// record's read (part (c)): a cause that stands, and the window's offsets
-// at Dispatch and at Result, each against the current one.
-func (l *Link) laterRefusal(r *holdRun, capt time.Time) string {
+// laterRefusal is the gate for a tie decided at a later record's read, by
+// a waiting run (part (c)) or the late index (part (e)): a cause that
+// stands, the window's offsets at Dispatch and at Result, each against the
+// current one, and the capture floor.
+func (l *Link) laterRefusal(r stamps, capt time.Time) string {
 	if !l.skewOn() {
 		return ""
 	}
@@ -1119,9 +1164,12 @@ func (l *Link) RecoverHold(ctx context.Context) error {
 	return nil
 }
 
-// takeHeld holds st, ties it by the open table, or reports false so the
-// caller commits it untied. The caller holds cmu.
-func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldRecord) bool {
+// takeHeld holds st, ties it by the open table or the late index, or
+// reports false so the caller commits it untied. bk: st is a backlog
+// record the break refuses (CH-39), which takes no tie: the open table
+// keeps its bookkeeping, and nothing holds it or ties it. The caller holds
+// cmu.
+func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldRecord, bk bool) bool {
 	h := l.hold
 	if !h.on() {
 		return false
@@ -1162,7 +1210,7 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 				l.commitOne(ctx, hr, nil, "")
 				return true
 			}
-			tie := l.openTie(of, st, &hr) // before hr is read: it may mark it
+			tie := l.openTie(of, st, &hr, bk) // before hr is read: it may mark it
 			l.commitOne(ctx, hr, tie, of.AssetID)
 			return true
 		default:
@@ -1174,14 +1222,22 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 			if h.last != nil {
 				_ = h.save(ctx, *h.last)
 			}
-			tie := l.openTie(of, st, &hr) // before hr is read: it may mark it
+			tie := l.openTie(of, st, &hr, bk) // before hr is read: it may mark it
 			l.commitOne(ctx, hr, tie, of.AssetID)
 			return true
 		}
 	}
+	if bk {
+		// No hold and no late tie for it (CH-39), but an entry it matches
+		// is spent by it, refused (D1's ruling 2 on #770).
+		if i := l.lateFind(k, st); i >= 0 {
+			h.late = slices.Delete(h.late, i, i+1)
+		}
+		return false
+	}
 	r := h.runFor(k)
 	if r == nil {
-		return false
+		return l.lateTie(ctx, st, hr, k)
 	}
 	if c := l.standing(); c != "" {
 		// No tie is made for skew: the record commits untied, counted and
@@ -1235,7 +1291,7 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 			tie, rec.WindowTaken = TieWindow, true
 		}
 		skewed := l.standing() != ""
-		switch c := l.laterRefusal(r, f.Start); {
+		switch c := l.laterRefusal(r.stamps, f.Start); {
 		case tie == "":
 		case r.onset:
 			tie, skewed = "", true // refused and counted at the onset (D6's B4 on #748)
@@ -1263,8 +1319,12 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 
 // openTie is the open table's tie for a later record of of's flow (part
 // (d)), decided at its read: nil, counted, when the gate refuses it, and
-// the record then carries node.skewed (section 1.5).
-func (l *Link) openTie(of OpenFlow, st *netobs.Observation, hr *HeldRecord) *netobs.PlatformSession {
+// the record then carries node.skewed (section 1.5); nil for a backlog
+// record the break refuses (bk), which carries node.backlog instead.
+func (l *Link) openTie(of OpenFlow, st *netobs.Observation, hr *HeldRecord, bk bool) *netobs.PlatformSession {
+	if bk {
+		return nil
+	}
 	if c := first(l.standing(), l.storedRefusal(of.Off, of.Live), l.floorRefusal(flowStart(st))); c != "" {
 		l.countRefusal(c)
 		if b, err := nodeBody(hr.Observation, "skewed", true); err == nil {
