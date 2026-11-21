@@ -1043,7 +1043,7 @@ func TestCursorTextForm(t *testing.T) {
 		{"the held gap's from absent", 40, "-"}, {"the held gap's to not a decimal", 41, "x"},
 		{"the held gap's cause out of the set", 42, "unknown"}, {"the held gap's causes empty", 43, "0"},
 		{"the held gap's causes out of the set", 43, "512"}, {"the held gap carries none", 44, "0"},
-		{"the held gap's mark out of range", 45, "4"}, {"M not a decimal", 46, "x"}, {"a slot past the count", 52, "0"},
+		{"the held gap's mark out of range", 45, "8"}, {"M not a decimal", 46, "x"}, {"a slot past the count", 52, "0"},
 		{"a mark out of range", 51, "4"}, {"a leading zero", 4, "09"}, {"a sign", 4, "+9"}, {"previous_end", 82, "x"},
 		{"started_by", 83, "someone"}, {"the tag", 0, "sp1"}, {"run_id", 3, "not-a-uuid"},
 	} {

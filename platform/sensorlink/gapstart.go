@@ -57,6 +57,10 @@ var frozenUnwatchedOnly, gapDropReversed, stepFloorUnmoved, floorNoCap, stepKeep
 // once the raise is saved; copyNoHold lets it rise while a gap is held.
 var copyHeldIgnored, copyHeldFromSave, copyNoHold bool
 
+// heldCoveredMemOnly holds a covered close waiting for its budget in
+// memory only, 2e-2's rule (the control of D1's ruling on #788).
+var heldCoveredMemOnly bool
+
 // nodeStart opens the node-start gap for the link at the node's start
 // (CH-45, "At a start"): copyAt is the run file's copy, zero when the file
 // holds none for the sensor. The gap held for the floor that takeWatch

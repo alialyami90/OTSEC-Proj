@@ -963,3 +963,46 @@ func TestGapStartBoundaries(t *testing.T) {
 		t.Fatalf("an unreadable cursor: gap %+v, want from no later than the copy %s", st, cp)
 	}
 }
+
+// TestGapCoveredWaitAcrossStart (D4-123 item 3.1; D1's ruling on #788,
+// option (a)): a gap written open closes as covered while its closed
+// record waits at the ceiling, and the node is killed before room
+// returns: the cursor holds the wait with the covered mark, and at the
+// start its closed record, covered true, is written first and pairs the
+// open record. Control: the wait held in memory only (2e-2's rule), which
+// leaves the open record unpaired.
+func TestGapCoveredWaitAcrossStart(t *testing.T) {
+	run := func(t *testing.T) (*gsrc, *Cursor) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(9, true)
+		if g.openRecord() == nil {
+			t.Fatalf("records %v: the link gap not written open", g.gaps())
+		}
+		g.r.sink.refuse = func(typ string, d map[string]string) bool {
+			return typ == EventCoverageGap && d["state"] == "closed"
+		}
+		g.reconnect(false)
+		g.live(3, true)
+		c := cursorNow(t, g.r.cs)
+		g.kill()
+		g.r.sink.refuse = nil
+		g.r.l.CheckStep(bg)
+		return g, c
+	}
+	g, c := run(t)
+	if c.Held == nil || !c.Held.Covered || c.Held.Cause != CauseLink {
+		t.Fatalf("the cursor held %+v, want the covered link gap", c.Held)
+	}
+	gs := g.gaps()
+	if len(gs) < 2 || gs[1]["state"] != "closed" || gs[1]["covered"] != "true" || len(unpaired(gs, false)) != 0 {
+		t.Fatalf("records %v, want the covered close written first at the start, pairing the open record", gs)
+	}
+	t.Run("control: in memory only", func(t *testing.T) {
+		withSeam(t, &heldCoveredMemOnly)
+		if g, _ := run(t); len(unpaired(g.gaps(), false)) != 1 {
+			t.Fatalf("records %v: the control paired the open record", g.gaps())
+		}
+	})
+}

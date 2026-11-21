@@ -181,9 +181,15 @@ func (l *Link) takeWatch(c *Cursor) {
 	// (D1's 7056051455 on #770); the node-start gap is that gap.
 	wt.frozen = !c.W.IsZero() || !c.R.IsZero()
 	if c.Held != nil {
-		// A gap held for the floor at the stop is written first (CH-45).
-		wt.wait = &waitRec{HeldGap: *c.Held}
-		wt.floor = c.Held.To
+		// A gap held for the floor at the stop is written first (CH-45),
+		// and so is a covered close that waited for its budget, which
+		// raises nothing (D1's ruling on #788).
+		g := *c.Held
+		g.Covered = false
+		wt.wait = &waitRec{HeldGap: g, covered: c.Held.Covered}
+		if !c.Held.Covered {
+			wt.floor = c.Held.To
+		}
 	}
 	if len(c.Ifaces) > 0 {
 		wt.run, wt.kept = c.RunID, slices.Clone(c.Ifaces)
@@ -202,8 +208,9 @@ func (l *Link) watchInto(c *Cursor) {
 	if wt.open != nil {
 		c.Causes = wt.open.causes
 	}
-	if w := wt.wait; w != nil && !w.covered && !raiseNoHeld {
+	if w := wt.wait; w != nil && !(w.covered && heldCoveredMemOnly) && !(raiseNoHeld && !w.covered) {
 		g := w.HeldGap
+		g.Covered = w.covered
 		c.Held = &g
 	}
 	if wt.w.IsZero() {

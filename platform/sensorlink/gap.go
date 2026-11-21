@@ -62,6 +62,10 @@ type HeldGap struct {
 	Gaps    uint64    `json:"gaps"`
 	Stepped bool      `json:"stepped,omitempty"`
 	Bound   bool      `json:"bound,omitempty"`
+	// Covered: a gap written open that closed as covered and waits for
+	// its budget or the ceiling, held in the same fields (D1's ruling on
+	// #788, option (a)); it raises nothing.
+	Covered bool `json:"covered,omitempty"`
 }
 
 // gapOpenAfter is how long a link, silent or node-start gap stands before
@@ -371,6 +375,10 @@ func (s *skew) closeLocked(covered bool, to time.Time) {
 		if g.written {
 			if wt.wait == nil {
 				wt.wait = &waitRec{HeldGap: HeldGap{From: g.from, To: to, Cause: g.cause, Causes: g.causes, Gaps: 1, Stepped: g.stepped, Bound: g.bound}, covered: true}
+				// Saved in the cursor before its record, so a crash
+				// leaves its open record paired at the start (D4-123
+				// item 3.1; D1's ruling on #788).
+				wt.heldSave = !heldCoveredMemOnly
 			} else {
 				// Behind a waiting record: merged, and unwatched from the
 				// first's start, which fails closed.
