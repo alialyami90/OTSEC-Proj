@@ -1,0 +1,29 @@
+{
+  "schema": "otsec.event/0.6",
+  "id": {
+    "node_id": "site-a-node1",
+    "stream": "platform/health",
+    "seq": 42
+  },
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {
+    "origin_auth": "platform"
+  },
+  "received": {
+    "utc": "2026-11-21T10:00:00.000000Z",
+    "resolution_ns": 1000,
+    "clock": {
+      "sync": "synchronized",
+      "source": "w32time"
+    }
+  },
+  "health": {
+    "type": "detector.baseline-refused",
+    "details": {
+      "hash": "sha256:3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+      "schema": "otsec.netbaseline/0.2",
+      "cause": "later-minor"
+    }
+  }
+}

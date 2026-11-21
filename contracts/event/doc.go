@@ -1,4 +1,4 @@
-// Package event is contract C4, otsec.event/0.5: the event every module
+// Package event is contract C4, otsec.event/0.6: the event every module
 // produces and the timestamp model every other contract imports.
 //
 // # What it covers
@@ -123,4 +123,25 @@
 //     values. Every earlier reader accepts a 0.5 event. Identifier is one
 //     constant, so every event this code stamps says 0.5; no rule of any
 //     other event type changes.
+//   - 0.6 (D4, approved by D1 at #768's merge, D4-121,
+//     docs/phase4/D4-c4-0.6-proposal.md): two health types, each refused
+//     on an event stamped below 0.6, closed at the event's own minor and
+//     open, with its known details still checked, at a later one.
+//     detector.observation-refused (C4-0.6-1) carries the durable counts
+//     of stored observations the network detector refused to judge:
+//     stream, since, through, netobs (the writer's C13 identifier,
+//     netobs.SelfIdentifier), count, an optional unsure range <a>-<b>, and
+//     reason.<r> with first_seq.<r> and last_seq.<r> for each
+//     ObservationRefusedReasons reason above 0. count is the sum of every
+//     reason.<r> without wrapping, first_seq.<r> <= last_seq.<r> <=
+//     through, and in unsure <a> <= <b> <= through; a relation is checked
+//     only over present, well-formed details. detector.baseline-refused
+//     (C4-0.6-2) carries the refused baseline's hash, its schema
+//     ("unreadable" or an otsec.netbaseline identifier) and a
+//     BaselineRefusedCauses cause; later-minor with an unreadable schema
+//     is refused. C4-0.6-3, a later minor's network-observation and
+//     collection.run refused at judging, is in contracts/netobs and the
+//     node, not in Decode or Validate. No envelope field or flag changes.
+//     Identifier is one constant, so every event this code stamps says
+//     0.6.
 package event

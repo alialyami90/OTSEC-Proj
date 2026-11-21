@@ -49,12 +49,12 @@ func (p c4v3Parts) json() []byte {
 	return []byte(b.String())
 }
 
-// C4 0.5 (P4-4-C4-05) moved the identifier this code stamps to 0.5; the
-// 0.3 events of this file are still read strictly, as an earlier minor
-// (C4 0.4 §3).
+// C4 0.6 (P4-4-C4-06-S1) moved the identifier this code stamps to 0.6;
+// the 0.3 events of this file are still read strictly, as an earlier
+// minor (C4 0.4 §3).
 func TestC4v03Constants(t *testing.T) {
-	if event.Identifier != "otsec.event/0.5" {
-		t.Errorf("Identifier %q, want otsec.event/0.5 (C4 0.5 §2)", event.Identifier)
+	if event.Identifier != "otsec.event/0.6" {
+		t.Errorf("Identifier %q, want otsec.event/0.6 (C4 0.6 §1)", event.Identifier)
 	}
 	if event.KindNetworkObservation != "network-observation" {
 		t.Errorf("kind %q", event.KindNetworkObservation)

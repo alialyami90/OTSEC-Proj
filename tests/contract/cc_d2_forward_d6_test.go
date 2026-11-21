@@ -26,6 +26,7 @@ import (
 
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/netobs"
+	"otsec.local/otsec/contracts/version"
 )
 
 func ccD2File(t *testing.T, name string) []byte {
@@ -147,13 +148,20 @@ func TestCCD2ForwardE44(t *testing.T) {
 }
 
 // E4-7, forward contract leg: the identifier this code stamps on every
-// event is 0.5 (C4 0.5 §2), and a stored 0.4 event of each type validates
-// under the 0.5 reader, strictly at its own earlier minor (the 0.3 reader
-// passed a later minor's field over).
+// event is 0.6 (C4 0.6 §1), and a stored 0.4 event of each type validates
+// under the 0.6 reader, strictly at its own earlier minor (the 0.3 reader
+// passed a later minor's field over). The later minor is one above
+// event.Identifier, computed (C4 0.6 §6).
 func TestCCD2ForwardE47(t *testing.T) {
-	if event.Identifier != "otsec.event/0.5" {
-		t.Errorf("event.Identifier %q, C4 0.5 §2: every event this code stamps says 0.5", event.Identifier)
+	if event.Identifier != "otsec.event/0.6" {
+		t.Errorf("event.Identifier %q, C4 0.6 §1: every event this code stamps says 0.6", event.Identifier)
 	}
+	laterV, err := version.Parse(event.Identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	laterV.Minor++
+	later := laterV.String()
 	for _, c := range []struct {
 		file string
 		kind event.Kind
@@ -182,13 +190,13 @@ func TestCCD2ForwardE47(t *testing.T) {
 			if err := json.Unmarshal(ccD2With(t, b, "", "added_in_0_5"), &m); err != nil {
 				t.Fatal(err)
 			}
-			m["schema"] = "otsec.event/0.6"
+			m["schema"] = later
 			fwd, err := json.Marshal(m)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := event.Decode(fwd); err != nil {
-				t.Errorf("stamped 0.6 with a field 0.6 adds: %v", err)
+				t.Errorf("stamped %s with a field it adds: %v", later, err)
 			}
 		})
 	}
