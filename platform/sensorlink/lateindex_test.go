@@ -20,19 +20,37 @@ func untiedOwnKey(t *testing.T, nd *netobs.Node) {
 	}
 }
 
-// TestLateRecordTied: a record of a flow in a failed dial's window, read
-// after the Result, ties by the late index. Control: no index, untied.
+// released is a 0.2 rig, tie_grace_s 30 s, with session s dispatched to
+// ep over l4 and released 2 s later with no flow held: it enters the late
+// index.
+func released(t *testing.T, s Session, ep netip.AddrPort, l4 string) (*rig, *sim) {
+	r, sm := breakRig(t, 30*time.Second)
+	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: ep, L4: l4}); err != nil {
+		t.Fatal(err)
+	}
+	s.StartedAt = r.now()
+	sm.pass(2 * time.Second)
+	s.EndedAt = r.now()
+	if _, err := r.l.Result(bg, "req-1", s); err != nil {
+		t.Fatal(err)
+	}
+	return r, sm
+}
+
+// TestLateRecordTied: a syn_only end of a flow in a failed dial's window,
+// read after the Result, ties by the late index. Control: no index,
+// untied.
 func TestLateRecordTied(t *testing.T) {
 	run := func(t *testing.T) *rig {
 		r, s := breakRig(t, 30*time.Second)
 		d := s.dialFails(1, 2*time.Second)
-		s.flow(40001, d.StartedAt.Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, d.StartedAt.Add(time.Second), time.Time{})
 		return r
 	}
 	r := run(t)
 	tiedTo(t, r.one(40001), 1)
-	if st := r.l.Stats().Hold; st.LateTied != 1 || st.Late != 0 || st.Open != 1 {
-		t.Fatalf("hold %+v: want one late tie, the entry spent, the flow open", st)
+	if st := r.l.Stats().Hold; st.LateTied != 1 || st.Late != 0 || st.Open != 0 {
+		t.Fatalf("hold %+v: want one late tie, the entry spent, the flow ended", st)
 	}
 	t.Run("control: no late index", func(t *testing.T) {
 		withSeam(t, &lateIndexOff)
@@ -42,20 +60,7 @@ func TestLateRecordTied(t *testing.T) {
 	// 5-tuple only; a 0.8 result, with no local address, the first flow in
 	// its window; a failed dial's window a TCP flow only. Mutants B7 and B8
 	// (the PR's body): the 5-tuple unchecked, and a failed dial's window
-	// open to any transport.
-	released := func(t *testing.T, s Session, ep netip.AddrPort, l4 string) (*rig, *sim) {
-		r, sm := breakRig(t, 30*time.Second)
-		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: ep, L4: l4}); err != nil {
-			t.Fatal(err)
-		}
-		s.StartedAt = r.now()
-		sm.pass(2 * time.Second)
-		s.EndedAt = r.now()
-		if _, err := r.l.Result(bg, "req-1", s); err != nil {
-			t.Fatal(err)
-		}
-		return r, sm
-	}
+	// open to any transport. A tied flow not ended joins the open table.
 	t.Run("a 0.9 result: its 5-tuple only", func(t *testing.T) {
 		r, s := released(t, Session{InvocationID: inv(1), Connected: true, Local: netip.AddrPortFrom(netip.MustParseAddr(nodeAddr), 40002)}, endpoint, "tcp")
 		s.flow(40001, s.now(), time.Time{}, false)
@@ -63,6 +68,9 @@ func TestLateRecordTied(t *testing.T) {
 		untiedOwnKey(t, r.one(40001))
 		if ps := r.one(40002).PlatformSession; ps == nil || ps.Tie != TieConnection || ps.InvocationID != inv(1) {
 			t.Fatalf("the session's 5-tuple: %+v", ps)
+		}
+		if st := r.l.Stats().Hold; st.Open != 1 {
+			t.Fatalf("hold %+v: want the tied flow open", st)
 		}
 	})
 	t.Run("a 0.8 result: the first flow in its window", func(t *testing.T) {
@@ -77,6 +85,103 @@ func TestLateRecordTied(t *testing.T) {
 	})
 }
 
+// TestLateRecordShape is D1's rulings 1 and 7 on #770 (D3's B1 and N1): a
+// late record ties an entry only as Result would tie its flow. A failed
+// dial's entry ties only a syn_only end: a full connection from the node's
+// address, its start read 5 s after the Result and then its FIN end, and a
+// record that is only an established end, each commit untied, and the
+// first spends the entry, so a syn_only end that follows is untied too. A
+// 0.8 entry never ties a syn_only end, which spends it. Control: mutant
+// M1, every record shape tied (lateShapeTies true), which ties the
+// connection's start and end, the established end and the 0.8 syn_only
+// end.
+func TestLateRecordShape(t *testing.T) {
+	t.Run("a failed dial: a full connection", func(t *testing.T) {
+		r, s := breakRig(t, 30*time.Second)
+		s.dialFails(1, 2*time.Second)
+		s.pass(5 * time.Second)
+		at := s.now()
+		s.flow(40001, at, time.Time{}, false)
+		s.pass(3 * time.Second)
+		s.flow(40001, at, time.Time{}, true)
+		s.synEnd(40002, at, time.Time{})
+		for _, o := range r.fromPort(40001) {
+			untiedOwnKey(t, o.Node)
+		}
+		untiedOwnKey(t, r.one(40002))
+		if st := r.l.Stats().Hold; st.Late != 0 || st.LateTied != 0 || st.Open != 0 {
+			t.Fatalf("hold %+v: want the entry spent and nothing tied or open", st)
+		}
+	})
+	t.Run("a failed dial: an established end alone", func(t *testing.T) {
+		r, s := breakRig(t, 30*time.Second)
+		d := s.dialFails(1, 2*time.Second)
+		s.flow(40001, d.StartedAt.Add(time.Second), time.Time{}, true)
+		untiedOwnKey(t, r.one(40001))
+		if st := r.l.Stats().Hold; st.Late != 0 {
+			t.Fatalf("hold %+v: want the entry spent", st)
+		}
+	})
+	t.Run("a 0.8 result: a syn_only end", func(t *testing.T) {
+		r, s := released(t, Session{InvocationID: inv(1), Connected: true}, endpoint, "tcp")
+		s.synEnd(40001, s.now(), time.Time{})
+		s.flow(40002, s.now(), time.Time{}, false)
+		untiedOwnKey(t, r.one(40001))
+		untiedOwnKey(t, r.one(40002))
+	})
+}
+
+// TestLateIndexSpentByBacklog is D1's ruling 2 on #770 (D3's B2, D4's N1),
+// with D3's probe P2: a dial fails and the link is cut for 70 s; the
+// session's syn_only end is read in the backlog, untied with node.backlog,
+// and spends the entry, so a second flow in the window, read once the
+// backlog is through, commits untied. Control: mutant M2, a backlog record
+// that spends nothing, under which the second flow ties.
+func TestLateIndexSpentByBacklog(t *testing.T) {
+	r, s := breakRig(t, 30*time.Second)
+	d := s.dialFails(1, 2*time.Second)
+	s.cut()
+	s.synEnd(40001, d.StartedAt.Add(time.Second), time.Time{})
+	s.pass(70 * time.Second)
+	s.connect(true)
+	backlogUntied(t, r.one(40001))
+	s.pass(time.Second)
+	s.synEnd(40002, d.StartedAt.Add(time.Second), time.Time{})
+	untiedOwnKey(t, r.one(40002))
+	if st := r.l.Stats().Hold; st.Late != 0 || st.LateTied != 0 {
+		t.Fatalf("hold %+v: want the entry spent by the backlog record", st)
+	}
+}
+
+// TestLateIndexWaitingNotIndexed is D1's ruling 5 on #770, D6's probe P5:
+// a failed dial whose flow waits at the Result is not indexed; the flow's
+// syn_only end takes the window tie, and a second flow in the window
+// commits untied. Control: D6's mutant E18, a session indexed with a flow
+// left waiting, under which the second flow ties: a second tie for one
+// session.
+func TestLateIndexWaitingNotIndexed(t *testing.T) {
+	r, s := breakRig(t, 30*time.Second)
+	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+		t.Fatal(err)
+	}
+	from := r.now()
+	s.flow(40001, from, time.Time{}, false)
+	r.pass(2 * time.Second)
+	if _, err := r.l.Result(bg, "req-1", Session{InvocationID: inv(1), StartedAt: from, EndedAt: r.now()}); err != nil {
+		t.Fatal(err)
+	}
+	s.synEnd(40001, from, time.Time{})
+	os := r.fromPort(40001)
+	if len(os) != 2 {
+		t.Fatalf("%d records of the dial's flow, want 2", len(os))
+	}
+	for _, o := range os {
+		tiedTo(t, o.Node, 1)
+	}
+	s.synEnd(40002, from.Add(time.Second), time.Time{})
+	untiedOwnKey(t, r.one(40002))
+}
+
 // TestLateIndexTiesOnce: an entry ties one flow and is then spent, so a
 // second flow in the dial's window commits untied and alerts (AP-35).
 // Control: the entry not spent, which ties both.
@@ -84,8 +189,8 @@ func TestLateIndexTiesOnce(t *testing.T) {
 	run := func(t *testing.T) *rig {
 		r, s := breakRig(t, 30*time.Second)
 		d := s.dialFails(1, 2*time.Second)
-		s.flow(40001, d.StartedAt.Add(time.Second), time.Time{}, false)
-		s.flow(40002, d.StartedAt.Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, d.StartedAt.Add(time.Second), time.Time{})
+		s.synEnd(40002, d.StartedAt.Add(time.Second), time.Time{})
 		return r
 	}
 	r := run(t)
@@ -105,11 +210,11 @@ func TestLateIndexTiesOnce(t *testing.T) {
 		s.pass(8 * time.Second)
 		s.step(0, -3*time.Second)
 		s.pass(10 * time.Second) // a tick 3 s behind: the latest sample stands
-		s.flow(40001, d.StartedAt.Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, d.StartedAt.Add(time.Second), time.Time{})
 		skewedUntied(t, r.one(40001))
 		s.step(0, 3*time.Second)
 		s.pass(10 * time.Second) // the next tick clears it
-		s.flow(40002, d.StartedAt.Add(time.Second), time.Time{}, false)
+		s.synEnd(40002, d.StartedAt.Add(time.Second), time.Time{})
 		untiedOwnKey(t, r.one(40002))
 		noOtherWindows(t, r.l.SkewStats(), cLatest, 1)
 	})
@@ -135,7 +240,7 @@ func TestLateIndexOnlyUntiedSessions(t *testing.T) {
 		if _, err := r.l.Result(bg, "req-1", Session{InvocationID: inv(1), StartedAt: from, EndedAt: r.now()}); err != nil {
 			t.Fatal(err)
 		}
-		s.flow(40002, from.Add(time.Second), time.Time{}, false)
+		s.synEnd(40002, from.Add(time.Second), time.Time{})
 		return r
 	}
 	r := run(t)
@@ -173,7 +278,7 @@ func TestLateIndexEmptyAtStart(t *testing.T) {
 		}
 		s.pass(c.Add(50 * time.Second).Sub(s.now()))
 		s.connect(true) // nothing buffered: the first backlog is through at the hello
-		s.flow(40001, d.StartedAt.Add(45*time.Second), time.Time{}, false)
+		s.synEnd(40001, d.StartedAt.Add(45*time.Second), time.Time{})
 		return r
 	}
 	r := run(t, false)
@@ -197,7 +302,7 @@ func TestLatePastHorizon(t *testing.T) {
 		r, s := breakRig(t, 30*time.Second)
 		d := s.dialFails(1, 2*time.Second)
 		s.hold = true
-		s.flow(40001, d.StartedAt.Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, d.StartedAt.Add(time.Second), time.Time{})
 		s.pass(after)
 		s.flush()
 		return r
@@ -227,7 +332,7 @@ func TestLateIndexBound(t *testing.T) {
 		for i := 2; i <= n; i++ {
 			s.dialFails(i, time.Millisecond)
 		}
-		s.flow(40001, first.StartedAt.Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, first.StartedAt.Add(time.Second), time.Time{})
 		return r
 	}
 	r := run(t, HoldLateEntries)
@@ -243,4 +348,20 @@ func TestLateIndexBound(t *testing.T) {
 	if n := r.al.count(AlarmLateIndexShort); n != 1 {
 		t.Fatalf("sensor-late-index-short raised %d times, want once for the stretch", n)
 	}
+	// D6's N1 on #770: an entry evicted past its horizon raises nothing.
+	// Control: D6's mutant E21, which raises it.
+	t.Run("an eviction past the horizon", func(t *testing.T) {
+		r, s := breakRig(t, 30*time.Second)
+		s.dialFails(1, 2*time.Second)
+		r.pass(HoldLateHorizon + time.Minute)
+		for i := 2; i <= HoldLateEntries+1; i++ {
+			s.dialFails(i, time.Millisecond)
+		}
+		if st := r.l.Stats().Hold; st.LateEvicted != 1 {
+			t.Fatalf("hold %+v", st)
+		}
+		if n := r.al.count(AlarmLateIndexShort); n != 0 {
+			t.Fatalf("sensor-late-index-short raised %d times for an entry past its horizon", n)
+		}
+	})
 }

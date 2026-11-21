@@ -84,7 +84,7 @@ func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 		s.step(-300*time.Second, -300*time.Second)
 		s.pass(338 * time.Second)
 		at := s.now()
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		return r, at
 	}
 	t.Run("(a)", func(t *testing.T) {
@@ -127,7 +127,7 @@ func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 			after -= 4 * time.Second
 		}
 		s.pass(after)
-		s.flow(40001, s.now(), time.Time{}, false)
+		s.synEnd(40001, s.now(), time.Time{})
 		return r
 	}
 	for name, steps := range map[string]bool{"(b)": false, "(b), in steps of 1,900 ms": true} {
@@ -161,7 +161,7 @@ func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 		s.pass(time.Minute)
 		s.connect(true)
 		s.pass(time.Minute)
-		s.flow(40001, s.now(), time.Time{}, false)
+		s.synEnd(40001, s.now(), time.Time{})
 		return r
 	}
 	t.Run("(c)", func(t *testing.T) {
@@ -191,7 +191,7 @@ func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 		s.hold = true
 		s.pass(time.Second)
 		s.step(300*time.Second, 300*time.Second)
-		s.flow(40001, s.now().Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, s.now().Add(time.Second), time.Time{})
 		s.pass(3 * time.Second)
 		s.step(-300*time.Second, -300*time.Second)
 		s.pass(time.Second)
@@ -246,7 +246,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 	d := func(t *testing.T) *rig {
 		r, s, _ := t13(t, 30*time.Second, ahead, nil)
 		s.hold = true
-		s.flow(40001, s.now(), time.Time{}, false)
+		s.synEnd(40001, s.now(), time.Time{})
 		s.pass(5 * time.Second)
 		s.step(0, -300*time.Second)
 		s.pass(295 * time.Second)
@@ -260,7 +260,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 	e := func(t *testing.T) *rig {
 		r, s, _ := t13(t, 30*time.Second, nil, nil)
 		s.hold = true
-		s.flow(40001, s.now(), time.Time{}, false)
+		s.synEnd(40001, s.now(), time.Time{})
 		s.pass(5 * time.Second)
 		s.step(-300*time.Second, -300*time.Second)
 		s.pass(295 * time.Second)
@@ -296,7 +296,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.pass(at.Add(-300 * time.Second).Add(300 * time.Second).Sub(s.r.trueNow()))
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		return r
 	}
 	for name, run := range map[string]func(*testing.T) *rig{"(d)": d, "(e)": e, "(f)": func(t *testing.T) *rig { return f(t, false) }} {
@@ -329,7 +329,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.pass(260 * time.Second)
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cMoved, skewMoved, at)
 	})
@@ -364,7 +364,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		if !ss.StartedAt.Equal(rt.Add(6*time.Second)) || !ss.EndedAt.Equal(rt.Add(8*time.Second)) {
 			t.Fatalf("the dial was recorded as [%s, %s], want [R + 6 s, R + 8 s]", ss.StartedAt, ss.EndedAt)
 		}
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cMoved, skewMoved, at)
 		if r.l.SkewStats().SamplesAfterHold != 1 {
@@ -414,7 +414,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.pass(at.Add(600 * time.Second).Sub(s.r.trueNow()))
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		return r
 	}
 	for name, rekey := range map[string]bool{"(k)": false, "(q)": true} {
@@ -450,7 +450,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.pass(at.Add(300 * time.Second).Sub(s.r.trueNow()))
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cPrestart, skewPrestart, at)
 	})
@@ -475,7 +475,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.pass(start.Add(15 * time.Minute).Sub(s.r.trueNow()))
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cPrestart, skewPrestart, at)
 	})
@@ -510,7 +510,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		n.pass(start.Add(13 * time.Minute).Sub(n.r.trueNow()))
 		n.dialFails(1, 2*time.Second)
 		n.pass(time.Second)
-		n.flow(40001, at, time.Time{}, false)
+		n.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cPrestart, skewPrestart, at)
 	})
@@ -570,7 +570,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.pass(start.Add(18 * time.Minute).Sub(s.r.trueNow()))
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		if leg == "(s)" {
 			evict()
 			s.pass(5 * time.Second)
@@ -631,7 +631,7 @@ func TestTieNodeMovedSinceSample(t *testing.T) {
 		t.Fatalf("the dial was recorded as [%s, %s], want [T - 2 s, T]", ss.StartedAt, ss.EndedAt)
 	}
 	s.pass(time.Second)
-	s.flow(40001, at, time.Time{}, false)
+	s.synEnd(40001, at, time.Time{})
 	skewedUntied(t, r.one(40001))
 	refusedBy(t, r, cMoved, "", time.Time{})
 }
@@ -664,7 +664,7 @@ func TestSkewCountPrecedence(t *testing.T) {
 		at := s.now()
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cLatest, "", time.Time{})
 	})
@@ -681,7 +681,7 @@ func TestSkewCountPrecedence(t *testing.T) {
 		}
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cAlarm, skewMoved, at)
 	})
@@ -706,7 +706,7 @@ func TestSkewCountPrecedence(t *testing.T) {
 		s.pass(time.Second)
 		s.tick()
 		s.pass(4 * time.Second)
-		s.flow(40001, at, time.Time{}, false)
+		s.synEnd(40001, at, time.Time{})
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cMoved, skewSpan, at)
 		if st := r.l.SkewStats(); absDur(st.Latest) > MaxSkew || st.Alarm || st.Floor.Before(x.Add(40*time.Second)) {

@@ -72,7 +72,7 @@ type Options struct {
 	// LateBound is late_bound_s (CH-23); zero is DefaultLateBound.
 	LateBound time.Duration
 	// BacklogTie is backlog_tie_s (CH-39); zero is DefaultBacklogTie, and
-	// it is at most MaxBacklogTie.
+	// it is from zero to MaxBacklogTie.
 	BacklogTie time.Duration
 	// Health is the sensor's health events (health.go): with it, Owed
 	// defaults to its WriteOwed, the heartbeat baselines are judged, and
@@ -223,6 +223,8 @@ func New(cfg Config, opt Options) (*Link, error) {
 		return nil, errors.New("sensorlink: no observation quota")
 	case opt.Store == nil || opt.Monotonic == nil || opt.Received == nil:
 		return nil, errors.New("sensorlink: Store, Monotonic and Received are required")
+	case opt.BacklogTie < 0:
+		return nil, fmt.Errorf("sensorlink: backlog_tie_s %s is below zero", opt.BacklogTie)
 	case opt.BacklogTie > MaxBacklogTie:
 		return nil, fmt.Errorf("sensorlink: backlog_tie_s %s is above %s", opt.BacklogTie, MaxBacklogTie)
 	}

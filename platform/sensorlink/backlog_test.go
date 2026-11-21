@@ -44,7 +44,7 @@ func cut20(t *testing.T, brk time.Duration, made func(b time.Time) time.Time) (*
 	s.cut()
 	s.pass(5 * time.Second)
 	s.dialFails(1, 2*time.Second)
-	s.flow(40001, b.Add(6*time.Second), made(b), false)
+	s.synEnd(40001, b.Add(6*time.Second), made(b))
 	s.pass(brk - 7*time.Second)
 	s.connect(true)
 	return r, r.one(40001)
@@ -119,7 +119,7 @@ func TestShortBreakMadeUtcCheck(t *testing.T) {
 		s.cut()
 		s.pass(5 * time.Second)
 		s.step(0, -10*time.Minute) // the sensor's clock set back 10 minutes
-		s.flow(40001, d.Add(time.Second), time.Time{}, false)
+		s.synEnd(40001, d.Add(time.Second), time.Time{})
 		s.pass(5 * time.Second)
 		s.step(0, 10*time.Minute) // and put back
 		s.pass(20 * time.Second)
@@ -152,7 +152,7 @@ func shortBreakNodeStep(t *testing.T) {
 		s.pass(4 * time.Second)
 		s.step(-30*time.Second, -30*time.Second)
 		s.pass(25 * time.Second)
-		s.flow(40001, s.now(), time.Time{}, false) // stamped 5 s into the break
+		s.synEnd(40001, s.now(), time.Time{}) // stamped 5 s into the break
 		s.pass(5 * time.Second)
 		s.connect(true)
 		return r, r.one(40001)
@@ -186,7 +186,7 @@ func stepAfterHello(t *testing.T) {
 		s.cut()
 		s.hold = true
 		s.pass(35 * time.Second)
-		s.flow(40001, s.now(), time.Time{}, false)
+		s.synEnd(40001, s.now(), time.Time{})
 		s.pass(5 * time.Second)
 		s.connect(true) // the record is N: the backlog is read until it is
 		s.pass(time.Second)
@@ -245,6 +245,12 @@ func TestBreakOverBoundNoTie(t *testing.T) {
 		if _, err := New(Config{NodeID: testNode, SensorID: testSensor, OutageHours: 1, ObservationQuota: 1, Stream: obsStream}, o); err == nil {
 			t.Fatal("a backlog_tie_s above 120 s was taken")
 		}
+		// D3's N2 on #770: a negative value is refused, not read as the
+		// default.
+		o.BacklogTie = -time.Nanosecond
+		if _, err := New(Config{NodeID: testNode, SensorID: testSensor, OutageHours: 1, ObservationQuota: 1, Stream: obsStream}, o); err == nil {
+			t.Fatal("a negative backlog_tie_s was taken")
+		}
 	})
 }
 
@@ -263,7 +269,7 @@ func TestFirstBreakAfterStartUnknown(t *testing.T) {
 		r.restart()
 		s.pass(3 * time.Second)
 		s.dialFails(1, 2*time.Second)
-		s.flow(40001, b.Add(6*time.Second), time.Time{}, false)
+		s.synEnd(40001, b.Add(6*time.Second), time.Time{})
 		s.pass(3 * time.Second)
 		s.connect(true)
 		return r, r.one(40001)
@@ -297,9 +303,9 @@ func TestBacklogEndsAtCurrentRun(t *testing.T) {
 		s.hold = true
 		s.pass(60 * time.Second)
 		s.dialFails(1, 2*time.Second)
-		s.flow(40001, b.Add(61*time.Second), time.Time{}, false)
+		s.synEnd(40001, b.Add(61*time.Second), time.Time{})
 		// A record stamped for the second break, numbered in the first.
-		s.flow(40002, b.Add(311*time.Second), b.Add(311*time.Second), false)
+		s.synEnd(40002, b.Add(311*time.Second), b.Add(311*time.Second))
 		s.write(obs02(0)) // N
 		s.pass(5*time.Minute - 62*time.Second)
 		s.connect(true)
@@ -314,7 +320,7 @@ func TestBacklogEndsAtCurrentRun(t *testing.T) {
 		s.sendN(1) // N: the backlog is through
 		s.pass(5 * time.Second)
 		s.dialFails(3, 2*time.Second)
-		s.flow(40003, s.now().Add(-time.Second), time.Time{}, false)
+		s.synEnd(40003, s.now().Add(-time.Second), time.Time{})
 		s.flush()
 		return r, s
 	}
@@ -354,13 +360,15 @@ func TestBacklogEndRule(t *testing.T) {
 		return r, s
 	}
 	// raises reports whether a heartbeat of the sim's run, read now and
-	// stated an hour ahead, raises the floor.
-	raises := func(t *testing.T, r *rig, s *sim) bool {
+	// stated ahead by d, raises the floor. Each call states a later time
+	// than the one before (D6's B2 on #770), so a floor raised once can be
+	// raised again only while the first break stands.
+	raises := func(t *testing.T, r *rig, s *sim, d time.Duration) bool {
 		t.Helper()
 		before := r.l.SkewStats().Floor
-		s.off += time.Hour
+		s.off += d
 		s.heartbeat()
-		s.off -= time.Hour
+		s.off -= d
 		return !r.l.SkewStats().Floor.Equal(before)
 	}
 	legs := map[string]func(t *testing.T, r *rig, s *sim){
@@ -375,29 +383,31 @@ func TestBacklogEndRule(t *testing.T) {
 			s.seq, s.sent = 30, 30
 			s.tick() // sent_seq 30
 		},
-		// A rekey: a later generation's run 1.
+		// A rekey: a later generation's hello of the same run (D6's P4).
 		"a later generation's hello": func(t *testing.T, r *rig, s *sim) {
 			s.cut()
-			s.en = Enrolment{SensorID: testSensor, Generation: 3, Began: 3, ConfigDigest: testDigest}
-			s.run, s.counter, s.newRun, s.seq, s.sent = testRun2, 1, true, 0, 0
+			s.en = Enrolment{SensorID: testSensor, Generation: 3, Began: 1, ConfigDigest: testDigest}
 			s.connect(true)
 		},
 	}
 	for name, leg := range legs {
 		t.Run(name, func(t *testing.T) {
 			r, s := started(t)
-			if !raises(t, r, s) {
+			if !raises(t, r, s, time.Hour) {
 				t.Fatal("a heartbeat of the first break raised no floor")
 			}
 			leg(t, r, s)
-			if raises(t, r, s) {
+			if raises(t, r, s, 2*time.Hour) {
 				t.Fatalf("a heartbeat after the break's end raised the floor to %s", r.l.SkewStats().Floor)
 			}
 			t.Run("control: the end at a record of run X only", func(t *testing.T) {
 				withSeam(t, &backlogEndRecordOnly)
 				r, s := started(t)
+				if !raises(t, r, s, time.Hour) {
+					t.Fatal("a heartbeat of the first break raised no floor")
+				}
 				leg(t, r, s)
-				if !raises(t, r, s) {
+				if !raises(t, r, s, 2*time.Hour) {
 					t.Fatal("the control ended the first break")
 				}
 			})
@@ -408,11 +418,108 @@ func TestBacklogEndRule(t *testing.T) {
 		for s.seq < 29 {
 			s.write(obs02(0))
 		}
-		if !raises(t, r, s) { // seq 30, N itself, still raises
+		if !raises(t, r, s, time.Hour) { // seq 30, N itself, still raises
 			t.Fatal("N raised no floor")
 		}
-		if raises(t, r, s) {
+		if raises(t, r, s, 2*time.Hour) {
 			t.Fatal("a heartbeat past N raised the floor")
 		}
 	})
+	// A later backlog is not the first break: its heartbeat, read below its
+	// N and stated later than the floor, raises nothing. Control: D6's
+	// mutant E6, every backlog taken as the first break, which raises it.
+	t.Run("a later backlog", func(t *testing.T) {
+		r, s := started(t)
+		if !raises(t, r, s, time.Hour) {
+			t.Fatal("a heartbeat of the first break raised no floor")
+		}
+		legs["run X's position at N"](t, r, s)
+		s.cut()
+		s.hold = true
+		before := r.l.SkewStats().Floor
+		s.off += 2 * time.Hour
+		s.heartbeat() // seq 31
+		s.off -= 2 * time.Hour
+		s.write(obs02(0)) // seq 32: N
+		s.connect(true)
+		s.sendN(1)
+		if f := r.l.SkewStats().Floor; !f.Equal(before) {
+			t.Fatalf("a heartbeat of a later backlog raised the floor to %s", f)
+		}
+		if st := r.l.SkewStats(); st.Backlog != 0 {
+			t.Fatalf("backlog count %d: the heartbeat is not a record", st.Backlog)
+		}
+	})
+}
+
+// TestBacklogExtendedBySecondBreak is D1's ruling 3 on #770 (D6's B1, with
+// D6's probes P1 and P2): a break that begins before the backlog is through
+// extends it, N rising to the newest_seq of run X's next hello, so the
+// second break's own records, numbered past the first N, are read in the
+// backlog and judged by its longest break. Each leg: two records buffered
+// in a first break, X's hello and the first record read; a second break
+// before the second is read, in which a dial fails and its syn_only end is
+// made (seq 3); reconnect and flush: record 3 is untied with node.backlog.
+// "a long second break": first 20 s, second 5 min. "a shorter second
+// break": first 50 s, second 10 s; the longest break is the first, outside
+// which record 3 was made. Controls: mutant M3, N kept at the first
+// hello's, which ties record 3 in both; D6's E10 (a long second break not
+// marked long) ties it in the first leg, and E11 (judged by the latest
+// break) in the second.
+func TestBacklogExtendedBySecondBreak(t *testing.T) {
+	for name, brk := range map[string][2]time.Duration{
+		"a long second break":    {20 * time.Second, 5 * time.Minute},
+		"a shorter second break": {50 * time.Second, 10 * time.Second},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, s := breakRig(t, 30*time.Second)
+			s.cut()
+			s.hold = true
+			s.write(obs02(0))
+			s.write(obs02(0))
+			s.pass(brk[0])
+			s.connect(true) // N = 2
+			s.sendN(1)
+			s.cut()
+			s.pass(brk[1] / 2)
+			d := s.dialFails(1, time.Second)
+			s.synEnd(40003, d.StartedAt.Add(500*time.Millisecond), time.Time{})
+			s.pass(brk[1] - brk[1]/2 - time.Second)
+			s.connect(true) // newest_seq 3
+			s.flush()
+			backlogUntied(t, r.one(40003))
+			if st := r.l.SkewStats(); st.Backlog != 3 {
+				t.Fatalf("backlog count %d, want records 1 to 3", st.Backlog)
+			}
+		})
+	}
+}
+
+// TestBacklogNoOpenTie is D1's ruling 5 on #770, D6's probe P3: a flow
+// tied by the late index (a 0.8 result) and left open; a cut of 90 s, in
+// which the flow's end record is made; it is read in the backlog and
+// commits untied with node.backlog, though the open table holds its key.
+// Control: D6's mutant E15, openTie without its backlog check, which ties
+// it.
+func TestBacklogNoOpenTie(t *testing.T) {
+	r, s := released(t, Session{InvocationID: inv(1), Connected: true}, endpoint, "tcp")
+	at := s.now()
+	s.flow(40001, at, time.Time{}, false)
+	if st := r.l.Stats().Hold; st.LateTied != 1 || st.Open != 1 {
+		t.Fatalf("hold %+v: want the start late-tied and open", st)
+	}
+	s.cut()
+	s.pass(30 * time.Second)
+	s.flow(40001, at, time.Time{}, true)
+	s.pass(60 * time.Second)
+	s.connect(true)
+	os := r.fromPort(40001)
+	if len(os) != 2 {
+		t.Fatalf("%d records of the flow, want 2", len(os))
+	}
+	tiedTo(t, os[0].Node, 1)
+	backlogUntied(t, os[1].Node)
+	if st := r.l.Stats().Hold; st.Open != 0 {
+		t.Fatalf("hold %+v: want the end to release the key", st)
+	}
 }

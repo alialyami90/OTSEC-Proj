@@ -1228,7 +1228,12 @@ func (l *Link) takeHeld(ctx context.Context, st *netobs.Observation, hr HeldReco
 		}
 	}
 	if bk {
-		return false // no hold and no late tie for it (CH-39)
+		// No hold and no late tie for it (CH-39), but an entry it matches
+		// is spent by it, refused (D1's ruling 2 on #770).
+		if i := l.lateFind(k, st); i >= 0 {
+			h.late = slices.Delete(h.late, i, i+1)
+		}
+		return false
 	}
 	r := h.runFor(k)
 	if r == nil {

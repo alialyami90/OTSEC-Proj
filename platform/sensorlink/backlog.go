@@ -22,7 +22,10 @@ import (
 //     A sensor that holds run X open below N without sending stays a
 //     backlog (AP-35's stall): it fails closed.
 //   - A break that begins before a backlog is through extends it, and its
-//     records are judged by the longest break of the backlog.
+//     records are judged by the longest break of the backlog. N then
+//     rises to the highest newest_seq of a hello of run X read while the
+//     backlog is on, so the extended backlog, and the first break's floor
+//     raise with it, are read through the records made in that break.
 //   - After a break longer than backlog_tie_s, and after one whose length
 //     on the wall clock differs from its length on the monotonic clock by
 //     more than max_skew_ms, no backlog record takes a tie. After a shorter
@@ -129,8 +132,13 @@ func (l *Link) breakEnd(h *netobs.SensorHello, gen, taken uint64) {
 	case !b.long && length > b.length:
 		b.from, b.to, b.length, b.toOff = b.lastWall, wall, length, off
 	}
-	if !b.known && h.Current != nil && *h.Current {
-		b.known, b.run, b.gen, b.end = true, h.RunID, gen, num(h.NewestSeq)
+	switch n := num(h.NewestSeq); {
+	case !b.known && h.Current != nil && *h.Current:
+		b.known, b.run, b.gen, b.end = true, h.RunID, gen, n
+	case b.known && h.RunID == b.run && gen == b.gen && n > b.end:
+		// A break before the backlog was through: its records, numbered
+		// past N, are read in the backlog it extends (D6's B1 on #770).
+		b.end = n
 	}
 	b.through(h.RunID, taken)
 }

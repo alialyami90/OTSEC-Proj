@@ -16,9 +16,13 @@ import (
 //   - Only a session released with no flow tied, none left waiting and its
 //     window not refused for skew enters it (Result).
 //   - An entry ties one flow and is then spent, under Result's rules: the
-//     5-tuple for a 0.9 result that connected, the first flow in the
-//     window for a 0.8 result, a failed dial's window. A refusal spends it
-//     too. A tied flow not ended joins the open table (part (d)).
+//     5-tuple for a 0.9 result that connected; for a 0.8 result, the first
+//     flow in its window that is not a syn_only end; for a failed dial, a
+//     syn_only end in its window, as part (c) ties. Any other record that
+//     matches an entry spends it and commits untied (D1's ruling 1 on
+//     #770), as a refusal does, and so does a backlog record the break
+//     refuses (takeHeld). A tied flow not ended joins the open table (part
+//     (d)).
 //   - Each tie passes the skew gate as a waiting run's does
 //     (laterRefusal): a cause that stands, the window's offsets at Dispatch
 //     and at Result, and the capture floor.
@@ -89,6 +93,20 @@ func (l *Link) lateFind(k FlowKey, st *netobs.Observation) int {
 	return -1
 }
 
+// lateShapeTies reports whether a late record st may tie s's entry, as
+// Result would tie its flow: a failed dial ties only a syn_only end (part
+// (c)), and a 0.8 result never one (D3's B1 and N1 on #770).
+func lateShapeTies(s Session, st *netobs.Observation) bool {
+	synEnd := isEnd(st) && st.Flow.SynOnly != nil && *st.Flow.SynOnly
+	switch {
+	case s.Connected && s.Local.IsValid():
+		return true
+	case s.Connected:
+		return !synEnd
+	}
+	return synEnd
+}
+
 // lateTie ties st's record hr by the late index, or reports false so the
 // caller commits it untied. The caller holds cmu.
 func (l *Link) lateTie(ctx context.Context, st *netobs.Observation, hr HeldRecord, k FlowKey) bool {
@@ -104,6 +122,9 @@ func (l *Link) lateTie(ctx context.Context, st *netobs.Observation, hr HeldRecor
 	if h.now().After(e.s.EndedAt.Add(HoldLateHorizon)) {
 		h.stats.LateHorizon++
 		return false
+	}
+	if !lateShapeTies(e.s, st) {
+		return false // spent, and committed untied
 	}
 	if c := l.laterRefusal(e.stamps, flowStart(st)); c != "" {
 		l.countRefusal(c)

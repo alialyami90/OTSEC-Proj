@@ -153,6 +153,22 @@ func (s *sim) flow(sport int, at, made time.Time, end bool) {
 	s.write(o)
 }
 
+// synEnd writes the syn_only end of the node's own flow from port sport,
+// its start captured at the sensor's time at and made at made (zero: now
+// on the sensor's clock): a dial's SYN that had no answer, the one late
+// record a failed dial's entry ties (D1's ruling 1 on #770).
+func (s *sim) synEnd(sport int, at, made time.Time) {
+	s.t.Helper()
+	o := ownFlow02(0, sport, at, true)
+	o.Flow.SynOnly = ptr(true)
+	if !made.IsZero() {
+		o.MadeUTC = canonUTC(made)
+	} else {
+		o.MadeUTC = ""
+	}
+	s.write(o)
+}
+
 // flush sends every record kept.
 func (s *sim) flush() {
 	s.t.Helper()
