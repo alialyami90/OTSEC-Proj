@@ -3005,3 +3005,31 @@ Evidence class: `desk` for the rulings, the reviews and the documents merged her
   2. 2e-3, after #781 merges, starting with item 3.1's options; then P4-4-INT-D5-BLIND.
   3. Deliverable 3 (D6, running), then HR-25's build (D4).
 - **Next decision number:** D4-124.
+
+## D4-124: 2e-2 and HR-25's cases merged, HR-25's build split, 2e-3's held close, and work paused at the owner's word (D1, 2026-11-21)
+
+Evidence class: `desk` for the rulings and reviews; `CI-Linux` and `CI-Windows` for the merges in items 1.2 and 1.3, each on D1's merge check with `full-ci` (20 of 20 `integration-long` legs; #787 also `a6-gt-pcap`'s six jobs); #786 (item 1.1) is documents only and ran no CI. Nothing was built or run against a device, and no counted run, rehearsal or engine run was made. It follows D4-123 the same day.
+
+- **1. Merged** (each by D1, after D1's merge check on the reviewed head):
+  1. #786 (D4-123's records, D1; documents) as `7780fecc` at `c6955b52`: records-auditor, then D6 (7061270031, 7061282625).
+  2. #781 (P4-4-INT-D5P2E, 2e-2, D5; the gaps while the node runs) as `e2a23806` at `4e062288`: D6 (7061851840), D3 (7061733106), D4 (review 6004821923). Unwired; F-027's gate holds.
+  3. #787 (P4-4-HR2325S deliverable 3, D6; HR-25's cases from the design) as `1ac35c4b` at `cd0f36f1`: D4 (7061791753), D2 (7061792989), D3 (7061795482), under the held-rows rule.
+- **2. Rulings.**
+  1. **#787** (D1's 7061298052): HR-25 closes only when the `seq`, `insert` and `surface` routes pass too (`judge-route`, conditions §1); `judge-twins` and `chg-malformed` follow rule (A); `udp-throw-alone`'s UDP control drops `viol`, with a note per configuration; a read is not added to `repeat-after-reset` on inference alone (IEEE 1815's text is not held); D6's case ids are accepted.
+  2. **HR-25's build, split** (D1's message to D4, recorded here): three PRs, HR25-B1 (the C++ core, the two-patch build, unit inputs, `build_only`), B2 (confirmation, budget, reporting) and B3 (the fuzz run), each re-pinning A's patch, none shipped before HR-25's counted run, which waits for a separate D1 ruling. D4 may edit only the rows of D6's `resync-conditions.tsv` that the public list names (D1's 7061298052 item 5, `judge-viol` and the `builder-seq` tokens; D4's 7061274184 finding D; D4-111 item 5.3, the two `pins.env` lines, the coverage site map and the seed converter), with D6 reviewing them: B1 carries none of them, B2 carries `report-no-new-field`, `cfg-c2a`, `fp-3a`, `judge-viol` and `builder-seq`, and B3 carries `cov-where`, `cov-causes`, `cov-not` and the new fuzz row. Of the items that are not TSV rows, B1 carries the two `pins.env` lines (each later PR re-pins them), and B3 carries the seed converter and design §3.3's new `cov-` row. D4 adds a `build_only` input that builds and records the images and runs no engine over any capture; D1 dispatches it after D3 and D7 review it.
+  3. **2e-3's held close, option (a)** (D1's 7062427315 on #788, closing D4-123 item 3.1): a covered close waiting for its budget or the ceiling is held in the cursor's held-gap fields (bit 4 of field 45's mark), written first at a start and pairing its `open` record. C13's CH-45 stands as written.
+  4. **#789, D2's N1** (D1's 7062790081): not applied. D2 asked for an expected read R(1) in `d4u-hr25-repeat-after-reset`; as on #787 (7061298052 item 4, a different case), no read is added on IEEE 1815 inference alone.
+- **3. Open items.**
+  1. **Owner D4, #789 (HR25-B1), blocking (D7, 7062671801):** the record check would fail on the real C2A image, which carries patch A's notice file (D7, `desk`). Fix: allow exactly that path, update the self-test's file list, and add a control in which another file under `notices/` differs; D7's N1 to N3 too. `build_only` is not dispatched until D7 confirms.
+  2. **Owner D4, text:** restate the HR-25 design's §3.2 items 7, 13 and 14 (N3) and §3's UDP throw-alone control in the next records PR (D4's N2, 7061274184 on #787).
+  3. **Owner D1, before #789's `hr25_unit` input is dispatched:** a ruling on running the unit inputs through the engines (#789's body keeps it for D1's later ruling).
+  4. D4-123 items 3.2 to 3.4 and 3.6, D4-122 items 3.2 to 3.5 and 3.9, and D4-122 item 3.1's first half (D3's N2 on #774, the node pins no names) stay open; D4-122 item 3.1's second half is closed by #781; D4-123 item 3.1 is closed by item 2.3; D4-123 item 3.5 is replaced by this entry's items 2.2 and 5 (deliverable 3's cases are merged as #787).
+- **4. Paused at the owner's word** ("pause work and update handoff"). No agent is running: D1 stopped D3's and D6's reviews of #789 before either posted. Open PRs:
+  1. #789 (HR25-B1, D4, head `4fb7d011`): D2 accepts (7062698215); D7 asks for changes (B1 above); D3's and D6's reviews start again; then D4's fix round, the confirms, D7's word on `build_only`, and D1's build-only dispatch.
+  2. #788 (2e-3, D5, head `2dcf1e19`, ready; CI green): its reviews by D6, D3 and D4 have not started.
+- **5. Next, in order, when work resumes:**
+  1. #789: D3's and D6's reviews, D1's rulings, D4's fixes, the confirms, then the build-only run.
+  2. #788: its reviews by D6, D3 and D4 start together once D3 has finished #789's review and D4 is not fixing #789 (one D4 instance, D4-89); then D5's fixes and D1's merge check.
+  3. P4-4-INT-D5-BLIND (D5), after #788: D1 first issues its brief in `docs/agent-handoffs.md`, from D4-121 item 2.5.
+  4. HR25-B2 and B3 (D4).
+- **Next decision number:** D4-125.

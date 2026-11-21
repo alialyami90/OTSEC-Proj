@@ -2118,6 +2118,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no device contact (the TCP-after-bad-CRC H-row needs the owner's authorization); no reading of session content.
 - Uncertainty or safety risks: new hand-written C++ in `DNP3.cc`'s buffer code (D3), and a scan that an attacker could use to smuggle frames (D2, D3).
 - Scratch files: `d4-hr25-*`, `d6-hr25-*`
+- Result: the design is #782 (`c3edfd8a`); deliverable 2 is #698 (`5f88510f`); deliverable 3 was split in D4-111 item 5 into #714 (`8c5e3a92`), brief P4-4-HR2325S (option (a)'s cases are its deliverable 3, #787, `1ac35c4b`) and D4's build, which D4-124 item 2.2 splits into HR25-B1 (#789), B2 and B3.
 
 ## After D4-102: the approved contracts in code (issued 2026-11-14, D4-103)
 
@@ -2848,7 +2849,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: wiring (F-027); C4 0.6 step 2.
 - Uncertainty or safety risks: a gap never starts late or closes early.
 - Scratch files: `d5-2e-*`
-- Result: 2e-1 is #774, merged as `554f9d12`; 2e-2 is #781.
+- Result: 2e-1 is #774, merged as `554f9d12`; 2e-2 is #781, merged as `e2a23806`; 2e-3 is #788.
 
 ### P4-4-HR23-JUDGE (D4; D6, D3 and D2 review; under the held-rows rule): HR-23's judge
 - Objective and rationale: `table.py` judges `out-hr23/` with the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2), before HR-23's counted run; with `likely_server_ports` printed under every configuration and the `fp/` set fed and pin-checked (D4-121 item 3.8).
