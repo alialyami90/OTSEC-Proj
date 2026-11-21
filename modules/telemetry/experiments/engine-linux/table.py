@@ -2085,9 +2085,11 @@ def held_log(path, hide):
     """PATH's lines, as in-container.sh prints them, without those about a
     capture in HIDE: a line `ENGINE failed on NAME (CFG), exit N:` and the
     lines after it up to the next such line or `ENGINE NAME (CFG) says:`,
-    and each `says:` line of NAME."""
+    and each `says:` line of NAME. Lines end at a newline only: a lone
+    carriage return in an engine's stderr does not start a line (D3's and
+    D6's findings on #776 at e40f9b45)."""
     skip = False
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    with open(path, encoding="utf-8", errors="replace", newline="\n") as fh:
         for ln in fh:
             m = ENGINE_LINE.match(ln)
             if m:

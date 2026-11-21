@@ -921,6 +921,43 @@ def in_container_problems(tmp_path, text):
     return bad
 
 
+# D3's and D6's findings at e40f9b45: a carriage return followed by text
+# of the header's form, in a left-out capture's tail line or `says:` line,
+# must not end held-log's skip. Lines as in-container.sh prints them; the
+# control opens the file with universal newlines.
+CR_LINES = {
+    "tail": (f"zeek failed on {HOLD} (zeek), exit 1:\n  x\rzeek failed on {OTHER} (zeek), exit 1:\n  {MARK}\n"
+             f"zeek failed on {OTHER} (zeek), exit 1:\n  other tail\n"),
+    "says": (f"zeek {HOLD} (zeek) says: W: x\rzeek failed on {OTHER} (zeek), exit 1:\r{MARK}\n"
+             f"zeek failed on {OTHER} (zeek), exit 1:\n  other tail\n"),
+}
+
+
+def cr_problems(m, tmp_path, capsys, which):
+    p = tmp_path / "lines.txt"
+    with open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write(CR_LINES[which])
+    m.held_log(str(p), {HOLD})
+    shown = capsys.readouterr().out
+    bad = []
+    if "other tail" not in shown:
+        bad.append("the capture not left out is missing")
+    if MARK in shown:
+        bad.append("a held capture's line reached held-log's copy")
+    return bad
+
+
+@pytest.mark.parametrize("which", CR_LINES)
+def test_a_carriage_return_in_a_held_line_does_not_end_the_skip(tmp_path, capsys, which):
+    assert cr_problems(table, tmp_path, capsys, which) == []
+
+
+@pytest.mark.parametrize("which", CR_LINES)
+def test_control_universal_newlines_leak(tmp_path, capsys, which):
+    m = load(table, 'errors="replace", newline="\\n") as fh:', 'errors="replace") as fh:', "mutant_table_cr")
+    assert cr_problems(m, tmp_path, capsys, which) == ["a held capture's line reached held-log's copy"]
+
+
 def in_container_text():
     with open(os.path.join(HERE, "in-container.sh"), encoding="utf-8") as fh:
         return fh.read().replace("\r", "")
