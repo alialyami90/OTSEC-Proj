@@ -429,7 +429,8 @@ func (s *skew) nextRecordLocked(mono time.Duration, skipWait bool) (d map[string
 
 // gapAct saves the raise of an unwatched close, then writes the gap records
 // due, in order. cn is the live connection, nil at a tick or a close. The
-// caller holds curMu. An error is a save that failed.
+// caller holds gmu, which orders every change of the gap open and the
+// record that waits with these writes. An error is a save that failed.
 func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 	if !l.skewOn() {
 		return nil
@@ -469,6 +470,10 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 	for {
 		s.mu.Lock()
 		d, wait := s.nextRecordLocked(l.opt.Monotonic(), skip)
+		var snap waitRec
+		if wait {
+			snap = *s.wt.wait
+		}
 		s.mu.Unlock()
 		if d == nil {
 			return nil
@@ -482,7 +487,12 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 		}
 		s.mu.Lock()
 		if wait {
-			s.wt.wait = nil // the next save of the cursor clears it there
+			// The next save of the cursor clears it there. A step found
+			// while it was written marks it again, and it is written again
+			// with the mark: twice, never without it.
+			if w := s.wt.wait; w != nil && *w == snap {
+				s.wt.wait = nil
+			}
 		} else if s.wt.open != nil {
 			s.wt.open.written = true
 		}
@@ -529,8 +539,8 @@ func (l *Link) connEnded(ctx context.Context, accepted bool) {
 	if !l.skewOn() {
 		return
 	}
-	l.curMu.Lock()
-	defer l.curMu.Unlock()
+	l.gmu.Lock()
+	defer l.gmu.Unlock()
 	l.measureStep()
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
@@ -552,8 +562,8 @@ func (l *Link) SensorFailed(ctx context.Context) {
 	if !l.skewOn() {
 		return
 	}
-	l.curMu.Lock()
-	defer l.curMu.Unlock()
+	l.gmu.Lock()
+	defer l.gmu.Unlock()
 	l.measureStep()
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
@@ -567,10 +577,13 @@ func (l *Link) SensorFailed(ctx context.Context) {
 }
 
 // gapTick is the gap model at the node's tick: a silent gap that falls
-// due, and the records due.
+// due, and the records due. It never waits for a frame: when a frame holds
+// gmu, that frame writes what is due, and the next tick tries again.
 func (l *Link) gapTick(ctx context.Context) {
-	l.curMu.Lock()
-	defer l.curMu.Unlock()
+	if !l.gmu.TryLock() {
+		return
+	}
+	defer l.gmu.Unlock()
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()

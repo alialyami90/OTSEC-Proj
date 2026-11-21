@@ -212,6 +212,10 @@ type Link struct {
 	// lateShortDue: sensor-late-index-short is due, raised by Result
 	// once it has left the link's lock.
 	lateShortDue atomic.Bool
+	// gmu orders the gap model's changes of the gap open and the record
+	// that waits with their writes (gap.go). It is taken after curMu and
+	// before cmu; the node's tick only tries it.
+	gmu sync.Mutex
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).

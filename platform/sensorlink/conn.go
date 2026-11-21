@@ -1288,11 +1288,14 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 	l.stats.HeartbeatMono = l.opt.Monotonic()
 	l.mu.Unlock()
 	cn.cur.Taken, cn.pending = max(cn.cur.Taken, n), true
-	l.place(cn, h, late)
 	// An unwatched close's raise is saved before its record is written; a
 	// save that fails closes store, and the raise is saved with the next
 	// save (CH-18).
-	if err := l.gapAct(ctx, cn); err != nil {
+	l.gmu.Lock()
+	l.place(cn, h, late)
+	err := l.gapAct(ctx, cn)
+	l.gmu.Unlock()
+	if err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: a gap's raise was not saved: %v", l.cfg.SensorID, err))
 		return netobs.CloseStore
 	}

@@ -1387,3 +1387,102 @@ func TestGapNewRunInFlatCut(t *testing.T) {
 		}
 	})
 }
+
+// TestGapRaiseNotSaved (self-check item 3): the save of an unwatched
+// close's raise fails at the heartbeat that closes it: the connection
+// closes store, and the record is written only once a later save holds
+// the raise (here the save at the connection's end), and once. Control:
+// the record written before the raise is saved, which the cursor does not
+// hold when the record is written.
+func TestGapRaiseNotSaved(t *testing.T) {
+	run := func(t *testing.T) (g *gsrc, reason string, closed int, heldAtWrite bool) {
+		g = newGsrc(t)
+		g.live(6, true)
+		g.idle(70 * time.Second)
+		failed := false
+		cursorEncodeFault = func(c *Cursor) error {
+			if c.Held != nil && !failed {
+				failed = true
+				return errDown
+			}
+			return nil
+		}
+		t.Cleanup(func() { cursorEncodeFault = nil })
+		g.r.sink.refuse = func(typ string, d map[string]string) bool {
+			if typ == EventCoverageGap && d["state"] == "closed" {
+				heldAtWrite = cursorNow(t, g.r.cs).Held != nil
+			}
+			return false
+		}
+		g.r.pass(10 * time.Second)
+		g.send(g.mk(true))
+		reason = g.p.end() // store when the node closed it first
+		for _, d := range g.gaps() {
+			if d["state"] == "closed" {
+				closed++
+			}
+		}
+		return g, reason, closed, heldAtWrite
+	}
+	_, reason, closed, held := run(t)
+	if reason != netobs.CloseStore || closed != 1 || !held {
+		t.Fatalf("reason %q, %d closed records, the cursor holding the gap at the write %v: want store, one, true", reason, closed, held)
+	}
+	t.Run("control: the record first", func(t *testing.T) {
+		withSeam(t, &gapRecordFirst)
+		if _, _, _, held := run(t); held {
+			t.Fatal("the control's record was written with the raise saved")
+		}
+	})
+}
+
+// TestGapBoundaries (self-check item 2): each comparison of a time or a
+// count in the gap model at its bound. The chain's spacing at exactly
+// HeartbeatGapMax passes and 1 ns over fails; its count at exactly the
+// length passes and 1 ns of length over fails; a silent gap opens at
+// exactly HeartbeatGapMax from W's receipt and not 1 ns before; a link
+// gap's open record is due at exactly 60 s from W and not 1 ns before.
+func TestGapBoundaries(t *testing.T) {
+	blind := DefaultBlindAfter
+	at0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	beat := func(seq int, at time.Time, packets uint64) *netobs.Heartbeat {
+		return hbWith(seq, func(h *netobs.Heartbeat) { h.AtUTC = canonUTC(at) }, pk(packets, "up"))
+	}
+	chainAfter := func(gap time.Duration) bool {
+		var s skew
+		s.wt.live = map[string]*ifLive{"eth1": {riseAt: at0}}
+		s.startChainLocked(nil, beat(1, at0, 100), at0, 0, blind)
+		s.extendChainLocked(beat(2, at0.Add(gap), 200), at0.Add(gap), blind)
+		return s.wt.ch.ok
+	}
+	if !chainAfter(HeartbeatGapMax) || chainAfter(HeartbeatGapMax+1) {
+		t.Fatal("part 3 at its bound")
+	}
+	covers := func(length time.Duration) bool {
+		var s skew
+		cn := &conn{cur: &Cursor{RunID: testRun}}
+		s.wt.ch = chain{ok: true, run: testRun, n: 2}
+		s.wt.open = &openGap{cause: CauseLink, causes: gapCauseBit(CauseLink)}
+		return s.chainCoversLocked(cn, length)
+	}
+	if !covers(2*HeartbeatGapMax) || covers(2*HeartbeatGapMax+1) {
+		t.Fatal("part 4 at its bound")
+	}
+	silentAt := func(since time.Duration) bool {
+		var s skew
+		s.wt.w, s.wt.placed, s.wt.current, s.wt.wRecv = at0, true, true, time.Hour
+		return s.silentDueLocked(at0, time.Hour+since)
+	}
+	if !silentAt(HeartbeatGapMax) || silentAt(HeartbeatGapMax-1) {
+		t.Fatal("the silent cause at its bound")
+	}
+	dueAt := func(since time.Duration) bool {
+		var s skew
+		s.wt.open = &openGap{from: at0, cause: CauseLink, causes: gapCauseBit(CauseLink), openMono: time.Hour, wMono: time.Hour}
+		d, _ := s.nextRecordLocked(time.Hour+since, false)
+		return d != nil
+	}
+	if !dueAt(gapOpenAfter) || dueAt(gapOpenAfter-1) {
+		t.Fatal("the open record's 60 s at its bound")
+	}
+}
