@@ -32,13 +32,14 @@ import (
 //	prior: runs_skipped, records_lost, previous_end (c or u), started_by,
 //	  owed mark, span count (6), and 8 x (from, to, cut end, mark) (32)
 //
-// This build fills the position, write_no, the digest, Ds, newest_seq, the
-// heartbeat baselines (section 1.8), W with its seq and at_utc, R with the
-// interfaces' packets and last rises (INT-D5 2e-1, watch.go), M (section
-// 1.5), the spans and prior. W's causes and the gap held for the floor
-// are the gap model's later parts (2e-2): they are written "-", and a
-// cursor that carries any of them is refused, so a later build's cursor
-// is never read as this one's. W and its seq and at_utc are written
+// Every field is filled: W's causes and the gap held for the floor are
+// the gap model's (INT-D5 2e-2, gap.go). W's causes are the causes of the
+// gap open now, as bits of gapCauses, "-" when none is open; the gap held
+// for the floor is six fields, all "-" or all filled: from and to (Unix
+// nanoseconds, in either order, since a step back can put the end before
+// the start), the cause at the open (a token of gapCauses), the causes
+// (bits), the gaps it carries (at least 1), and its mark (1
+// clock_stepped, 2 from_bound). W and its seq and at_utc are written
 // together or not at all; the interface count is "-" when none is held,
 // and its slots past the count "-". Its largest is 2,026 bytes (section
 // 1.4), within MaxLinkCursorBytes by construction.
@@ -48,9 +49,6 @@ const (
 	cursorAbsent     = "-"
 	cursorSpanFields = 4
 )
-
-// The reserved fields this build writes "-": their first index and count.
-var cursorReserved = [][2]int{{21, 1}, {40, 6}}
 
 // The egress mark (section 1.8): whether the run's baseline heartbeat
 // carried egress_check, "-" when no baseline is held.
@@ -111,9 +109,7 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 		return nil, fmt.Errorf("sensorlink: the egress mark %q cannot be saved", c.Egress)
 	}
 	f = appendWatch(f, c)
-	for range 6 { // the gap held for the floor: 2e-2's
-		f = append(f, cursorAbsent)
-	}
+	f = appendHeld(f, c.Held)
 	if c.M.IsZero() {
 		f = append(f, cursorAbsent)
 	} else {
@@ -254,13 +250,6 @@ func decodeCursor(b []byte) (*Cursor, error) {
 	if len(f) != cursorFields || f[0] != cursorFormTag {
 		return nil, errCursorForm
 	}
-	for _, r := range cursorReserved {
-		for i := r[0]; i < r[0]+r[1]; i++ {
-			if f[i] != cursorAbsent {
-				return nil, fmt.Errorf("%w: field %d is filled, which this build does not read", errCursorForm, i)
-			}
-		}
-	}
 	bad := false
 	dec := func(i int) uint64 {
 		if !cursorDecimal.MatchString(f[i]) {
@@ -290,7 +279,7 @@ func decodeCursor(b []byte) (*Cursor, error) {
 		c.Digest = f[10]
 		bad = bad || !cursorDigest.MatchString(c.Digest)
 	}
-	if !readWatch(f, c) {
+	if !readWatch(f, c) || !readHeld(f, c) {
 		return nil, errCursorForm
 	}
 	if f[46] != cursorAbsent {
@@ -374,7 +363,7 @@ func allAbsent(s []string) bool {
 	return true
 }
 
-// appendWatch is W, its seq, its at_utc and its causes ("-", 2e-2's), R,
+// appendWatch is W, its seq, its at_utc and its causes, R,
 // the interface count and its 8 slots (fields 18 to 39). Every time is
 // clamped to the field's range, as M is, so a sensor time out of it never
 // stops a save.
@@ -390,7 +379,12 @@ func appendWatch(f []string, c *Cursor) []string {
 	} else {
 		f = append(f, tm(c.W), strconv.FormatUint(c.WSeq, 10), strconv.FormatInt(clampNano(c.WAtUTC), 10))
 	}
-	f = append(f, cursorAbsent, tm(c.R))
+	if c.Causes == 0 {
+		f = append(f, cursorAbsent)
+	} else {
+		f = append(f, strconv.FormatUint(uint64(c.Causes), 10))
+	}
+	f = append(f, tm(c.R))
 	if len(c.Ifaces) == 0 {
 		f = append(f, cursorAbsent)
 	} else {
@@ -431,6 +425,11 @@ func readWatch(f []string, c *Cursor) bool {
 		ok = ok && err == nil
 		c.WSeq = v
 	}
+	if f[21] != cursorAbsent {
+		v, good := causeBits(f[21])
+		ok = ok && good
+		c.Causes = v
+	}
 	if f[22] != cursorAbsent {
 		c.R = tm(22)
 	}
@@ -467,4 +466,62 @@ func clampNano(t time.Time) int64 {
 		return math.MaxInt64
 	}
 	return t.UnixNano()
+}
+
+// appendHeld is the gap held for the floor (fields 40 to 45).
+func appendHeld(f []string, g *HeldGap) []string {
+	if g == nil {
+		return append(f, cursorAbsent, cursorAbsent, cursorAbsent, cursorAbsent, cursorAbsent, cursorAbsent)
+	}
+	m := 0
+	if g.Stepped {
+		m |= 1
+	}
+	if g.Bound {
+		m |= 2
+	}
+	return append(f, strconv.FormatInt(clampNano(g.From), 10), strconv.FormatInt(clampNano(g.To), 10), g.Cause,
+		strconv.FormatUint(uint64(g.Causes), 10), strconv.FormatUint(g.Gaps, 10), strconv.Itoa(m))
+}
+
+// readHeld reads fields 40 to 45 into c, false for any other form.
+func readHeld(f []string, c *Cursor) bool {
+	s := f[40:46]
+	if allAbsent(s) {
+		return true
+	}
+	var t [2]time.Time
+	for i := range 2 {
+		if !cursorDecimal.MatchString(s[i]) {
+			return false
+		}
+		n, err := strconv.ParseInt(s[i], 10, 64)
+		if err != nil {
+			return false
+		}
+		t[i] = time.Unix(0, n).UTC()
+	}
+	bits, ok := causeBits(s[3])
+	if !ok || gapCauseBit(s[2]) == 0 || !cursorDecimal.MatchString(s[4]) {
+		return false
+	}
+	n, err := strconv.ParseUint(s[4], 10, 64)
+	m, err2 := strconv.Atoi(s[5])
+	if err != nil || n == 0 || err2 != nil || m < 0 || m > 3 || s[5] != strconv.Itoa(m) {
+		return false
+	}
+	c.Held = &HeldGap{From: t[0], To: t[1], Cause: s[2], Causes: bits, Gaps: n, Stepped: m&1 != 0, Bound: m&2 != 0}
+	return true
+}
+
+// causeBits reads a set of causes, 1 to the full set.
+func causeBits(s string) (uint16, bool) {
+	if !cursorDecimal.MatchString(s) {
+		return 0, false
+	}
+	v, err := strconv.ParseUint(s, 10, 16)
+	if err != nil || v == 0 || v >= 1<<len(gapCauses) {
+		return 0, false
+	}
+	return uint16(v), true
 }

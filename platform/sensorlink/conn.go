@@ -187,6 +187,11 @@ type Cursor struct {
 	WAtUTC time.Time   `json:"w_at,omitzero"`
 	R      time.Time   `json:"r,omitzero"`
 	Ifaces []IfaceMark `json:"ifaces,omitempty"`
+	// Causes are the causes of the gap open now, held in W, as bits of
+	// gapCauses; Held is the gap held for the floor (CH-18; gap.go). Both
+	// written by Link.encode at each write, as W is.
+	Causes uint16   `json:"causes,omitempty"`
+	Held   *HeldGap `json:"held,omitempty"`
 }
 
 func checkCursorBytes(b []byte) error {
