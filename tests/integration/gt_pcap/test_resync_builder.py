@@ -149,7 +149,7 @@ def test_every_case_and_twin_is_built_and_nothing_else():
         if r["twins"] != "-":
             want |= {f"{r['case']}--{t}" for t in r["twins"].split(",")}
     want.add("dnp3-resync-udp-report-mark-state--control")
-    assert set(caps()) == want and len(want) == 166 + 189 + 1
+    assert set(caps()) == want and len(want) == 168 + 189 + 1
     # The prose cells are exactly these, and every other cell is read token by token.
     assert set(rc.IRREGULAR) == IRREGULAR
     for r in rc.CASES:
@@ -341,7 +341,8 @@ def check_failure(c, u):
         if spec in ("badchunk", "P", "open+badchunk", "firopen"):
             apdu = dnp3.request(s, dnp3.READ, P_OBJ) if m else dnp3.response(s)
         elif spec == "throw":
-            apdu = bytes([0xC0 | s, 0x01, 0x3C]) if m else bytes([0xC0 | s, 0x81, 0x00])
+            # From o, badobj (judge-twins; D1's ruling 2 on #787).
+            apdu = bytes([0xC0 | s, 0x01, 0x3C]) if m else dnp3.response(s) + b"\x3c"
         else:
             apdu = dnp3.request(s, dnp3.READ, Q_OBJ) if m else dnp3.response(s)
         if spec in ("open+badchunk", "firopen"):
@@ -626,6 +627,17 @@ def test_confirmed_user_data_follows_rst_with_fcb_1_and_a_retry_repeats_it():
     assert retry.data == units(c, lambda x: x.name == "W1c")[0].data
     c = cap("dnp3-resync-udp-link-retry-middle")
     assert [u.data[3] for u in units(c, lambda x: x.name in ("W1c", "W2c", "retry", "W3c"))] == [0xF3, 0xD3, 0xD3, 0xF3]
+
+
+def test_the_builder_refuses_a_retry_of_unconfirmed_user_data():
+    """(retry, same FCB) repeats confirmed user data with FCV set, the only repeat design 2.3 discards (D3's N3 on
+    #787): every built retry does, and the builder refuses one of unconfirmed W2."""
+    for _, c in caps().values():
+        assert all(u.data[3] & 0x5F == 0x53 for u in units(c, lambda x: x.kind == "retry")), c.name
+    r = ROWS["dnp3-resync-udp-repeat-unconfirmed"]
+    c = rc.Capture(r["case"], None, "udp", rc.CASES.index(r), None)
+    with pytest.raises(AssertionError, match="not confirmed"):
+        rc.interpret(c, "P R | W1 | W2 | W2 (retry, same FCB) | W3 | Q R")
 
 
 def test_link_only_frames_are_the_functions_builder_msgs_names():
@@ -1037,6 +1049,11 @@ def confirmed(ctrl):
     return ctrl & 0x5F == 0x53
 
 
+# Design 2.3's compare of a repeat with the last segment, the whole segment, in each arm.
+# test_the_cells_kill_the_compares_length_mutants replaces one arm's (D3's N1 on #787).
+SAME = {"fragment": lambda new, last: new == last, "after FIN": lambda new, last: new == last}
+
+
 def rule(st, u):
     """Design 2.3 for one whole frame with valid CRCs; its verdict."""
     ctrl, user = u.data[3], app_of(u.data)
@@ -1047,7 +1064,7 @@ def rule(st, u):
     elif st.frag and n == (st.tseq + 1) & 0x3F:
         verdict = "accept"
     elif (st.frag or st.after_fin) and confirmed(ctrl) and st.fcb == (ctrl >> 5) & 1 and n == st.tseq \
-            and user == st.last:
+            and SAME["fragment" if st.frag else "after FIN"](user, st.last):
         return "discard"   # a link-layer retry, the whole segment identical: no state changes
     elif st.frag:
         st.clear()
@@ -1129,6 +1146,25 @@ def test_the_new_cells_count_what_the_rule_gives():
                for r in NEW) == 17
 
 
+# A compare over less than the whole segment (D3's N1 on #787): over the last segment's length, over the new
+# frame's, or over the shorter of the two.
+LENGTH_MUTANTS = {
+    "last-length": lambda new, last: new[:len(last)] == last,
+    "new-length": lambda new, last: new == last[:len(new)],
+    "shorter": lambda new, last: new[:len(last)] == last[:len(new)],
+}
+
+
+@pytest.mark.parametrize("arm", sorted(SAME))
+@pytest.mark.parametrize("mutant", sorted(LENGTH_MUTANTS))
+def test_the_cells_kill_the_compares_length_mutants(arm, mutant, monkeypatch):
+    """Each length mutant of the compare, in either arm, changes a deliverable 3 cell's count: inside a fragment
+    items 9b and 9c, after FIN item 10b's shorter and longer variants (D3's N1 on #787)."""
+    monkeypatch.setitem(SAME, arm, LENGTH_MUTANTS[mutant])
+    with pytest.raises(AssertionError):
+        check_new_cells(NEW)
+
+
 def check_numbered_from(c):
     """m numbered from n: m's next frame after the marker carries n, and W's frames step on, mod 64."""
     build = ROWS[c.case]["build"]
@@ -1183,6 +1219,20 @@ LABELLED = ["dnp3-resync-udp-repeat-after-reset", "dnp3-resync-udp-link-retry-mi
 def test_builder_seq_labels():
     for case in LABELLED:
         check_labels(cap(case))
+
+
+def check_reset_miss(c):
+    """18c (D2's N1 on #787): after the second Reset Link States, the repeat carries W2c's FCB 0, not the FCB 1 a
+    secondary expects after a reset, and W3c carries FCB 1. So a conforming device drops the repeat, runs W, and
+    the cell calls W a counted miss; the capture holds no R(W) (inference, not added)."""
+    ms = units(c, lambda x: x.end == "m" and x.name in ("Rst", "W1c", "W2c", "retry", "W3c"))
+    assert [u.name for u in ms] == ["Rst", "W1c", "W2c", "Rst", "retry", "W3c"], c.name
+    assert [(u.data[3] >> 5) & 1 for u in (ms[1], ms[2], ms[4], ms[5])] == [1, 0, 0, 1], c.name
+    assert not units(c, lambda x: x.name == "R(W)") and "W is a counted miss" in ROWS[c.case]["a"], c.name
+
+
+def test_the_repeat_after_reset_is_a_counted_miss():
+    check_reset_miss(cap("dnp3-resync-udp-repeat-after-reset"))
 
 
 def seq_unit(case, name):
@@ -1345,6 +1395,22 @@ def control_reset_reads_secondary(mp):
     return lambda: check_labels(c)
 
 
+def control_otherend_throw_short(mp):
+    """The other end's throw as C0h 81h 00h, 3 octets, which rule (A) parses (judge-twins before D1's ruling 2 on #787)."""
+    c, u = seq_unit("dnp3-resync-udp-app-parse--otherend", "X")
+    t, s = app_of(u.data)[0], app_of(u.data)[1] & 0x0F
+    u.data = frame_from("o", "udp", bytes([t, 0xC0 | s, 0x81, 0x00]))
+    return lambda: check_failure(c, u)
+
+
+def control_reset_repeat_fcb_1(mp):
+    """18c's repeat after the reset with FCB 1, the FCB a secondary expects there: a device would take it as new data."""
+    c = fresh("dnp3-resync-udp-repeat-after-reset")
+    (u,) = units(c, lambda x: x.name == "retry")
+    u.data = rc.link_frame(u.data[3] | 0x20, 10, 5, rc.user_data(u.data))
+    return lambda: check_reset_miss(c)
+
+
 def control_fc_label_without_32(mp):
     """fc's label rule with 32 left out of the object arms."""
     mp.setattr(rc, "OBJECT_ARM", rc.OBJECT_ARM - {32})
@@ -1360,7 +1426,8 @@ def test_the_controls_pass_unmutated():
     check_solved_headers(cap("dnp3-resync-udp-crc-magic-2"))
     for name, unit in (("dnp3-resync-udp-chunk-crc", "X"), ("dnp3-resync-udp-header-crc", "X"),
                        ("dnp3-resync-udp-magic", "X"), ("dnp3-resync-udp-embedded-frame", "X"),
-                       ("dnp3-resync-tcp-embedded-tail", "X"), ("dnp3-resync-udp-fragment-limit", "X/1")):
+                       ("dnp3-resync-tcp-embedded-tail", "X"), ("dnp3-resync-udp-fragment-limit", "X/1"),
+                       ("dnp3-resync-udp-app-parse--otherend", "X")):
         c = fresh(name)
         check_failure(c, next(x for x in units(c) if x.name == unit))
     check_sequences(fresh("dnp3-resync-udp-magic"))
@@ -1384,6 +1451,7 @@ def test_the_controls_pass_unmutated():
     check_numbered_from(fresh("dnp3-resync-udp-seq-wrap"))
     for case in LABELLED:
         check_labels(fresh(case))
+    check_reset_miss(fresh("dnp3-resync-udp-repeat-after-reset"))
 
 
 @pytest.mark.parametrize("control", sorted(CONTROLS))

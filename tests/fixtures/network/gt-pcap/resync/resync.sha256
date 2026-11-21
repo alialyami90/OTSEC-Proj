@@ -45,7 +45,7 @@ f3c1dd3177e85f004e80ea91856dea82cbc686357b2f99a940c3070324c0b798  dnp3-resync-ud
 8bfecbe1697edc8f3f6ebbadf77aec19443ae3e1b23499c44dc1cc06794b50aa  dnp3-resync-udp-app-parse.pcap
 858d538993c099ba29daa34b8f377fcaac3935aa6827cbba3f0888e7456a9b6b  dnp3-resync-udp-app-parse--nofail.pcap
 867a0515e0253fd3122dbe7e336b90e9bb05e66e5811326dba314829e9b84ef1  dnp3-resync-udp-app-parse--nowrite.pcap
-463e76ca0b405f48436e962085b87eb8532093c9472a364a3875780ad04ae0c7  dnp3-resync-udp-app-parse--otherend.pcap
+89e5ee437977d7b3e9f9ddb04a20f87402019ab7342c437b8b9441308a9316d0  dnp3-resync-udp-app-parse--otherend.pcap
 f9679c4cee8170152dc6a48e0855d22e6a7ed2d73ce81f4d67afe9e284361f93  dnp3-resync-udp-truncated.pcap
 80aa0eff759292795325584a22d6051834c8b01717928426a654afcf790287a0  dnp3-resync-udp-truncated--nofail.pcap
 0f8bbb0a4724af165fb33f652db31deb79be3425206c13ed3be2eac8a86392f3  dnp3-resync-udp-truncated--nowrite.pcap
@@ -97,7 +97,7 @@ d5974257b80a475afa80d4fd29770733a9c3283ccaa74d58e85a2f6d8df82e23  dnp3-resync-tc
 62a4170f3189af8678f7875dfcd3032f3c2cb87ec02547c34f8d24c3786811c0  dnp3-resync-tcp-app-parse.pcap
 117b1564f77a68120e7ccd7a522fcf825cc5d1113c286066a88d9397b56ffa81  dnp3-resync-tcp-app-parse--nofail.pcap
 78b1bee33c6fe2ff243a1faf92f136c30614cc649a9740f5cf5f85b627752796  dnp3-resync-tcp-app-parse--nowrite.pcap
-c21c2ce1830643a9aeae85df3484a57a06f4ec3a110cdea636592439bdd67358  dnp3-resync-tcp-app-parse--otherend.pcap
+e18cf9eadb7f0cc89cd9e1b3f3c768bd7a4dd13f8f8e929929347c8551d39919  dnp3-resync-tcp-app-parse--otherend.pcap
 820e36d7fcba395b8beba4b2c9914ff41c4d7493642b6463928f76736848ab44  dnp3-resync-udp-chunk-crc-same-datagram.pcap
 9e7015795e78bb80e1d6058bc24e16c3dde3f56c238707f7a0c469525ac3edf7  dnp3-resync-udp-chunk-crc-same-datagram--nofail.pcap
 613114ffc0a644b227e83005c3399023ed4057cd7c0ff761be8b0e34fcfd01c7  dnp3-resync-udp-chunk-crc-same-datagram--nowrite.pcap
@@ -354,3 +354,5 @@ f3bfda8b543f5940bd745666b5ad33e9117edc14c250419137de848070744587  dnp3-resync-ud
 6ae5041436fdef0efa7e626221bc4b2af0741e1a84f5f3a461097b7afba7da62  dnp3-resync-udp-repeat-unconfirmed.pcap
 296d71e0beba903695309e74e3cd9daeeb6e9335b23f4a166573161eb52d0146  dnp3-resync-udp-repeat-fcb-toggled.pcap
 761834cf40bffdefc1b4293b39c1cfd3e537cfe7bf18896839b31d044072ea71  dnp3-resync-udp-repeat-after-reset.pcap
+c0b04f4e720d3981a4c5f703551c26271c4bd60e56455348dd8887800e2eadda  dnp3-resync-udp-link-retry-last-shorter.pcap
+fb07daee9822fd0c515186791d95ec104e85fd170a8a61455b0dfff822044614  dnp3-resync-udp-link-retry-last-longer.pcap

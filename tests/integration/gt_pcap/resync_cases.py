@@ -428,8 +428,8 @@ class Flow:
             msg.name = "P"
             return [units(msg, [name])]
         if spec == "throw":
-            # From o: C0h 81h 00h, short of the 4-octet response header (judge-twins).
-            msg = message("throw", o_apdu=lambda s: bytes([0xC0 | s, 0x81, 0x00]))
+            # From o: badobj, a 129 of 5 octets (judge-twins; D1's ruling 2 on #787).
+            msg = message("throw", o_apdu=lambda s: dnp3.response(s, objects=b"\x3c"))
             msg.why = "throws"
             return [units(msg, [name])]
         if spec in ("badchunk", "cut"):
@@ -865,6 +865,8 @@ def token_groups(f, t, twin, build, last_frame):
         return []
     if t.group("retry"):
         prev = last_frame[name]
+        # Design 2.3 discards only a repeat of confirmed user data with FCV set (D3's N3 on #787).
+        assert prev.data[3] & 0x5F == 0x53, f"{name} (retry, same FCB) repeats a frame that is not confirmed"
         u = Unit("retry", prev.end, prev.data, msg=prev.msg, kind="retry")
         prev.msg.units.append(u)
         return [[u]]
