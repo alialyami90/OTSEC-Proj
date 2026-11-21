@@ -317,11 +317,12 @@ func TestDetectorLaterCheckpoint(t *testing.T) {
 // unknown degraded value moves with the minor, to 0.4 now that this build
 // is 0.3, whose own records refuse it strictly: a stored 0.4 alert whose
 // coverage.degraded holds a value this build does not know is read and not
-// skipped, and a stored 0.4 observation with that value is taken by the
-// detector and not refused. The controls are D4's on contracts/netobs:
-// each value refused at every minor makes the restore skip the alert, or
-// the detector refuse the observation; and the value left at 0.3, this
-// build's own minor, which the restore skips and the detector refuses.
+// skipped. A stored observation one C13 minor above this build's, computed,
+// is refused at judging under later-minor since C4 0.6 step 3
+// (docs/phase4/D4-c4-0.6-proposal.md section 3.2), and still taken. The
+// controls are D4's on contracts/netobs: each value refused at every minor
+// makes the restore skip the alert; and the value left at 0.3, this
+// build's own minor, which the restore skips.
 func TestDetectorBridgeLaterRecords(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
@@ -370,7 +371,7 @@ func TestDetectorBridgeLaterRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.ID.Seq = 0
-	e.Netobs = laterMinor(t, e.Netobs, "otsec.netobs/0.4", map[string]string{"seq": `"2"`,
+	e.Netobs = laterMinor(t, e.Netobs, laterID(t, netobs.SelfIdentifier()), map[string]string{"seq": `"2"`,
 		"made_utc": `"2026-11-07T10:00:00.250000Z"`, "coverage.degraded": `["prp-late"]`})
 	b, err := json.Marshal(e)
 	if err != nil {
@@ -388,7 +389,7 @@ func TestDetectorBridgeLaterRecords(t *testing.T) {
 	defer r.Close()
 	tick(t, r)
 	d := detectorStatus(t, st)
-	if !d.Restored || d.AlertsUnreadable != 0 || countAlarms(st, AlarmAlertUnreadable) != 0 || d.Through != 2 || d.Refused != 0 {
+	if !d.Restored || d.AlertsUnreadable != 0 || countAlarms(st, AlarmAlertUnreadable) != 0 || d.Through != 2 || d.Refused != 1 || d.RefusedBy[RefusedLaterMinor] != 1 {
 		t.Fatalf("status %+v, %d unreadable alarms", d, countAlarms(st, AlarmAlertUnreadable))
 	}
 }

@@ -80,11 +80,21 @@ const (
 	// refusal is counted in observations_refused_by
 	// (docs/phase4/D5-refusal-alarms-options.md section 2, D4-120 item 2.5).
 	AlarmObservationRefused = "network-observation-refused"
+	// AlarmSessionRefused: a collection.run stamped with a later C4 minor
+	// than this build's was refused at judging, so its session was not
+	// handed to the detector. Raised at the first such refusal in the
+	// node's process run, and counted, as every collection.run that is not
+	// read, in runs_session_missing, in memory only
+	// (docs/phase4/D4-c4-0.6-proposal.md section 3.1; D1's ruling 1 on
+	// #768).
+	AlarmSessionRefused = "network-session-refused"
 )
 
 // The reasons of a refused stored observation (C4-0.6-1's reason.<r>).
-// later-minor comes with C4 0.6 step 3.
 const (
+	// RefusedLaterMinor: observationOf refused the record with
+	// netobs.ErrLaterMinor, a later C4 or C13 minor than this build's.
+	RefusedLaterMinor = "later-minor"
 	// RefusedMalformed: observationOf refused the record.
 	RefusedMalformed = "malformed"
 	// RefusedByDetector: observationOf read it and Detector.Observe
@@ -201,11 +211,12 @@ type netDetector struct {
 	// lagging: AlarmDetectorLag is raised for this stretch.
 	lagging bool
 	// rc are the durable counts of the refused observations (netrefused.go),
-	// and refusedRaised holds the reasons whose AlarmObservationRefused is
-	// raised. r.detector is set once per process, so both last the
-	// process run.
-	rc            refusedCounts
-	refusedRaised map[string]bool
+	// refusedRaised holds the reasons whose AlarmObservationRefused is
+	// raised, and sessionRefused whether AlarmSessionRefused is. r.detector
+	// is set once per process, so all three last the process run.
+	rc             refusedCounts
+	refusedRaised  map[string]bool
+	sessionRefused bool
 }
 
 // unsentAlert is what the node keeps of an unsent alert beside its record:
@@ -387,10 +398,18 @@ func (r *Runtime) startDetector(ctx context.Context) (err error) {
 // to fail the start there, after a restore that failed.
 var rebuildIndex = (*Runtime).rebuildFrameIndex
 
-// observationOf decodes a stored observation.
+// observationOf decodes a stored observation. An event that event.Decode
+// reads but Validate refuses is refused with netobs.ErrLaterMinor, ahead of
+// the Validate error, when its C4 stamp is a later minor than this build's;
+// with any other stamp the Validate error is returned (C4 0.6 section 3.1).
 func observationOf(st c5.Stored) (*netobs.Observation, error) {
 	e, err := event.Decode(st.Event)
 	if err != nil {
+		if e != nil {
+			if lerr := netobs.CheckEventMinor(e); errors.Is(lerr, netobs.ErrLaterMinor) {
+				return nil, lerr
+			}
+		}
 		return nil, err
 	}
 	return netobs.ObservationFromEvent(e)
@@ -669,6 +688,9 @@ func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector, dv *drive)
 	for _, e := range runs {
 		if e.bad {
 			r.intake.missing() // D3 on #590
+			if e.later {
+				r.refuseSession(nd, e.seq)
+			}
 		} else {
 			if r.observeTo(ctx, nd, min(e.s.AfterSeq, limit), dv); len(nd.unsent) > 0 || dv.spent {
 				return dv.spent && len(nd.unsent) == 0
@@ -686,11 +708,13 @@ func (r *Runtime) driveDetector(ctx context.Context, nd *netDetector, dv *drive)
 }
 
 // runEntry is a collection.run record on the health stream: its session,
-// or bad when it doesn't parse.
+// or bad when it doesn't parse, and later when it was refused with
+// netobs.ErrLaterMinor.
 type runEntry struct {
-	seq c5.Seq
-	s   RunSession
-	bad bool
+	seq   c5.Seq
+	s     RunSession
+	bad   bool
+	later bool
 }
 
 // newSessions reads the collection.run records with a session after the
@@ -713,7 +737,7 @@ func (r *Runtime) newSessions(ctx context.Context, hdb interface {
 				continue
 			}
 			if s, ok, err := runSessionOf(st); err != nil {
-				out = append(out, runEntry{seq: st.Key.Seq, bad: true})
+				out = append(out, runEntry{seq: st.Key.Seq, bad: true, later: errors.Is(err, netobs.ErrLaterMinor)})
 			} else if ok {
 				out = append(out, runEntry{seq: st.Key.Seq, s: s})
 			}
@@ -817,7 +841,10 @@ func (r *Runtime) refuseObservation(nd *netDetector, seq c5.Seq, o *netobs.Obser
 		return // the seq rule: a replay's refusal the newest counts event holds
 	}
 	reason := RefusedByDetector
-	if decodeErr != nil {
+	switch {
+	case errors.Is(decodeErr, netobs.ErrLaterMinor):
+		reason = RefusedLaterMinor
+	case decodeErr != nil:
 		reason = RefusedMalformed
 	}
 	nd.rc.count(reason, uint64(seq), r.opt.Mono())
@@ -826,10 +853,20 @@ func (r *Runtime) refuseObservation(nd *netDetector, seq c5.Seq, o *netobs.Obser
 	}
 	nd.refusedRaised[reason] = true
 	var detail string
-	if decodeErr != nil {
+	switch {
+	case reason == RefusedLaterMinor:
+		// The stamp is named by the Field of the error ErrLaterMinor
+		// matched, which is returned alone: schema for the C4 envelope,
+		// netobs.schema for the C13 body.
+		stamp := "a C4 minor above this build's " + event.Identifier
+		if e := (*netobs.Error)(nil); errors.As(decodeErr, &e) && e.Field == "netobs.schema" {
+			stamp = "a C13 minor above this build's " + netobs.SelfIdentifier()
+		}
+		detail = fmt.Sprintf("a stored observation was written by a later build (%s), so this build refused it at judging: the detector did not judge it and raised no network alert for it. Every such record is counted in status (observations_refused_by) and on the health stream. First at seq %d. Remedy: move this node forward to a build that reads it; records already passed are not judged again.", stamp, seq)
+	case decodeErr != nil:
 		code, field := refusalAt(decodeErr)
 		detail = fmt.Sprintf("a stored observation did not decode (%s at %s), so the detector did not judge it and raised no network alert for it. Every such record is counted. First at seq %d.", code, field, seq)
-	} else {
+	default:
 		// Observe's errors are untyped, so the wording is chosen from the
 		// record, never from the error's text.
 		why := "no readable time"
@@ -839,6 +876,19 @@ func (r *Runtime) refuseObservation(nd *netDetector, seq c5.Seq, o *netobs.Obser
 		detail = fmt.Sprintf("the detector refused a stored observation (%s), so it raised no network alert for it. Every such record is counted. First at seq %d.", why, seq)
 	}
 	r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmObservationRefused, At: r.opt.Now(), Stream: nd.obs, Detail: detail})
+}
+
+// refuseSession raises AlarmSessionRefused at the first collection.run
+// refused with netobs.ErrLaterMinor in this process run; the caller has
+// counted it in runs_session_missing (C4 0.6 section 3.1). The seq is the
+// record's on the health stream.
+func (r *Runtime) refuseSession(nd *netDetector, seq c5.Seq) {
+	if nd.sessionRefused {
+		return
+	}
+	nd.sessionRefused = true
+	detail := fmt.Sprintf("a collection.run was written by a later build (a C4 minor above this build's %s), so this build refused it at judging: its session was not handed to the detector, which may then report that run's flows as unexplained, and own-session-unseen does not check that run. It is counted in status (runs_session_missing), in memory only. First at health-stream seq %d. Remedy: move this node forward to a build that reads it; records already passed are not judged again.", event.Identifier, seq)
+	r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmSessionRefused, At: r.opt.Now(), Stream: HealthStream, Detail: detail})
 }
 
 // refusalAt is the code and field of the first typed error in err's tree,

@@ -17,6 +17,7 @@ import (
 	"otsec.local/otsec/contracts/asset"
 	"otsec.local/otsec/contracts/audit"
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/platform/sensorlink"
 )
@@ -460,14 +461,29 @@ type RunSession struct {
 
 // runSessionOf rebuilds a run's session from its committed collection.run.
 // ok is false for a run the hold didn't watch, whose record has no session.
+// A collection.run stamped with a later C4 minor than this build's is
+// refused with netobs.ErrLaterMinor. The order is C4 0.6 section 3.1's:
+// when event.Decode fails, a record with no event or that is not a
+// collection.run returns its error, with no "type first" short cut, then
+// the stamp is checked, then the Validate error is returned; when it reads,
+// the type is checked first, then the stamp, then after_seq.
 func runSessionOf(st c5.Stored) (RunSession, bool, error) {
 	ev, err := event.Decode(st.Event)
 	if err != nil {
+		if ev == nil || ev.Health == nil || ev.Health.Type != HealthCollectionRun {
+			return RunSession{}, false, err
+		}
+		if lerr := netobs.CheckEventMinor(ev); errors.Is(lerr, netobs.ErrLaterMinor) {
+			return RunSession{}, false, lerr
+		}
 		return RunSession{}, false, err
 	}
 	h := ev.Health
 	if h == nil || h.Type != HealthCollectionRun {
 		return RunSession{}, false, nil
+	}
+	if err := netobs.CheckEventMinor(ev); err != nil {
+		return RunSession{}, false, err
 	}
 	d := h.Details
 	if _, ok := d["after_seq"]; !ok {

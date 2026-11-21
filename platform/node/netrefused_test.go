@@ -159,7 +159,7 @@ func TestObservationRefusedMalformed(t *testing.T) {
 	d := detectorStatus(t, st)
 	got := refusedAlarms(st)
 	if d.Through != 3 || d.Refused != 1 || d.RefusedBy[RefusedMalformed] != 1 || d.RefusedBy[RefusedByDetector] != 0 || len(got) != 1 ||
-		!strings.Contains(got[0], "at first_utc)") || !strings.Contains(got[0], "First at seq 3.") {
+		!strings.Contains(got[0], "at netobs.first_utc)") || !strings.Contains(got[0], "First at seq 3.") {
 		t.Fatalf("status %+v, alarms %q", d, got)
 	}
 	noMarker(t, st, logged)
