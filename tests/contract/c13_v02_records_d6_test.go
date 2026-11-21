@@ -18,6 +18,7 @@ package contract
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -386,7 +387,7 @@ func TestC13v02EgressCheck(t *testing.T) {
 
 // R-2 (CH-35): the stored reader takes a 0.1 observation without the new
 // fields, strictly; a stored 0.2 observation may lack them; a later minor
-// is read forward.
+// is refused (C4 0.6 §3.2).
 func TestC13v02R2StoredReader(t *testing.T) {
 	added := []string{"made_utc", "coverage.config_digest", "coverage.settings.prp_window_ms", "node.late", "node.backlog", "node.lost"}
 	at01 := func(keep string) v2Msg {
@@ -435,12 +436,15 @@ func TestC13v02R2StoredReader(t *testing.T) {
 	if _, err := netobs.DecodeStored(v2JSON(t, m)); err != nil {
 		t.Errorf("node.lost with 8 spans: %v", err)
 	}
-	// A later minor is read forward: a field it adds is ignored. The later
-	// minor is this code's own + 1: 0.4 since C13 0.3 (#689).
+	// A later minor is refused, as schema with ErrLaterMinor alone, and no
+	// observation is returned; a field it adds does not make it decode
+	// (docs/phase4/D4-c4-0.6-proposal.md §3.2, which supersedes CH-35's
+	// forward read for the stored observation). The later minor is this
+	// code's own + 1: 0.4 since C13 0.3 (#689).
 	m = v2Stored(t)
 	m["schema"], m["added_in_0_4"] = "otsec.netobs/0.4", "x"
-	if _, err := netobs.DecodeStored(v2JSON(t, m)); err != nil {
-		t.Errorf("a stored 0.4 observation with a new field: %v", err)
+	if o, err := netobs.DecodeStored(v2JSON(t, m)); o != nil || !slices.Equal(netobs.Codes(err), []netobs.Code{netobs.CodeSchema}) || !errors.Is(err, netobs.ErrLaterMinor) {
+		t.Errorf("a stored 0.4 observation with a new field: %v, %v, want refused as schema with ErrLaterMinor", o, err)
 	}
 	// At its own minor the reader is strict.
 	m = v2Stored(t)
