@@ -23,11 +23,11 @@ import (
 // contracts/netobs's; this file acts on their verdicts.
 //
 // Not wired (F-027's gate, D4-96): nothing outside the tests calls
-// ServeConn. The dialer, node-hello, the coverage gaps other than lost,
-// the late index and the break rule are not here (P4-4-INT's split,
-// docs/phase4/D5-p44int-split.md); the heartbeat baselines, the run file
-// and the health-event pool are health.go's and runfile.go's, and the
-// skew estimate and its marks skew.go's.
+// ServeConn. The dialer, node-hello and the coverage gaps other than lost
+// are not here (P4-4-INT's split, docs/phase4/D5-p44int-split.md); the
+// heartbeat baselines, the run file and the health-event pool are
+// health.go's and runfile.go's, the skew estimate and its marks skew.go's,
+// the break rule backlog.go's and the late index lateindex.go's.
 
 // The node's channel bounds (CH-4, CH-18, CH-40; C13 0.2 §12). They are the
 // node's constants, not C13's.
@@ -248,6 +248,8 @@ type conn struct {
 	// held: the read loop's step before the frame being acted on lasted
 	// longer than AckMaxDelay (section 1.5 item 6).
 	held bool
+	// tickFrame: the frame being acted on is a tick.
+	tickFrame bool
 }
 
 // connGuard is the link's one live connection (CH-3) and the close a
@@ -446,6 +448,11 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 				if r := l.frame(ctx, cn, b); r != "" {
 					return r
 				}
+				// The frame was accepted: the next break begins after it, and a
+				// backlog is through once the run's position reaches its end
+				// (CH-39).
+				l.frameAccepted()
+				l.positionRead(cn.hello.RunID, cn.cur.Taken, !cn.tickFrame)
 				l.flush(ctx, cn, false)
 				l.retryOwed(ctx, cn)
 				return ""
@@ -894,7 +901,8 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		l.startRun = h.RunID
 	}
 	l.resetRun(ctx, h.RunID, v.Accept == netobs.HelloNewRun)
-	l.helloRead(h, next.Taken)
+	l.breakEnd(h, cn.en.Generation, next.Taken) // the break ends, before the hello is the last frame
+	l.frameAccepted()
 	if opened > 0 {
 		l.lostOpened(h.SensorID, h.RunID, opened)
 	}
@@ -1122,6 +1130,7 @@ func (l *Link) now() time.Time {
 // "".
 func (l *Link) frame(ctx context.Context, cn *conn, b []byte) string {
 	fs, err := netobs.DecodeFromSensorIn(b, cn.hello.Schema)
+	cn.tickFrame = fs.Type == netobs.TypeTick
 	switch fs.Type {
 	case netobs.TypeSensorHello:
 		return netobs.CloseHello // a second hello
@@ -1213,7 +1222,7 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 		return ""
 	}
 	l.late(cn, h.AtUTC) // counted; a heartbeat is never a skew sample (CH-23)
-	if l.heartbeatRaise(h, n) {
+	if l.heartbeatRaise(h) {
 		if r := l.saveFloor(ctx, cn); r != "" {
 			return r
 		}
@@ -1395,7 +1404,6 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	l.mu.Lock()
 	l.stats.LastSeq = n
 	l.mu.Unlock()
-	l.observationRead(o.RunID, n)
 	if observeFault != nil {
 		observeFault()
 	}

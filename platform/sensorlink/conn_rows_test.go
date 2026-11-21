@@ -805,7 +805,7 @@ func TestStoredSchemaIsChannelMinorTied(t *testing.T) {
 	if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
 		t.Fatal(err)
 	}
-	h := hello02()
+	h := live02()
 	h.Schema = netobs.Identifier03
 	p := r.accepted(h)
 	o := obs03(1)

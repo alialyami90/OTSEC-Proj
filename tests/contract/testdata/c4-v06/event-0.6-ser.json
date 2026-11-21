@@ -1,0 +1,50 @@
+{
+  "schema": "otsec.event/0.6",
+  "id": {"node_id": "d6-node", "stream": "ser/9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4", "seq": 8},
+  "origin": "device",
+  "kind": "ser",
+  "source": {
+    "asset": {"id": "9e8d7c6b-5a49-4382-a1b0-c9d8e7f6a5b4", "binding": {"method": "adapter-target", "confidence": "configured"}},
+    "origin_auth": "session",
+    "evidence_class": "simulated"
+  },
+  "collection": {
+    "method": "adapter-poll",
+    "invocation_id": "0b9a6e2c-5d4f-4e3a-9b1c-000000000008",
+    "operation_id": "sel.ser.read_all",
+    "parser": {"name": "sel-ascii-ser-row", "version": "1"},
+    "native_position": "8",
+    "alignment": "first-read",
+    "parse_status": "ok"
+  },
+  "received": {"utc": "2026-11-14T10:00:01.000250Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "device_time": {
+    "native": "02/28/2007 13:54:09.602",
+    "native_encoding": "text",
+    "format": "sel-ascii-ser-row",
+    "wall_clock": "2007-02-28T13:54:09.602",
+    "offset": "unknown",
+    "offset_basis": "none",
+    "resolution_ns": 1000000
+  },
+  "native": {
+    "bytes": "OCAgICAgMDIvMjgvMjAwNyAgIDEzOjU0OjA5LjYwMiAgIDUxUDFQICAgICAgICAgICAgICAgICAgICBBc3NlcnRlZA==",
+    "record_sha256": "17a3967c69ba758a4fb272c18c57b1391c59e381e4536237d759ec058acecbfd",
+    "record_length": 67,
+    "evidence": {
+      "sha256": "f5a7e6438b3bb1ba0a4b10b985dfe179e03df9957a642224889450b7fbd6d308",
+      "length": 69,
+      "ref": "sha256:f5a7e6438b3bb1ba0a4b10b985dfe179e03df9957a642224889450b7fbd6d308"
+    },
+    "span": {"offset": 0, "length": 67},
+    "alignment_key": "sha256:1caaf49fb21226069b72cc6efeff83e0b95f1331da18ac854b3f9d7ff6b69ed7",
+    "fields": [
+      {"name": "#", "value": "8"},
+      {"name": "DATE", "value": "02/28/2007"},
+      {"name": "TIME", "value": "13:54:09.602"},
+      {"name": "ELEMENT", "value": "51P1P"},
+      {"name": "STATE", "value": "Asserted"}
+    ]
+  },
+  "normalized": {"subject": "51P1P", "subject_type": "relay-word-bit", "value": "Asserted", "category": "unmapped"}
+}
