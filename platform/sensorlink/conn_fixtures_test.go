@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -438,8 +440,53 @@ func refused(l *Link, reason string) uint64 { return l.Stats().Refused[reason] }
 func closes(l *Link, reason string) uint64 { return l.ConnStats().Closes[reason] }
 
 // aclock is the test's monotonic clock, safe to move while the link reads
-// it.
-type aclock struct{ n atomic.Int64 }
+// it. A hold armed by holdNext stops the next reader after its reading.
+type aclock struct {
+	n    atomic.Int64
+	hold atomic.Pointer[clockHold]
+}
 
-func (c *aclock) mono() time.Duration { return time.Hour + time.Duration(c.n.Load()) }
+// clockHold is one reader held: reached is closed when it has read, and it
+// returns once release is closed. in, when set, holds only a read made
+// directly by the function whose name ends in it.
+type clockHold struct {
+	reached, release chan struct{}
+	in               string
+}
+
+func (c *aclock) mono() time.Duration {
+	v := time.Hour + time.Duration(c.n.Load())
+	if h := c.hold.Load(); h != nil && (h.in == "" || readBy(h.in)) && c.hold.CompareAndSwap(h, nil) {
+		close(h.reached)
+		<-h.release
+	}
+	return v
+}
+
+// readBy reports whether the clock's reader, the first caller outside
+// aclock (D6's probes on #774 name a reader so), ends in fn.
+func readBy(fn string) bool {
+	pc := make([]uintptr, 8)
+	fr := runtime.CallersFrames(pc[:runtime.Callers(3, pc)])
+	for {
+		f, more := fr.Next()
+		if !strings.Contains(f.Function, "aclock") {
+			return strings.HasSuffix(f.Function, fn)
+		}
+		if !more {
+			return false
+		}
+	}
+}
+
 func (c *aclock) add(d time.Duration) { c.n.Add(int64(d)) }
+
+// holdNext arms a hold for the next reader of the clock.
+func (c *aclock) holdNext() *clockHold { return c.holdIn("") }
+
+// holdIn arms a hold for the next read made directly by fn.
+func (c *aclock) holdIn(fn string) *clockHold {
+	h := &clockHold{reached: make(chan struct{}), release: make(chan struct{}), in: fn}
+	c.hold.Store(h)
+	return h
+}

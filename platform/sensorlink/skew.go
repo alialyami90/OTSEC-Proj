@@ -85,8 +85,12 @@ func first(cs ...string) string {
 // t - E; lateWithoutE judges lateness without E; skewNoFloor makes no
 // refusal by the capture floor or the start bound; skewNoStored has no
 // first half, its stored times compared as they are (storedRefusal and
-// windowRefusal refuse nothing).
+// windowRefusal refuse nothing). skewLatestMovedOnly reads the latest
+// sample only as moved by the steps found since it was taken (D4's B1 on
+// #774); skewAlarmMoved raises the alarm on the moved samples (D6's N1 on
+// #774).
 var skewGateEOnly, skewMarkAlarmOnly, skewNoMarkAlarm, skewSubtractE, lateWithoutE, skewNoFloor, skewNoStored bool
+var skewLatestMovedOnly, skewAlarmMoved bool
 
 // afterMarkSeam runs in observe after the record's mark is read and
 // before the hold takes it; skewTakeHeldUnmarked is its control, a hold
@@ -129,7 +133,14 @@ type skew struct {
 	// samples is the connection's: the hello's o until the first tick,
 	// then the last SkewSamples ticks'.
 	samples []time.Duration
-	ticked  bool
+	// shift is how far the step check has moved each sample back since it
+	// was taken (watch.go), and latestShift the latest sample's: W and R,
+	// and a heartbeat's lateness, are placed with the samples moved; the
+	// latest sample's gate reads it both as taken and as moved. The alarm
+	// reads the samples as taken.
+	shift       []time.Duration
+	latestShift time.Duration
+	ticked      bool
 	// latestOff is the node's offset (wall less monotonic) at the latest
 	// sample's receipt; has, that a sample was taken since the start.
 	latest    time.Duration
@@ -149,6 +160,8 @@ type skew struct {
 	bl           backlog
 	lateRaisedAt *conn // the connection sensor-records-late was raised for
 	stats        SkewStats
+	// wt is the gap model's W, R and step check (watch.go).
+	wt watch
 }
 
 // skewOn reports whether the gate applies: the 0.2 intake's link.
@@ -236,25 +249,40 @@ func (l *Link) sample(sensorUTC string, hello, held bool) (raised, onset bool) {
 	if err != nil {
 		return false, false
 	}
-	wall, mono := l.now(), l.opt.Monotonic()
-	o := wall.Sub(su)
-	k := su.Add(-mono)
+	var wall time.Time
+	var mono time.Duration
+	if sampleClocksBeforeLock {
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
 	s := &l.skew
 	s.mu.Lock()
+	if !sampleClocksBeforeLock {
+		// Under the lock, as in the step check and W's placement: a step
+		// check on another goroutine is wholly before or after this
+		// sample, so a step it finds moves this sample or was taken into
+		// its reading, never neither (D6's B5 on #774).
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
+	o := wall.Sub(su)
+	k := su.Add(-mono)
 	before := l.standingLocked()
 	switch {
 	case hello:
-		s.samples, s.ticked = []time.Duration{o}, false
+		s.samples, s.shift, s.ticked = []time.Duration{o}, []time.Duration{0}, false
 	case !s.ticked:
-		s.samples, s.ticked = []time.Duration{o}, true
+		s.samples, s.shift, s.ticked = []time.Duration{o}, []time.Duration{0}, true
 	default:
-		s.samples = append(s.samples, o)
+		s.samples, s.shift = append(s.samples, o), append(s.shift, 0)
 		if len(s.samples) > SkewSamples {
 			s.samples = s.samples[len(s.samples)-SkewSamples:]
+			s.shift = s.shift[len(s.shift)-SkewSamples:]
 		}
 	}
-	s.latest, s.latestOff, s.has = o, wall.UnixNano()-int64(mono), true
+	s.latest, s.latestShift, s.latestOff, s.has = o, 0, wall.UnixNano()-int64(mono), true
 	e := s.minE()
+	if skewAlarmMoved {
+		e = s.movedELocked()
+	}
 	raise := false
 	switch {
 	case !s.alarm && absDur(e) > MaxSkew:
@@ -303,7 +331,8 @@ func (l *Link) standingLocked() string {
 	switch {
 	case !s.has:
 		return ""
-	case absDur(s.latest) > MaxSkew && !skewGateEOnly:
+	case (absDur(s.latest) > MaxSkew && !skewLatestMovedOnly || absDur(s.latest-s.latestShift) > MaxSkew) && !skewGateEOnly:
+		// As taken or as moved by a step found since (D4's B1 on #774).
 		return skewLatest
 	case s.alarm:
 		return skewAlarm
@@ -363,7 +392,7 @@ func (l *Link) storedRefusal(off int64, live bool) string {
 		return ""
 	case !live:
 		return skewPrestart
-	case absDur(time.Duration(l.offNow()-off)) > MaxSkew:
+	case absDur(time.Duration(l.offStored()-off)) > MaxSkew:
 		return skewMoved
 	}
 	return ""
@@ -453,8 +482,10 @@ func (l *Link) heartbeatRaise(h *netobs.Heartbeat) bool {
 
 // late judges a record's lateness against late_bound_s: the node's wall
 // time at receipt less its made time less E (CH-23). It counts a late
-// record and raises sensor-records-late once for each connection.
-func (l *Link) late(cn *conn, made string) bool {
+// record and raises sensor-records-late once for each connection. moved:
+// E's samples moved back by the steps found since each was taken, as for
+// a heartbeat, whose step check runs first (D3's N1 on #774).
+func (l *Link) late(cn *conn, made string, moved bool) bool {
 	m := parseUTC(made)
 	if m.IsZero() {
 		return false
@@ -464,6 +495,14 @@ func (l *Link) late(cn *conn, made string) bool {
 		bound = DefaultLateBound
 	}
 	at := l.toNode(m)
+	if moved && l.skewOn() && !skewSubtractE {
+		s := &l.skew
+		s.mu.Lock()
+		if len(s.samples) > 0 {
+			at = m.Add(s.movedELocked())
+		}
+		s.mu.Unlock()
+	}
 	if lateWithoutE {
 		at = m
 	}

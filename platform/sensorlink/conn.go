@@ -177,6 +177,16 @@ type Cursor struct {
 	// M is the sensor's clock as last read (section 1.5), zero before the
 	// sensor's first K: written by Link.encode at each write.
 	M time.Time `json:"m,omitzero"`
+	// W, the moment accounted through, with its heartbeat's seq and
+	// at_utc; R; and, from W's heartbeat, each interface's packets and the
+	// at_utc of its last rise in the run, in the bytewise order of the
+	// interfaces' names (section 1.4; watch.go). Each zero or empty when
+	// none is held; written by Link.encode at each write, as M is.
+	W      time.Time   `json:"w,omitzero"`
+	WSeq   uint64      `json:"w_seq,omitempty"`
+	WAtUTC time.Time   `json:"w_at,omitzero"`
+	R      time.Time   `json:"r,omitzero"`
+	Ifaces []IfaceMark `json:"ifaces,omitempty"`
 }
 
 func checkCursorBytes(b []byte) error {
@@ -518,15 +528,19 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 	if err == nil {
 		// M is the sensor's, whatever the position's generation, so it is
 		// taken before acceptHello reads a lower generation as none
-		// (section 1.4; D6's N3 on #641).
+		// (section 1.4; D6's N3 on #641). W and R are node times, taken
+		// the same way.
 		l.takeM(c.M)
+		l.takeWatch(c)
 	}
 	return c, err
 }
 
-// encode is c's stored form with M computed afresh (section 1.4).
+// encode is c's stored form with M, W, R and the interfaces kept with W
+// as the link holds them now (section 1.4).
 func (l *Link) encode(c *Cursor) ([]byte, error) {
 	c.M = l.mNow()
+	l.watchInto(c)
 	return encodeCursor(c)
 }
 
@@ -865,7 +879,12 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		}
 	}
 	// The hello's sample and its stated spans move the floor before the
-	// save, which carries M (section 1.5).
+	// save, which carries M (section 1.5); the step check runs before the
+	// sample takes the receipt's time.
+	if err := l.stepAtReceipt(ctx); err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: W and R moved by a step of the node's clock were not saved: %v", h.SensorID, err))
+		return netobs.ClosePositionNotSaved
+	}
 	_, onset := l.sample(h.SensorUTC, true, false)
 	if h.Prior != nil {
 		l.spansRaise(h.Prior.Lost)
@@ -899,6 +918,9 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 	l.startRun = ""
 	if cn.fromStart {
 		l.startRun = h.RunID
+	}
+	if v.Accept == netobs.HelloNewRun {
+		l.runBegan(h.RunID)
 	}
 	l.resetRun(ctx, h.RunID, v.Accept == netobs.HelloNewRun)
 	l.breakEnd(h, cn.en.Generation, next.Taken) // the break ends, before the hello is the last frame
@@ -1215,13 +1237,24 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 	}
 	l.mu.Lock()
 	prev := l.stats.Heartbeat
-	err := h.Follows(prev)
 	l.mu.Unlock()
-	if err != nil {
+	judged := prev
+	if judged == nil {
+		// After a node start: the packets kept with W (K-1).
+		judged = l.keptHeartbeat(h)
+	}
+	if err := h.Follows(judged); err != nil {
 		l.takeRefused(cn, n, RefusedCounterDecrease)
 		return ""
 	}
-	l.late(cn, h.AtUTC) // counted; a heartbeat is never a skew sample (CH-23)
+	// The step check before lateness is judged and W and R take the
+	// receipt's time (D3's N1 on #774); a save that fails closes before the
+	// heartbeat is taken, so its resend follows.
+	if err := l.stepAtReceipt(ctx); err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: W and R moved by a step of the node's clock were not saved: %v", l.cfg.SensorID, err))
+		return netobs.CloseStore
+	}
+	late := l.late(cn, h.AtUTC, true) // counted; a heartbeat is never a skew sample (CH-23)
 	if l.heartbeatRaise(h) {
 		if r := l.saveFloor(ctx, cn); r != "" {
 			return r
@@ -1244,6 +1277,7 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 	l.stats.HeartbeatMono = l.opt.Monotonic()
 	l.mu.Unlock()
 	cn.cur.Taken, cn.pending = max(cn.cur.Taken, n), true
+	l.place(cn, h, late)
 	if degraded(h.Coverage) {
 		l.cmu.Lock()
 		l.giveWay(ctx, false)
@@ -1407,7 +1441,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	if observeFault != nil {
 		observeFault()
 	}
-	l.observe(ctx, o, n, lost, l.late(cn, o.MadeUTC))
+	l.observe(ctx, o, n, lost, l.late(cn, o.MadeUTC, false))
 	l.cmu.Lock()
 	l.inflight = nil
 	l.cmu.Unlock()
@@ -1471,6 +1505,10 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 		l.conn.TickEarly++
 		l.mu.Unlock()
 		return ""
+	}
+	if err := l.stepAtReceipt(ctx); err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: W and R moved by a step of the node's clock were not saved: %v", l.cfg.SensorID, err))
+		return netobs.CloseStore
 	}
 	cn.lastTick, cn.tickAt = t, now
 	raised, onset := l.sample(t.SensorUTC, false, cn.held)

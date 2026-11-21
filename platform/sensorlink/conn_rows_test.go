@@ -983,16 +983,20 @@ func TestCursorAtMaxLinkCursorBytes(t *testing.T) {
 }
 
 // The cursor's text form (section 1.4, CH-18): every field it fills reads
-// back as written, write_no, the baselines (2b) and M (2c) included, with
-// drops_driver absent (unknown); a field of the gap model filled, M not a
-// decimal, a span slot
-// past the count, a mark out of range, or a time that Unix nanoseconds
-// cannot hold, is refused. Control: a decoder that reads the reserved
-// fields loosely.
+// back as written, write_no, the baselines (2b), M (2c), and W, R and the
+// interfaces kept with W (2e-1) included, with drops_driver absent
+// (unknown); W's causes or the gap held for the floor filled, W without
+// its seq or at_utc, an interface count out of range or an interface slot
+// past it, M not a decimal, a span slot past the count, a mark out of
+// range, or a time that Unix nanoseconds cannot hold, is refused. Control:
+// a decoder that reads the reserved fields loosely.
 func TestCursorTextForm(t *testing.T) {
 	c := &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Taken: 9, G: 3, D: 1, Refused: 4, Dropped: 6, Ds: 1,
 		NewestSeq: 20, Digest: testDigest, WriteNo: 7, FramesOutgoing: ptr(uint64(0)), DropsHolder: ptr(uint64(3)),
 		FramesOverlong: ptr(uint64(1)), Egress: EgressCarried, M: time.Date(2026, 11, 7, 9, 30, 0, 123456789, time.UTC),
+		W: time.Date(2026, 11, 7, 9, 29, 0, 5, time.UTC), WSeq: 8, WAtUTC: time.Date(2026, 11, 7, 9, 28, 59, 0, time.UTC),
+		R: time.Date(2026, 11, 7, 9, 28, 0, 0, time.UTC), Ifaces: []IfaceMark{{Packets: 700, RiseUTC: time.Date(2026, 11, 7, 9, 28, 59, 0, time.UTC)},
+			{Packets: 0, RiseUTC: time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)}},
 		Spans: []HeldSpan{{FromUTC: "2026-11-07T09:00:00Z", ToUTC: "2026-11-07T09:00:05.5Z", CutUTC: "2026-11-07T09:00:05.5Z", Owed: true, Marked: true}},
 		Prior: &HeldPrior{RunsSkipped: 4, RecordsLost: 2, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true,
 			Spans: []HeldSpan{{FromUTC: "2026-11-07T08:00:00Z", ToUTC: "2026-11-07T08:01:00Z", CutUTC: "2026-11-07T08:00:30Z", Marked: true}}}}
@@ -1012,6 +1016,7 @@ func TestCursorTextForm(t *testing.T) {
 	}
 	none := *c
 	none.Prior, none.Spans, none.Digest = nil, []HeldSpan{}, ""
+	none.W, none.WSeq, none.WAtUTC, none.R, none.Ifaces = time.Time{}, 0, time.Time{}, time.Time{}, nil
 	b2, _ := encodeCursor(&none)
 	if back, err := decodeCursor(b2); err != nil || back.Prior != nil || back.Digest != "" {
 		t.Fatalf("no prior: %+v %v", back, err)
@@ -1023,7 +1028,9 @@ func TestCursorTextForm(t *testing.T) {
 		v    string
 	}{
 		{"write_no absent", 9, "-"}, {"a baseline not a decimal", 13, "x"}, {"an egress mark out of range", 17, "2"},
-		{"W filled", 18, "0"}, {"R filled", 22, "0"},
+		{"W's causes filled", 21, "0"}, {"W without its seq", 19, "-"}, {"W without its at_utc", 20, "-"},
+		{"R not a decimal", 22, "x"}, {"an interface count of 0", 23, "0"}, {"an interface count of 9", 23, "9"},
+		{"an interface slot past the count", 28, "0"}, {"an interface's rise absent", 25, "-"},
 		{"the gap held filled", 40, "0"}, {"M not a decimal", 46, "x"}, {"a slot past the count", 52, "0"},
 		{"a mark out of range", 51, "4"}, {"a leading zero", 4, "09"}, {"a sign", 4, "+9"}, {"previous_end", 82, "x"},
 		{"started_by", 83, "someone"}, {"the tag", 0, "sp1"}, {"run_id", 3, "not-a-uuid"},

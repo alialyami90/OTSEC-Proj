@@ -74,6 +74,8 @@ type Options struct {
 	// BacklogTie is backlog_tie_s (CH-39); zero is DefaultBacklogTie, and
 	// it is from zero to MaxBacklogTie.
 	BacklogTie time.Duration
+	// BlindAfter is blind_after_s (CH-31); zero is DefaultBlindAfter.
+	BlindAfter time.Duration
 	// Health is the sensor's health events (health.go): with it, Owed
 	// defaults to its WriteOwed, the heartbeat baselines are judged, and
 	// the pool's alarms make their event due.
@@ -243,6 +245,9 @@ func New(cfg Config, opt Options) (*Link, error) {
 	h.off = l.offNow
 	if opt.Health != nil && opt.Health.cfg.File != nil {
 		opt.Health.cfg.File.addLink(l)
+	}
+	if opt.Health != nil && opt.Cursor != nil {
+		opt.Health.watched = l.watchedCopy
 	}
 	return l, nil
 }
