@@ -29,11 +29,12 @@ const AlarmSensorPlatformFloor = "sensor-platform-floor"
 const SensorHealthRecordBytes = 4096
 
 // SensorHealthEventsHour is the sensor's health events an hour (section
-// 1.10: 12 drop counts, 4 + 4 coverage gaps, a pool of 24, and its
-// database's mode change), and RetiredHealthEventsHour a retired sensor's.
+// 1.10: 12 drop counts, 4 + 4 coverage gaps, a pool of 24, its database's
+// mode change, and 4 detector.observation-refused on a budget of their own,
+// RefusedCountsPerHour), and RetiredHealthEventsHour a retired sensor's.
 // main has one sensor and no retired one.
 const (
-	SensorHealthEventsHour  = 45
+	SensorHealthEventsHour  = 49
 	RetiredHealthEventsHour = 3
 )
 
@@ -44,7 +45,7 @@ var errPastCeiling = errors.New("node: the platform class is at the sensor's cei
 // PlatformFloor is collection's need over the outage, C, and the sensor's
 // share, S, in bytes (section 1.9 item 5): C = R x 2 x 4,096 x H, where R
 // is the schedule's runs an hour and H the sensor's outage_hours, and S =
-// (45 x sensors + 3 x retired) x 4,096 x H. Each entry's part of C is
+// (49 x sensors + 3 x retired) x 4,096 x H. Each entry's part of C is
 // rounded up, so C is never under its exact value. Both are 0 without the
 // network_sensor section. C is a lower bound: it counts collection's run
 // records only (section 1.14).
