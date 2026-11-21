@@ -401,3 +401,612 @@ func TestGapChainCount(t *testing.T) {
 		}
 	})
 }
+
+// openWithin reports whether the first record written is an open record of
+// cause from at most from, written no later than by: 60 s plus one node
+// tick from W.
+func (g *gsrc) openRecord() map[string]string {
+	for _, d := range g.gaps() {
+		if d["state"] == "open" {
+			return d
+		}
+	}
+	return nil
+}
+
+// TestGapNeverBackOpen (V-10): the link cut and never restored: a link gap
+// from W is in the health stream as open within 60 s plus one node tick
+// of W, and stays open. Second case: no heartbeat after the last current
+// one, and the connection reset 20 s after its receipt: from_utc is that
+// receipt, cause link. Third case: every packets flat from four minutes
+// before W, then the connection reset at W and never restored: open
+// within 60 s plus one tick of W, from R. Controls: a node that writes a
+// gap only when it closes (nothing in the stream); a gap from the moment
+// it opens (20 s late); a gap from W (four minutes late).
+func TestGapNeverBackOpen(t *testing.T) {
+	never := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		w := g.w()
+		g.cut()
+		g.idle(50 * time.Second)
+		if len(g.gaps()) != 0 {
+			t.Fatalf("written before 60 s: %v", g.gaps())
+		}
+		g.idle(20 * time.Second) // 60 s plus one tick
+		return g, w
+	}
+	g, w := never(t)
+	if d := g.openRecord(); d == nil || d["cause"] != CauseLink || !fromOf(d).Equal(w) {
+		t.Fatalf("records %v, want link open from %s", g.gaps(), w)
+	}
+	g.idle(30 * time.Minute)
+	if len(g.gaps()) != 1 || !g.r.l.GapStatus().Open {
+		t.Fatalf("records %v: the gap did not stay open", g.gaps())
+	}
+	t.Run("control: written only at the close", func(t *testing.T) {
+		withSeam(t, &gapOpenNever)
+		if g, _ := never(t); len(g.gaps()) != 0 {
+			t.Fatalf("records %v under the control", g.gaps())
+		}
+	})
+	reset20 := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		recv := g.r.now()
+		g.r.pass(20 * time.Second)
+		g.cut()
+		g.idle(70 * time.Second)
+		return g, recv
+	}
+	t.Run("reset 20 s after the receipt", func(t *testing.T) {
+		g, recv := reset20(t)
+		if d := g.openRecord(); d == nil || d["cause"] != CauseLink || fromOf(d).After(recv) {
+			t.Fatalf("records %v, want link from no later than %s", g.gaps(), recv)
+		}
+		t.Run("control: from the open", func(t *testing.T) {
+			withSeam(t, &gapAtOpen)
+			if g, recv := reset20(t); g.openRecord() == nil || !fromOf(g.openRecord()).After(recv) {
+				t.Fatalf("records %v: the control did not start it late", g.gaps())
+			}
+		})
+	})
+	flat := func(t *testing.T) (*gsrc, time.Time, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		_, rr := g.r.l.watchNow()
+		g.live(24, false) // four minutes flat, within blind_after_s
+		w := g.w()
+		g.cut()
+		g.idle(70 * time.Second)
+		return g, rr, w
+	}
+	t.Run("flat from four minutes before W", func(t *testing.T) {
+		g, rr, w := flat(t)
+		if !w.After(rr.Add(3 * time.Minute)) {
+			t.Fatalf("W %s and R %s: W did not move through the flat stretch", w, rr)
+		}
+		if d := g.openRecord(); d == nil || !fromOf(d).Equal(rr) {
+			t.Fatalf("records %v, want open from R %s", g.gaps(), rr)
+		}
+		t.Run("control: from W", func(t *testing.T) {
+			withSeam(t, &gapFromW)
+			if g, _, w := flat(t); g.openRecord() == nil || !fromOf(g.openRecord()).Equal(w) {
+				t.Fatalf("records %v: the control did not start it at W", g.gaps())
+			}
+		})
+	})
+}
+
+// TestGapSensorFailedOpen (V-13): a recovered panic stops the sensor's
+// work: a sensor-failed gap is written open at the panic, and nothing
+// closes it. The panic 20 s after the last current heartbeat's receipt:
+// from_utc is that receipt. Controls: a node that writes a gap only when
+// it closes, which leaves nothing until its next start; a gap from the
+// panic, 20 s late.
+func TestGapSensorFailedOpen(t *testing.T) {
+	run := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		recv := g.r.now()
+		g.r.pass(20 * time.Second)
+		g.r.l.SensorFailed(bg)
+		return g, recv
+	}
+	g, recv := run(t)
+	if d := g.openRecord(); d == nil || d["cause"] != CauseSensorFailed || !fromOf(d).Equal(recv) {
+		t.Fatalf("records %v, want sensor-failed open from %s at the panic", g.gaps(), recv)
+	}
+	g.cut()
+	g.idle(10 * time.Minute)
+	if len(g.gaps()) != 1 || !g.r.l.GapStatus().Open {
+		t.Fatalf("records %v: the gap did not stay open", g.gaps())
+	}
+	t.Run("control: written only at the close", func(t *testing.T) {
+		withSeam(t, &gapOpenNever)
+		if g, _ := run(t); len(g.gaps()) != 0 {
+			t.Fatalf("records %v under the control", g.gaps())
+		}
+	})
+	t.Run("control: from the panic", func(t *testing.T) {
+		withSeam(t, &gapAtOpen)
+		if g, recv := run(t); g.openRecord() == nil || !fromOf(g.openRecord()).After(recv) {
+			t.Fatalf("records %v: the control did not start it late", g.gaps())
+		}
+	})
+}
+
+// queue makes n heartbeats 10 s apart on the live link without sending
+// them: an engine whose heartbeats wait behind records.
+func (g *gsrc) queue(n int, rise bool) {
+	for range n {
+		g.r.pass(10 * time.Second)
+		g.tick()
+		g.buf = append(g.buf, g.mk(rise))
+	}
+}
+
+// flush sends what the queue holds, a tenth of a second apart.
+func (g *gsrc) flush() {
+	g.t.Helper()
+	for _, b := range g.buf {
+		g.r.pass(100 * time.Millisecond)
+		g.send(b)
+	}
+	g.buf = nil
+}
+
+// TestGapHeartbeatSilence (V-16): a heartbeat silence on a link that stays
+// up, the node ticking every 10 s.
+//   - No heartbeat for five minutes, then heartbeats again in the same
+//     run: a silent gap from W, open within 60 s plus one tick of W, closed
+//     unwatched. Control: no silent cause, which writes nothing.
+//   - Heartbeats made every 10 s and delivered four minutes late: closed as
+//     covered once the chain is read.
+//   - Delivered two minutes late, inside late_bound_s, then on time:
+//     covered at the first heartbeat whose lateness is under
+//     HeartbeatGapMax. Control: the cause ended at the first current
+//     heartbeat, whose chain is too short: unwatched.
+//   - Flat from four minutes before W, silent for two minutes, then flat:
+//     blind joins the gap, from R. Control: a gap from W.
+//   - The floor: the heartbeats after the stall arrive 25 s late, so the
+//     gap closes unwatched at t1, the receipt of the first; one heartbeat
+//     later the link is cut for two minutes and restored with a full
+//     chain: the link gap is covered, from no earlier than t1. Control: no
+//     floor, which starts it about 15 s before t1.
+func TestGapHeartbeatSilence(t *testing.T) {
+	five := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		w := g.w()
+		g.idle(70 * time.Second)
+		if d := g.openRecord(); d == nil || d["cause"] != CauseSilent || !fromOf(d).Equal(w) {
+			t.Fatalf("records %v, want silent open from %s within 60 s plus a tick", g.gaps(), w)
+		}
+		g.idle(230 * time.Second)
+		g.live(3, true)
+		return g, w
+	}
+	g, w := five(t)
+	if d := g.lastGap(); d == nil || d["state"] != "closed" || d["covered"] != "false" || !fromOf(d).Equal(w) {
+		t.Fatalf("records %v, want silent closed unwatched from %s", g.gaps(), w)
+	}
+	t.Run("control: no silent cause", func(t *testing.T) {
+		withSeam(t, &gapSilentOff)
+		g := newGsrc(t)
+		g.live(6, true)
+		g.idle(5 * time.Minute)
+		g.live(3, true)
+		if len(g.gaps()) != 0 {
+			t.Fatalf("records %v under the control", g.gaps())
+		}
+	})
+	t.Run("four minutes late", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.queue(24, true)
+		g.flush()
+		g.live(3, true)
+		if d := g.lastGap(); d == nil || d["covered"] != "true" || g.r.l.GapStatus().Open {
+			t.Fatalf("records %v, want closed covered", g.gaps())
+		}
+	})
+	twoLate := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.queue(12, true)
+		for range 6 { // two minutes late, one delivered for each made
+			g.r.pass(10 * time.Second)
+			g.tick()
+			g.buf = append(g.buf, g.mk(true))
+			b := g.buf[0]
+			g.buf = g.buf[1:]
+			g.send(b)
+		}
+		g.flush()
+		g.r.pass(time.Second)
+		g.send(g.mk(true))
+		return g
+	}
+	t.Run("two minutes late, then on time", func(t *testing.T) {
+		g := twoLate(t)
+		if d := g.lastGap(); d == nil || d["covered"] != "true" {
+			t.Fatalf("records %v, want closed covered", g.gaps())
+		}
+		t.Run("control: ended at the first current heartbeat", func(t *testing.T) {
+			withSeam(t, &gapSilentEndsAtCurrent)
+			if g := twoLate(t); g.lastGap() == nil || g.lastGap()["covered"] != "false" {
+				t.Fatalf("records %v: the control did not close it unwatched", g.gaps())
+			}
+		})
+	})
+	flatStall := func(t *testing.T) (*gsrc, time.Time, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		_, rr := g.r.l.watchNow()
+		g.live(24, false)
+		w := g.w()
+		g.idle(2 * time.Minute)
+		g.live(3, false)
+		return g, rr, w
+	}
+	t.Run("flat across the stall", func(t *testing.T) {
+		g, rr, _ := flatStall(t)
+		st := g.r.l.GapStatus()
+		if !st.Open || st.Causes != "silent blind" || !st.From.Equal(rr) {
+			t.Fatalf("gap %+v, want silent blind from R %s", st, rr)
+		}
+		t.Run("control: from W", func(t *testing.T) {
+			withSeam(t, &gapFromW)
+			if g, _, w := flatStall(t); !g.r.l.GapStatus().From.Equal(w) {
+				t.Fatalf("gap %+v: the control did not start it at W %s", g.r.l.GapStatus(), w)
+			}
+		})
+	})
+	floor := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.idle(2 * time.Minute)
+		g.ahead = -25 * time.Second
+		g.live(1, true)
+		t1 := g.r.now()
+		g.live(1, true)
+		g.cut()
+		g.buffer(12, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g, t1
+	}
+	t.Run("no move back below the floor", func(t *testing.T) {
+		g, t1 := floor(t)
+		gs := g.gaps()
+		if len(gs) != 4 || gs[1]["cause"] != CauseSilent || gs[1]["covered"] != "false" || !parseUTC(gs[1]["to_utc"]).Equal(t1) {
+			t.Fatalf("records %v, want the silent gap closed unwatched at %s first", gs, t1)
+		}
+		d := g.lastGap()
+		if d["cause"] != CauseLink || d["covered"] != "true" || fromOf(d).Before(t1) {
+			t.Fatalf("records %v, want the link gap covered from no earlier than %s", gs, t1)
+		}
+		t.Run("control: no floor", func(t *testing.T) {
+			withSeam(t, &gapNoFloor)
+			if g, t1 := floor(t); !fromOf(g.lastGap()).Before(t1) {
+				t.Fatalf("records %v: the control did not start the link gap before %s", g.gaps(), t1)
+			}
+		})
+	})
+}
+
+// TestGapFlatCountsCarrierUp (V-17, the gap only: sensor.past-blind is
+// P4-4-INT-D5-BLIND's, D4-121).
+//   - A ten-minute cut, one run, every carrier up and every packets flat
+//     for the whole cut: closed unwatched. Control: a chain that checks the
+//     carrier alone, which closes it as covered.
+//   - The blind close: the link current, flat for blind_after_s, then
+//     rising: a blind gap written open from R, closed unwatched at the
+//     first heartbeat that rises. Control: a gap from the moment the node
+//     finds every interface blind, blind_after_s late.
+//   - Every carrier down for 60 s inside the cut, packets rising: unwatched.
+//   - Every packets flat for seven minutes inside the cut: unwatched.
+//   - Flat from four minutes before W, no restart: from R. Control: a gap
+//     from W.
+//   - The cables pulled after W's heartbeat: the next heartbeat's packets
+//     rose, every carrier down: a blind gap from W.
+func TestGapFlatCountsCarrierUp(t *testing.T) {
+	flatCut := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(60, false)
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	if d := flatCut(t).lastGap(); d == nil || d["covered"] != "false" {
+		t.Fatalf("last record %v, want closed unwatched", d)
+	}
+	t.Run("control: the carrier alone", func(t *testing.T) {
+		withSeam(t, &gapChainCarrierOnly)
+		if g := flatCut(t); !g.anyCovered() {
+			t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+		}
+	})
+	blind := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		_, rr := g.r.l.watchNow()
+		g.live(31, false)
+		return g, rr
+	}
+	t.Run("the blind close", func(t *testing.T) {
+		g, rr := blind(t)
+		d := g.openRecord()
+		if d == nil || d["cause"] != CauseBlind || !fromOf(d).Equal(rr) {
+			t.Fatalf("records %v, want blind open from R %s", g.gaps(), rr)
+		}
+		g.live(1, true)
+		if d := g.lastGap(); d["state"] != "closed" || d["covered"] != "false" || !parseUTC(d["to_utc"]).Equal(g.r.now()) {
+			t.Fatalf("records %v, want blind closed unwatched at the rise", g.gaps())
+		}
+		t.Run("control: from the open", func(t *testing.T) {
+			withSeam(t, &gapAtOpen)
+			g, rr := blind(t)
+			if d := g.openRecord(); d == nil || !fromOf(d).After(rr.Add(DefaultBlindAfter)) {
+				t.Fatalf("records %v: the control did not start it blind_after_s late", g.gaps())
+			}
+		})
+	})
+	inside := func(t *testing.T, mid func(g *gsrc)) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(10, true)
+		mid(g)
+		g.buffer(10, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	t.Run("carrier down for 60 s", func(t *testing.T) {
+		g := inside(t, func(g *gsrc) {
+			g.carrier = "down"
+			g.buffer(6, true)
+			g.carrier = "up"
+		})
+		if d := g.lastGap(); d == nil || d["covered"] != "false" {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
+	})
+	t.Run("flat for seven minutes", func(t *testing.T) {
+		g := inside(t, func(g *gsrc) { g.buffer(42, false) })
+		if d := g.lastGap(); d == nil || d["covered"] != "false" {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
+	})
+	flatBefore := func(t *testing.T) (*gsrc, time.Time, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		_, rr := g.r.l.watchNow()
+		g.live(24, false)
+		w := g.w()
+		g.cut()
+		g.buffer(12, false)
+		g.reconnect(false)
+		g.live(3, true)
+		return g, rr, w
+	}
+	t.Run("flat from four minutes before W", func(t *testing.T) {
+		g, rr, _ := flatBefore(t)
+		if d := g.lastGap(); d == nil || d["covered"] != "false" || !fromOf(d).Equal(rr) {
+			t.Fatalf("records %v, want closed unwatched from R %s", g.gaps(), rr)
+		}
+		t.Run("control: from W", func(t *testing.T) {
+			withSeam(t, &gapFromW)
+			if g, _, w := flatBefore(t); !fromOf(g.lastGap()).Equal(w) {
+				t.Fatalf("records %v: the control did not start it at W", g.gaps())
+			}
+		})
+	})
+	t.Run("the cables pulled", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		w := g.w()
+		g.carrier = "down"
+		g.live(1, true)
+		if d := g.openRecord(); d == nil || d["cause"] != CauseBlind || fromOf(d).After(w) {
+			t.Fatalf("records %v, want blind open from no later than W %s", g.gaps(), w)
+		}
+	})
+}
+
+// twoIf makes the source's heartbeats carry eth1 and eth2 from now on,
+// eth1 at the source's packets with carrier c1 and eth2 flat at 0, up.
+func (g *gsrc) twoIf(c1 string) {
+	g.f = func(h *netobs.Heartbeat) {
+		ifs([]string{"eth1", "eth2"}, []uint64{g.pk, 0})(h)
+		h.Interfaces[0].Carrier = c1
+	}
+}
+
+// TestGapChainNoRiseHeld (D6's N4 on #774, D1's ruling on #781, from D6's
+// PR3): a name first seen within a run holds no rise, so the chain counts
+// it only once its own packets rise. eth2 is first seen at the run's
+// second heartbeat, flat and up; W is placed there on eth1's rise; through
+// a three-minute cut eth1's carrier is down, so only eth2 could show
+// capture: closed unwatched. Control: a name's rise_utc kept as the
+// heartbeat it was first seen in, which carries the chain on eth2 and
+// closes it as covered. Second case: a name changed inside the chain
+// fails it. Control: a chain that takes a new name as it comes.
+func TestGapChainNoRiseHeld(t *testing.T) {
+	run := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(1, true)
+		g.twoIf("up")
+		g.live(1, true)
+		g.cut()
+		g.twoIf("down")
+		g.buffer(18, false)
+		g.twoIf("up")
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	if g := run(t); g.lastGap() == nil || g.anyCovered() {
+		t.Fatalf("records %v, want closed unwatched", g.gaps())
+	}
+	t.Run("control: rise_utc at the first sight", func(t *testing.T) {
+		withSeam(t, &gapRiseFirstSeen)
+		if g := run(t); !g.anyCovered() {
+			t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+		}
+	})
+	names := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(10, true)
+		g.f = func(h *netobs.Heartbeat) { ifs([]string{"eth1", "eth3"}, []uint64{g.pk, 0})(h) }
+		g.buffer(1, true)
+		g.f = nil
+		g.buffer(10, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	t.Run("a name changed in the chain", func(t *testing.T) {
+		if g := names(t); g.lastGap() == nil || g.anyCovered() {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
+		t.Run("control: any names", func(t *testing.T) {
+			withSeam(t, &gapChainAnyNames)
+			if g := names(t); !g.anyCovered() {
+				t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+			}
+		})
+	})
+}
+
+// TestCaptureShuffleNotARise (D3's N-b on #774, D1's ruling on #781, from
+// D3's two probes): a sensor that moves packets between names across a
+// drop, the run's counters.packets flat at 200, eth1 flat. W stops at the
+// run's start plus blind_after_s, and R never moves. Control: a rise
+// counted without a rise of counters.packets, under which W moves through
+// the flat total, to within a cycle of the probe's end.
+func TestCaptureShuffleNotARise(t *testing.T) {
+	withSeam(t, &gapsOff) // W and R alone
+	probes := map[string]func(i int) func(*netobs.Heartbeat){
+		"re-added lower": func(i int) func(*netobs.Heartbeat) {
+			switch i % 3 {
+			case 0:
+				return ifs([]string{"eth1", "eth2"}, []uint64{100, 100})
+			case 1:
+				return ifs([]string{"eth1", "eth3"}, []uint64{100, 100})
+			}
+			return func(h *netobs.Heartbeat) {
+				ifs([]string{"eth1", "eth2", "eth3"}, []uint64{100, 0, 100})(h)
+			}
+		},
+		"a fresh name each cycle": func(i int) func(*netobs.Heartbeat) {
+			a, b := "eth"+itoa(10+i), "eth"+itoa(11+i)
+			if i%2 == 0 {
+				return ifs([]string{"eth1", a}, []uint64{100, 100})
+			}
+			return ifs([]string{"eth1", a, b}, []uint64{100, 100, 0})
+		},
+	}
+	for name, set := range probes {
+		run := func(t *testing.T) (*healthRig, time.Time, time.Time) {
+			r := newHealthRig(t)
+			p := r.accepted(live02())
+			r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), set(0)))
+			began, want := r.now(), r.now()
+			for i := 1; i <= 31; i++ {
+				r.pass(59 * time.Second)
+				r.beatAt(p, hbWith(1+i, at(r.now().Add(time.Second)), set(i)))
+				if r.now().Sub(began) <= DefaultBlindAfter {
+					want = r.now()
+				}
+			}
+			return r, r.now(), want
+		}
+		t.Run(name, func(t *testing.T) {
+			r, _, want := run(t)
+			wantW(t, r, want, time.Time{}, "the total flat for 31 minutes")
+			t.Run("control: a rise without the total", func(t *testing.T) {
+				withSeam(t, &gapRiseNoTotal)
+				r, _, want := run(t)
+				if w, _ := r.l.watchNow(); !w.After(want.Add(20 * time.Minute)) {
+					t.Fatalf("W %s under the control, want it moved through the flat total", w)
+				}
+			})
+		})
+	}
+}
+
+// TestGapClockStepped (V-9's third and eleventh cases, with the node
+// running): a ten-minute cut in one run with a full chain.
+//   - The wall clock stepped back fifteen minutes five minutes in: closed
+//     unwatched with clock_stepped, and time.node-stepped written once.
+//     Control: a chain that closes a stepped gap, which writes covered.
+//   - Stepped forward thirty minutes: closed as covered, since its length
+//     is taken on the monotonic clock.
+//   - The wall clock slewed 0.5 ms a second throughout: covered, with no
+//     clock_stepped and no time.node-stepped; and one step back of 3 s:
+//     unwatched with clock_stepped. Control: a check that acts on any
+//     backward difference, which marks the slewed gap.
+func TestGapClockStepped(t *testing.T) {
+	stepped := func(t *testing.T, step time.Duration, slew bool) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		for i := range 60 {
+			g.r.pass(10 * time.Second)
+			if slew {
+				g.r.addWall(-5 * time.Millisecond)
+				g.ahead += 5 * time.Millisecond
+			}
+			if i == 30 && step != 0 {
+				g.r.addWall(step) // the node's clock alone: the sensor's runs on
+				g.ahead -= step
+			}
+			g.tick()
+			g.buf = append(g.buf, g.mk(true))
+		}
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	stepEvents := func(g *gsrc) int { return g.r.sink.count("time.node-stepped") }
+	g := stepped(t, -15*time.Minute, false)
+	if d := g.lastGap(); d == nil || d["covered"] != "false" || d["clock_stepped"] != "true" || stepEvents(g) != 1 {
+		t.Fatalf("records %v and %d steps, want unwatched with clock_stepped and one step", g.gaps(), stepEvents(g))
+	}
+	t.Run("control: the chain closes a stepped gap", func(t *testing.T) {
+		withSeam(t, &gapChainIgnoresStep)
+		if g := stepped(t, -15*time.Minute, false); !g.anyCovered() {
+			t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+		}
+	})
+	t.Run("forward thirty minutes", func(t *testing.T) {
+		if g := stepped(t, 30*time.Minute, false); !g.anyCovered() || g.lastGap()["clock_stepped"] != "" {
+			t.Fatalf("records %v, want closed covered", g.gaps())
+		}
+	})
+	t.Run("slewed", func(t *testing.T) {
+		g := stepped(t, 0, true)
+		if !g.anyCovered() || g.lastGap()["clock_stepped"] != "" || stepEvents(g) != 0 {
+			t.Fatalf("records %v and %d steps, want covered and none", g.gaps(), stepEvents(g))
+		}
+		t.Run("control: any backward difference", func(t *testing.T) {
+			withSeam(t, &stepAnyBack)
+			if g := stepped(t, 0, true); g.lastGap()["clock_stepped"] != "true" {
+				t.Fatalf("records %v: the control did not mark it", g.gaps())
+			}
+		})
+	})
+	t.Run("one step back of 3 s", func(t *testing.T) {
+		g := stepped(t, -3*time.Second, false)
+		if d := g.lastGap(); d["covered"] != "false" || d["clock_stepped"] != "true" || stepEvents(g) != 1 {
+			t.Fatalf("records %v and %d steps, want unwatched with clock_stepped and one step", g.gaps(), stepEvents(g))
+		}
+	})
+}

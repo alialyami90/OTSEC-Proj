@@ -85,7 +85,10 @@ const gapOpenAfter = 60 * time.Second
 // gap only when it closes.
 // gapNeedsObservation closes a gap as covered only once an observation
 // was read after its open.
-var gapFromW, gapChainAnyRun, gapOpenNever, gapNeedsObservation bool
+// gapSilentEndsAtCurrent ends a silent gap's cause at the first current
+// heartbeat, whatever its lateness; gapChainAnyNames lets a chain run
+// across a change of the names.
+var gapFromW, gapChainAnyRun, gapOpenNever, gapNeedsObservation, gapSilentEndsAtCurrent, gapChainAnyNames bool
 var gapChainSeqOnly, gapChainNoSpacing, gapChainNoCount, gapChainCarrierOnly, gapChainIgnoresStep, gapCloseAtReconnect bool
 
 // gapsOff opens no gap: 2e-1's placement tests, whose heartbeats a
@@ -187,7 +190,13 @@ func (s *skew) extendChainLocked(h *netobs.Heartbeat, at time.Time, blind time.D
 	}
 	// The names must be the names kept with W, one for one (CH-39 part 2;
 	// D1's ruling on D6's N4 on #781).
-	if len(h.Interfaces) != len(ch.ifs) {
+	if gapChainAnyNames {
+		for _, i := range h.Interfaces {
+			if ch.ifs[i.Name] == nil {
+				ch.ifs[i.Name] = &chainIf{packets: i.Packets, rise: at}
+			}
+		}
+	} else if len(h.Interfaces) != len(ch.ifs) {
 		ch.ok, ch.reason = false, "names"
 		return
 	}

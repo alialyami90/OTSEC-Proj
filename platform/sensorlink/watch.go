@@ -379,7 +379,7 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 		switch {
 		case g.causes&gapCauseBit(CauseSensorFailed) != 0:
 			return // nothing closes it in this process
-		case g.causes&gapCauseBit(CauseSilent) != 0 && lateness >= HeartbeatGapMax:
+		case g.causes&gapCauseBit(CauseSilent) != 0 && lateness >= HeartbeatGapMax && !gapSilentEndsAtCurrent:
 			return // the silence's cause has not ended
 		case g.causes&gapCauseBit(CauseBlind) != 0:
 			if !rose {
