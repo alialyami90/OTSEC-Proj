@@ -75,6 +75,7 @@ type Health struct {
 	mu   sync.Mutex
 	pool *Pool
 	lost window // sensor.coverage-gap with cause lost: its own budget
+	gaps window // sensor.coverage-gap of every other cause: its own budget
 	// written holds the keys of owed events committed in this process, so
 	// a call repeated after a partial failure, or a redial after a failed
 	// save, writes each event once (D4-116 items 3.4 and 3.5). A start
@@ -293,6 +294,30 @@ func (h *Health) writeGaps(ctx context.Context, now time.Duration, o Owed, gaps 
 		}
 		gaps, room = gaps[len(batch):], room-1
 	}
+	return nil
+}
+
+// writeGap writes one sensor.coverage-gap record of a cause other than
+// lost under its own budget (CH-45): ErrHealthHeld when the budget is
+// spent, or the sink's error past the ceiling. Either way it is not
+// written, and the link tries it again.
+func (h *Health) writeGap(ctx context.Context, d map[string]string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := h.cfg.Monotonic()
+	budget := &h.gaps
+	if gapOneBudget {
+		budget = &h.lost
+	}
+	if budget.room(now, GapOtherPerHour) == 0 {
+		return ErrHealthHeld
+	}
+	d = maps.Clone(d)
+	d["sensor_id"] = h.cfg.SensorID
+	if err := h.cfg.Sink.WriteHealth(ctx, EventCoverageGap, d); err != nil {
+		return err
+	}
+	*budget = append(*budget, now)
 	return nil
 }
 
