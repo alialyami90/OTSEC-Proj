@@ -2929,3 +2929,44 @@ Evidence class: `desk` for the rulings and reviews; `CI-Linux` and `CI-Windows` 
   3. P4-4-HR23-JUDGE (D4, running): D1 rules on its held-row options.
   4. The rest of D4-120 item 7.5: finding 1's open item (D4-112 item 4.5), §8.4's items before the counted run, then the HR-25 design PR.
 - **Next decision number:** D4-122.
+
+## D4-122: C4 0.6 coded on `main`, 2e-1 and HR-23's judge merged, and four more briefs (D1, 2026-11-21)
+
+Evidence class: `desk` for the rulings and reviews; `CI-Linux` and `CI-Windows` for the merges in items 1.2 to 1.8, each on D1's merge check with `full-ci` (20 of 20 `integration-long` legs); #775 (item 1.1) is documents only and ran no CI. Nothing was built or run against a device, and no counted run or campaign was made. It follows D4-121 the same day.
+
+- **1. Merged** (each by D1, after D1's merge check on the reviewed head):
+  1. #775 (D4-121's records, D1; documents) as `b0480175` at `ff7f81a2`: records-auditor, then D6 (7056631465, 7056646215).
+  2. #772 (P4-4-C4-06-S1, D4; C4 0.6 step 1, the two `detector.*` types and the 0.6 stamp) as `9a6df521` at `01760048`: D3 (7056438538), D5 (7056608346), D6 (7056443281); D1 accepts the C4 row (7055871541).
+  3. #777 (P4-4-C4-06-S2, S2-a, D5; the refusal classifier and R1) as `50f1e56a` at `5d9659fd`: D3 (7058073231), D4 (7057895138), D6 (7057920832).
+  4. #778 (P4-4-C4-06-D6R, D6; E6-1 to E6-3 and the E6-4 (c) head leg) as `90b7e56f` at `c5166bae`: D4 (7057840924), D3 (7057763650).
+  5. #779 (P4-4-C4-06-S2, S2-bc, D5; the counts event, the checkpoint hold and the lasting mark) as `24296a1a` at `4c883fe3`: D3 (7059473281), D4 (7059398245), D6 (7059470673).
+  6. #780 (P4-4-C4-06-S3, D4 with D5 and D6; both later-minor refusals at judging) as **`2326f34f`** at `fea3341a`: D6 (7060024014), D3 (7060017915), D2 (7060010142), D4 (7060010821). **This merge commit is the C4 0.6 proposal's §5 floor commit.** C4 0.6 is complete on `main`.
+  7. #776 (P4-4-HR23-JUDGE, D4; HR-23's judge, the `fp/` feed, `likely_server_ports` under every configuration, and the judge's handling of held rows) as `4fe8729a` at `a78f2c25`: D6 (7059338017), D3 (7059313679), D2 (7059311453), under the held-rows rule. No merged commit carries held wording.
+  8. #774 (P4-4-INT-D5P2E, 2e-1, D5; W, R, the capture check by interface name, the step check) as `554f9d12` at `dd558435`: D6 (7059711588), D3 (7059681781), D4 (7059683376). Unwired; F-027's gate holds.
+- **2. Rulings.**
+  1. **C4 0.6's code order** (D1's 7056838245 on #772): step 2 is two PRs, S2-a, then S2-bc, which carries S2-b and S2-c in one PR, because between a separate S2-b and S2-c a start with U > T would show the counts as exact.
+  2. **#777** (D1's 7057328323): T2 gains a record whose `node.dst_asset` conflicts with its `source.asset` and one with a port out of range, each refused, counted and never judged, with the `o = nil` no-op as their control; T7 fails the start at its last failing step and checks the restore's own error text; T3 checks the alarm's database and stream; `refusalAt`'s single wrap has a row. (#772's rulings are D4-121 item 2.2.)
+  3. **#779** (D1's 7058214697, 7058994605): counts writes are spaced at least `time.Hour/RefusedCountsPerHour` apart, so the hold matches §1.14's 15 minutes; §1.11 row 12 states both CH-45's 45 (unchanged) and the node's ceiling of 49; the status key `observations_refused_unsure_cause` is accepted.
+  4. **#780** (D1's 7058903473, 7059552243): one branch carried D4's contract half, D5's node half and D6's `tests/contract` half; D1 authorized the change to D6's `TestC13v02R2StoredReader` that the refusal needs.
+  5. **#774** (D1's 7057035425, 7058929380): the skew gate refuses a tie when the latest sample is outside `max_skew_ms` as taken or as moved; the clocks are read under the lock in `measureStep`, `place` and `sample`; CH-31's state is kept by interface name, with no `began` grace for a name first seen within a run; a step back moves the run file's copy even with no W or R held; after a restart only heartbeats numbered above W's are judged for `counter-decrease`; the race tests run one schedule with a bounded wait.
+  6. **#781, 2e-2's options** (D1's 7060142487): D3's N-b, option (a), a rise counts for W, R and the chain only when the run's `counters.packets` rose; D6's N4, option (a), a name first seen or seen again within a run, and every name of a run whose first heartbeat read here was not accepted as new, keeps `rise_utc` at the epoch, and the chain fails when the names in a chain heartbeat differ from those kept with W.
+  7. **#776, the judge's handling of held rows** (D1's 7056743490, 7057468942, 7058073091, 7058840166): option C with option A's artifact rule; the held list is verified against a keyed digest under a per-run salt before use; every table the dnp3 mode prints honours it, and a counted run without the list prints no per-row table; `in-container.sh` indents its tail lines; the extension of 7057113098 is withdrawn.
+  8. **#782, HR-25's design** (D1's 7060193584, 7060254723): deliverable 3 of P4-4-HR2325S takes the six cases marked (+); the harness rows go to HR-25's build (D4) and the case cells to deliverable 3 (D6).
+- **3. Open items.**
+  1. **Owner D5, risk:** the node pins no run's interface names (D3's N2 on #774); the shuffle half (D3's N-b) and D6's N4 on #774 (`rise_utc`) are closed by #781 when it merges.
+  2. **Owner D5, risk:** an older form of D6's B2 on #774 within one process when the save at a connection's close fails (D6's N3).
+  3. **Owner D4, text:** C13 §13's cap does not name the run file's copy (D3's N3 on #774). **Owner D5, in 2e-3:** the copy is capped at a start (the same note's 2e-3 half).
+  4. **Owner D1, before HR-23's counted run:** the committed digest for each counted run is computed from D1's private record, separately from the text entered into the secret (D3's note 2 on #776); the run-time secrets sit in an environment limited to `main`, their wiring reviewed by D3 (D3's N4); a diagnosis path for a held capture that fails to run; whoever sets the salt keeps a copy outside GitHub (D1's 7057468942 item 8, D6's N3 on #776).
+  5. **Owner D6:** E6-17's workflow, the C13 old-reader leg (D4-120 item 3.4), is still owed.
+  6. **Owner D4:** HR-25's build, with the harness rows of the design's §3.3, after #782 merges; then P4-4-HR2325S deliverable 3 (D6) (D1's 7060193584, 7060254723 item 6).
+  7. **Owner D7:** C4 0.6's §7.1 floor row at `2326f34f` and §7.2's entry (the proposal's §5; D4-121 item 3.4; brief P4-D7-C406, running).
+  8. **Closed:** D4-121 item 3.8 by #776, and item 3.10 by #778 and #780.
+  9. **Owner D1:** about 80 agent worktrees on the owner's PC (`git worktree list`, 2026-11-21), removed when they are clean and no agent is running.
+- **4. For the owner** ("Waiting on the owner" item 21): decisions D1 described to the owner directly (see also item 18), and the run-time secret's holder, for HR-23's counted run. The counted run does not start before the owner decides.
+- **5. Briefs issued** (`docs/agent-handoffs.md`, "After D4-121"): P4-4-C4-06-S2, P4-4-C4-06-D6R, P4-4-C4-06-S3 and P4-D7-C406; 2e-2 under P4-4-INT-D5P2E; HR-25's design under P4-4-HR25.
+- **6. Next, in order:**
+  1. #782 (HR-25's design): D1 ruled on the four reviews in 7060412749 (recorded in D4-123); D4's fix round, the reviewers' confirms, then the merge on review.
+  2. #781 (2e-2, D5, building), then 2e-3, then P4-4-INT-D5-BLIND.
+  3. D7's P4-D7-C406.
+  4. HR-25's build (D4), then deliverable 3's cases (D6).
+- **Next decision number:** D4-123.

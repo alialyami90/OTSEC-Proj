@@ -2809,7 +2809,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: any refusal, node code or wiring.
 - Uncertainty or safety risks: closed sets at `self`, open only above it.
 - Scratch files: `d4-c406s1-*`
-- Result: #772.
+- Result: #772, merged as `9a6df521`.
 
 ### P4-4-C4-06-E64A (D6; D4 and D3 review): E6-4 (a) in the 0.5 code
 - Objective and rationale: earlier readers read 0.6 with nothing dropped, proved before the 0.6 code lands.
@@ -2848,7 +2848,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: wiring (F-027); C4 0.6 step 2.
 - Uncertainty or safety risks: a gap never starts late or closes early.
 - Scratch files: `d5-2e-*`
-- Result: 2e-1 is #774.
+- Result: 2e-1 is #774, merged as `554f9d12`; 2e-2 is #781.
 
 ### P4-4-HR23-JUDGE (D4; D6, D3 and D2 review; under the held-rows rule): HR-23's judge
 - Objective and rationale: `table.py` judges `out-hr23/` with the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2), before HR-23's counted run; with `likely_server_ports` printed under every configuration and the `fp/` set fed and pin-checked (D4-121 item 3.8).
@@ -2861,4 +2861,58 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: no engine run, dispatch or image change.
 - Uncertainty or safety risks: disclosure. Reviewers post verdicts only.
 - Scratch files: `d4-hr23judge-*`
+- Result: #776, merged as `4fe8729a`.
+
+## After D4-121: C4 0.6's code and its release rows (issued 2026-11-21, D4-122)
+
+### P4-4-C4-06-S2 (D5; D6, D3 and D4 review): C4 0.6 step 2
+- Objective and rationale: the node's refusal alarms and counts (D4-120 items 2.5 and 3.1), before step 3's refusals.
+- Required inputs: `docs/phase4/D5-refusal-alarms-options.md` with D1's 7011310755; the proposal §2 to §4 and §7.
+- Files: `platform/node/` and its tests; the note's §1.9, §1.11 and §1.14.
+- Expected interfaces: C4 0.6 on `main`; no contract change.
+- Deliverable: S2-a, then S2-bc (D1's 7056838245).
+- Acceptance tests: T2 to T7, T10, E6-16 and E6-18, each with its control.
+- Owed: step 3's tests; the durable session count (D4-121 item 3.1).
+- Exclusions: the refusals; wiring.
+- Uncertainty or safety risks: no false-exact status; no silent hold.
+- Scratch files: `d5-c406s2a-*`, `d5-c406s2bc-*`
+- Result: #777 and #779, merged as `50f1e56a` and `24296a1a`.
+
+### P4-4-C4-06-D6R (D6; D4 and D3 review): C4 0.6's independent rows
+- Objective and rationale: D6's E6-1 to E6-3 and the E6-4 (c) head leg (D4-121 item 3.10).
+- Required inputs: the proposal §2 and §6; #771's pins.
+- Files: `tests/contract/`.
+- Expected interfaces: C4 0.6.
+- Deliverable: one PR.
+- Acceptance tests: each row's controls; D6's six survivors from #772 killed.
+- Owed: E6-6 (with step 3), E6-17.
+- Exclusions: code outside `tests/contract`.
+- Uncertainty or safety risks: none beyond the proposal's.
+- Scratch files: `d6-c406r-*`
+- Result: #778, merged as `90b7e56f`.
+
+### P4-4-C4-06-S3 (D4, D5 and D6; D6, D3, D2 and D4 review): C4 0.6 step 3
+- Objective and rationale: both later-minor refusals at judging in one merge, the proposal's §5 floor commit.
+- Required inputs: the proposal §3, §5 and §6; the two forward-read notes; D1's 7053867485 ruling 2.
+- Files: `contracts/netobs/`, `contracts/event/` (D4); `platform/node/` (D5); `tests/contract/` (D6).
+- Expected interfaces: C4 0.6; C13 0.3, with no minor change.
+- Deliverable: one PR, three halves in turn (D1's 7058903473).
+- Acceptance tests: E6-6 to E6-15, each with its controls.
+- Owed: E6-17; D7's floor row.
+- Exclusions: wiring.
+- Uncertainty or safety risks: no joined or hidden refusal; no non-nil observation on refusal.
+- Scratch files: `d4-c406s3-*`, `d5-c406s3-*`, `d6-c406s3-*`
+- Result: #780, merged as `2326f34f`.
+
+### P4-D7-C406 (D7; records-auditor first, then D3 and D6 review): C4 0.6 in the release record
+- Objective and rationale: §7.1's floor row at `2326f34f` and §7.2's C4 0.6 entry with its upgrade notes (D4-121 item 3.4).
+- Required inputs: the proposal §4, §5 and §7; D7's verdicts on #768.
+- Files: `docs/release.md`.
+- Expected interfaces: none changed.
+- Deliverable: one documents-only PR.
+- Acceptance tests: records-auditor's and the reviewers' reading.
+- Owed: none.
+- Exclusions: code; HR-23's held items.
+- Uncertainty or safety risks: none.
+- Scratch files: `d7-c406-*`
 - Result: running.
