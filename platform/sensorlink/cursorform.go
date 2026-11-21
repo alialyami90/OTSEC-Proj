@@ -14,7 +14,7 @@ import (
 )
 
 // The cursor's stored form (docs/phase4/D5-sensor-node.md section 1.4;
-// C13 CH-18): "sp2" and 117 fields after it, space-separated, every
+// C13 CH-18): "sp2" and 119 fields after it, space-separated, every
 // decimal and every time (Unix nanoseconds) at most 20 digits, the digest
 // at most 71 characters, and "-" for an absent field. In order:
 //
@@ -31,6 +31,7 @@ import (
 //	the span count, and 8 x (from, to, cut end, mark) (33)
 //	prior: runs_skipped, records_lost, previous_end (c or u), started_by,
 //	  owed mark, span count (6), and 8 x (from, to, cut end, mark) (32)
+//	G and D at W's heartbeat (2)
 //
 // Every field is filled: W's causes and the gap held for the floor are
 // the gap model's (INT-D5 2e-2, gap.go). W's causes are the causes of the
@@ -40,13 +41,14 @@ import (
 // the start), the cause at the open (a token of gapCauses), the causes
 // (bits), the gaps it carries (at least 1), and its mark (1
 // clock_stepped, 2 from_bound, 4 covered: a covered close waiting for its
-// budget, D1's ruling on #788). W and its seq and at_utc are written
-// together or not at all; the interface count is "-" when none is held,
-// and its slots past the count "-". Its largest is 2,026 bytes (section
-// 1.4), within MaxLinkCursorBytes by construction.
+// budget, D1's ruling on #788). W and its seq and at_utc, and G and D at
+// its heartbeat (D1's ruling 8 on #788), are written together or not at
+// all; the interface count is "-" when none is held, and its slots past
+// the count "-". Its largest is 2,068 bytes as section 1.4 counts it,
+// within MaxLinkCursorBytes by construction.
 const (
 	cursorFormTag    = "sp2"
-	cursorFields     = 118
+	cursorFields     = 120
 	cursorAbsent     = "-"
 	cursorSpanFields = 4
 )
@@ -139,6 +141,12 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 		if f, err = appendSpans(f, p.Spans); err != nil {
 			return nil, err
 		}
+	}
+	if c.W.IsZero() {
+		f = append(f, cursorAbsent, cursorAbsent)
+	} else {
+		dec(c.WG)
+		dec(c.WD)
 	}
 	// What the decoder refuses is refused here too, so a cursor saved is
 	// one the next start reads (D6's N2 on #742).
@@ -311,8 +319,19 @@ func decodeCursor(b []byte) (*Cursor, error) {
 			return nil, err
 		}
 		c.Prior = p
-	} else if !allAbsent(f[86:]) {
+	} else if !allAbsent(f[86:118]) {
 		return nil, errCursorForm
+	}
+	// G and D at W's heartbeat, with W or not at all.
+	switch {
+	case allAbsent(f[118:120]) && c.W.IsZero():
+	case c.W.IsZero() || !cursorDecimal.MatchString(f[118]) || !cursorDecimal.MatchString(f[119]):
+		return nil, errCursorForm
+	default:
+		c.WG, c.WD = dec(118), dec(119)
+		if bad {
+			return nil, errCursorForm
+		}
 	}
 	return c, nil
 }

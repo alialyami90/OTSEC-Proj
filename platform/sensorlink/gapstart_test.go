@@ -154,11 +154,13 @@ func TestGapLostDatabaseReachesBack(t *testing.T) {
 	// First case: the sensor database deleted while the node and the
 	// sensor are stopped for ten minutes: the gap reaches back to no later
 	// than the run file's copy, with from_bound. The second case's run-file
-	// half: with the file deleted too, to no bound later than the start.
-	// Control: a gap that begins at the node's start.
+	// half: with the file deleted too, from the Unix epoch, no later than
+	// the last W (D3's B1 on #788, D1's ruling 7; enrolled_at is
+	// P4-4-DE's). Control: a gap that begins at the node's start.
 	lost := func(t *testing.T, dropFile bool) (*gsrc, time.Time, time.Time) {
 		g := newGsrc(t)
 		g.live(6, true)
+		w := g.w()
 		g.writeFile()
 		cp := parseUTC(runFileCopy(t, g.r.path))
 		g.down()
@@ -167,12 +169,11 @@ func TestGapLostDatabaseReachesBack(t *testing.T) {
 		if dropFile {
 			_ = os.Remove(g.r.path)
 		}
-		start := g.r.now()
 		g.up()
 		g.restartSensor()
 		g.reconnect(true)
 		g.live(2, true)
-		return g, cp, start
+		return g, cp, w
 	}
 	g, cp, _ := lost(t, false)
 	if d := g.startClosed(); d == nil || fromOf(d).After(cp) || d["from_bound"] != "true" || d["covered"] != "false" {
@@ -185,10 +186,16 @@ func TestGapLostDatabaseReachesBack(t *testing.T) {
 		}
 	})
 	t.Run("the run file deleted too", func(t *testing.T) {
-		g, _, start := lost(t, true)
-		if d := g.startClosed(); d == nil || fromOf(d).After(start) || d["from_bound"] != "true" {
-			t.Fatalf("records %v, want from no later than the start %s, from_bound", g.gaps(), start)
+		g, _, w := lost(t, true)
+		if d := g.startClosed(); d == nil || fromOf(d).After(w) || d["from_bound"] != "true" {
+			t.Fatalf("records %v, want from no later than the last W %s, from_bound", g.gaps(), w)
 		}
+		t.Run("control: from the start", func(t *testing.T) {
+			withSeam(t, &startNoBoundNow)
+			if g, _, w := lost(t, true); g.startClosed() == nil || !fromOf(g.startClosed()).After(w) {
+				t.Fatalf("records %v: the control started no later than the last W %s", g.gaps(), w)
+			}
+		})
 	})
 	// A clock stepped back across the outage, the database kept: written
 	// from the saved moment, never dropped, clock_stepped, and
@@ -950,25 +957,36 @@ func TestGapStartBoundaries(t *testing.T) {
 	if !shown(at0) || !shown(at0.Add(-DefaultBlindAfter)) || shown(at0.Add(-DefaultBlindAfter-1)) || shown(at0.Add(1)) {
 		t.Fatal("part 2 at W across a start, at its bounds")
 	}
-	// The run file unreadable at the start: no copy, so the gap reaches
-	// back to no bound later than the start, from_bound.
-	g := newGsrc(t)
-	g.live(6, true)
-	g.down()
-	g.away(6, false, false)
-	g.r.loseDatabase()
-	if err := os.WriteFile(g.r.path, []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
+	// The run file unreadable at the start, the database lost: no copy, so
+	// the gap reaches back to the Unix epoch, no later than the last W,
+	// from_bound (D3's B1 on #788, D1's ruling 7). Control: from the
+	// start's own time.
+	unreadable := func(t *testing.T) (GapStatus, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		w := g.w()
+		g.down()
+		g.away(6, false, false)
+		g.r.loseDatabase()
+		if err := os.WriteFile(g.r.path, []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		g.r.restartNoStart()
+		_ = g.r.file.Start(bg, g.r.l) // it reports the file unreadable
+		return g.r.l.GapStatus(), w
 	}
-	at := g.r.now()
-	g.r.restartNoStart()
-	_ = g.r.file.Start(bg, g.r.l) // it reports the file unreadable
-	if st := g.r.l.GapStatus(); !st.Open || st.From.After(at) {
-		t.Fatalf("an unreadable run file: gap %+v, want from no later than %s", st, at)
+	if st, w := unreadable(t); !st.Open || st.From.After(w) {
+		t.Fatalf("an unreadable run file: gap %+v, want from no later than the last W %s", st, w)
 	}
+	t.Run("control: from the start", func(t *testing.T) {
+		withSeam(t, &startNoBoundNow)
+		if st, w := unreadable(t); !st.From.After(w) {
+			t.Fatalf("gap %+v: the control started no later than the last W %s", st, w)
+		}
+	})
 	// The cursor unreadable at the start: no W, so the gap reaches back to
 	// the run file's copy, from_bound.
-	g = newGsrc(t)
+	g := newGsrc(t)
 	g.live(6, true)
 	g.writeFile()
 	cp := parseUTC(runFileCopy(t, g.r.path))
@@ -1295,6 +1313,132 @@ func TestGapChainAcrossStartCount(t *testing.T) {
 	}
 	t.Run("control: MG, part 4 from the start", func(t *testing.T) {
 		withSeam(t, &startChainFromStart)
+		if d := run(t); d["covered"] != "true" {
+			t.Fatalf("%v: the control closed it unwatched", d)
+		}
+	})
+}
+
+// TestGapStartLaterReadTakesOnlyKept (D6's B1 on #788; D1's ruling 6,
+// option (a)): a silent gap closed unwatched, its closed record refused,
+// so held for the floor; the run file written; the node stopped two
+// minutes and started with its first cursor read failing, the later read
+// at the file's write succeeding. The node-start gap stands from the copy,
+// and no closed record pairs its open record while it does; the held gap
+// is not taken. Control: the later read takes W, R, the floor and the held
+// gap (the code at f596b82e), whose closed record pairs it.
+func TestGapStartLaterReadTakesOnlyKept(t *testing.T) {
+	run := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.r.sink.refuse = func(typ string, d map[string]string) bool {
+			return typ == EventCoverageGap && d["state"] == "closed"
+		}
+		g.idle(2 * time.Minute)
+		g.ahead = g.base - 25*time.Second
+		g.live(1, true) // the silent gap closes unwatched: held
+		g.ahead = g.base
+		if g.r.l.GapStatus().Waiting == nil {
+			t.Fatalf("records %v: no gap held for the floor", g.gaps())
+		}
+		g.writeFile()
+		g.down()
+		g.away(12, false, false)
+		g.r.sink.refuse = nil
+		g.r.restartNoStart()
+		g.r.gen.failReads.Store(1)
+		_ = g.r.file.Start(bg, g.r.l) // the first read fails; the file's write reads again
+		g.tick()
+		g.tick()
+		return g
+	}
+	// pairsStart reports whether a closed record after the node-start
+	// gap's open record pairs it.
+	pairsStart := func(t *testing.T, g *gsrc) bool {
+		gs := g.gaps()
+		for i, d := range gs {
+			if d["cause"] != CauseNodeStart || d["state"] != "open" {
+				continue
+			}
+			for _, e := range gs[i+1:] {
+				if e["state"] == "closed" && e["from_utc"] == d["from_utc"] {
+					return true
+				}
+			}
+			return false
+		}
+		t.Fatalf("records %v: no node-start open record", gs)
+		return false
+	}
+	g := run(t)
+	if st := g.r.l.GapStatus(); !st.Open || st.Cause != CauseNodeStart || st.Waiting != nil || pairsStart(t, g) {
+		t.Fatalf("gap %+v, records %v: want the node-start gap standing, unpaired, and no held gap taken", st, g.gaps())
+	}
+	t.Run("control: the later read takes all", func(t *testing.T) {
+		withSeam(t, &startLateTakesAll)
+		if g := run(t); !pairsStart(t, g) {
+			t.Fatalf("records %v: the control did not pair the node-start open record", g.gaps())
+		}
+	})
+}
+
+// TestGapChainAcrossStartGDAtW (D6's N3 on #788; D1's ruling 8, option
+// (b)): heartbeats carrying drops_channel 5, W placed at the last; the
+// link cut and a resume hello stating drops_channel 7 read, which saves
+// the cursor with D 7 and W unmoved; the node stopped, the sensor
+// capturing, and started: the chain across the start judges part 1 from G
+// and D at W's heartbeat, so the node-start gap closes unwatched. Control:
+// G and D read from the cursor at the start (the code at f596b82e), which
+// closes it as covered.
+func TestGapChainAcrossStartGDAtW(t *testing.T) {
+	run := func(t *testing.T) map[string]string {
+		g := newGsrc(t)
+		drops := uint64(5)
+		g.f = func(h *netobs.Heartbeat) { h.Counters.DropsChannel = drops }
+		g.live(6, true)
+		g.cut()
+		drops = 7
+		resume := func() {
+			first := g.seq - len(g.buf) + 1
+			g.p = g.r.dial(enrolment())
+			hl := g.hello(first, false)
+			hl.DropsChannel = itoa(int(drops))
+			g.send(hl)
+			for _, b := range g.buf {
+				g.r.pass(100 * time.Millisecond)
+				g.send(b)
+			}
+			g.buf = nil
+		}
+		resume() // D rises to 7 with W at the drops-5 heartbeat
+		raw, err := g.r.cs.SourceCursor(bg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := decodeCursor(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.D != 7 || c.WD != 5 || c.W.IsZero() {
+			t.Fatalf("cursor D %d, D at W %d, W %s: not the shape", c.D, c.WD, c.W)
+		}
+		g.down()
+		g.away(5, true, true)
+		g.up()
+		g.buffer(2, true)
+		resume()
+		g.live(3, true)
+		d := g.startClosed()
+		if d == nil {
+			t.Fatalf("records %v: the node-start gap not closed", g.gaps())
+		}
+		return d
+	}
+	if d := run(t); d["covered"] != "false" {
+		t.Fatalf("D raised between W's heartbeat and the last save: %v, want unwatched", d)
+	}
+	t.Run("control: G and D from the cursor at the start", func(t *testing.T) {
+		withSeam(t, &startChainCursorGD)
 		if d := run(t); d["covered"] != "true" {
 			t.Fatalf("%v: the control closed it unwatched", d)
 		}

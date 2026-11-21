@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -982,12 +983,58 @@ func TestCursorAtMaxLinkCursorBytes(t *testing.T) {
 	}
 }
 
+// TestCursorLargestForm (D1's ruling 8 on #788): the largest cursor the
+// encoder can write, every field at its largest (every decimal 20 digits,
+// every time 2262's, 8 interfaces, a held gap with every mark, 8 spans
+// and 8 prior spans, unclean and enrolment, and G and D at W's heartbeat),
+// reads back as written and is within the 2,026 bytes D1's ruling names,
+// section 1.4's count of 2,068 (each time counted at 20 digits; Unix
+// nanoseconds to 2262 take 19) and MaxLinkCursorBytes. The negative is
+// TestCursorAtMaxLinkCursorBytes.
+func TestCursorLargestForm(t *testing.T) {
+	const top = uint64(18446744073709551615)
+	end := time.Unix(0, math.MaxInt64).UTC()
+	e := canonUTC(end)
+	var spans []HeldSpan
+	for range netobs.MaxLostSpans {
+		spans = append(spans, HeldSpan{FromUTC: e, ToUTC: e, CutUTC: e, Owed: true, Marked: true})
+	}
+	var ifs []IfaceMark
+	for range netobs.MaxInterfaces {
+		ifs = append(ifs, IfaceMark{Packets: top, RiseUTC: end})
+	}
+	tp := top
+	all := uint16(1<<len(gapCauses) - 1)
+	c := &Cursor{Generation: top, RunCounter: top, RunID: testRun, Taken: top, G: top, D: top, Refused: top, Dropped: top,
+		WriteNo: top, Digest: testDigest, Ds: top, NewestSeq: top, FramesOutgoing: &tp, DropsHolder: &tp, FramesOverlong: &tp,
+		DropsDriver: &tp, Egress: EgressCarried, W: end, WSeq: top, WAtUTC: end, WG: top, WD: top, Causes: all, R: end, Ifaces: ifs,
+		Held: &HeldGap{From: end, To: end, Cause: CauseSensorFailed, Causes: all, Gaps: top, Stepped: true, Bound: true, Covered: true},
+		M:    end, Spans: spans,
+		Prior: &HeldPrior{RunsSkipped: top, RecordsLost: top, PreviousEnd: "unclean", StartedBy: "enrolment", Owed: true, Spans: spans}}
+	b, err := encodeCursor(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeCursor(b)
+	if err != nil || !reflect.DeepEqual(got, c) {
+		t.Fatalf("read back %+v (%v), wrote %+v", got, err, c)
+	}
+	f := strings.Split(string(b), " ")
+	if len(f[118]) != 20 || len(f[119]) != 20 {
+		t.Fatalf("G and D at W %q %q, want 20 digits each", f[118], f[119])
+	}
+	t.Logf("the largest cursor: %d bytes (D1's ruling 2,026, section 1.4's count 2,068, MaxLinkCursorBytes %d)", len(b), MaxLinkCursorBytes)
+	if len(b) > 2026 || len(b) > 2068 || len(b) > MaxLinkCursorBytes {
+		t.Fatalf("%d bytes", len(b))
+	}
+}
+
 // The cursor's text form (section 1.4, CH-18): every field it fills reads
 // back as written, write_no, the baselines (2b), M (2c), and W, R and the
 // interfaces kept with W (2e-1), W's causes and the gap held for the floor
-// (2e-2) included, with drops_driver absent (unknown); W's causes or a
-// held gap's out of the set, a held gap partly filled, W without its seq
-// or at_utc, an interface count out of range or an interface slot past
+// (2e-2) and G and D at W's heartbeat (2e-3) included, with drops_driver
+// absent (unknown); W's causes or a held gap's out of the set, a held gap
+// partly filled, W without its seq, at_utc, G or D, G and D without W, an interface count out of range or an interface slot past
 // it, M not a decimal, a span slot past the count, a mark out of range,
 // or a time that Unix nanoseconds cannot hold, is refused. Control: a
 // decoder that reads the gap's fields loosely.
@@ -995,7 +1042,7 @@ func TestCursorTextForm(t *testing.T) {
 	c := &Cursor{Generation: 2, RunCounter: 5, RunID: testRun, Taken: 9, G: 3, D: 1, Refused: 4, Dropped: 6, Ds: 1,
 		NewestSeq: 20, Digest: testDigest, WriteNo: 7, FramesOutgoing: ptr(uint64(0)), DropsHolder: ptr(uint64(3)),
 		FramesOverlong: ptr(uint64(1)), Egress: EgressCarried, M: time.Date(2026, 11, 7, 9, 30, 0, 123456789, time.UTC),
-		W: time.Date(2026, 11, 7, 9, 29, 0, 5, time.UTC), WSeq: 8, WAtUTC: time.Date(2026, 11, 7, 9, 28, 59, 0, time.UTC),
+		W: time.Date(2026, 11, 7, 9, 29, 0, 5, time.UTC), WSeq: 8, WAtUTC: time.Date(2026, 11, 7, 9, 28, 59, 0, time.UTC), WG: 2, WD: 1,
 		R: time.Date(2026, 11, 7, 9, 28, 0, 0, time.UTC), Ifaces: []IfaceMark{{Packets: 700, RiseUTC: time.Date(2026, 11, 7, 9, 28, 59, 0, time.UTC)},
 			{Packets: 0, RiseUTC: time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)}},
 		Causes: 1<<1 | 1<<6, Held: &HeldGap{From: time.Date(2026, 11, 7, 9, 10, 0, 0, time.UTC), To: time.Date(2026, 11, 7, 9, 5, 0, 0, time.UTC),
@@ -1014,7 +1061,7 @@ func TestCursorTextForm(t *testing.T) {
 	if !reflect.DeepEqual(got, c) {
 		t.Fatalf("read back %+v, wrote %+v", got, c)
 	}
-	if n := len(strings.Split(string(b), " ")); n != 118 {
+	if n := len(strings.Split(string(b), " ")); n != 120 {
 		t.Fatalf("%d fields", n)
 	}
 	// The held gap's cause at its open is one character, as section 1.4
@@ -1024,7 +1071,7 @@ func TestCursorTextForm(t *testing.T) {
 	}
 	none := *c
 	none.Prior, none.Spans, none.Digest = nil, []HeldSpan{}, ""
-	none.W, none.WSeq, none.WAtUTC, none.R, none.Ifaces = time.Time{}, 0, time.Time{}, time.Time{}, nil
+	none.W, none.WSeq, none.WAtUTC, none.R, none.Ifaces, none.WG, none.WD = time.Time{}, 0, time.Time{}, time.Time{}, nil, 0, 0
 	none.Causes, none.Held = 0, nil
 	b2, _ := encodeCursor(&none)
 	if back, err := decodeCursor(b2); err != nil || back.Prior != nil || back.Digest != "" || back.Held != nil || back.Causes != 0 {
@@ -1046,6 +1093,8 @@ func TestCursorTextForm(t *testing.T) {
 		{"the held gap's mark out of range", 45, "8"}, {"M not a decimal", 46, "x"}, {"a slot past the count", 52, "0"},
 		{"a mark out of range", 51, "4"}, {"a leading zero", 4, "09"}, {"a sign", 4, "+9"}, {"previous_end", 82, "x"},
 		{"started_by", 83, "someone"}, {"the tag", 0, "sp1"}, {"run_id", 3, "not-a-uuid"},
+		{"W without G at its heartbeat", 118, "-"}, {"W without D at its heartbeat", 119, "-"},
+		{"G at W not a decimal", 118, "x"}, {"D at W with a leading zero", 119, "01"},
 	} {
 		g := slices.Clone(f)
 		g[k.i] = k.v
@@ -1054,10 +1103,10 @@ func TestCursorTextForm(t *testing.T) {
 		}
 	}
 	if _, err := decodeCursor(append(slices.Clone(b), " -"...)); err == nil {
-		t.Error("119 fields read")
+		t.Error("121 fields read")
 	}
-	// Every field of an absent held gap, and of an absent prior (D6's N1
-	// on #742).
+	// Every field of an absent held gap, of an absent prior (D6's N1 on
+	// #742), and of G and D at W with no W.
 	nf := strings.Split(string(b2), " ")
 	for i := 40; i < 46; i++ {
 		g := slices.Clone(nf)
@@ -1070,7 +1119,7 @@ func TestCursorTextForm(t *testing.T) {
 		g := slices.Clone(nf)
 		g[i] = "0"
 		if _, err := decodeCursor([]byte(strings.Join(g, " "))); err == nil {
-			t.Errorf("field %d of an absent prior filled: read", i)
+			t.Errorf("field %d of an absent prior, or of G and D with no W, filled: read", i)
 		}
 	}
 	// The digest in its one form, and a span in CH-40's order (D3's N1,

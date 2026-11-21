@@ -124,6 +124,9 @@ type linkGen struct {
 	// beforeSave, when set, runs before each cursor save that is let
 	// through.
 	beforeSave func()
+	// failReads is the number of cursor reads still to fail, as a
+	// transient store error does (gapstart_test.go).
+	failReads atomic.Int32
 }
 
 var errKilled = errors.New("test: the link was killed")
@@ -136,6 +139,9 @@ type genCursor struct {
 func (c genCursor) SourceCursor(ctx context.Context) ([]byte, error) {
 	if c.g.dead.Load() {
 		return nil, errKilled
+	}
+	if n := c.g.failReads.Load(); n > 0 && c.g.failReads.CompareAndSwap(n, n-1) {
+		return nil, errors.New("test: a cursor read failed")
 	}
 	return c.cs.SourceCursor(ctx)
 }

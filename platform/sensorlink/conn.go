@@ -182,9 +182,14 @@ type Cursor struct {
 	// at_utc of its last rise in the run, in the bytewise order of the
 	// interfaces' names (section 1.4; watch.go). Each zero or empty when
 	// none is held; written by Link.encode at each write, as M is.
-	W      time.Time   `json:"w,omitzero"`
-	WSeq   uint64      `json:"w_seq,omitempty"`
-	WAtUTC time.Time   `json:"w_at,omitzero"`
+	W      time.Time `json:"w,omitzero"`
+	WSeq   uint64    `json:"w_seq,omitempty"`
+	WAtUTC time.Time `json:"w_at,omitzero"`
+	// WG and WD are G and D at W's heartbeat, written with W or not at
+	// all, from which a chain across a start judges CH-39 part 1 (D1's
+	// ruling 8 on #788).
+	WG     uint64      `json:"w_g,omitempty"`
+	WD     uint64      `json:"w_d,omitempty"`
 	R      time.Time   `json:"r,omitzero"`
 	Ifaces []IfaceMark `json:"ifaces,omitempty"`
 	// Causes are the causes of the gap open now, held in W, as bits of

@@ -147,9 +147,16 @@ type watch struct {
 	wMono    time.Duration
 	ch       chain
 	obsSeen  bool // gapNeedsObservation's control only
-	// startG and startD are the cursor's G and D at the start, for a
-	// chain across it (gapstart.go).
+	// wG and wD are G and D at W's heartbeat, kept with W in the cursor
+	// for a chain across a start (D1's ruling 8 on #788, option (b));
+	// startG and startD are the cursor's G and D at the start, read only
+	// by startChainCursorGD's control (gapstart.go).
+	wG, wD         uint64
 	startG, startD uint64
+	// startPassed: the node-start gap opened with no cursor read in this
+	// process, so a later read takes only M and the kept interfaces (D1's
+	// ruling 6 on #788, option (a)).
+	startPassed bool
 	// clearSave: a covered close's record committed while the cursor may
 	// still hold it; the cursor is saved without it before any later gap
 	// record (D3's B2 on #788).
@@ -178,7 +185,18 @@ func (l *Link) takeWatch(c *Cursor) {
 	if c == nil {
 		return // no cursor at the first read: nothing to take
 	}
+	if wt.startPassed && !startLateTakesAll {
+		// Read after the start's read failed: W, R, G, D, the floor and the
+		// held gap belong to the start, whose node-start gap stands from
+		// the copy; only the kept interfaces, with their heartbeat's seq
+		// for K-1's resend rule, are K-1's baseline (D6's B1 on #788).
+		if len(c.Ifaces) > 0 {
+			wt.run, wt.kept, wt.wSeq = c.RunID, slices.Clone(c.Ifaces), c.WSeq
+		}
+		return
+	}
 	wt.w, wt.wSeq, wt.wAt, wt.r = c.W, c.WSeq, c.WAtUTC, c.R
+	wt.wG, wt.wD = c.WG, c.WD
 	wt.startG, wt.startD = c.G, c.D
 	// W and R saved before the stop are not moved by a placement until a
 	// gap closes, so a gap after the start reaches back across the stop
@@ -208,6 +226,7 @@ func (l *Link) watchInto(c *Cursor) {
 	defer s.mu.Unlock()
 	wt := &s.wt
 	c.W, c.WSeq, c.WAtUTC, c.R, c.Ifaces = wt.w, wt.wSeq, wt.wAt, wt.r, nil
+	c.WG, c.WD = wt.wG, wt.wD
 	c.Causes, c.Held = 0, nil
 	if wt.open != nil {
 		c.Causes = wt.open.causes
@@ -218,7 +237,7 @@ func (l *Link) watchInto(c *Cursor) {
 		c.Held = &g
 	}
 	if wt.w.IsZero() {
-		c.WSeq, c.WAtUTC = 0, time.Time{}
+		c.WSeq, c.WAtUTC, c.WG, c.WD = 0, time.Time{}, 0, 0
 	}
 	if wt.run == c.RunID && len(wt.kept) > 0 {
 		c.Ifaces = slices.Clone(wt.kept)
@@ -441,6 +460,7 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 			wt.kept[i] = IfaceMark{Packets: wt.live[n].packets, RiseUTC: wt.live[n].riseAt}
 		}
 		s.startChainLocked(cn, h, at, wt.wMono, blind)
+		wt.wG, wt.wD = wt.ch.g, wt.ch.d
 		return
 	}
 	// Every interface blind: W stays, and a blind gap opens (CH-45).

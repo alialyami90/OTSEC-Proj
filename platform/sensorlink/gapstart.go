@@ -17,8 +17,10 @@ import (
 //     then the node-start gap opens from the earlier of W and R. With no W
 //     (the sensor database lost, or a sensor never watched) it opens from
 //     the bound, the run file's copy, with from_bound; with no copy either,
-//     from the start's own time, which is no bound later than the start
-//     (enrolled_at is P4-4-DE's).
+//     from the Unix epoch, with from_bound, until P4-4-DE replaces it with
+//     enrolled_at (D1's ruling 7 on #788). Only the start's cursor read
+//     takes W, R, G and D at W, the floor and the held gap: when it failed,
+//     a later read takes only M and the kept interfaces (ruling 6).
 //   - It is marked clock_stepped at once where W, R, the floor or the copy
 //     it starts from is later than the wall clock. The mark moves nothing:
 //     the cap of W, R and the floor waits for the gap's close (CH-45). The
@@ -26,8 +28,9 @@ import (
 //   - While it is open nothing places W or R and no other gap opens: a
 //     cause found joins it (link, restart, blind, sensor-failed).
 //   - It closes as any gap does: as covered by a chain that runs from the
-//     saved W across the start (CH-39 part 4: its length is the wall-clock
-//     difference from the saved W), or unwatched at the first current
+//     saved W across the start, from G and D at W's heartbeat (CH-39 part
+//     1; ruling 8; part 4: its length is the wall-clock difference from the
+//     saved W), or unwatched at the first current
 //     heartbeat that shows capture. The step check at its close caps W, R
 //     and the floor at the wall clock before its to_utc is taken.
 
@@ -75,6 +78,14 @@ var heldCoveredMemOnly bool
 var startDueFromWR, coveredNoClear, startCopyKept, coveredNoSave, coveredRaisesFloor bool
 var startChainZeroGD, startChainNoPart1, startChainFromStart bool
 
+// The controls of D1's rulings 6 to 8 on #788 (comment 7069502767), each
+// the code at f596b82e: startLateTakesAll lets a cursor read after a
+// failed start's read take W, R, the floor and the held gap;
+// startNoBoundNow opens a gap with no W and no copy from the start's own
+// time; startChainCursorGD starts the chain across a start from the
+// cursor's G and D at the start, not at W's heartbeat.
+var startLateTakesAll, startNoBoundNow, startChainCursorGD bool
+
 // nodeStart opens the node-start gap for the link at the node's start
 // (CH-45, "At a start"): copyAt is the run file's copy, zero when the file
 // holds none for the sensor. The gap held for the floor that takeWatch
@@ -92,6 +103,9 @@ func (l *Link) nodeStart(ctx context.Context, copyAt time.Time) (capped time.Tim
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()
+	if !s.wt.taken {
+		s.wt.startPassed = true // the start's read failed (D6's B1 on #788)
+	}
 	capped = s.startGapLocked(copyAt, wall, mono, l.blindAfter())
 	s.mu.Unlock()
 	if startCopyKept {
@@ -130,7 +144,13 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 			from, stepped, capped = wall, true, wall
 		}
 		if from.IsZero() {
-			from = wall // no bound later than the start (enrolled_at is P4-4-DE's)
+			// No copy either: the Unix epoch, the earliest the node can
+			// state, until P4-4-DE replaces it with enrolled_at (CH-45;
+			// D3's B1 on #788, D1's ruling 7).
+			from = time.Unix(0, 0).UTC()
+			if startNoBoundNow {
+				from = wall
+			}
 		}
 	}
 	if startFromNow {
@@ -166,7 +186,8 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 }
 
 // startChainAcrossLocked starts the chain at the saved W's heartbeat, from
-// the values the cursor keeps with it (CH-39 part 2), its length counted
+// the values the cursor keeps with it (CH-39 part 2) and G and D at that
+// heartbeat (part 1; D1's ruling 8 on #788), its length counted
 // from the saved W on the wall clock (part 4: across a restart, a
 // wall-clock difference). The kept values are matched to the names of the
 // run's first heartbeat read after the start, in their bytewise order, as
@@ -175,7 +196,10 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 // s.mu.
 func (s *skew) startChainAcrossLocked(wall time.Time, mono, blind time.Duration) {
 	wt := &s.wt
-	ch := chain{run: wt.run, seq: wt.wSeq, at: wt.wAt, n: 1, wMono: mono - wall.Sub(wt.w), g: wt.startG, d: wt.startD}
+	ch := chain{run: wt.run, seq: wt.wSeq, at: wt.wAt, n: 1, wMono: mono - wall.Sub(wt.w), g: wt.wG, d: wt.wD}
+	if startChainCursorGD {
+		ch.g, ch.d = wt.startG, wt.startD
+	}
 	if startChainFromStart {
 		ch.wMono = mono // MG: part 4 from the start
 	}
