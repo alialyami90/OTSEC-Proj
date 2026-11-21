@@ -148,16 +148,30 @@ const (
 	CodeType     Code = "type"     // a channel record whose type the channel does not carry
 )
 
-// Error is one validation failure.
+// ErrLaterMinor marks a refusal of a record stamped with a later minor than
+// this reader's, at judging (docs/phase4/D4-c4-0.6-proposal.md §3.1 and
+// §3.2): a stored observation of a later C13 minor (DecodeStored), or a
+// network-observation event of a later C4 minor (CheckEventMinor). The
+// refusal is an *Error with CodeSchema and Field "schema" for which
+// errors.Is(err, ErrLaterMinor) holds, returned alone and never joined. A
+// schema that cannot be read is refused as CodeSchema without it.
+var ErrLaterMinor = errors.New("a later minor than this reader's")
+
+// Error is one validation failure. err, when set, is the sentinel it
+// carries (ErrLaterMinor), read with errors.Is.
 type Error struct {
 	Code   Code
 	Field  string
 	Detail string
+	err    error
 }
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("netobs: %s: %s: %s", e.Field, e.Code, e.Detail)
 }
+
+// Unwrap returns the sentinel e carries, or nil.
+func (e *Error) Unwrap() error { return e.err }
 
 // Codes returns the codes of every *Error in err, which may be a join.
 func Codes(err error) []Code {

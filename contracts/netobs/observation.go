@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -382,6 +383,12 @@ func (o *Observation) ValidateStored() error { return o.validateStored(nil) }
 func (o *Observation) validateStored(keys map[string]bool) error {
 	c := &checker{keys: keys}
 	c.storedSchema(o.Schema)
+	if c.later {
+		// A later C13 minor is refused at judging, alone (D4-c4-0.6
+		// §3.2): its forward read may have dropped keys this reader
+		// does not know, so nothing else in it is judged.
+		return &Error{Code: CodeSchema, Field: "schema", Detail: fmt.Sprintf("%q is a later minor than this reader's %s", o.Schema, self), err: ErrLaterMinor}
+	}
 	o.check(c)
 	if len(o.Frames) > 0 {
 		c.fail(CodeConflict, "frames", "stored as the record's capture, never in the body")
@@ -1017,8 +1024,9 @@ func (o *Observation) checkNode(c *checker) {
 }
 
 // DecodeStored reads a stored observation, a C4 event's netobs, and
-// validates it. This minor or an earlier one is read strictly; a later 0.x
-// minor's added fields are ignored.
+// validates it. This minor or an earlier one is read strictly. A later 0.x
+// minor is read forward and then refused with ErrLaterMinor, alone, and the
+// observation returned is nil (D4-c4-0.6 §3.1 and §3.2).
 func DecodeStored(b []byte) (*Observation, error) {
 	if len(b) > event.MaxNetobsBytes {
 		return nil, &Error{Code: CodeRange, Field: "netobs", Detail: fmt.Sprintf("%d bytes, above %d", len(b), event.MaxNetobsBytes)}
@@ -1033,19 +1041,31 @@ func DecodeStored(b []byte) (*Observation, error) {
 			return nil, &Error{Code: CodeDecode, Field: "netobs", Detail: err.Error()}
 		}
 	}
-	return &o, o.validateStored(keyPaths(b))
+	err := o.validateStored(keyPaths(b))
+	if errors.Is(err, ErrLaterMinor) {
+		return nil, err
+	}
+	return &o, err
 }
 
 // ObservationFromEvent reads the stored observation of a C4
 // network-observation event, and checks that the event's asset is the
-// observation's destination asset (C13 §5).
+// observation's destination asset (C13 §5). An event of a later C4 minor
+// is refused by CheckEventMinor before its body is read. Each Field of the
+// body's errors is prefixed "netobs.", so the C13 stamp reads netobs.schema
+// and the C4 stamp schema; the whole-body Field netobs is kept (D4-c4-0.6
+// §3.1, "The Field split"). A refused later minor returns a nil
+// observation.
 func ObservationFromEvent(e *event.Event) (*Observation, error) {
 	if e.Kind != event.KindNetworkObservation {
 		return nil, &Error{Code: CodeType, Field: "kind", Detail: fmt.Sprintf("%q is not %s", e.Kind, event.KindNetworkObservation)}
 	}
+	if err := CheckEventMinor(e); err != nil {
+		return nil, err
+	}
 	o, err := DecodeStored(e.Netobs)
 	if err != nil || o.Node == nil {
-		return o, err
+		return o, bodyFields(err)
 	}
 	var asset string
 	if e.Source.Asset != nil {
@@ -1058,4 +1078,26 @@ func ObservationFromEvent(e *event.Event) (*Observation, error) {
 		return o, &Error{Code: CodeConflict, Field: "source.asset", Detail: fmt.Sprintf("%q, but the destination asset is %s", asset, o.Node.DstAsset)}
 	}
 	return o, nil
+}
+
+// bodyFields prefixes "netobs." to the Field of each *Error in err, a
+// DecodeStored error that may be a join, except the whole-body Field
+// "netobs". Each *Error is copied, so the sentinel it carries is kept.
+func bodyFields(err error) error {
+	switch x := err.(type) {
+	case *Error:
+		if x.Field == "netobs" {
+			return x
+		}
+		y := *x
+		y.Field = "netobs." + x.Field
+		return &y
+	case interface{ Unwrap() []error }:
+		var out []error
+		for _, e := range x.Unwrap() {
+			out = append(out, bodyFields(e))
+		}
+		return errors.Join(out...)
+	}
+	return err
 }
