@@ -42,7 +42,7 @@ func startClocked(t *testing.T, g *retentionRig, s SensorSeams) (*Runtime, *Stat
 }
 
 // The floor's terms (section 1.9 item 5): the worked example, ten entries
-// every 600 s over 24 outage hours, gives C = 11,796,480 and S = 4,423,680
+// every 600 s over 24 outage hours, gives C = 11,796,480 and S = 4,816,896
 // bytes. A quota of C + S starts the sensor and one byte less does not;
 // the ceiling admits an event only while the class holds less than quota
 // less C after it. Controls: each comparison moved by one, which the
@@ -53,15 +53,15 @@ func TestPlatformFloorTerms(t *testing.T) {
 		c.Schedule = append(c.Schedule, Collection{EverySeconds: 600})
 	}
 	col, sen := c.PlatformFloor()
-	if col != 11796480 || sen != 4423680 {
-		t.Fatalf("C %d, S %d; want 11796480, 4423680", col, sen)
+	if col != 11796480 || sen != 4816896 {
+		t.Fatalf("C %d, S %d; want 11796480, 4816896", col, sen)
 	}
 	c.Store.Quotas["platform"] = col + sen
 	if short, why := c.platformFloorShort(); short {
 		t.Fatalf("a quota of C + S is short: %s", why)
 	}
 	c.Store.Quotas["platform"] = col + sen - 1
-	if short, why := c.platformFloorShort(); !short || !strings.Contains(why, "11796480") || !strings.Contains(why, "4423680") {
+	if short, why := c.platformFloorShort(); !short || !strings.Contains(why, "11796480") || !strings.Contains(why, "4816896") {
 		t.Fatalf("a quota one byte below C + S: short %v, %q", short, why)
 	}
 	if !ceilingFits(99, 1, 200, 99) || ceilingFits(100, 1, 200, 99) {

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -121,10 +120,18 @@ type DetectorStatus struct {
 	// AlertCommitFailures the commits of them that failed since start.
 	AlertsPending       int   `json:"alerts_pending"`
 	AlertCommitFailures int64 `json:"alert_commit_failures"`
-	// Refused are observations the detector refused, still taken, and
-	// RefusedBy the same by reason, since start.
-	Refused   int64            `json:"observations_refused"`
-	RefusedBy map[string]int64 `json:"observations_refused_by"`
+	// Refused are the stored observations the detector refused, still
+	// taken, and RefusedBy the same by reason, since RefusedSince: the
+	// durable counts of the detector.observation-refused events (C4 0.6
+	// section 2.1). RefusedExact is false while RefusedUnsure, a seq range
+	// "<a>-<b>", may be counted wrongly, for the causes RefusedUnsureCause
+	// names (section 4).
+	Refused            int64            `json:"observations_refused"`
+	RefusedBy          map[string]int64 `json:"observations_refused_by"`
+	RefusedSince       time.Time        `json:"observations_refused_since"`
+	RefusedExact       bool             `json:"observations_refused_exact"`
+	RefusedUnsure      string           `json:"observations_refused_unsure,omitempty"`
+	RefusedUnsureCause string           `json:"observations_refused_unsure_cause,omitempty"`
 	// NotJudged are the sessions not judged, by reason (D4-74).
 	NotJudged map[string]int64 `json:"not_judged"`
 	// OpenFlowSeen counts the sessions seen through a reused conversation,
@@ -193,11 +200,11 @@ type netDetector struct {
 	raised   map[string]bool
 	// lagging: AlarmDetectorLag is raised for this stretch.
 	lagging bool
-	// refusedBy counts the refused observations by reason, and
-	// refusedRaised holds the reasons whose AlarmObservationRefused is
+	// rc are the durable counts of the refused observations (netrefused.go),
+	// and refusedRaised holds the reasons whose AlarmObservationRefused is
 	// raised. r.detector is set once per process, so both last the
 	// process run.
-	refusedBy     map[string]int64
+	rc            refusedCounts
 	refusedRaised map[string]bool
 }
 
@@ -288,7 +295,7 @@ func (r *Runtime) startDetector(ctx context.Context) (err error) {
 	}()
 	s := r.cfg.NetworkSensor
 	nd := &netDetector{cfg: r.detectorConfig(), obs: NetObservationStream(s.SensorID), start: r.opt.Mono(), raised: map[string]bool{},
-		refusedBy: map[string]int64{}, refusedRaised: map[string]bool{}}
+		refusedRaised: map[string]bool{}}
 	odb := r.Store(nd.obs)
 	if odb == nil {
 		return errors.New("the network database is not open")
@@ -338,6 +345,9 @@ func (r *Runtime) startDetector(ctx context.Context) (err error) {
 		if nd.d, err = netdetect.NewDetector(nd.cfg); err != nil {
 			return err
 		}
+	}
+	if err := r.restoreRefused(ctx, nd); err != nil {
+		return err
 	}
 	first, err := odb.FirstRetained(ctx, nd.obs)
 	if err != nil {
@@ -538,10 +548,17 @@ func (r *Runtime) tickDetector(ctx context.Context) (more bool) {
 	more = r.driveOnce(ctx, nd)
 	if len(nd.unsent) == 0 && (nd.d.Through() != nd.written || nd.moved) {
 		r.checkpointDetector(ctx, nd)
-	} else if c5.Seq(nd.written) > nd.saved || len(nd.ckpts) > 1 {
-		// A cursor save or a removal that failed is tried again, though no
-		// new checkpoint is due (D6's N2 on #590).
-		r.saveDetectorCursor(ctx, nd)
+	} else {
+		if len(nd.unsent) == 0 && nd.rc.owing {
+			// An owed counts event that a stored checkpoint passed is tried
+			// again, though no new checkpoint is due.
+			r.refusedCountsReady(ctx, nd)
+		}
+		if c5.Seq(nd.written) > nd.saved || len(nd.ckpts) > 1 {
+			// A cursor save or a removal that failed is tried again, though
+			// no new checkpoint is due (D6's N2 on #590).
+			r.saveDetectorCursor(ctx, nd)
+		}
 	}
 	r.detectorStatus(nd)
 	return more
@@ -796,12 +813,14 @@ func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64, dv 
 // the error's code and field and the seq, never the error's detail or text,
 // which can quote the record (D5-refusal-alarms-options.md section 2).
 func (r *Runtime) refuseObservation(nd *netDetector, seq c5.Seq, o *netobs.Observation, decodeErr error) {
-	nd.st.Refused++
+	if uint64(seq) <= nd.rc.through {
+		return // the seq rule: a replay's refusal the newest counts event holds
+	}
 	reason := RefusedByDetector
 	if decodeErr != nil {
 		reason = RefusedMalformed
 	}
-	nd.refusedBy[reason]++
+	nd.rc.count(reason, uint64(seq), r.opt.Mono())
 	if nd.refusedRaised[reason] {
 		return
 	}
@@ -1011,9 +1030,14 @@ func (r *Runtime) alertCapture(ctx context.Context, nd *netDetector, a *netobs.A
 // checkpointDetector stores the detector's checkpoint, then moves the
 // consumer's cursor to its Through, then removes the older checkpoints, as
 // identity.read's are (D1 in D4-74). A step that fails keeps the cursor
-// where it was and raises the alarm; the next tick tries again.
+// where it was and raises the alarm; the next tick tries again. An owed
+// counts event is written first, and while it is held, up to
+// RefusedCountsWait, no checkpoint is stored (refusedCountsReady).
 func (r *Runtime) checkpointDetector(ctx context.Context, nd *netDetector) {
-	seq, err := r.storeDetectorCheckpoint(ctx, nd)
+	if !r.refusedCountsReady(ctx, nd) {
+		return
+	}
+	seq, err := storeCheckpoint(r, ctx, nd)
 	if err != nil {
 		nd.st.CheckpointFailures++
 		r.raiseDetector(nd, AlarmDetectorCheckpoint, "the detector's checkpoint was not stored, so its cursor stays and a restart resumes from the last one stored: "+err.Error())
@@ -1024,6 +1048,10 @@ func (r *Runtime) checkpointDetector(ctx context.Context, nd *netDetector) {
 	nd.ckpts = append(nd.ckpts, seq)
 	r.saveDetectorCursor(ctx, nd)
 }
+
+// storeCheckpoint is checkpointDetector's store. A test swaps it to fail
+// the checkpoint after the counts event is written.
+var storeCheckpoint = (*Runtime).storeDetectorCheckpoint
 
 // storeDetectorCheckpoint stores the detector's checkpoint, which holds
 // back the alerts committed after the alert stream's head (D1 in D4-74).
@@ -1132,7 +1160,16 @@ func (r *Runtime) detectorStatus(nd *netDetector) {
 	if h := (r.opt.Mono() - nd.start).Hours(); h > 0 {
 		nd.st.EarlyClosesPerHour = float64(nd.st.EarlyCloses) / h
 	}
-	nd.st.RefusedBy = maps.Clone(nd.refusedBy)
+	nd.st.Refused, nd.st.RefusedBy, nd.st.RefusedSince = 0, map[string]int64{}, nd.rc.since
+	for reason, c := range nd.rc.by {
+		nd.st.Refused += int64(c.n)
+		nd.st.RefusedBy[reason] = int64(c.n)
+	}
+	rg, why := nd.rc.shown()
+	nd.st.RefusedExact, nd.st.RefusedUnsure, nd.st.RefusedUnsureCause = !rg.set(), "", why
+	if rg.set() {
+		nd.st.RefusedUnsure = rg.String()
+	}
 	nd.st.NotYetSeen = nil
 	for _, e := range d.NotYetSeen() {
 		nd.st.NotYetSeen = append(nd.st.NotYetSeen, e.AssetID+" "+e.L4+" "+e.Addr+":"+strconv.Itoa(e.Port))

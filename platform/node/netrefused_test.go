@@ -258,8 +258,8 @@ func TestObservationRefusedOtherSensor(t *testing.T) {
 // T4 (R1): five refusals of one reason raise one alarm, and a second
 // reason one more, each naming its first seq; every refusal is counted by
 // reason. A restart raises it again at the first new refusal, since the
-// alarm is once per process run. Mutant: a raise per record, which raises
-// six.
+// alarm is once per process run, and the counts go on from the counts
+// event (S2-bc). Mutant: a raise per record, which raises six.
 func TestObservationRefusedOncePerReason(t *testing.T) {
 	var bad []byte
 	r, st, _, c, dir := storeAfterCheckpoint(t, func(_ *Runtime, base []byte) [][]byte {
@@ -278,7 +278,7 @@ func TestObservationRefusedOncePerReason(t *testing.T) {
 	r, st, _ = start(t, c, dir)
 	defer r.Close()
 	tick(t, r)
-	if d, got := detectorStatus(t, st), refusedAlarms(st); d.RefusedBy[RefusedMalformed] != 1 || len(got) != 1 || !strings.Contains(got[0], "First at seq 8.") {
+	if d, got := detectorStatus(t, st), refusedAlarms(st); d.RefusedBy[RefusedMalformed] != 6 || len(got) != 1 || !strings.Contains(got[0], "First at seq 8.") {
 		t.Fatalf("after a restart: status %+v, alarms %q", d, got)
 	}
 }

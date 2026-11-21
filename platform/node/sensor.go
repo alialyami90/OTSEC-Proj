@@ -469,6 +469,9 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 		}
 	}
 	more = r.tickDetector(ctx)
+	if final {
+		r.refusedAtStop(r.detector)
+	}
 	st := in.link.Stats()
 	r.notTied(st)
 	in.mu.Lock()
@@ -634,37 +637,18 @@ func countDetails(stream c5.StreamID, class c5.StreamClass, prefix string, since
 // sensorDropScanRecords back, for the stream's last intake.drop-counted
 // event, and returns its counts and since.
 func (r *Runtime) lastDropCounts(ctx context.Context, stream c5.StreamID) (dropCounts, time.Time, bool) {
-	db := r.Store(HealthStream)
-	if db == nil {
+	var (
+		d  dropCounts
+		at time.Time
+		ok bool
+	)
+	if err := r.newestHealth(ctx, sensorDropScanRecords, func(b []byte) bool {
+		d, at, ok = parseDropCounts(b, stream)
+		return ok
+	}); err != nil || !ok {
 		return dropCounts{}, time.Time{}, false
 	}
-	last, err := db.LastCommitted(ctx, HealthStream)
-	if err != nil {
-		return dropCounts{}, time.Time{}, false
-	}
-	first, err := db.FirstRetained(ctx, HealthStream)
-	if err != nil || first == 0 {
-		return dropCounts{}, time.Time{}, false
-	}
-	const page = 500
-	for hi, read := last, 0; hi >= first && read < sensorDropScanRecords; {
-		lo := first - 1
-		if hi-lo > page {
-			lo = hi - page
-		}
-		got, err := db.Read(ctx, HealthStream, lo, int(hi-lo))
-		if err != nil {
-			return dropCounts{}, time.Time{}, false
-		}
-		read += len(got)
-		for i := len(got) - 1; i >= 0; i-- {
-			if d, at, ok := parseDropCounts(got[i].Event, stream); ok {
-				return d, at, true
-			}
-		}
-		hi = lo
-	}
-	return dropCounts{}, time.Time{}, false
+	return d, at, true
 }
 
 // parseDropCounts reads an event the node wrote with dropDetails or
