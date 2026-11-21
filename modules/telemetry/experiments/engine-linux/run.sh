@@ -80,7 +80,8 @@ rm -rf "$mc"
 # `docker run` took, less --rm. A failed rule stops the run.
 mc_run() {
   mc_rc=0
-  MOUNTCHECK_LOG=/dev/fd/9 python3 -I "$here/mountcheck.py" run "$mc" -- "$@" || mc_rc=$?
+  mc_counts
+  MOUNTCHECK_LOG=/dev/fd/9 python3 -I "$here/mountcheck.py" run "$mc" $mc_count -- "$@" || mc_rc=$?
   mc_stop
   return $mc_rc
 }
@@ -103,13 +104,18 @@ mc_selftest() {
 # The check's record of this mode, appended to FILE, which the workflow
 # uploads (D6's N5): the controls, and mountcheck.py's summary, which reads
 # every output folder again (output-unchanged) and fails on a rule failed.
-mc_record() {
-  # hr23-unit, and the dnp3 mode when it feeds HR-23's captures, print each
-  # output folder's hash without its entry count: the count would say which
-  # logs a held row's capture left (D4-112 item 1.3; #764).
+# hr23-unit, and the dnp3 mode when it feeds HR-23's captures, print each
+# output folder's hash without its entry count, and name only the container
+# when its output folder changed or could not be hashed: the count or an
+# entry's name would say which logs a held row's capture left (D4-112 item
+# 1.3; #764; D1's ruling 2 on #769).
+mc_counts() {
   mc_count=
   [ "$mode" != hr23-unit ] || mc_count=--no-count
   [ "$mode" != dnp3 ] || [ -z "$hr23" ] || mc_count=--no-count
+}
+mc_record() {
+  mc_counts
   { echo; cat "$work/mountcheck-$mode.md"; python3 -I "$here/mountcheck.py" summary "$mc" $mc_count; } >> "$1" || {
     cat "$1" >&9
     echo "the script-hash check (docs/release.md section 8.4 item 3) failed; the run stops" >&9
@@ -348,8 +354,10 @@ fifos() {
 
 # HR-23's feed (D4-120 item 3.7; the design's section 4.1): every capture
 # D6's hr23_cases.py writes, left in only when it equals its pin in
-# hr23.sha256 (hr23_feed.py pin), under C0, C1, C1p and C2 with viol.zeek,
-# whose otsec_viol.log hr23-conditions.tsv's mal-states reads. They have their
+# hr23.sha256 (hr23_feed.py pin, which removes every other file zeek_run
+# would feed, by mountcheck.py's CAPTURE), under C0, C1, C1p and C2 with
+# viol.zeek, whose otsec_viol.log hr23-conditions.tsv's mal-states reads.
+# check judges the captures pin kept (WORK/hr23-kept.txt). They have their
 # own folders, so that no other table of this mode reads them. Some HR-23 rows
 # are held from per-row publication (D4-112 item 1.3): each container's own
 # output, in which in-container.sh prints the engine's warnings, goes to a
@@ -362,7 +370,7 @@ hr23_feed() {
   # The caller's `||` turns off set -e in here, so each step that can fail
   # returns on its own.
   python3 "$root/tests/integration/gt_pcap/hr23_cases.py" "$h" > /dev/null || return 1
-  python3 -I "$here/hr23_feed.py" pin "$h" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" || return 1
+  python3 -I "$here/hr23_feed.py" pin "$h" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" || return 1
   pcaps=$h
   out=$work/out-hr23
   mkdir -p "$out"
@@ -377,7 +385,7 @@ hr23_feed() {
   } > "$work/hr23-engines.txt" 2>&1
   hr23_counted=
   [ "${GITHUB_REF:-local}" != refs/heads/main ] || hr23_counted=--counted
-  python3 -I "$here/hr23_feed.py" check "$out" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" $hr23_counted
+  python3 -I "$here/hr23_feed.py" check "$out" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" $hr23_counted
 }
 
 # CH-53's and CH-57's requirements on the script (D4-102 item 6; D1's

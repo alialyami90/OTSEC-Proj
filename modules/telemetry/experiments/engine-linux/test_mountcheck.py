@@ -4,8 +4,10 @@ folders on the host. Each control breaks one rule and must fail on that
 rule and no other. The same controls run on a runner's Docker in
 mountcheck.py's selftest, which run.sh runs first in every mode. Run:
 python -m pytest -q modules/telemetry/experiments/engine-linux/test_mountcheck.py"""
+import importlib.util
 import json
 import os
+import shutil
 import sys
 import types
 
@@ -518,3 +520,99 @@ def test_main_fails_closed_when_the_log_cannot_be_opened(tmp_path, tree, monkeyp
     d = tmp_path / "checks"
     assert mc.main(["run", str(d), "--", *zeek_run(tree, exp_ro=False)[0]]) == 3
     assert (d / "FAILED").exists()
+
+
+# D1's ruling 2 on #769 (D3's N2, D6's N2): under --no-count, an
+# output-unchanged failure, or an output folder that could not be hashed,
+# names only the container, never the folder's entries. Each control is a
+# named mutant of mountcheck.py's text, loaded as a module of its own, which
+# must make the check fail.
+ENTRY = "conn.log"
+NO_COUNT_MUTANTS = {
+    "changed-entries-printed": ("        if diff and not counts:\n", "        if False:\n"),
+    "rehash-error-printed": ('else "could not hash its output folder again"',
+                             'else f"could not hash {rec[\'path\']} again: {e}"'),
+    "exit-hash-error-printed": ('if counts else "could not hash its output folder when it exited"',
+                                'if True else ""'),
+    "run-switch-ignored": ('counts = rest[:1] != ["--no-count"]\n', 'counts = True\n'),
+}
+
+
+def load(tmp_path, old=None, new=None):
+    """mountcheck.py, or a mutant of it, as a module of its own."""
+    with open(mc.__file__, encoding="utf-8") as fh:
+        text = fh.read()
+    if old is not None:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    p = tmp_path / "mutant_mountcheck.py"
+    p.write_text(text, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(f"mutant_mountcheck_{abs(hash(old))}", p)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def no_count_leaks(m, tmp_path, tree, monkeypatch, capsys):
+    """Where module M, under --no-count, names an output folder's entry."""
+    line, mounts, cmd = zeek_run(tree)
+    f = FakeDocker(inspect(mounts, cmd), lambda: write_output(tree))
+    monkeypatch.setattr(m, "docker", f)
+    monkeypatch.setattr(m, "subprocess", types.SimpleNamespace(run=f.subprocess_run, PIPE=None))
+    monkeypatch.setenv("MOUNTCHECK_LOG", str(tmp_path / "log"))
+    bad = []
+    # An entry changed after the container exited.
+    d = str(tmp_path / "changed")
+    assert m.run(d, line, counts=False) == (0, {})
+    with open(os.path.join(tree["out"], "a", "zeek-probe", ENTRY), "a") as fh:
+        fh.write("{\"changed\": 1}\n")
+    capsys.readouterr()
+    assert m.summary(d, counts=False) == 1
+    out = capsys.readouterr().out
+    if f"{m.R_OUT} failed (container 1)" not in out or ENTRY in out:
+        bad.append("changed: " + out)
+    # The output folder could not be hashed again at the end of the mode.
+    real = m.hash_tree
+
+    def broken(p):
+        raise OSError(f"{p}/{ENTRY} is a symbolic link (to /x); a hashed tree may hold none")
+    monkeypatch.setattr(m, "hash_tree", broken)
+    msgs = m.output_changes(d, counts=False)
+    if not msgs or any(ENTRY in x or "container 1" not in x for x in msgs):
+        bad.append(f"rehash: {msgs}")
+    # The output folder could not be hashed when its container exited, by
+    # `main run --no-count`, as run.sh's mc_run calls it.
+    shutil.rmtree(os.path.join(tree["out"], "a"))
+
+    def out_broken(p):
+        if p.startswith(tree["out"]):
+            raise OSError(f"{p}/{ENTRY} is a symbolic link (to /x); a hashed tree may hold none")
+        return real(p)
+    monkeypatch.setattr(m, "hash_tree", out_broken)
+    d = tmp_path / "exited"
+    assert m.main(["run", str(d), "--no-count", "--", *line]) == 3
+    failed = (d / "FAILED").read_text()
+    log = (tmp_path / "log").read_text()
+    if f"rule {m.R_OUT} failed" not in failed or ENTRY in failed or ENTRY in log:
+        bad.append("exited: " + failed)
+    return bad
+
+
+def test_no_count_names_only_the_container(tmp_path, tree, monkeypatch, capsys):
+    assert no_count_leaks(mc, tmp_path, tree, monkeypatch, capsys) == []
+
+
+def test_without_no_count_the_entry_is_named(tmp_path, tree, monkeypatch, capsys):
+    # The other modes keep the detail: a changed entry is named.
+    d = str(tmp_path / "checks")
+    line = fake(monkeypatch, tree, start=lambda: write_output(tree))
+    monkeypatch.setenv("MOUNTCHECK_LOG", str(tmp_path / "log"))
+    assert mc.run(d, line) == (0, {})
+    with open(os.path.join(tree["out"], "a", "zeek-probe", ENTRY), "a") as fh:
+        fh.write("{\"changed\": 1}\n")
+    assert any(ENTRY in x for x in mc.output_changes(d))
+
+
+@pytest.mark.parametrize("old,new", NO_COUNT_MUTANTS.values(), ids=NO_COUNT_MUTANTS.keys())
+def test_no_count_mutant_is_killed(tmp_path, tree, monkeypatch, capsys, old, new):
+    assert no_count_leaks(load(tmp_path, old, new), tmp_path, tree, monkeypatch, capsys) != []

@@ -4,7 +4,8 @@ Docker run). Under mode hr23-unit, and under mode dnp3 when it feeds HR-23's
 captures (`$hr23` set; run.sh's hr23_feed), the record prints the output
 folder's hash and no entry count; under any other mode it prints the count.
 The controls are mc_record with its `$mc_count` argument dropped, and with
-the dnp3 line dropped, each of which must make the check fail. Run: python -m pytest -q modules/telemetry/experiments/engine-linux/test_run_mc_record.py"""
+the dnp3 line dropped, each of which must make the check fail. mc_run
+passes the same switch to `mountcheck.py run`. Run: python -m pytest -q modules/telemetry/experiments/engine-linux/test_run_mc_record.py"""
 import json
 import os
 import shutil
@@ -21,13 +22,19 @@ SH = shutil.which("sh")
 pytestmark = pytest.mark.skipif(SH is None, reason="no sh on PATH")
 
 
-def function():
-    """mc_record as run.sh holds it; CR is stripped for a Windows checkout."""
+def shell(name):
+    """NAME's function as run.sh holds it; CR is stripped for a Windows
+    checkout."""
     with open(os.path.join(HERE, "run.sh"), encoding="utf-8") as f:
         lines = f.read().replace("\r", "").split("\n")
-    start = lines.index("mc_record() {")
+    start = lines.index(name + "() {")
     end = lines.index("}", start)
-    text = "\n".join(lines[start:end + 1]) + "\n"
+    return "\n".join(lines[start:end + 1]) + "\n"
+
+
+def function():
+    """mc_counts and mc_record as run.sh holds them."""
+    text = shell("mc_counts") + shell("mc_record")
     assert "mountcheck.py\" summary" in text and "$mc_count" in text, text
     return text
 
@@ -89,3 +96,41 @@ def test_control_mc_record_without_the_dnp3_feed_line_fails(tmp_path):
     line = '  [ "$mode" != dnp3 ] || [ -z "$hr23" ] || mc_count=--no-count\n'
     assert function().count(line) == 1
     assert leaks(tmp_path, function().replace(line, ""))
+
+
+# mc_run passes the same switch to `mountcheck.py run`, so that a container
+# whose output folder could not be hashed when it exited is named without
+# its entries (D1's ruling 2 on #769: D3's N2, D6's N2). The control,
+# mc-run-switch-dropped, drops the switch from mc_run.
+def run_args(work, text, mode, hr23=""):
+    work.mkdir(parents=True)
+    script = work / "probe.sh"
+    script.write_text('set -eu\npython3() { echo "$@" > "$work/args"; }\nmc_stop() { :; }\n' + text
+                      + 'mc_run --network none img\n', newline="\n")
+    env = dict(os.environ, here="H", work=fwd(work), mode=mode, mc="M", hr23=hr23)
+    r = subprocess.run([SH, fwd(script)], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return (work / "args").read_text().split()
+
+
+def run_leaks(tmp_path, text):
+    bad = []
+    for mode, hr23, nocount in (("hr23-unit", "1", True), ("dnp3", "1", True), ("dnp3", "", False),
+                                ("public", "", False)):
+        a = run_args(tmp_path / f"{mode}-{hr23}", text, mode, hr23)
+        want = (["-I", "H/mountcheck.py", "run", "M"] + (["--no-count"] if nocount else [])
+                + ["--", "--network", "none", "img"])
+        if a != want:
+            bad.append(f"{mode} hr23={hr23!r}: {a}")
+    return bad
+
+
+def test_mc_run_passes_no_count_where_mc_record_does(tmp_path):
+    assert run_leaks(tmp_path, shell("mc_counts") + shell("mc_run")) == []
+
+
+def test_control_mc_run_switch_dropped_fails(tmp_path):
+    text = shell("mc_counts") + shell("mc_run")
+    old = ' run "$mc" $mc_count --'
+    assert text.count(old) == 1
+    assert run_leaks(tmp_path, text.replace(old, ' run "$mc" --'))

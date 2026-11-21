@@ -422,7 +422,7 @@ For each case and configuration, the harness reports:
 
 The judge does not read these. They show which parser ran.
 
-For the captures of `hr23_cases.py`, these readings are not printed, since some HR-23 rows are held from per-row publication (D4-112 item 1.3). `run.sh dnp3`, given the two builds, feeds every one of them, each equal to its pin in `hr23.sha256`, to C0, C1, C1p and C2 in folders of their own, and its table says only whether each configuration ran and its exit code. On `refs/heads/main` the job fails when any did not run with exit code 0 (D4-120 item 3.7; `hr23_feed.py`).
+For the captures of `hr23_cases.py`, these readings are not printed, since some HR-23 rows are held from per-row publication (D4-112 item 1.3). `run.sh dnp3`, given the two builds, feeds every one of them, each equal to its pin in `hr23.sha256`, to C0, C1, C1p and C2 in folders of their own, with `zeek-patch/viol.zeek` loaded under each, since `mal-states` reads its `otsec_viol.log`. Every other file that `zeek_run` would feed, under any extension in `mountcheck.py`'s `CAPTURE`, is removed first, and the check judges only the captures the pin kept. Its table says only whether each configuration ran and its exit code. On `refs/heads/main` the job fails when any did not run with exit code 0, or when a capture the pin did not keep was fed (D4-120 item 3.7; `hr23_feed.py`). No judge reads `out-hr23/` yet: these are rehearsal outputs, and no HR-23 row is judged from them.
 
 ### 4.5 The build and the pin of option (i)
 
