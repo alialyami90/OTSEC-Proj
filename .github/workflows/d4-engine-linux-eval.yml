@@ -34,7 +34,8 @@
 # - `build_only` builds and records the images, after selftest.sh, and runs
 #   no engine over any capture (GT-PCAP, public, PRP or HR-23's) and no unit
 #   test. It uploads only the build record. It wins over the other inputs.
-#   test_build_only.py checks that every other step is skipped under it.
+#   test_build_only.py checks, from each condition read as a conjunction,
+#   that every other step is skipped under it, and the same for hr25_unit.
 # - `hr25_unit` builds the images and runs only D4's unit tests of A's
 #   patch (run.sh hr25-unit) on D4's own synthetic inputs, under C2A and
 #   its controls; no capture of GT-PCAP or of D6's cases is read.
@@ -47,7 +48,7 @@ on:
         type: boolean
         default: false
       build_only:
-        description: "Only build and record the project's Zeek images (HR-23 C1p and C2, HR-25 C2A and its controls); run no engine and no test"
+        description: "Only build and record the project's Zeek images (HR-23 C1p and C2, HR-25 C2A and its controls), after selftest.sh; runs no engine over any capture"
         type: boolean
         default: false
       hr25_unit:
@@ -120,6 +121,8 @@ jobs:
         run: |
           sh modules/telemetry/experiments/engine-linux/zeek-patch/build.sh build "$RUNNER_TEMP/e-d4-03"
           cat "$RUNNER_TEMP/e-d4-03/images.env" >> "$GITHUB_ENV"
+          df -h /
+          docker system df
       - name: D4's unit and negative tests of the patch, on both builds
         if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh hr23-unit "$RUNNER_TEMP/e-d4-03"
@@ -146,14 +149,14 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.hr25_unit && !inputs.build_only }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh hr25-unit "$RUNNER_TEMP/e-d4-03"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: ${{ always() && inputs.build_only }}
+        if: ${{ !cancelled() && inputs.build_only }}
         with:
           name: d4-engine-linux-eval-build
           path: |
             ${{ runner.temp }}/e-d4-03/zeek-build.txt
           if-no-files-found: warn
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: ${{ always() && !inputs.build_only }}
+        if: ${{ !cancelled() && !inputs.build_only }}
         with:
           name: d4-engine-linux-eval-hr23
           path: |

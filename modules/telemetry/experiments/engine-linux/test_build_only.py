@@ -1,10 +1,18 @@
-"""The `build_only` input of d4-engine-linux-eval.yml (HR25-B1; D1's ruling
-(2) in D4-124): it builds and records the images and runs no engine over
-any capture and no test, and uploads only the build record.
+"""The `build_only` and `hr25_unit` inputs of d4-engine-linux-eval.yml
+(HR25-B1; D1's ruling (2) in D4-124). Under `build_only` the job builds and
+records the images, runs no engine over any capture and no test, and
+uploads only the build record. Under `hr25_unit` it runs only the build
+steps, the `hr25-unit` step and one upload: no job but `hr23`, and no other
+engine, fetch or install.
 
 The workflow is read as text, step by step (no YAML library on CI's python
-job). Each control edits the workflow so that one engine step, one job or
-the upload would run under build_only, and the check must refuse it.
+job). Each condition is read as a conjunction (D3's N1 and D6's N2 on
+#789): a step or job is skipped under an input only when its condition is
+`${{ a && b && ... }}` with no `||` and no `always()`, and one conjunct is
+`!inputs.<that input>` (or, under hr25_unit, `inputs.build_only`). Any
+other condition counts as running. Each control edits the workflow so
+that one engine step, one job or an upload would run under an input, and
+the check must refuse it.
 
 Run: python -m pytest -q modules/telemetry/experiments/engine-linux/test_build_only.py
 """
@@ -15,10 +23,11 @@ import pytest
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 WORKFLOW = os.path.join(ROOT, ".github", "workflows", "d4-engine-linux-eval.yml")
-SKIP = "!inputs.build_only"
 # The steps that may run under build_only, by their name or action.
 ALLOWED = ("actions/checkout", "Free disk for the Zeek build", "build.sh refuses every changed input",
            "Build C1p, C2, C2A and the controls")
+# hr25_unit's one engine step.
+HR25_STEP = "D4's unit tests of HR-25 option A's patch"
 
 
 def jobs(wf):
@@ -54,8 +63,52 @@ def jobs(wf):
     return out
 
 
+def conjuncts(cond):
+    """The conjuncts of `${{ a && b }}`, or None when the condition is not a
+    plain conjunction (it holds `||` or `always()`)."""
+    e = cond.strip()
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", e)
+    if m:
+        e = m.group(1)
+    if "||" in e or "always()" in e:
+        return None
+    return [c.strip() for c in e.split("&&")]
+
+
+def skipped(cond, inp):
+    """True when `cond` is skipped under `inp`. build_only wins over the
+    other inputs, so its skip is always `!inputs.build_only`; under
+    hr25_unit a step may also be build_only's own (`inputs.build_only`)."""
+    c = conjuncts(cond)
+    if c is None:
+        return False
+    return f"!inputs.{inp}" in c or (inp == "hr25_unit" and "inputs.build_only" in c)
+
+
 def runs_under_build_only(step):
-    return SKIP not in step.get("if", "")
+    return not skipped(step.get("if", ""), "build_only")
+
+
+def check_hr25_unit(js):
+    for name, (cond, _) in js.items():
+        if name != "hr23":
+            assert skipped(cond, "hr25_unit"), f"job {name} runs under hr25_unit"
+    uploads = 0
+    for st in js["hr23"][1]:
+        label = st.get("name") or st.get("uses", "")
+        if skipped(st.get("if", ""), "hr25_unit"):
+            continue
+        if "upload-artifact" in st.get("uses", ""):
+            uploads += 1
+            continue
+        assert label.startswith(ALLOWED + (HR25_STEP,)), f"step '{label}' runs under hr25_unit"
+        run = st.get("run", "")
+        if label.startswith(HR25_STEP):
+            assert run.strip() == 'sh modules/telemetry/experiments/engine-linux/run.sh hr25-unit "$RUNNER_TEMP/e-d4-03"'
+            continue
+        assert "run.sh" not in run and "fetch_captures" not in run and "apt-get" not in run, \
+            f"step '{label}' runs an engine, a fetch or an install under hr25_unit"
+    assert uploads == 1, "hr25_unit does not upload exactly one artifact"
 
 
 def check(wf):
@@ -64,9 +117,12 @@ def check(wf):
     js = jobs(wf)
     for name, (cond, _) in js.items():
         if name != "hr23":
-            assert SKIP in cond, f"job {name} runs under build_only"
+            assert skipped(cond, "build_only"), f"job {name} runs under build_only"
     cond, steps = js["hr23"]
-    assert "inputs.build_only" in cond.replace(SKIP, ""), "the hr23 job does not run under build_only"
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", cond.strip())
+    ors = [d.strip() for d in (m.group(1) if m else cond).split("||")]
+    assert "inputs.build_only" in ors and "inputs.hr25_unit" in ors, \
+        "the hr23 job does not run under build_only and hr25_unit"
     uploads = 0
     for st in steps:
         label = st.get("name") or st.get("uses", "")
@@ -83,6 +139,7 @@ def check(wf):
         assert "run.sh" not in run and "fetch_captures" not in run and "apt-get" not in run, \
             f"step '{label}' runs an engine, a fetch or an install under build_only"
     assert uploads == 1, "build_only does not upload exactly one artifact"
+    check_hr25_unit(js)
 
 
 def read():
@@ -113,13 +170,44 @@ CONTROLS = [
                                              "inputs.hr25_unit }}")),
     ("the dnp3-public job without the skip", ("  dnp3-public:\n    if: ${{ !inputs.build_only && !inputs.hr25_unit }}",
                                               "  dnp3-public:\n    if: ${{ !inputs.hr25_unit }}")),
-    ("the full upload under build_only", ("if: ${{ always() && !inputs.build_only }}", "if: ${{ always() }}")),
+    ("the full upload under build_only", ("if: ${{ !cancelled() && !inputs.build_only }}", "if: ${{ !cancelled() }}")),
     ("a second path in build_only's upload", ("            ${{ runner.temp }}/e-d4-03/zeek-build.txt\n"
                                               "          if-no-files-found: warn\n      - uses",
                                               "            ${{ runner.temp }}/e-d4-03/zeek-build.txt\n"
                                               "            ${{ runner.temp }}/hr23-selftest.md\n"
                                               "          if-no-files-found: warn\n      - uses")),
     ("the input missing", ("      build_only:\n", "      build_nothing:\n")),
+    # D3's N1 (a) and D6's N2 (a) on #789: the skip inside a condition that
+    # also holds `||` or `always()`.
+    ("an engine step whose skip is or-ed", ("!cancelled() && steps.build.outcome == 'success' && !inputs.build_only "
+                                            "&& !inputs.hr25_unit }}\n        run: sh modules/telemetry/experiments/"
+                                            "engine-linux/run.sh dnp3",
+                                            "!cancelled() && steps.build.outcome == 'success' || !inputs.build_only "
+                                            "&& !inputs.hr25_unit }}\n        run: sh modules/telemetry/experiments/"
+                                            "engine-linux/run.sh dnp3")),
+    ("the prp job's skip or-ed", ("  prp:\n    if: ${{ !inputs.build_only && !inputs.hr25_unit }}",
+                                  "  prp:\n    if: ${{ !inputs.build_only || inputs.hr23_build }}")),
+    ("an engine step under always() or the skip", ("if: ${{ !cancelled() && steps.build.outcome == 'success' && "
+                                                   "!inputs.build_only && !inputs.hr25_unit }}\n        run: sh "
+                                                   "modules/telemetry/experiments/engine-linux/run.sh dnp3",
+                                                   "if: ${{ always() || !inputs.build_only }}\n        run: sh "
+                                                   "modules/telemetry/experiments/engine-linux/run.sh dnp3")),
+    ("an engine step with always() beside the skip", ("if: ${{ !cancelled() && steps.build.outcome == 'success' && "
+                                                      "!inputs.build_only && !inputs.hr25_unit }}\n        run: sh "
+                                                      "modules/telemetry/experiments/engine-linux/run.sh dnp3",
+                                                      "if: ${{ always() && !inputs.build_only && !inputs.hr25_unit }}"
+                                                      "\n        run: sh modules/telemetry/experiments/engine-linux/"
+                                                      "run.sh dnp3")),
+    # D3's N1 (b) and D6's N2 (b): hr25_unit's skips.
+    ("an engine step without hr25_unit's skip", ("&& !inputs.build_only && !inputs.hr25_unit }}\n        run: sh "
+                                                 "modules/telemetry/experiments/engine-linux/run.sh dnp3",
+                                                 "&& !inputs.build_only }}\n        run: sh modules/telemetry/"
+                                                 "experiments/engine-linux/run.sh dnp3")),
+    ("the dnp3-public job without hr25_unit's skip", ("  dnp3-public:\n    if: ${{ !inputs.build_only && "
+                                                      "!inputs.hr25_unit }}",
+                                                      "  dnp3-public:\n    if: ${{ !inputs.build_only }}")),
+    ("the prp job without hr25_unit's skip", ("  prp:\n    if: ${{ !inputs.build_only && !inputs.hr25_unit }}",
+                                              "  prp:\n    if: ${{ !inputs.build_only }}")),
 ]
 
 
