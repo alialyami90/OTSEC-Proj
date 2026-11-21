@@ -429,7 +429,10 @@ For the captures of `hr23_cases.py`, these readings are not printed, since some 
 - the false-positive set, per class and configuration (`fp-` rows); a class that was not fed or did not run reads `not run` for every bound that needs it, never zero;
 - under any configuration whose `likely_server_ports` was not printed, or puts a flow's port on the other side of the pinned set, that flow reads `unknown` (`cfg-ports`).
 
-`hr23-cases.tsv`'s rows are judged by the same code's `judge-` rules, tested on synthetic logs, but are not judged or printed in a run until D1 rules on the judge's handling of held rows (D4-112 item 1.3). Until then a run on `refs/heads/main` fails at that step, so no counted HR-23 result is taken without them.
+`hr23-cases.tsv`'s rows are judged by the same code's `judge-` rules, under D1's ruling 7056743490 on #776 (D4-122):
+- The held list (`OTSEC_HR23_HELD`, the captures that hold a row held under D4-112 item 1.3) and a salt of at least 32 characters (`OTSEC_HR23_SALT`) reach the job from the environment at run time, never from a committed file. Without either, no row of the file is judged or printed, and a run on `refs/heads/main` fails at that step. A list that names anything other than a pinned capture is refused without being printed. Without the list, the check above prints no per-capture row either.
+- Every row of a held capture reads `held (D4-112 item 1.3)`, in the check and in the judge, and held captures are left out of the counts, which say how many are held. A fix reading of another capture that rests on a held capture reads `held (depends on a held row)`. No result, citation, finding or error text of a held capture is printed; a held capture that did not run cleanly fails a counted run without being named.
+- One SHA-256 is printed, over the salt followed by a newline and then the held captures' verdict lines, each followed by a newline: each held row's line in the table's order as the judge would have printed it, then each finding that names a held capture. A later disclosure can be checked against it with the salt.
 
 ### 4.5 The build and the pin of option (i)
 

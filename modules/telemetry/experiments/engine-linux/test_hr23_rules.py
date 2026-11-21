@@ -90,6 +90,18 @@ def test_a_flow_on_a_moved_port_reads_unknown_and_its_control_does_not():
     assert table.sides_moved(None, LIKELY, "udp", ("41018",)).startswith("unknown")
 
 
+def test_a_row_with_no_source_port_is_judged_on_its_other_port(tmp_path):
+    # A service row names no source port; the moved port still turns it unknown.
+    moved = copy.deepcopy(LIKELY)
+    moved["udp"].discard(20000)
+    assert table.sides_moved(moved, LIKELY, "udp", ("", "20000")).startswith("unknown")
+    assert table.sides_moved(LIKELY, LIKELY, "udp", ("", "20000")) is None
+    # Control: without the empty-port rule the row stops the judge.
+    m = mutant(tmp_path, "for p in flow_ports if p and (", "for p in flow_ports if (")
+    with pytest.raises(ValueError):
+        m.sides_moved(LIKELY, LIKELY, "udp", ("", "20000"))
+
+
 # The cases (judge-rows, judge-cells, judge-link, judge-fix and the rest),
 # on made-up rows: none of hr23-cases.tsv's rows is judged here.
 M, O = ("192.0.2.14", "20000"), ("192.0.2.20", "20000")
@@ -169,7 +181,8 @@ def results(rows, per_cfg):
 
 
 def judge(rows, per_cfg, root=ROOT):
-    return table.judge_cases(rows, results(rows, per_cfg), root)
+    oc, fix, findings, _ = table.judge_cases(rows, results(rows, per_cfg), root)
+    return oc, fix, [t for _, t in findings]
 
 
 def test_fix_a_shows_when_c0_fails_and_c1_c1p_pass(tmp_path):
@@ -433,19 +446,19 @@ def test_fp_b_fails_a_flow_named_by_c2_alone(tmp_path):
 
 
 # The mode: likely_server_ports under every configuration, and the cases'
-# rows withheld from a counted run.
+# rows withheld from a run without the held list and the salt.
 
 def test_hr23judge_prints_every_configurations_ports_and_fails_a_counted_run(tmp_path, capsys):
     ports = tmp_path / "ports"
     ports.mkdir()
     for cfg in table.JUDGED:
         (ports / f"{cfg}.txt").write_text("likely_server_ports at zeek_done: tcp [20000]; udp [20000]\n")
-    args = (str(tmp_path / "o"), str(tmp_path / "f"), str(tmp_path / "k"), ROOT, str(ports))
-    assert table.hr23judge(*args, True) == 3
+    args = (str(tmp_path / "o"), str(tmp_path / "f"), str(tmp_path / "k"), ROOT, str(ports), str(tmp_path / "p"))
+    assert table.hr23judge(*args, True, {}) == 3
     md = capsys.readouterr().out
     assert sum(1 for ln in md.splitlines() if ln.startswith("- c") and "tcp 20000; udp 20000" in ln) == 4
     assert "hr23-cases.tsv's rows" in md and "no counted HR-23 result is taken without the cases' rows" in md
-    assert table.hr23judge(*args, False) == 0
+    assert table.hr23judge(*args, False, {}) == 0
     # No row of hr23-cases.tsv is printed.
     cases = {r["capture"] for r in table.tsv(os.path.join(ROOT, table.GP, "hr23-cases.tsv"))}
     mal = {r["input"] for r in table.tsv(os.path.join(ROOT, table.GP, "hr23-malformed.tsv"))}

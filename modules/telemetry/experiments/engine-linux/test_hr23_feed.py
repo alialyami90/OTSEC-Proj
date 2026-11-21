@@ -167,6 +167,20 @@ def kept_file(d, names):
     return str(p)
 
 
+# A held capture with a neutral name, added to a copy of the pin file, and
+# the held list that names it (D1's ruling 7056743490 on #776). No real
+# capture is named as held in any test.
+HELD = "syn-held"
+ENV = {hr23_feed.HELD_ENV: HELD}
+
+
+def sums_with_held(d):
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "hr23.sha256"
+    p.write_text(open(SUMS, encoding="utf-8").read() + f"{'0' * 64}  {HELD}.pcap\n")
+    return str(p)
+
+
 CHECKS = [  # (what is missing or bad, counted, expected exit code)
     ((), "0", True, 0),
     ({(0, "zeek-probe-c2")}, "0", True, 3),
@@ -180,8 +194,9 @@ CHECKS = [  # (what is missing or bad, counted, expected exit code)
 def test_check_prints_only_ran_or_not_and_fails_a_counted_partial_run(tmp_path, capsys, skip, code, counted, want):
     caps = pinned()
     out = tmp_path / "out"
-    outs(out, caps, {(caps[i], cfg) for i, cfg in skip}, code)
-    assert hr23_feed.check(str(out), SUMS, kept_file(tmp_path, caps), counted) == want
+    outs(out, caps + [HELD], {(caps[i], cfg) for i, cfg in skip}, code)
+    assert hr23_feed.check(str(out), sums_with_held(tmp_path / "s"), kept_file(tmp_path, caps + [HELD]), counted,
+                           ENV) == want
     md = capsys.readouterr().out
     assert MARK not in md
     assert sum(1 for ln in md.splitlines() if ln.startswith("| dnp3-")) == 81
@@ -199,18 +214,19 @@ def check_failures(m, tmp_path, capsys):
     not kept, a pinned capture not kept but fed, an exit code that is not a
     number, and a path separator or absolute name in the pin file or the
     kept list."""
-    bad, caps = [], pinned()
+    bad, caps = [], pinned() + [HELD]
+    sums = sums_with_held(tmp_path / "s")
     # Fed but not kept: an output folder of a capture pin did not keep.
     out = tmp_path / "fed"
     outs(out, caps + ["stray"])
-    if m.check(str(out), SUMS, kept_file(tmp_path / "k-fed", caps), True) != 3:
+    if m.check(str(out), sums, kept_file(tmp_path / "k-fed", caps), True, ENV) != 3:
         bad.append("fed but not kept: not failed")
     capsys.readouterr()
     # Kept but not fed is "not run"; and a pinned capture pin did not keep,
     # though fed, reads "not run".
     out = tmp_path / "notkept"
     outs(out, caps)
-    rc = m.check(str(out), SUMS, kept_file(tmp_path / "k-notkept", caps[1:]), True)
+    rc = m.check(str(out), sums, kept_file(tmp_path / "k-notkept", caps[1:]), True, ENV)
     md = capsys.readouterr().out
     if rc != 3 or f"| {caps[0]} | not run | not run | not run | not run |" not in md:
         bad.append("a capture pin did not keep reads as run")
@@ -218,7 +234,7 @@ def check_failures(m, tmp_path, capsys):
     out = tmp_path / "text"
     outs(out, caps)
     (out / caps[0] / "zeek-probe" / "exit-code").write_text(TEXT + "\n")
-    rc = m.check(str(out), SUMS, kept_file(tmp_path / "k-text", caps), True)
+    rc = m.check(str(out), sums, kept_file(tmp_path / "k-text", caps), True, ENV)
     md = capsys.readouterr().out
     if rc != 3 or TEXT in md or "exit code not a number" not in md:
         bad.append("a non-numeric exit code was printed, or read as clean")
@@ -227,11 +243,11 @@ def check_failures(m, tmp_path, capsys):
         d = tmp_path / f"name{i}"
         out = d / "out"
         outs(out, caps)
-        sums = d / "s.sha256"
-        sums.write_text(open(SUMS, encoding="utf-8").read() + f"{'0' * 64}  {name}.pcap\n")
-        if m.check(str(out), str(sums), kept_file(d, caps), False) != 1:
+        s2 = d / "s.sha256"
+        s2.write_text(open(sums, encoding="utf-8").read() + f"{'0' * 64}  {name}.pcap\n")
+        if m.check(str(out), str(s2), kept_file(d, caps), False, ENV) != 1:
             bad.append(f"pin file name {name!r} not refused")
-        if m.check(str(out), SUMS, kept_file(d, caps + [name]), False) != 1:
+        if m.check(str(out), sums, kept_file(d, caps + [name]), False, ENV) != 1:
             bad.append(f"kept name {name!r} not refused")
         capsys.readouterr()
     return bad
@@ -317,10 +333,11 @@ def make_root(tmp_path, bad_pin=None):
         i = next(k for k, ln in enumerate(lines) if ln.endswith("  " + bad_pin + ".pcap"))
         lines[i] = "0" * 64 + lines[i][64:]
         text = "\n".join(lines)
-    (d / "hr23.sha256").write_text(text, newline="\n")
-    # The judge's inputs: D6's malformed set and the builder's labels.
-    shutil.copy(os.path.join(ROOT, "tests", "integration", "gt_pcap", "hr23-malformed.tsv"),
-                root / "tests" / "integration" / "gt_pcap")
+    # The neutral held capture, which the feed's python3 below writes.
+    (d / "hr23.sha256").write_text(text + f"{hashlib.sha256(b'syn').hexdigest()}  {HELD}.pcap\n", newline="\n")
+    # The judge's inputs: D6's malformed set and cases, and the builder's labels.
+    for f in ("hr23-malformed.tsv", "hr23-cases.tsv"):
+        shutil.copy(os.path.join(ROOT, "tests", "integration", "gt_pcap", f), root / "tests" / "integration" / "gt_pcap")
     for f in os.listdir(os.path.join(GT, "hr23")):
         if f.endswith(".tsv"):
             shutil.copy(os.path.join(GT, "hr23", f), d)
@@ -328,22 +345,31 @@ def make_root(tmp_path, bad_pin=None):
     return root
 
 
-def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here=HERE):
+SALT = "test-only-salt-" + "0" * 32
+
+
+def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here=HERE, held=True):
     """hr23_feed in TEXT with run.sh's zeek_run; EXTRA is a shell command
-    run on the feed folder after hr23_cases.py writes it, before pin."""
+    run on the feed folder after hr23_cases.py writes it, before pin. The
+    neutral held capture is written beside hr23_cases.py's, and HELD gives
+    the held list and the salt in the environment."""
     work = tmp_path / "work"
     work.mkdir(parents=True)
     root = make_root(tmp_path, bad_pin)
     script = work / "probe.sh"
     script.write_text('set -eu\n'
                       'python3() {\n  "$PY" "$@" || return $?\n'
-                      '  case $1 in */hr23_cases.py) [ -z "${EXTRA:-}" ] || sh -c "$EXTRA" sh "$2" ;; esac\n}\n'
+                      '  case $1 in */hr23_cases.py) printf syn > "$2/' + HELD + '.pcap"\n'
+                      '    [ -z "${EXTRA:-}" ] || sh -c "$EXTRA" sh "$2" ;; esac\n}\n'
                       + STUB + function("zeek_run") + text
                       + 'rc=0\nhr23_feed > "$work/feed.md" || rc=$?\necho "feed rc $rc"\necho "$img" > "$work/img"\n',
                       newline="\n")
     env = dict(os.environ, PY=fwd(sys.executable), here=fwd(here), root=fwd(root), work=fwd(work), MARK=MARK,
                ZEEK_IMAGE="stock", HR23_C1P_IMAGE="c1p", HR23_C2_IMAGE="c2", img="stock", locked="", pkgs="P")
-    env.pop("GITHUB_REF", None)
+    for k in ("GITHUB_REF", hr23_feed.HELD_ENV, hr23_feed.SALT_ENV):
+        env.pop(k, None)
+    if held:
+        env.update({hr23_feed.HELD_ENV: HELD, hr23_feed.SALT_ENV: SALT})
     if ref:
         env["GITHUB_REF"] = ref
     if skip:
@@ -362,10 +388,7 @@ def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here
 
 ONE = "dnp3-udp-relay-write"
 # (ref, a pair not run, a capture off its pin, extra files, whether the
-# hr23 check fails it as partial). Every run on main now exits 3: the judge
-# withholds hr23-cases.tsv's rows until D1 rules on the judge's handling of
-# held rows (brief P4-4-HR23-JUDGE), so the check's own verdict is read from
-# its text.
+# hr23 check fails it as partial). A run on main exits 3 only when partial.
 FEEDS = [
     ("refs/heads/main", None, None, None, False),
     ("refs/heads/main", (ONE, "zeek-probe-c2"), None, None, True),
@@ -392,16 +415,20 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
     for i, (ref, skip, bad_pin, extra, partial) in enumerate(FEEDS):
         rc, md, log, calls, fed, img, ports = run_feed(tmp_path / str(i), text, ref, skip, bad_pin, extra, here)
         case = f"case {i}: ref={ref} skip={skip} bad_pin={bad_pin} extra={extra}"
-        want = 3 if ref == "refs/heads/main" else 0
+        want = 3 if ref == "refs/heads/main" and partial else 0
         if rc != want:
             bad.append(f"{case}: exit {rc}, want {want}")
         hr23_md = md.split("## HR-23's false-positive set")[0]
         if (PARTIAL in hr23_md) != (partial and want == 3):
             bad.append(f"{case}: the check's counted failure is {'missing' if partial else 'wrongly there'}")
+        if f"| {HELD} | " + " | ".join([hr23_feed.HELD] * 4) + " |" not in hr23_md or "1 held captures" not in hr23_md:
+            bad.append(f"{case}: the held capture's row is not held in the check")
+        if "salted SHA-256" not in md or "### hr23-cases.tsv's rows" not in md:
+            bad.append(f"{case}: the cases' rows were not judged")
         if MARK in md or MARK in log:
             bad.append(f"{case}: an engine's own output reached the table or the log")
         if "10 of 10 captures ran under all four" not in md:
-            bad.append(f"{case}: the false-positive set was not fed and checked: {md[-300:]}")
+            bad.append(f"{case}: the false-positive set was not fed and checked")
         first_kept = sorted(set(pinned()) - ({bad_pin} if bad_pin else set()))[0]
         if set(ports.split("\n")) - {""} != {w.format(first_kept) for w in PORTS_WIRING}:
             bad.append(f"{case}: ports.zeek did not run under each configuration's image and scripts: {ports!r}")
@@ -419,7 +446,7 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
         if sorted({ln.split("|")[0] for ln in fp_fed}) != sorted(p + ".pcap" for p in hr23_feed.pins(FP_SUMS)) \
                 or len(fp_fed) != 40:
             bad.append(f"{case}: the false-positive set's classes not each fed once to each configuration")
-        want_fed = {p + ".pcap" for p in pinned()} - ({bad_pin + ".pcap"} if bad_pin else set())
+        want_fed = {p + ".pcap" for p in pinned() + [HELD]} - ({bad_pin + ".pcap"} if bad_pin else set())
         if extra and ".pcapng" in extra:
             want_fed.discard(ONE + ".pcap")
         if fed_names != want_fed:
@@ -430,7 +457,7 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
                         or f"| {bad_pin} | not run | not run | not run | not run |" not in md):
             bad.append(f"{case}: the capture off its pin was fed, or not reported")
         if not partial and ref == "refs/heads/main" and "81 of 81 captures ran" not in md:
-            bad.append(f"{case}: not every capture ran: {md[-400:]}")
+            bad.append(f"{case}: not every capture ran")
         if first and bad:
             break
     return bad
@@ -439,6 +466,19 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
 @needs_sh
 def test_feed_runs_every_pinned_capture_and_fails_only_a_counted_partial_run(tmp_path):
     assert feed_failures(tmp_path, function()) == []
+
+
+@needs_sh
+def test_feed_without_the_held_list_prints_no_capture_row_and_fails_a_counted_run(tmp_path):
+    # Control: test_feed_runs_every_pinned_capture_..., the same feed with
+    # the held list and the salt, prints every row.
+    for ref, want in (("refs/heads/main", 3), ("refs/heads/agent/x", 0)):
+        rc, md = run_feed(tmp_path / str(want), function(), ref, held=False)[:2]
+        assert rc == want
+        hr23_md, rest = md.split("## HR-23's false-positive set")
+        assert "| dnp3-" not in hr23_md and HELD not in md and "No per-capture row is printed" in hr23_md
+        cases_md = rest.split("### hr23-cases.tsv's rows")[1]
+        assert "Not judged or printed" in cases_md and "| dnp3-" not in cases_md and "SHA-256" not in cases_md
 
 
 FEED_MUTANTS = {

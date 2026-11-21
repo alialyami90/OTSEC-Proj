@@ -30,6 +30,17 @@ otherwise it exits 0. A name in SUMS or KEPT that is not one plain file
 name (mountcheck.py's PLAIN: no path separator, not absolute) is refused,
 and `check` exits 1.
 
+The held list (D1's ruling 7056743490 on #776, D4-122): for HR-23's
+captures (not the false-positive set), `check` reads from the environment,
+at run time and never from a committed file, OTSEC_HR23_HELD: the captures
+that hold a row held under D4-112 item 1.3, separated by commas or spaces.
+Each held capture's row reads `held (D4-112 item 1.3)` in every cell and is
+left out of the count, which says how many captures are held; if one did not
+run cleanly, the text says only that a held capture did not, and a counted
+run exits 3. Without the list no per-capture row is printed, and a counted
+run exits 3. A list that names anything other than a capture of SUMS is
+refused, without printing it, and `check` exits 1.
+
 Usage: python3 -I hr23_feed.py pin DIR SUMS KEPT
        python3 -I hr23_feed.py check OUT SUMS KEPT [--counted]
 """
@@ -44,6 +55,32 @@ from mountcheck import CAPTURE, PLAIN  # noqa: E402
 
 # C0, C1, C1p and C2 (the design's section 4.1), by the names run.sh gives them.
 CONFIGS = ("zeek-probe-c0", "zeek-probe", "zeek-probe-c1p", "zeek-probe-c2")
+# The held list and the salt (D1's ruling 7056743490 on #776, D4-122): from
+# the environment at run time, never from a committed file.
+HELD_ENV, SALT_ENV = "OTSEC_HR23_HELD", "OTSEC_HR23_SALT"
+HELD = "held (D4-112 item 1.3)"
+# The salt is at least this long, so that the printed hash of a few short
+# verdict lines cannot be reversed by trying each possible verdict.
+SALT_MIN = 32
+
+
+def held_list(known, env=None):
+    """(captures, why): the set named by HELD_ENV and None; or None and why
+    when it is not given; or False and why when it names anything that is
+    not in KNOWN. No name from the list is ever printed."""
+    env = os.environ if env is None else env
+    names = env.get(HELD_ENV, "").replace(",", " ").split()
+    if not names:
+        return None, f"the held list ({HELD_ENV}) was not given"
+    if any(not PLAIN.fullmatch(n) or n not in known for n in names):
+        return False, f"the held list ({HELD_ENV}) names something that is not a pinned capture; refused"
+    return set(names), None
+
+
+def salt_of(env=None):
+    """SALT_ENV's value, or None when it is shorter than SALT_MIN."""
+    s = (os.environ if env is None else env).get(SALT_ENV, "")
+    return s if len(s) >= SALT_MIN else None
 
 
 def pins(sums):
@@ -105,7 +142,7 @@ def plain(names, what):
     return names
 
 
-def check(out, sums, kept_file, counted):
+def check(out, sums, kept_file, counted, env=None):
     caps = plain(sorted(pins(sums)), "the pin file")
     with open(kept_file, encoding="utf-8") as fh:
         kept = plain([ln.strip() for ln in fh if ln.strip()], "the kept list")
@@ -113,6 +150,14 @@ def check(out, sums, kept_file, counted):
         return 1
     kept = set(kept)
     fp = os.path.basename(sums) == "fp.sha256"
+    held = set()
+    if not fp:
+        held, why = held_list(set(caps), env)
+        if why:
+            print(f"\n## HR-23's captures under C0, C1, C1p and C2: not printed\n\nNo per-capture row is printed: {why}"
+                  " (D1's ruling 7056743490 on #776)." +
+                  (" **This run is on refs/heads/main, so it fails.**" if counted and held is None else ""))
+            return 1 if held is False else (3 if counted else 0)
     print(f"\n## HR-23's {'false-positive set' if fp else 'captures'} under C0, C1, C1p and C2 (D4-120 item 3.7): "
           "ran or not\n")
     print(f"Every capture `{'fp_set' if fp else 'hr23_cases'}.py` writes, equal to its pin in "
@@ -123,22 +168,27 @@ def check(out, sums, kept_file, counted):
           "own output is kept on the runner and is neither printed nor uploaded.\n")
     print("| capture | " + " | ".join(CONFIGS) + " |")
     print("| --- |" + " --- |" * len(CONFIGS))
-    bad, unclean = [], set()
+    bad, unclean, held_unclean = [], set(), False
     for c in caps:
         cells = []
         for cfg in CONFIGS:
             code = exit_code(os.path.join(out, c, cfg)) if c in kept else None
             cells.append("not run" if code is None else
                          "exit code not a number" if code == "not a number" else f"exit {code}")
-            if code != "0":
+            if code != "0" and c in held:
+                held_unclean = True
+            elif code != "0":
                 bad.append(f"{c} ({cfg}: {cells[-1]})")
                 unclean.add(c)
-        print(f"| {c} | " + " | ".join(cells) + " |")
+        print(f"| {c} | " + " | ".join([HELD] * len(CONFIGS) if c in held else cells) + " |")
+    if held_unclean:
+        bad.append(f"a held capture (which, and how, is {HELD})")
     # Fed but not kept: an output folder of a capture that pin did not keep.
     for c in sorted(set(os.listdir(out)) - kept):
         bad.append(f"{c} (fed, but not a capture that pin kept)")
-    print(f"\n{len(caps) - len(unclean)} of {len(caps)} captures ran under all four "
-          "configurations with exit code 0.")
+    n = len(caps) - len(held)
+    print(f"\n{n - len(unclean)} of {n} captures ran under all four configurations with exit code 0" +
+          (f"; {len(held)} held captures are left out of this count, and their rows read `{HELD}`." if held else "."))
     if bad:
         print("\n**Not run, or a non-zero exit:** " + "; ".join(bad) + ".")
         print("\n" + ("**This run is on refs/heads/main, so it fails: no counted HR-23 result is taken from a run in "
@@ -151,7 +201,7 @@ def main(argv):
     if len(argv) == 4 and argv[0] == "pin":
         return pin(argv[1], argv[2], argv[3])
     if len(argv) in (4, 5) and argv[0] == "check" and argv[4:] in ([], ["--counted"]):
-        return check(argv[1], argv[2], argv[3], argv[4:] == ["--counted"])
+        return check(argv[1], argv[2], argv[3], argv[4:] == ["--counted"], os.environ)
     sys.stderr.write(__doc__.split("Usage:")[1])
     return 2
 

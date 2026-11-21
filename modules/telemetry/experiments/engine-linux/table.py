@@ -40,7 +40,7 @@ labels modbus_label.py writes in the run (`sig` below).
 
 Usage: python -I table.py dnp3 OUT GT_PCAP_DIR WORK ROOT   (pipe runs in OUT-pipe)
        python -I table.py hr23 OUT   (HR-23's readings, section 4.4 of its design)
-       python -I -B table.py hr23judge OUT OUT_FP FP_KEPT ROOT PORTS [--counted]   (HR-23's judge)
+       python -I -B table.py hr23judge OUT OUT_FP FP_KEPT ROOT PORTS PCAPS [--counted]   (HR-23's judge)
        python -I table.py fifo OUT OUT-pipe
        python -I table.py public OUT PCAPS MANIFEST EXTRA [--counted]
        python -I table.py sig SIG_DIR ROOT WORK
@@ -1558,10 +1558,11 @@ def read_ports(path):
 def sides_moved(ports, want, l4, flow_ports):
     """cfg-ports: None when every port of the flow falls on the same side of
     the configuration's likely_server_ports as of the pinned set (WANT), else
-    why the flow reads unknown under that configuration."""
+    why the flow reads unknown under that configuration. An empty port (a
+    service row names no source port) is no port."""
     if ports is None:
         return "unknown (likely_server_ports not printed under this configuration)"
-    moved = sorted({int(p) for p in flow_ports if (int(p) in ports[l4]) != (int(p) in want[l4])})
+    moved = sorted({int(p) for p in flow_ports if p and (int(p) in ports[l4]) != (int(p) in want[l4])})
     return f"unknown (likely_server_ports differs from the pinned set at {l4}/{','.join(map(str, moved))})" \
         if moved else None
 
@@ -1672,9 +1673,12 @@ def judge_cases(conds, res, root):
     """judge-fix, judge-control, judge-objects, judge-swap, judge-link,
     judge-regression and the premise, over every row's results under the
     four configurations (RES: {cfg: {index: (result, citation)}}). Returns
-    ({index: {cfg: outcome}}, {index: fix reading}, [findings])."""
+    ({index: {cfg: outcome}}, {index: fix reading}, [(captures, finding)],
+    {index: the captures its fix reading was read from}); the last two let
+    the cases' table hold back what rests on a held capture."""
     oc = {n: {cfg: outcome(r[CELL_OF[cfg]], res[cfg][n][0]) for cfg in JUDGED} for n, r in enumerate(conds)}
     findings = []
+    deps = {n: {r["capture"]} for n, r in enumerate(conds)}
     # judge-link: without the replayed link row under C1, C1's pass on the
     # case's Service row reads unknown.
     for n, r in enumerate(conds):
@@ -1688,7 +1692,7 @@ def judge_cases(conds, res, root):
     swap_unrun = any(c0(n).startswith("unknown") for n, r in enumerate(conds) if r["capture"] == SWAP)
     premise = [n for n, r in enumerate(conds) if r["capture"] == PREMISE]
     if any(c0(n).startswith("fail") for n in premise):
-        findings.append(f"premise: a row of {PREMISE} fails under C0, so option (i)'s premise does not hold")
+        findings.append(({PREMISE}, f"premise: a row of {PREMISE} fails under C0, so option (i)'s premise does not hold"))
     obj_failed = {}
     for g, cap in OBJ_CONTROL.items():
         ctl = [n for n, r in enumerate(conds) if r["capture"] == cap and r["condition"] == "objects"
@@ -1700,8 +1704,8 @@ def judge_cases(conds, res, root):
         o, f = oc[n], r["fix"]
         ctl_off = [CELL_OF[c] for c in ("zeek-probe-c0", "zeek-probe", "zeek-probe-c1p") if o[c] == "not as pinned"]
         if ctl_off and f not in ("unknown", "r1"):
-            findings.append(f"judge-control: {r['capture']} {r['condition']} {r['code']} {r['objects']}: "
-                            f"{', '.join(ctl_off)} not as pinned")
+            findings.append(({r["capture"]}, f"judge-control: {r['capture']} {r['condition']} {r['code']} "
+                                              f"{r['objects']}: {', '.join(ctl_off)} not as pinned"))
         if f == "unknown":
             fix[n] = "unknown (C0 passes the row)"
         elif f == "r1":
@@ -1712,25 +1716,34 @@ def judge_cases(conds, res, root):
             fix[n] = "unknown (a configuration did not run, or cfg-ports)"
         elif ctl_off:
             fix[n] = f"unknown (judge-control: {', '.join(ctl_off)} not as pinned)"
-        elif relay_started(root, r["capture"]) and (swap_failed or swap_unrun):
-            fix[n] = "unknown (judge-swap: the swap's control " + ("fails under C0)" if swap_failed else "did not run)")
-        elif f == "b" and r["condition"] == "objects" and any(
-                obj_failed.get(g, "unknown") is not False for g in r["objects"].split(",")):
-            fix[n] = "unknown (judge-objects: an object's own control does not pass under C0)"
-        elif f == "a":
-            fix[n] = "a shows"
-        elif f == "b":
-            fix[n] = "b shows" if o["zeek-probe-c2"] == "as pinned" else "b does not show"
         else:
-            fix[n] = f"unknown (fix column {f} is not a judge-fix value)"
+            # From here on the reading rests on other captures' rows too.
+            relay = relay_started(root, r["capture"])
+            objs = r["objects"].split(",") if f == "b" and r["condition"] == "objects" else []
+            if relay:
+                deps[n].add(SWAP)
+            if relay and (swap_failed or swap_unrun):
+                fix[n] = "unknown (judge-swap: the swap's control " + ("fails under C0)" if swap_failed else "did not run)")
+                continue
+            deps[n].update(OBJ_CONTROL[g] for g in objs if g in OBJ_CONTROL)
+            if any(obj_failed.get(g, "unknown") is not False for g in objs):
+                fix[n] = "unknown (judge-objects: an object's own control does not pass under C0)"
+            elif f == "a":
+                fix[n] = "a shows"
+            elif f == "b":
+                fix[n] = "b shows" if o["zeek-probe-c2"] == "as pinned" else "b does not show"
+            else:
+                fix[n] = f"unknown (fix column {f} is not a judge-fix value)"
     # judge-regression.
     for n, r in enumerate(conds):
         if r["c2"] == "pass" and res["zeek-probe-c2"][n][0].startswith("fail"):
             by = "the patch" if res["zeek-probe-c1p"][n][0].startswith("pass") else "the build"
-            findings.append(f"judge-regression: {r['capture']} {r['condition']} {r['code']}: C2 fails, of {by}")
+            findings.append(({r["capture"]}, f"judge-regression: {r['capture']} {r['condition']} {r['code']}: "
+                                              f"C2 fails, of {by}"))
         if r["c1"] == "pass" and res["zeek-probe"][n][0].startswith("fail"):
-            findings.append(f"judge-regression: {r['capture']} {r['condition']} {r['code']}: C1 fails, of part (a)")
-    return oc, fix, findings
+            findings.append(({r["capture"]}, f"judge-regression: {r['capture']} {r['condition']} {r['code']}: "
+                                              "C1 fails, of part (a)"))
+    return oc, fix, findings, deps
 
 
 def both_findings(out, caps):
@@ -1741,7 +1754,7 @@ def both_findings(out, caps):
         for cfg in ("zeek-probe", "zeek-probe-c1p", "zeek-probe-c2"):
             d = os.path.join(out, c, cfg)
             if not ran(d) and hr23_readings(d, cfg)["both"] and c not in BOTH_EXPECTED:
-                found.append(f"judge-both: {c} under {cfg}")
+                found.append(({c}, f"judge-both: {c} under {cfg}"))
     return found
 
 
@@ -2018,6 +2031,76 @@ def judge_fp(out_fp, root, kept):
     return res
 
 
+def cases(out, pcaps, root, ports_of, want, counted, env=None):
+    """hr23-cases.tsv's rows, under D1's ruling 7056743490 on #776 (D4-122).
+    The held list and the salt come from the environment (hr23_feed.py's
+    HELD_ENV and SALT_ENV), never from a committed file; without either, no
+    row is judged or printed, and a counted run exits 3. Every row of a held
+    capture reads HELD, and a fix reading that rests on a held capture reads
+    `held (depends on a held row)`; no result, citation or finding of a held
+    capture is printed, and held captures are left out of the counts. One
+    SHA-256 is printed, over the salt and the held captures' verdict lines:
+    each held row's line as this table would print it, then each finding
+    that names a held capture, each followed by a newline. Returns the exit
+    code."""
+    # Imported here, not at the top: table.py's other modes run without -B,
+    # and the import would write __pycache__ into the mounted folder.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import hashlib
+    import hr23_feed
+    print("\n### hr23-cases.tsv's rows\n")
+    held, why = hr23_feed.held_list(set(hr23_feed.pins(os.path.join(root, GT, HR23_DIR, "hr23.sha256"))), env)
+    salt = hr23_feed.salt_of(env)
+    if not why and salt is None:
+        why = f"the salt ({hr23_feed.SALT_ENV}) was not given, or is shorter than {hr23_feed.SALT_MIN} characters"
+    if why:
+        print(f"Not judged or printed: {why} (D1's ruling 7056743490 on #776)." +
+              (" **This run is on refs/heads/main, so it fails: no counted HR-23 result is taken without the cases' "
+               "rows.**" if counted and held is not False else ""))
+        return 1 if held is False else (3 if counted else 0)
+    conds = tsv(os.path.join(root, GP, "hr23-cases.tsv"))
+    try:
+        res = {cfg: {} for cfg in JUDGED}
+        for cap in dict.fromkeys(r["capture"] for r in conds):
+            rows = [(n, r) for n, r in enumerate(conds) if r["capture"] == cap]
+            for cfg in JUDGED:
+                res[cfg].update(case_results(rows, os.path.join(out, cap, cfg), cfg,
+                                             os.path.join(pcaps, cap + ".pcap"), ports_of[cfg], want))
+        oc, fix, findings, deps = judge_cases(conds, res, root)
+        findings += both_findings(out, sorted({r["capture"] for r in conds}))
+    except Exception:  # noqa: BLE001 (its text may concern a held capture)
+        print("Not printed: the cases' judge stopped on an error, whose text is not printed because it may concern a "
+              f"held capture ({hr23_feed.HELD}). The job fails.")
+        return 1
+    print("Each row under C0, C1, C1p and C2: `as pinned`, `not as pinned`, `unknown` or `reported`, with the result "
+          f"and the log line it rests on; then the fix reading (judge-fix). Every row of a held capture reads "
+          f"`{hr23_feed.HELD}`, and a fix reading that rests on a held capture reads `held (depends on a held row)` "
+          "(D1's ruling 7056743490 on #776).\n")
+    print("| capture | condition | code | objects | " + " | ".join(CELL_OF[c] for c in JUDGED) + " | fix |")
+    print("| --- | --- | --- | --- |" + " --- |" * len(JUDGED) + " --- |")
+    secret, tally, fixes = [], collections.Counter(), collections.Counter()
+    for n, r in enumerate(conds):
+        head = f"| {r['capture']} | {r['condition']} | {r['code']} | {r['objects']} | "
+        cells = [f"{oc[n][cfg]}: {res[cfg][n][0]} {res[cfg][n][1]}".strip().replace("|", "/") for cfg in JUDGED]
+        if r["capture"] in held:
+            secret.append(head + " | ".join(cells) + f" | {fix[n]} |")
+            print(head + " | ".join([hr23_feed.HELD] * (len(JUDGED) + 1)) + " |")
+            continue
+        f = "held (depends on a held row)" if deps[n] & held else fix[n]
+        tally.update(oc[n][cfg] for cfg in JUDGED)
+        fixes[f.split(" (")[0]] += 1
+        print(head + " | ".join(cells) + f" | {f} |")
+    shown = [t for caps, t in findings if not caps & held]
+    secret += [t for caps, t in findings if caps & held]
+    print("\nCells: " + ", ".join(f"{tally[k]} {k}" for k in ("as pinned", "not as pinned", "unknown", "reported")) +
+          ". Fix readings: " + (", ".join(f"{n} {k}" for k, n in sorted(fixes.items())) or "none") +
+          f". {len(held)} held captures are left out of these counts.")
+    print("\n**Findings:** " + ("; ".join(shown) if shown else "none") + ".")
+    digest = hashlib.sha256((salt + "\n" + "".join(x + "\n" for x in secret)).encode("utf-8")).hexdigest()
+    print(f"\nHeld captures' verdict lines, salted SHA-256 (D1's ruling 7056743490 on #776): `{digest}`.")
+    return 0
+
+
 def kept_names(path):
     if not os.path.isfile(path):
         return set()
@@ -2025,12 +2108,10 @@ def kept_names(path):
         return {ln.strip() for ln in fh if ln.strip()}
 
 
-def hr23judge(out, out_fp, fp_kept, root, ports_dir, counted):
+def hr23judge(out, out_fp, fp_kept, root, ports_dir, pcaps, counted, env=None):
     """HR-23's judge: likely_server_ports under each configuration, the
     malformed set and the false-positive set judged, and hr23-cases.tsv's
-    rows withheld until D1 rules on the judge's handling of held rows
-    (D4-112 item 1.3). Returns the exit code: 3 on a counted run, since the
-    cases' rows are not yet judged."""
+    rows (`cases`, on the captures in PCAPS). Returns cases' exit code."""
     ROOT_DIR[0] = root
     sys.path.insert(0, os.path.join(root, GP))
     import hr23_cases  # noqa: E402 (LIKELY: the pinned set, cfg-ports)
@@ -2076,22 +2157,17 @@ def hr23judge(out, out_fp, fp_kept, root, ports_dir, counted):
                          f"viol {x['viol']}; " + (", ".join(f"{k}={n}" for k, n in sorted(x["weirds"].items())) or "no weird"))
         rules = "; ".join(f"{k}: {v}" for k, v in r["rules"]) or "reported only"
         print(f"| {cls} | {r['items']} | " + " | ".join(cells) + f" | {rules} |")
-    print("\n### hr23-cases.tsv's rows\n")
-    print("Not judged in this run: the judge's handling of held rows (D4-112 item 1.3) waits on D1's ruling, and no "
-          "row of this file is judged, printed or counted until it is in place." +
-          (" **This run is on refs/heads/main, so it fails: no counted HR-23 result is taken without the cases' rows.**"
-           if counted else ""))
-    return 3 if counted else 0
+    return cases(out, pcaps, root, ports_of, want, counted, env)
 
 if __name__ == "__main__":
     if sys.argv[1] == "hr23":
         hr23(sys.argv[2])
         sys.exit(0)
     if sys.argv[1] == "hr23judge":
-        if len(sys.argv) < 7 or sys.argv[7:] not in ([], ["--counted"]):
-            print("usage: table.py hr23judge OUT OUT_FP FP_KEPT ROOT PORTS [--counted]", file=sys.stderr)
+        if len(sys.argv) < 8 or sys.argv[8:] not in ([], ["--counted"]):
+            print("usage: table.py hr23judge OUT OUT_FP FP_KEPT ROOT PORTS PCAPS [--counted]", file=sys.stderr)
             sys.exit(2)
-        sys.exit(hr23judge(*sys.argv[2:7], sys.argv[7:] == ["--counted"]))
+        sys.exit(hr23judge(*sys.argv[2:8], sys.argv[8:] == ["--counted"], os.environ))
     if sys.argv[1] == "dnp3":
         dnp3(*sys.argv[2:6])
     elif sys.argv[1] == "fifo":

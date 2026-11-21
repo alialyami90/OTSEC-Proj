@@ -364,10 +364,11 @@ fifos() {
 # are held from per-row publication (D4-112 item 1.3): each container's own
 # output, in which in-container.sh prints the engine's warnings, goes to a
 # file that is neither printed nor uploaded, and hr23_feed.py check prints only
-# whether each configuration ran and its exit code. table.py hr23judge then
-# judges what the brief P4-4-HR23-JUDGE allows to be printed. The first
-# non-zero exit code is returned: 3 when, on refs/heads/main, a capture did
-# not run cleanly under all four, or the cases' rows are not yet judged.
+# whether each configuration ran and its exit code, and for a held capture
+# only that it is held. table.py hr23judge then judges what the brief
+# P4-4-HR23-JUDGE and D1's ruling 7056743490 on #776 allow to be printed. The
+# first non-zero exit code is returned: 3 when, on refs/heads/main, a capture
+# did not run cleanly under all four, or the held list or the salt is missing.
 # -B: hr23_feed.py imports mountcheck.py, and without it python3 writes
 # __pycache__ into $here, the folder mounted at /exp and hashed (D6's N1).
 hr23_feed() {
@@ -418,11 +419,13 @@ hr23_feed() {
   rc=0
   python3 -I -B "$here/hr23_feed.py" check "$work/out-hr23" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" $hr23_counted || rc=$?
   python3 -I -B "$here/hr23_feed.py" check "$work/out-fp" "$root/tests/fixtures/network/gt-pcap/fp/fp.sha256" "$work/fp-kept.txt" $hr23_counted || { r=$?; [ "$rc" != 0 ] || rc=$r; }
-  # HR-23's judge (brief P4-4-HR23-JUDGE): the malformed set and the
-  # false-positive set against D6's conditions. hr23-cases.tsv's rows wait on
-  # D1's ruling on the judge's handling of held rows (D4-112 item 1.3), so a
-  # counted run fails here until it is in place.
-  python3 -I -B "$here/table.py" hr23judge "$work/out-hr23" "$work/out-fp" "$work/fp-kept.txt" "$root" "$work/ports-hr23" $hr23_counted || { r=$?; [ "$rc" != 0 ] || rc=$r; }
+  # HR-23's judge (brief P4-4-HR23-JUDGE): the malformed set, the
+  # false-positive set and hr23-cases.tsv's rows against D6's conditions.
+  # The held list and the salt (OTSEC_HR23_HELD, OTSEC_HR23_SALT) reach the
+  # check and the judge from the environment at run time, never from a
+  # committed file (D1's ruling 7056743490 on #776); without them neither
+  # prints a per-capture row, and a counted run fails here.
+  python3 -I -B "$here/table.py" hr23judge "$work/out-hr23" "$work/out-fp" "$work/fp-kept.txt" "$root" "$work/ports-hr23" "$h" $hr23_counted || { r=$?; [ "$rc" != 0 ] || rc=$r; }
   return "$rc"
 }
 
