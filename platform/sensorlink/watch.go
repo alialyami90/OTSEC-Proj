@@ -150,6 +150,10 @@ type watch struct {
 	// startG and startD are the cursor's G and D at the start, for a
 	// chain across it (gapstart.go).
 	startG, startD uint64
+	// clearSave: a covered close's record committed while the cursor may
+	// still hold it; the cursor is saved without it before any later gap
+	// record (D3's B2 on #788).
+	clearSave bool
 }
 
 // blindAfter is blind_after_s.
@@ -187,7 +191,7 @@ func (l *Link) takeWatch(c *Cursor) {
 		g := *c.Held
 		g.Covered = false
 		wt.wait = &waitRec{HeldGap: g, covered: c.Held.Covered}
-		if !c.Held.Covered {
+		if !c.Held.Covered || coveredRaisesFloor {
 			wt.floor = c.Held.To
 		}
 	}

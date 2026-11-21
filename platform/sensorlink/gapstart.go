@@ -21,8 +21,8 @@ import (
 //     (enrolled_at is P4-4-DE's).
 //   - It is marked clock_stepped at once where W, R, the floor or the copy
 //     it starts from is later than the wall clock. The mark moves nothing:
-//     the cap of W, R and the floor waits for the gap's close (CH-45), and
-//     the copy is capped only as the gap's start, never written back.
+//     the cap of W, R and the floor waits for the gap's close (CH-45). The
+//     copy capped is the copy the start writes, its step written first.
 //   - While it is open nothing places W or R and no other gap opens: a
 //     cause found joins it (link, restart, blind, sensor-failed).
 //   - It closes as any gap does: as covered by a chain that runs from the
@@ -61,21 +61,46 @@ var copyHeldIgnored, copyHeldFromSave, copyNoHold bool
 // memory only, 2e-2's rule (the control of D1's ruling on #788).
 var heldCoveredMemOnly bool
 
+// The controls of D1's rulings 1 to 4 on #788 (comment 7069112910), each
+// the code at 2dcf1e19 or a reviewer's mutant: startDueFromWR counts the
+// node-start gap's 60 s from the earlier of W and R; coveredNoClear saves
+// no cursor once a covered close's record commits; startCopyKept writes
+// the run file's copy uncapped and the copy's step at the next check;
+// coveredNoSave writes a covered close's record before the cursor holds
+// it (D6's MD); coveredRaisesFloor raises the floor to a covered wait's
+// end at a start (MC); startChainZeroGD starts the chain across a start
+// with G and D 0 (MF); startChainNoPart1 skips part 1 across a start
+// (MP1); startChainFromStart counts part 4 across a start from the start,
+// not from the saved W (MG).
+var startDueFromWR, coveredNoClear, startCopyKept, coveredNoSave, coveredRaisesFloor bool
+var startChainZeroGD, startChainNoPart1, startChainFromStart bool
+
 // nodeStart opens the node-start gap for the link at the node's start
 // (CH-45, "At a start"): copyAt is the run file's copy, zero when the file
 // holds none for the sensor. The gap held for the floor that takeWatch
-// found is written first, by gapAct's order.
-func (l *Link) nodeStart(ctx context.Context, copyAt time.Time) {
+// found is written first, by gapAct's order. It returns the copy capped at
+// the wall clock when the cap moved it, zero otherwise: the start writes
+// the file with it, so a kill after the cap loses nothing, and the cap's
+// time.node-stepped is written here, before that write (D6's B2 on #788,
+// option (a)).
+func (l *Link) nodeStart(ctx context.Context, copyAt time.Time) (capped time.Time) {
 	if !l.skewOn() || startGapOff {
-		return
+		return time.Time{}
 	}
 	l.gmu.Lock()
 	defer l.gmu.Unlock()
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()
-	s.startGapLocked(copyAt, wall, mono, l.blindAfter())
+	capped = s.startGapLocked(copyAt, wall, mono, l.blindAfter())
 	s.mu.Unlock()
+	if startCopyKept {
+		capped = time.Time{}
+	} else if !capped.IsZero() {
+		if err := l.actStep(ctx); err != nil {
+			l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: W and R moved by a step of the node's clock were not saved: %v", l.cfg.SensorID, err))
+		}
+	}
 	if startCapsAtOnce {
 		s.mu.Lock()
 		s.capLocked(wall)
@@ -85,14 +110,15 @@ func (l *Link) nodeStart(ctx context.Context, copyAt time.Time) {
 	if err := l.gapAct(ctx, nil); err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: a gap's raise was not saved: %v", l.cfg.SensorID, err))
 	}
+	return capped
 }
 
-// startGapLocked opens the node-start gap at wall and mono. The caller
-// holds s.mu.
-func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration) {
+// startGapLocked opens the node-start gap at wall and mono, and returns
+// the copy as capped when the cap moved it. The caller holds s.mu.
+func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration) (capped time.Time) {
 	wt := &s.wt
 	if gapsOff || wt.open != nil {
-		return
+		return time.Time{}
 	}
 	from, bound, stepped := wt.earlierWR(), false, false
 	if wt.w.IsZero() {
@@ -101,7 +127,7 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 		from, bound = copyAt, true
 		if from.After(wall) && !startCopyUncapped {
 			wt.owedStep += from.Sub(wall)
-			from, stepped = wall, true
+			from, stepped, capped = wall, true, wall
 		}
 		if from.IsZero() {
 			from = wall // no bound later than the start (enrolled_at is P4-4-DE's)
@@ -118,10 +144,14 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 			stepped = true
 		}
 	}
-	// The 60 s are counted from W, or from the bound, across the start on
-	// the wall clock (CH-45, "When it is written"), and never past 60 s
-	// after the open.
-	wMono := min(mono-wall.Sub(from), mono)
+	// The 60 s are counted from W when it is held, or else from the bound,
+	// across the start on the wall clock (CH-45, "When it is written"; D4's
+	// B1 on #788), and never past 60 s after the open.
+	due := from
+	if !wt.w.IsZero() && !startDueFromWR {
+		due = wt.w
+	}
+	wMono := min(mono-wall.Sub(due), mono)
 	// At a start the floor is where the gap begins (CH-45, "The floor"),
 	// so a placement before the cap at its close is never below it.
 	if from.After(wt.floor) {
@@ -132,6 +162,7 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 	if !wt.w.IsZero() {
 		s.startChainAcrossLocked(wall, mono, blind)
 	}
+	return capped
 }
 
 // startChainAcrossLocked starts the chain at the saved W's heartbeat, from
@@ -145,6 +176,13 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 func (s *skew) startChainAcrossLocked(wall time.Time, mono, blind time.Duration) {
 	wt := &s.wt
 	ch := chain{run: wt.run, seq: wt.wSeq, at: wt.wAt, n: 1, wMono: mono - wall.Sub(wt.w), g: wt.startG, d: wt.startD}
+	if startChainFromStart {
+		ch.wMono = mono // MG: part 4 from the start
+	}
+	if startChainZeroGD {
+		ch.g, ch.d = 0, 0 // MF
+	}
+	ch.noPart1 = startChainNoPart1 // MP1
 	if wt.run == "" || len(wt.kept) == 0 {
 		ch.reason = "nothing kept with W"
 		wt.ch = ch

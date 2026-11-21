@@ -231,8 +231,13 @@ func (f *RunFile) Start(ctx context.Context, links ...*Link) error {
 		h.mu.Lock()
 		copyAt := h.copyFile
 		h.mu.Unlock()
-		d.l.nodeStart(ctx, copyAt)
+		capped := d.l.nodeStart(ctx, copyAt)
 		h.mu.Lock()
+		if !capped.IsZero() {
+			// The copy as capped, so a kill after the cap loses nothing
+			// (D6's B2 on #788, option (a)).
+			h.copyFile = capped
+		}
 		_ = h.pool.Write(ctx, h.cfg.Monotonic(), h.emit) // what the start counted, at the start's time
 		f.put(d.l.cfg.SensorID, h.entry())
 		h.mu.Unlock()

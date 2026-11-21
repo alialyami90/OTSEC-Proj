@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"otsec.local/otsec/contracts/event"
+	"otsec.local/otsec/contracts/netobs"
 )
 
 // INT-D5 2e-3 (gapstart.go; docs/phase4/D5-sensor-node.md section 1.9 item
@@ -918,6 +919,25 @@ func TestGapStartBoundaries(t *testing.T) {
 	if !due(gapOpenAfter) || due(gapOpenAfter-1) {
 		t.Fatal("the open record's 60 s from W across a start, at its bound")
 	}
+	// D4's B1 and D6's N1 on #788: with R four minutes before W the 60 s
+	// still count from W (CH-45). Control: counted from the earlier of W
+	// and R, which writes it at once.
+	dueR := func(age time.Duration) bool {
+		var s skew
+		s.wt.w, s.wt.r = at0.Add(-age), at0.Add(-4*time.Minute)
+		s.startGapLocked(time.Time{}, at0, mono, DefaultBlindAfter)
+		d, _ := s.nextRecordLocked(at0, mono, false)
+		return d != nil
+	}
+	if !dueR(gapOpenAfter) || dueR(gapOpenAfter-1) {
+		t.Fatal("R earlier than W: the open record's 60 s from W across a start, at its bound")
+	}
+	t.Run("control: from the earlier of W and R", func(t *testing.T) {
+		withSeam(t, &startDueFromWR)
+		if !dueR(gapOpenAfter - 1) {
+			t.Fatal("the control did not write it before 60 s from W")
+		}
+	})
 	// Part 2 at W across a start: a rise kept blind before W's at_utc, or
 	// at it, shows; 1 ns earlier, or 1 ns after it, does not.
 	shown := func(rise time.Time) bool {
@@ -1003,6 +1023,280 @@ func TestGapCoveredWaitAcrossStart(t *testing.T) {
 		withSeam(t, &heldCoveredMemOnly)
 		if g, _ := run(t); len(unpaired(g.gaps(), false)) != 1 {
 			t.Fatalf("records %v: the control paired the open record", g.gaps())
+		}
+	})
+}
+
+// TestGapCoveredWaitKillAndFloor (D6's MD and MC, D4's N2 on #788; D1's
+// ruling 4). MD: the node killed as the covered close's record is first
+// tried, right after the closing heartbeat, the record refused: the
+// cursor holds the wait, and its record pairs the link gap's open record
+// at the start. Control: the record tried before the cursor holds it.
+// MC: a step back of five minutes while the covered close waits moves W
+// and R below its end; after a kill the floor is where the node-start gap
+// begins, since a covered wait raises nothing. Control: a covered wait
+// that raises the floor to its end.
+func TestGapCoveredWaitKillAndFloor(t *testing.T) {
+	md := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(9, true)
+		gen := g.r.gen
+		g.r.sink.refuse = func(typ string, d map[string]string) bool {
+			if typ == EventCoverageGap && d["state"] == "closed" {
+				gen.dead.Store(true) // killed at the record's first try
+				return true
+			}
+			return false
+		}
+		g.reconnect(false)
+		g.live(1, true)
+		g.r.sink.refuse = nil
+		g.kill()
+		return g
+	}
+	linkOpen := func(g *gsrc) int {
+		n := 0
+		for _, d := range unpaired(g.gaps(), false) {
+			if d["cause"] == CauseLink {
+				n++
+			}
+		}
+		return n
+	}
+	if g := md(t); linkOpen(g) != 0 || !g.anyCovered() {
+		t.Fatalf("MD: records %v, want the covered close written at the start, pairing the link gap", g.gaps())
+	}
+	t.Run("control: MD, the record before the save", func(t *testing.T) {
+		withSeam(t, &coveredNoSave)
+		if g := md(t); linkOpen(g) != 1 {
+			t.Fatalf("records %v: the control paired the link gap's open record", g.gaps())
+		}
+	})
+	mc := func(t *testing.T) GapStatus {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(9, true)
+		g.r.sink.refuse = func(typ string, d map[string]string) bool {
+			return typ == EventCoverageGap && d["state"] == "closed"
+		}
+		g.reconnect(false)
+		g.live(3, true)
+		g.stepNode(-5 * time.Minute)
+		g.tick() // the step found while the covered close waits, and saved
+		g.kill()
+		if c := cursorNow(t, g.r.cs); c == nil || c.Held == nil || !c.Held.Covered || !c.W.Before(c.Held.To) {
+			t.Fatalf("the cursor %+v: want the covered wait, W below its end", c)
+		}
+		return g.r.l.GapStatus()
+	}
+	if st := mc(t); !st.Open || !st.Floor.Equal(st.From) {
+		t.Fatalf("MC: gap %+v, want the floor at the node-start gap's start", st)
+	}
+	t.Run("control: MC, the covered wait raises the floor", func(t *testing.T) {
+		withSeam(t, &coveredRaisesFloor)
+		if st := mc(t); !st.Floor.After(st.From) {
+			t.Fatalf("gap %+v: the control left the floor at the gap's start", st)
+		}
+	})
+}
+
+// TestGapCoveredClearedAfterCommit (D3's B2 on #788; D1's ruling 2): a
+// link gap A written open closes as covered at a flat heartbeat, its
+// closed record committed; a second cut opens link gap B from the same
+// moment (R unmoved), written open; the node is killed and started. No
+// closed record after B's open record pairs it, since the cursor was
+// saved without A once A's record committed. Control: no save after the
+// commit, which writes A's covered close again at the start and pairs B.
+func TestGapCoveredClearedAfterCommit(t *testing.T) {
+	run := func(t *testing.T) []map[string]string {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(9, true)
+		g.reconnect(false)
+		g.live(1, false) // A closes covered; R does not move
+		if !g.anyCovered() {
+			t.Fatalf("records %v: A did not close as covered", g.gaps())
+		}
+		g.cut()
+		g.idle(70 * time.Second)
+		g.kill()
+		g.r.l.CheckStep(bg)
+		return g.gaps()
+	}
+	// pairsB reports whether a closed record after B's open record pairs it.
+	pairsB := func(t *testing.T, gs []map[string]string) bool {
+		var opens []int
+		for i, d := range gs {
+			if d["cause"] == CauseLink && d["state"] == "open" {
+				opens = append(opens, i)
+			}
+		}
+		if len(opens) != 2 || gs[opens[0]]["from_utc"] != gs[opens[1]]["from_utc"] {
+			t.Fatalf("records %v: want A's and B's open records of one from_utc", gs)
+		}
+		b := gs[opens[1]]
+		for _, d := range gs[opens[1]+1:] {
+			if d["state"] == "closed" && d["from_utc"] == b["from_utc"] {
+				return true
+			}
+		}
+		return false
+	}
+	if gs := run(t); pairsB(t, gs) {
+		t.Fatalf("records %v: a closed record pairs B's open record while B stands", gs)
+	}
+	t.Run("control: no save after the commit", func(t *testing.T) {
+		withSeam(t, &coveredNoClear)
+		if gs := run(t); !pairsB(t, gs) {
+			t.Fatalf("records %v: the control did not pair B's open record", gs)
+		}
+	})
+}
+
+// TestGapCopyCapSurvivesKill (D6's B2 on #788, option (a); D1's ruling
+// 3): the database lost and the clock stepped back ten minutes during the
+// stop, so the copy is later than the wall clock and is capped at the
+// first start; the node killed 20 s later with no tick, before the gap is
+// written open, and started again: the gap starts no later than the first
+// start, and time.node-stepped is in the stream once. Control: the copy
+// written uncapped and its step left to the next check, which starts the
+// gap at the second start and writes no time.node-stepped.
+func TestGapCopyCapSurvivesKill(t *testing.T) {
+	run := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.writeFile()
+		g.down()
+		g.away(6, false, false)
+		g.stepNode(-10 * time.Minute)
+		g.r.loseDatabase()
+		first := g.r.now()
+		g.up()
+		g.r.pass(20 * time.Second)
+		if g.openRecord() != nil {
+			t.Fatalf("records %v: written open before the kill", g.gaps())
+		}
+		g.kill()
+		return g, first
+	}
+	g, first := run(t)
+	if st := g.r.l.GapStatus(); !st.Open || st.From.After(first) {
+		t.Fatalf("gap %+v, want from no later than the first start %s", st, first)
+	}
+	if n := g.r.sink.count(event.HealthTimeNodeStepped); n != 1 {
+		t.Fatalf("time.node-stepped %d, want 1", n)
+	}
+	t.Run("control: the copy uncapped", func(t *testing.T) {
+		withSeam(t, &startCopyKept)
+		g, first := run(t)
+		if st := g.r.l.GapStatus(); !st.From.After(first) || g.r.sink.count(event.HealthTimeNodeStepped) != 0 {
+			t.Fatalf("gap %+v and %d steps: the control started no later than %s or wrote the step", st, g.r.sink.count(event.HealthTimeNodeStepped), first)
+		}
+	})
+}
+
+// TestGapChainAcrossStartPart1 (D6's MF and MP1 on #788; D1's ruling 4):
+// the node alone stopped for a minute, the sensor capturing, its
+// heartbeats carrying drops_channel 5. With D unchanged the node-start gap
+// closes as covered (control MF: the chain across the start with G and D
+// 0, which closes it unwatched); with D raised to 7 in heartbeats made
+// after the start, before the close, it closes unwatched (CH-39 part 1;
+// control MP1: part 1 skipped across a start, which closes it as covered).
+func TestGapChainAcrossStartPart1(t *testing.T) {
+	run := func(t *testing.T, rise bool) map[string]string {
+		g := newGsrc(t)
+		drops := uint64(5)
+		g.f = func(h *netobs.Heartbeat) { h.Counters.DropsChannel = drops }
+		g.live(6, true)
+		g.down()
+		g.away(5, true, true)
+		g.up()
+		if rise {
+			drops = 7
+		}
+		g.buffer(2, true)
+		// The reconnect, its hello stating the sensor's drops_channel now.
+		first := g.seq - len(g.buf) + 1
+		g.p = g.r.dial(enrolment())
+		hl := g.hello(first, false)
+		hl.DropsChannel = itoa(int(drops))
+		g.send(hl)
+		for _, b := range g.buf {
+			g.r.pass(100 * time.Millisecond)
+			g.send(b)
+		}
+		g.buf = nil
+		g.live(3, true)
+		d := g.startClosed()
+		if d == nil {
+			t.Fatalf("records %v: the node-start gap not closed", g.gaps())
+		}
+		return d
+	}
+	if d := run(t, false); d["covered"] != "true" {
+		t.Fatalf("D unchanged: %v, want covered", d)
+	}
+	t.Run("control: MF, G and D 0", func(t *testing.T) {
+		withSeam(t, &startChainZeroGD)
+		if d := run(t, false); d["covered"] != "false" {
+			t.Fatalf("%v: the control closed it as covered", d)
+		}
+	})
+	if d := run(t, true); d["covered"] != "false" {
+		t.Fatalf("D raised after the start: %v, want unwatched", d)
+	}
+	t.Run("control: MP1, part 1 skipped", func(t *testing.T) {
+		withSeam(t, &startChainNoPart1)
+		if d := run(t, true); d["covered"] != "true" {
+			t.Fatalf("%v: the control closed it unwatched", d)
+		}
+	})
+}
+
+// TestGapChainAcrossStartCount (D6's MG on #788; D1's ruling 4; CH-39
+// part 4 across a restart): TestGapChainCount's half-speed sensor clock,
+// a heartbeat every 40 s of the node's clock, with the node restarted 400
+// s into the cut: 17 heartbeats pass part 3 by at_utc, fewer than the
+// length from the saved W over 30 s and more than the length from the
+// start over 30 s, so the node-start gap closes unwatched. Control: part 4
+// counted from the start, which closes it as covered.
+func TestGapChainAcrossStartCount(t *testing.T) {
+	run := func(t *testing.T) map[string]string {
+		g := newGsrc(t)
+		g.live(6, true)
+		start := g.r.now()
+		half := func() { g.ahead = start.Add(g.r.now().Sub(start) / 2).Sub(g.r.now()) }
+		g.cut()
+		for i := range 15 {
+			if i == 10 {
+				g.up() // the node restarted inside the cut
+			}
+			g.r.pass(40 * time.Second)
+			g.tick()
+			half()
+			g.buf = append(g.buf, g.mk(true))
+		}
+		g.r.pass(10 * time.Second)
+		half()
+		g.reconnect(false)
+		g.live(1, true)
+		d := g.startClosed()
+		if d == nil {
+			t.Fatalf("records %v: the node-start gap not closed", g.gaps())
+		}
+		return d
+	}
+	if d := run(t); d["covered"] != "false" {
+		t.Fatalf("%v, want closed unwatched", d)
+	}
+	t.Run("control: MG, part 4 from the start", func(t *testing.T) {
+		withSeam(t, &startChainFromStart)
+		if d := run(t); d["covered"] != "true" {
+			t.Fatalf("%v: the control closed it unwatched", d)
 		}
 	})
 }

@@ -168,6 +168,7 @@ type chain struct {
 	// gapChainFromFirst's control.
 	kept      []IfaceMark
 	fromFirst bool
+	noPart1   bool // startChainNoPart1's control only
 }
 
 // chainShows is CH-39's part 2 for one heartbeat, by at_utc: some
@@ -295,7 +296,7 @@ func (s *skew) chainCoversLocked(cn *conn, wall time.Time, mono time.Duration) b
 	if gapNeedsObservation && !wt.obsSeen {
 		return false
 	}
-	if !gapChainAnyRun && (cn.cur.G != ch.g || cn.cur.D != ch.d) {
+	if !gapChainAnyRun && !ch.noPart1 && (cn.cur.G != ch.g || cn.cur.D != ch.d) {
 		return false // part 1
 	}
 	if gapChainSeqOnly || gapChainNoCount {
@@ -378,7 +379,7 @@ func (s *skew) closeLocked(covered bool, to time.Time) {
 				// Saved in the cursor before its record, so a crash
 				// leaves its open record paired at the start (D4-123
 				// item 3.1; D1's ruling on #788).
-				wt.heldSave = !heldCoveredMemOnly
+				wt.heldSave = !heldCoveredMemOnly && !coveredNoSave
 			} else {
 				// Behind a waiting record: merged, and unwatched from the
 				// first's start, which fails closed.
@@ -500,13 +501,27 @@ func (s *skew) nextRecordLocked(wall time.Time, mono time.Duration, skipWait boo
 }
 
 // gapAct saves the raise of an unwatched close, then writes the gap records
-// due, in order. cn is the live connection, nil at a tick or a close. The
-// caller holds gmu, which orders every change of the gap open and the
-// record that waits with these writes. An error is a save that failed.
+// due, in order. Once a covered close's record commits, the cursor is
+// saved without it before any later record, so a start never writes it
+// again (D3's B2 on #788). cn is the live connection, nil at a tick or a
+// close. The caller holds gmu, which orders every change of the gap open
+// and the record that waits with these writes. An error is a save that
+// failed, which holds the later records back.
 func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 	if !l.skewOn() {
 		return nil
 	}
+	for {
+		again, err := l.gapActOnce(ctx, cn)
+		if err != nil || !again {
+			return err
+		}
+	}
+}
+
+// gapActOnce is one pass of gapAct: again, a covered close's record
+// committed and the cursor is to be saved before the next record.
+func (l *Link) gapActOnce(ctx context.Context, cn *conn) (again bool, err error) {
 	s := &l.skew
 	if gapRecordFirst {
 		s.mu.Lock()
@@ -514,7 +529,7 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 		s.mu.Unlock()
 	}
 	s.mu.Lock()
-	save := s.wt.heldSave
+	save := s.wt.heldSave || s.wt.clearSave
 	s.mu.Unlock()
 	if save {
 		// The raise and the gap held for the floor are saved before the
@@ -528,15 +543,15 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 			err = l.saveMoved(ctx)
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
 		s.mu.Lock()
-		s.wt.heldSave = false
+		s.wt.heldSave, s.wt.clearSave = false, false
 		s.mu.Unlock()
 	}
 	h := l.opt.Health
 	if h == nil {
-		return nil
+		return false, nil
 	}
 	skip := false
 	for {
@@ -548,7 +563,7 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 		}
 		s.mu.Unlock()
 		if d == nil {
-			return nil
+			return false, nil
 		}
 		if gapDropReversed && wait && snap.To.Before(snap.From) {
 			// The control: a record whose end is before its start dropped.
@@ -562,7 +577,7 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 				skip = true // the control: on to the later records
 				continue
 			}
-			return nil // it waits for its budget or the ceiling, and is tried again
+			return false, nil // it waits for its budget or the ceiling, and is tried again
 		}
 		s.mu.Lock()
 		if wait {
@@ -571,6 +586,11 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 			// with the mark: twice, never without it.
 			if w := s.wt.wait; w != nil && *w == snap {
 				s.wt.wait = nil
+			}
+			if snap.covered && !heldCoveredMemOnly && !coveredNoClear {
+				s.wt.clearSave = true
+				s.mu.Unlock()
+				return true, nil
 			}
 		} else if s.wt.open != nil {
 			s.wt.open.written = true
