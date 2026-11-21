@@ -577,22 +577,32 @@ case $mode in
       echo "modbus-moved-port or its control did not check out; left out"
       rm -f "$work/dnp3/modbus-moved-port.pcap"
     fi
-    engines "$work/dnp3" "$work/out-dnp3"
-    pipes "$work/dnp3" "$work/out-dnp3-pipe"
+    # Every table, count and engine line of this mode leaves out the held
+    # list's captures, or, with no list accepted, every capture of
+    # hr23-cases.tsv (table.py's hidden; D1's ruling 1 on #776). The
+    # engines' own lines go to a file on the runner, and only held-log's
+    # copy of them, without those captures, reaches the job log.
+    dnp3_counted=
+    [ "${GITHUB_REF:-local}" != refs/heads/main ] || dnp3_counted=--counted
+    engines "$work/dnp3" "$work/out-dnp3" > "$work/dnp3-engines.txt"
+    pipes "$work/dnp3" "$work/out-dnp3-pipe" >> "$work/dnp3-engines.txt"
+    python3 -I -B "$here/table.py" held-log "$work/dnp3-engines.txt" "$root" $dnp3_counted
     feedrc=0
     if [ -n "$hr23" ]; then
       hr23_feed > "$work/hr23-feed.md" || feedrc=$?
     else
       printf '\n## HR-23 captures\n\nNot fed: this run has no HR-23 builds (HR23_C1P_IMAGE, HR23_C2_IMAGE), and no HR-23 result comes from it.\n' > "$work/hr23-feed.md"
     fi
-    { header; python3 -I "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root"; python3 -I "$here/table.py" hr23 "$work/out-dnp3"; cat "$work/hr23-feed.md"; } > "$work/dnp3.md"
+    { header; python3 -I -B "$here/table.py" dnp3 "$work/out-dnp3" "$gt" "$work" "$root" $dnp3_counted
+      python3 -I -B "$here/table.py" hr23 "$work/out-dnp3" "$root" $dnp3_counted; cat "$work/hr23-feed.md"; } > "$work/dnp3.md"
     if [ "$feedrc" != 0 ]; then
       cat "$work/dnp3.md" >&2
       echo "HR-23's feed: a capture did not run cleanly under C0, C1, C1p and C2 on a counted run, or the check did not finish (exit $feedrc); the job fails" >&2
       exit 1
     fi
-    fifos "$work/dnp3" "$work/out-dnp3-pipe"
-    python3 -I "$here/table.py" fifo "$work/out-dnp3" "$work/out-dnp3-pipe" >> "$work/dnp3.md"
+    fifos "$work/dnp3" "$work/out-dnp3-pipe" > "$work/dnp3-fifo-engines.txt"
+    python3 -I -B "$here/table.py" held-log "$work/dnp3-fifo-engines.txt" "$root" $dnp3_counted
+    python3 -I -B "$here/table.py" fifo "$work/out-dnp3" "$work/out-dnp3-pipe" "$root" $dnp3_counted >> "$work/dnp3.md"
     reqrc=0
     reqs >> "$work/dnp3.md" || reqrc=$?
     if [ "$reqrc" != 0 ]; then
@@ -632,7 +642,7 @@ case $mode in
     { header
       python3 -I "$here/table.py" public "$work/out-public" "$work/public" \
         "$root/tests/fixtures/network/public-ot-captures/MANIFEST.tsv" "$here/extra-captures.tsv" $counted || pubrc=$?
-      python3 -I "$here/table.py" hr23 "$work/out-public"; } > "$work/public.md"
+      python3 -I -B "$here/table.py" hr23 "$work/out-public" "$root" $counted; } > "$work/public.md"
     if [ "$pubrc" != 0 ]; then
       echo "table.py public exited $pubrc (3: a listed capture was not fetched on a counted run; see public.md); the job fails" >&2
       exit 1

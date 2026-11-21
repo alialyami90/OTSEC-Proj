@@ -13,6 +13,7 @@ import hashlib
 import importlib.util
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -170,13 +171,36 @@ def kept_file(d, names):
 
 
 # A held capture with a neutral name, added to a copy of the pin file and
-# of hr23-cases.tsv, and the held list that names it with the test salt
-# under which hr23-held.hmac's committed test value was made (D1's rulings
-# 7056743490 and 7057468942 on #776). No real capture is named as held in
-# any test.
+# of hr23-cases.tsv, and the held list that names it with a salt (D1's
+# rulings 7056743490 and 7057468942 on #776). No real capture is named as
+# held in any test. A counted run refuses the test salt of hr23-held.hmac's
+# committed value (D1's ruling 2), so the salt is new and random for each
+# test session, and the committed digest is the tests' own (committed).
 HELD = "syn-held"
-SALT = "0123456789abcdef" * 4
+SALT = secrets.token_hex(32)
+TEST_SALT = "0123456789abcdef" * 4
 ENV = {hr23_feed.HELD_ENV: HELD, hr23_feed.SALT_ENV: SALT}
+
+
+def write_digest(d):
+    """DIR/hr23-held.hmac: the digest of HELD under SALT, as committed."""
+    p = os.path.join(d, "hr23-held.hmac")
+    with open(p, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("# test\n" + hr23_feed.list_digest([HELD], SALT) + "\n")
+    return p
+
+
+@pytest.fixture(autouse=True)
+def committed(tmp_path_factory, monkeypatch):
+    monkeypatch.setattr(hr23_feed, "DIGEST", write_digest(tmp_path_factory.mktemp("digest")))
+
+
+def here_copy(tmp_path):
+    """A copy of this folder, with the tests' committed digest."""
+    here = tmp_path / "here"
+    shutil.copytree(HERE, here, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+    write_digest(here)
+    return here
 CASES = os.path.join(ROOT, "tests", "integration", "gt_pcap", "hr23-cases.tsv")
 
 
@@ -407,12 +431,14 @@ EXTRA_CASES = sorted(hr23_feed.case_captures(CASES) - set(pinned()))
 FD9 = "MOUNT-CHECK-FD9-MARKER"
 
 
-def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here=HERE, held=True, env_extra=None):
+def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here=None, held=True, env_extra=None):
     """hr23_feed in TEXT with run.sh's zeek_run; EXTRA is a shell command
     run on the feed folder after hr23_cases.py writes it, before pin. The
     neutral held capture is written beside hr23_cases.py's, and HELD gives
     the held list (HELD itself, or the string given) and the salt in the
-    environment. fd 9 is the job's stderr, as in run.sh."""
+    environment. fd 9 is the job's stderr, as in run.sh. HERE is by default
+    a copy of this folder with the tests' committed digest (here_copy)."""
+    here = here_copy(tmp_path) if here is None else here
     work = tmp_path / "work"
     (work / "dnp3").mkdir(parents=True)
     for c in EXTRA_CASES:
@@ -476,7 +502,7 @@ PORTS_WIRING = {"stock|zeek -C -r /pcaps/{0}.pcap " + ARGS + " OtsecProbe::log_d
                 "c2|zeek -C -r /pcaps/{0}.pcap " + ARGS + " /exp/ports.zeek"}
 
 
-def feed_failures(tmp_path, text, first=False, here=HERE):
+def feed_failures(tmp_path, text, first=False, here=None):
     bad = []
     for i, (ref, skip, bad_pin, extra, partial) in enumerate(FEEDS):
         rc, md, log, calls, fed, img, ports, ports_mc, ports_mount = run_feed(tmp_path / str(i), text, ref, skip,
@@ -646,6 +672,7 @@ def test_feed_control_pin_pcap_only_is_killed(tmp_path):
     here = tmp_path / "here"
     here.mkdir()
     shutil.copy(os.path.join(HERE, "mountcheck.py"), here)
+    write_digest(here)
     (here / "hr23_feed.py").write_text(mutate(read("hr23_feed.py"), "if not n.endswith(CAPTURE):",
                                               'if not n.endswith(".pcap"):'), encoding="utf-8")
     bad = feed_failures(tmp_path / "f", function(), here=here)
@@ -658,8 +685,7 @@ def test_feed_control_pin_pcap_only_is_killed(tmp_path):
 # the control is the same feed with -B dropped from both calls.
 
 def here_hash_changed(tmp_path, text):
-    here = tmp_path / "here"
-    shutil.copytree(HERE, here, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+    here = here_copy(tmp_path)
     before = mountcheck.hash_tree(str(here))
     rc = run_feed(tmp_path, text, here=here)[0]
     assert rc == 0
@@ -696,7 +722,7 @@ def run_block(tmp_path, text, hr23, feedrc):
                       'hr23_feed() { echo FEED-TABLE; return "$FEEDRC"; }\n' + text + 'echo "after the block"\n',
                       newline="\n")
     env = dict(os.environ, here=fwd(HERE), root=fwd(ROOT), gt=fwd(GT), work=fwd(work), hr23=hr23,
-               FEEDRC=str(feedrc))
+               FEEDRC=str(feedrc), dnp3_counted="")
     r = subprocess.run([SH, fwd(script)], env=env, capture_output=True, text=True)
     md = (work / "dnp3.md").read_text() if (work / "dnp3.md").exists() else ""
     return r.returncode, "after the block" in r.stdout, md

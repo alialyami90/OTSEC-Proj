@@ -7,7 +7,12 @@ named control: a mutant of the script's text that must make the rule's
 check fail.
 Run: python -m pytest -q modules/telemetry/experiments/engine-linux/test_hr23_held.py"""
 import importlib.util
+import json
 import os
+import random
+import secrets
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -21,9 +26,14 @@ import hr23_cases  # noqa: E402,F401 (hr23judge imports it by name)
 
 C0, C1, C1P, C2 = table.JUDGED
 HOLD, MARK = "syn-held", "HELD-RESULT-MARK"
-# Test salts: hex, as the run's salt must be; never a run's.
-SALT = "0123456789abcdef" * 4
-SALT2 = "fedcba9876543210" * 4
+# A capture pinned in hr23.sha256 that is not a capture of hr23-cases.tsv.
+PINNED = "syn-pinned"
+# The salt under which hr23-held.hmac's committed test value was made, which
+# a counted run refuses (D1's ruling 2 on #776).
+TEST_SALT = "0123456789abcdef" * 4
+# Salts for counted runs: new random ones for each test session, as a
+# counted run's salt must be, so that none is in the repository.
+SALT, SALT2 = secrets.token_hex(32), secrets.token_hex(32)
 ENV = {hr23_feed.HELD_ENV: HOLD, hr23_feed.SALT_ENV: SALT}
 COLS = ("capture", "condition", "l4", "src", "sport", "dst", "dport", "code", "objects", "sa", "show", "frames",
         "protocol", "direction", "c0", "c1", "c1p", "c2", "fix", "basis")
@@ -60,7 +70,8 @@ def make_root(tmp_path, rows, relay=()):
                                        "".join("\t".join(r[c] for c in COLS) + "\n" for r in rows))
     gt = root / table.GT / table.HR23_DIR
     gt.mkdir(parents=True)
-    (gt / "hr23.sha256").write_text("".join(f"{'0' * 64}  {c}.pcap\n" for c in sorted({r["capture"] for r in rows})))
+    (gt / "hr23.sha256").write_text("".join(f"{'0' * 64}  {c}.pcap\n"
+                                            for c in sorted({r["capture"] for r in rows} | {PINNED})))
     for cap in relay:
         (gt / f"{cap}.tsv").write_text("flow\trole\tpackets\nudp 192.0.2.20:20000 > 192.0.2.14:20000\toutstation\t1\n")
     return str(root)
@@ -319,6 +330,9 @@ def test_control_hash_mutant_is_caught(monkeypatch, capsys, tmp_path, old, new):
 # D1's ruling 1 on #776): a wrong but valid capture name is refused too. The
 # salt is at least 64 lowercase hex characters (D3's N2).
 
+# 64 hex characters with no period, but only nine distinct ones.
+WEAK_NOT_PERIODIC = "".join(random.Random(7).choices("012345678", k=64))
+
 GATES = [  # (environment, counted, exit code, committed digest: None for the list's own)
     ({}, True, 3, None),
     ({}, False, 0, None),
@@ -335,21 +349,45 @@ GATES = [  # (environment, counted, exit code, committed digest: None for the li
     (ENV, True, 1, hr23_feed.list_digest([HOLD], SALT2)),
     # No committed digest.
     (ENV, True, 1, False),
+    # D6's N1 on #776: a name pinned in hr23.sha256 that is not a case
+    # capture, under its own committed digest.
+    (dict(ENV, **{hr23_feed.HELD_ENV: PINNED}), True, 1, None),
+    # Two committed values, the first the list's own (D6's N1 on #776).
+    (ENV, True, 1, hr23_feed.list_digest([HOLD], SALT) + "\n" + "1" * 64),
+    # D1's ruling 2 on #776: on a counted run, the repository's test salt and
+    # weak salts, each under its own committed digest.
+    (dict(ENV, **{hr23_feed.SALT_ENV: TEST_SALT}), True, 1, None),
+    (dict(ENV, **{hr23_feed.SALT_ENV: "0" * 64}), True, 1, None),
+    (dict(ENV, **{hr23_feed.SALT_ENV: "fedcba9876543210" * 4}), True, 1, None),
+    (dict(ENV, **{hr23_feed.SALT_ENV: WEAK_NOT_PERIODIC}), True, 1, None),
 ]
 
 
-def gate_problems(feed, monkeypatch, capsys, tmp_path):
+def gate_problems(feed, monkeypatch, capsys, tmp_path, m=table):
     bad = []
     for i, (env, counted, want, committed) in enumerate(GATES):
         try:
-            rc, out = run(table, monkeypatch, capsys, tmp_path / str(i), ROWS, RESULTS, env, counted, feed=feed,
+            rc, out = run(m, monkeypatch, capsys, tmp_path / str(i), ROWS, RESULTS, env, counted, feed=feed,
                           digest=committed)
         except Exception as e:  # noqa: BLE001 (a mutant may stop the judge)
             bad.append(f"gate {i}: {type(e).__name__}")
             continue
-        if rc != want or "| syn-" in out or "SHA-256" in out or "syn-unknown-name" in out:
+        if rc != want or "| syn-" in out or "SHA-256" in out or "syn-unknown-name" in out or PINNED in out:
             bad.append(f"gate {i}: exit {rc}, want {want}, or a row, the hash or the list was printed")
     return bad
+
+
+# The same salts are accepted on a run that is not counted: only a counted
+# run refuses them (D1's ruling 2 on #776).
+def test_a_rehearsal_accepts_the_test_salt_and_weak_salts(monkeypatch, capsys, tmp_path):
+    for i, salt in enumerate((TEST_SALT, "0" * 64, WEAK_NOT_PERIODIC)):
+        rc, out = run(table, monkeypatch, capsys, tmp_path / str(i), ROWS, RESULTS,
+                      dict(ENV, **{hr23_feed.SALT_ENV: salt}), False)
+        assert rc == 0 and HELD_LINE in out and "SHA-256" in out
+
+
+def test_a_random_salt_is_not_weak():
+    assert not hr23_feed.weak_salt(SALT) and not hr23_feed.weak_salt(SALT2)
 
 
 def test_without_the_held_list_and_the_salt_no_row_is_printed(monkeypatch, capsys, tmp_path):
@@ -365,9 +403,9 @@ def test_the_digest_is_hmac_sha256_of_the_sorted_list_keyed_by_the_salt():
 
 def test_the_committed_value_is_the_synthetic_test_value():
     # D4 commits only a test value (D1's ruling 1 on #776): the synthetic
-    # list syn-held under the test salt SALT. D1 replaces it, and this test,
-    # when the value for a counted run's salt is committed.
-    assert hr23_feed.committed_digest(hr23_feed.DIGEST) == hr23_feed.list_digest([HOLD], SALT)
+    # list syn-held under the test salt TEST_SALT. D1 replaces it, and this
+    # test, when the value for a counted run's salt is committed.
+    assert hr23_feed.committed_digest(hr23_feed.DIGEST) == hr23_feed.list_digest([HOLD], TEST_SALT)
 
 
 GATE_MUTANTS = {
@@ -382,12 +420,34 @@ GATE_MUTANTS = {
                            "if want is None:"),
     "missing-digest-accepted": ("if want is None or not hmac.compare_digest(list_digest(names, salt), want):",
                                 "if want is not None and not hmac.compare_digest(list_digest(names, salt), want):"),
+    # D6's N1 on #776.
+    "two-values-take-the-first": ("return vals[0] if len(vals) == 1 and re.fullmatch",
+                                  "return vals[0] if vals and re.fullmatch"),
+    # D1's ruling 2 on #776.
+    "weak-salt-not-refused": ("    if counted and weak_salt(salt):", "    if False:"),
+    "period-not-checked": (" or any(s[p:] == s[:-p] for p in range(1, len(s) // 2 + 1))", ""),
+    "distinct-not-checked": ("return len(set(s)) < SALT_DISTINCT or any(", "return any("),
 }
 
 
 @pytest.mark.parametrize("old,new", GATE_MUTANTS.values(), ids=GATE_MUTANTS.keys())
 def test_control_gate_mutant_is_caught(monkeypatch, capsys, tmp_path, old, new):
     assert gate_problems(load(hr23_feed, old, new, "mutant_hr23_feed"), monkeypatch, capsys, tmp_path) != []
+
+
+# table.py's own call of the gate: over the case captures only (D6's N1 on
+# #776), and with the run's counted flag (D1's ruling 2).
+TABLE_GATE_MUTANTS = {
+    "wider-name-set": ('held, why = hr23_feed.held_list(hr23_feed.case_captures(os.path.join(root, GP, "hr23-cases.tsv")), env, counted)',
+                       'held, why = hr23_feed.held_list(set(hr23_feed.pins(os.path.join(root, GT, HR23_DIR, "hr23.sha256"))) | hr23_feed.case_captures(os.path.join(root, GP, "hr23-cases.tsv")), env, counted)'),
+    "counted-not-passed": ('hr23_feed.case_captures(os.path.join(root, GP, "hr23-cases.tsv")), env, counted)',
+                           'hr23_feed.case_captures(os.path.join(root, GP, "hr23-cases.tsv")), env)'),
+}
+
+
+@pytest.mark.parametrize("old,new", TABLE_GATE_MUTANTS.values(), ids=TABLE_GATE_MUTANTS.keys())
+def test_control_table_gate_mutant_is_caught(monkeypatch, capsys, tmp_path, old, new):
+    assert gate_problems(hr23_feed, monkeypatch, capsys, tmp_path, load(table, old, new, "mutant_table")) != []
 
 
 # Rule 5: an error while judging prints no text of it, since it may concern
@@ -452,6 +512,11 @@ def check_problems(feed, tmp_path, capsys, monkeypatch):
                         committed=hr23_feed.list_digest([HOLD], SALT))
     if rc != 1 or "| syn-" in out:
         bad.append("a list that is not the committed one was taken, or a row was printed")
+    # D1's ruling 2: the committed value's test salt, on a counted run, with
+    # the list's digest under it committed.
+    rc, out = check_run(feed, tmp_path / "d", capsys, monkeypatch, env=dict(ENV, **{hr23_feed.SALT_ENV: TEST_SALT}))
+    if rc != 1 or "| syn-" in out or TEST_SALT in out:
+        bad.append("a counted run took the test salt, or a row or the salt was printed")
     return bad
 
 
@@ -464,7 +529,10 @@ CHECK_MUTANTS = {
     "failure-named": ("            if code != \"0\" and c in held:\n                held_unclean = True\n            elif",
                       "            if"),
     "no-list-prints-rows": ("    if not fp:\n        held, why", "    if False:\n        held, why"),
-    "cases-not-read": ("held_list(case_captures(cases) if cases else set(), env)", "held_list({'syn-a'}, env)"),
+    "cases-not-read": ("held_list(case_captures(cases) if cases else set(), env, counted)",
+                       "held_list({'syn-a'}, env, counted)"),
+    "counted-not-passed": ("held_list(case_captures(cases) if cases else set(), env, counted)",
+                           "held_list(case_captures(cases) if cases else set(), env)"),
 }
 
 
@@ -557,8 +625,8 @@ def test_the_malformed_table_honours_the_held_list(monkeypatch, capsys, tmp_path
 MAL_MUTANTS = {
     "held-input-printed": ('            if row["input"] in held:\n                secret.append', '            if False:\n                secret.append'),
     "held-input-not-hashed": ("                secret.append(f\"| {row['input']} | \" + \" | \".join(cells) + \" |\")\n", ""),
-    "no-list-prints-rows": ("    held, _, why = held_gate(root, env)\n    import hr23_feed\n",
-                            "    held, _, why = held_gate(root, env)\n    import hr23_feed\n    held, why = (set() if held is None else held), (None if held is None else why)\n"),
+    "no-list-prints-rows": ("    held, _, why = held_gate(root, env, counted)\n    import hr23_feed\n",
+                            "    held, _, why = held_gate(root, env, counted)\n    import hr23_feed\n    held, why = (set() if held is None else held), (None if held is None else why)\n"),
     "refused-list-goes-on": ("    if held is False:\n        print(f\"Not judged or printed: {why} (D1's ruling 7057468942", "    if held is None and False:\n        print(f\"Not judged or printed: {why} (D1's ruling 7057468942"),
 }
 
@@ -566,3 +634,203 @@ MAL_MUTANTS = {
 @pytest.mark.parametrize("old,new", MAL_MUTANTS.values(), ids=MAL_MUTANTS.keys())
 def test_control_malformed_mutant_is_caught(monkeypatch, capsys, tmp_path, old, new):
     assert malformed_problems(load(table, old, new, "mutant_table"), monkeypatch, capsys, tmp_path) != []
+
+
+# D1's ruling 1 on #776 at 623365aa: every table the dnp3 mode prints
+# (table.py dnp3, hr23 and fifo) and the engines' own lines (held-log) leave
+# out the held list's captures, or, with no list accepted, every capture of
+# hr23-cases.tsv; through table.py's command line, over synthetic captures:
+# syn-a (a case capture, not held), HOLD (held) and syn-other (not a case
+# capture). HOLD's logs carry MARK. The committed test value (syn-held under
+# TEST_SALT) is the list a rehearsal accepts; a counted run refuses it.
+SH = shutil.which("sh")
+needs_sh = pytest.mark.skipif(SH is None, reason="no sh on PATH")
+OTHER = "syn-other"
+DNP3_CAPS = ("syn-a", HOLD, OTHER)
+COND_COLS = ("capture", "condition", "l4", "src", "sport", "dst", "dport", "code", "objects", "sa", "show", "frames",
+             "protocol", "direction")
+ENGINE_LINES = (f"zeek failed on {HOLD} (zeek-probe-c2), exit 139:\n{MARK} tail\n"
+                f"zeek {HOLD} (zeek) says: W: {MARK}\n"
+                f"zeek failed on {OTHER} (zeek), exit 1:\nother tail\n"
+                f"suricata-fifo {HOLD} (suricata-fifo) says: {MARK}\n")
+
+
+def consts(path, tables):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for name, entries in tables.items():
+            fh.write(f"const {name} = {{\n" + "".join(f'  [0x{c:x}] = "{n}",\n' for c, n in entries) + "}\n")
+
+
+def dnp3_inputs(tmp_path):
+    """(root, gt, work, out): a synthetic run of the dnp3 mode."""
+    root = make_root(tmp_path, ROWS)
+    with open(os.path.join(root, table.CONDITIONS), "w", encoding="utf-8") as fh:
+        fh.write("\t".join(COND_COLS) + "\n" + "".join(
+            f"{c}\tprotocol\tudp\t192.0.2.14\t20000\t192.0.2.20\t20000\t\t\t\t\t\tdnp3\tclient-server\n" for c in DNP3_CAPS))
+    gt = tmp_path / "gt"
+    (gt / "syn").mkdir(parents=True)
+    (gt / "syn" / "syn.sha256").write_text("".join(f"{'0' * 64}  {c}.pcap\n" for c in DNP3_CAPS))
+    work = tmp_path / "work"
+    consts(str(work / "zeek-dnp3-consts.zeek"), {"function_codes": [(1, "READ")]})
+    consts(str(work / "zeek-modbus-consts.zeek"), {"function_codes": [(3, "READ_HOLDING_REGISTERS")]})
+    consts(str(work / "pkgs" / "icsnpp-dnp3" / "scripts" / "consts.zeek"),
+           {"function_codes": [(1, "READ")], "dnp3_objects": [(0x100 + i, f"o{i}") for i in range(60)]})
+    out = tmp_path / "out"
+    for c in DNP3_CAPS + (table.CONTROL,):
+        for cfg in table.CONFIGS + table.HR23:
+            (out / c / cfg).mkdir(parents=True)
+            (out / c / cfg / "exit-code").write_text("0\n")
+        for cfg in table.PIPED:
+            (tmp_path / "out-pipe" / c / (cfg + "-pipe")).mkdir(parents=True)
+            (tmp_path / "out-pipe" / c / (cfg + "-pipe") / "exit-code").write_text("0\n")
+        (tmp_path / "out-pipe" / c / "suricata-fifo").mkdir(parents=True)
+        (tmp_path / "out-pipe" / c / "suricata-fifo" / "exit-code").write_text("0\n")
+    held = out / HOLD
+    (held / "zeek-probe-c2" / "weird.log").write_text(json.dumps({"ts": 1.0, "name": "dnp3_" + MARK}) + "\n")
+    (held / "zeek-probe-c2" / "only.log").write_text(json.dumps({"ts": 1.0, MARK: 1}) + "\n")
+    (held / "suricata" / "exit-code").write_text("1\n")
+    (tmp_path / "engines.txt").write_text(ENGINE_LINES)
+    return root, str(gt), str(work), str(out)
+
+
+def run_env(env):
+    e = {k: v for k, v in os.environ.items() if k not in (hr23_feed.HELD_ENV, hr23_feed.SALT_ENV, "GITHUB_REF")}
+    e.update(env)
+    return e
+
+
+def dnp3_mode(tmp_path, env, counted, here=HERE):
+    """Each command the dnp3 mode runs for its tables and engine lines, as
+    run.sh calls it. Returns (exit codes, output)."""
+    root, gt, work, out = dnp3_inputs(tmp_path)
+    flag = ["--counted"] if counted else []
+    cmds = [["dnp3", out, gt, work, root], ["hr23", out, root], ["fifo", out, out + "-pipe", root],
+            ["held-log", str(tmp_path / "engines.txt"), root]]
+    codes, text = [], ""
+    for c in cmds:
+        r = subprocess.run([sys.executable, "-I", "-B", os.path.join(here, "table.py")] + c + flag,
+                           env=run_env(env), capture_output=True, text=True)
+        codes.append(r.returncode)
+        text += r.stdout + r.stderr
+    return codes, text
+
+
+ACCEPTED = {hr23_feed.HELD_ENV: HOLD, hr23_feed.SALT_ENV: TEST_SALT}
+# (environment, counted, whether the list is accepted)
+DNP3_RUNS = [(ACCEPTED, False, True), ({}, False, False), ({}, True, False), (ACCEPTED, True, False),
+             (dict(ACCEPTED, **{hr23_feed.HELD_ENV: "syn-a"}), False, False)]
+
+
+def dnp3_problems(tmp_path, here=HERE):
+    bad = []
+    for i, (env, counted, accepted) in enumerate(DNP3_RUNS):
+        codes, text = dnp3_mode(tmp_path / str(i), env, counted, here)
+        case = f"run {i} (counted={counted}, list accepted={accepted})"
+        if codes != [0, 0, 0, 0]:
+            bad.append(f"{case}: exit codes {codes}")
+        if HOLD in text or MARK in text:
+            bad.append(f"{case}: a held capture's name, row or engine line was printed")
+        if ("syn-a" in text) != accepted:
+            bad.append(f"{case}: the case capture that is not held {'is missing' if accepted else 'was printed'}")
+        if text.count(f"| {OTHER} |") < 10 or "other tail" not in text:
+            bad.append(f"{case}: the capture that is not a case capture is missing")
+        n = 2 if accepted else 1
+        if text.count(f"protocol 0 pass, {n} fail, 0 unknown, of {n}") != len(table.CONFIGS + table.HR23):
+            bad.append(f"{case}: a count includes a capture left out")
+        if text.count(f"| 0 of {n + 1} | {n} of {n} |") != len(table.PIPED):
+            bad.append(f"{case}: the pipe case's count includes a capture left out")
+        if text.count("is printed here") < 2:
+            bad.append(f"{case}: the note is missing")
+    return bad
+
+
+def test_every_table_of_the_dnp3_mode_honours_the_held_list(tmp_path):
+    assert dnp3_problems(tmp_path) == []
+
+
+DNP3_MUTANTS = {
+    "dnp3-cases": ("labdir = {c: d for c, d in gt_cases(gt).items() if c not in hide}", "labdir = gt_cases(gt)"),
+    "dnp3-conditions": ('[r for r in tsv(cpath) if r["capture"] not in hide]', "tsv(cpath)"),
+    "readings-rows": ("os.path.isdir(os.path.join(out, x)) and x not in hide)", "os.path.isdir(os.path.join(out, x)))"),
+    "readings-fields": ('log_fields(out, "zeek-probe-c2", hide)', 'log_fields(out, "zeek-probe-c2")'),
+    "fifo": ('os.path.isdir(os.path.join(out_pipe, c, "suricata-fifo")) and c not in hide)',
+             'os.path.isdir(os.path.join(out_pipe, c, "suricata-fifo")))'),
+    "engine-lines": ("skip = (m.group(1) or m.group(2)) in hide", "skip = False"),
+    "no-list-hides-nothing": ('return hr23_feed.case_captures(os.path.join(root, GP, "hr23-cases.tsv")), (',
+                              "return set(), ("),
+    "counted-ignored": ('hidden(sys.argv[n - 1], sys.argv[n:] == ["--counted"])', "hidden(sys.argv[n - 1], False)"),
+}
+
+
+@pytest.mark.parametrize("old,new", DNP3_MUTANTS.values(), ids=DNP3_MUTANTS.keys())
+def test_control_dnp3_mode_mutant_is_caught(tmp_path, old, new):
+    here = tmp_path / "here"
+    here.mkdir()
+    for f in ("hr23_feed.py", "mountcheck.py", "hr23-held.hmac"):
+        shutil.copy(os.path.join(HERE, f), here)
+    with open(os.path.join(HERE, "table.py"), encoding="utf-8") as fh:
+        text = fh.read()
+    assert text.count(old) == 1, old
+    (here / "table.py").write_text(text.replace(old, new), encoding="utf-8")
+    assert dnp3_problems(tmp_path / "run", str(here)) != []
+
+
+# run.sh's dnp3 mode calls those commands with ROOT and the counted flag,
+# and keeps the engines' own lines off the job log but for held-log's copy:
+# its text from `counted=` to the fifo table, under sh -eu, with the engines
+# as stubs that print ENGINE_LINES.
+
+def run_sh_block():
+    with open(os.path.join(HERE, "run.sh"), encoding="utf-8") as fh:
+        lines = fh.read().replace("\r", "").split("\n")
+    start = lines.index("    dnp3_counted=")
+    end = next(i for i in range(start, len(lines)) if 'table.py" fifo' in lines[i])
+    return "\n".join(lines[start:end + 1]) + "\n"
+
+
+def block_problems(tmp_path, text):
+    bad = []
+    for i, (env, counted, accepted) in enumerate(DNP3_RUNS[:4]):
+        d = tmp_path / str(i)
+        root, gt, work, out = dnp3_inputs(d)
+        os.rename(out, os.path.join(work, "out-dnp3"))
+        os.rename(str(d / "out-pipe"), os.path.join(work, "out-dnp3-pipe"))
+        stub = (d / "engines.txt").read_text()
+        script = d / "block.sh"
+        script.write_text("set -eu\npython3() { \"$PY\" \"$@\"; }\nheader() { echo HEADER; }\n"
+                          "engines() { printf '%s' \"$LINES\"; }\npipes() { :; }\nfifos() { :; }\n"
+                          + text, newline="\n")
+        e = run_env(dict(env, PY=sys.executable.replace("\\", "/"), here=HERE.replace("\\", "/"),
+                         root=root.replace("\\", "/"), gt=gt.replace("\\", "/"), work=work.replace("\\", "/"),
+                         hr23="", LINES=stub, **({"GITHUB_REF": "refs/heads/main"} if counted else {})))
+        r = subprocess.run([SH, str(script).replace("\\", "/")], env=e, capture_output=True, text=True)
+        md = open(os.path.join(work, "dnp3.md"), encoding="utf-8").read() if os.path.exists(
+            os.path.join(work, "dnp3.md")) else ""
+        log = r.stdout + r.stderr
+        if r.returncode != 0 or f"| {OTHER} |" not in md or "other tail" not in log:
+            bad.append(f"block {i}: exit {r.returncode}, or a table or the engine lines are missing")
+        if HOLD in md + log or MARK in md + log or ("syn-a" in md + log) != accepted:
+            bad.append(f"block {i}: a capture left out reached dnp3.md or the job log")
+    return bad
+
+
+@needs_sh
+def test_the_dnp3_mode_calls_every_table_with_the_held_list(tmp_path):
+    assert block_problems(tmp_path, run_sh_block()) == []
+
+
+BLOCK_MUTANTS = {
+    "engines-to-the-log": ('engines "$work/dnp3" "$work/out-dnp3" > "$work/dnp3-engines.txt"',
+                           'engines "$work/dnp3" "$work/out-dnp3"'),
+    "readings-without-root": ('table.py" hr23 "$work/out-dnp3" "$root" $dnp3_counted', 'table.py" hr23 "$work/out-dnp3"'),
+    "dnp3-without-counted": ('"$work" "$root" $dnp3_counted', '"$work" "$root"'),
+}
+
+
+@needs_sh
+@pytest.mark.parametrize("old,new", BLOCK_MUTANTS.values(), ids=BLOCK_MUTANTS.keys())
+def test_control_dnp3_mode_block_mutant_is_caught(tmp_path, old, new):
+    text = run_sh_block()
+    assert text.count(old) == 1, old
+    assert block_problems(tmp_path, text.replace(old, new)) != []

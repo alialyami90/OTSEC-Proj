@@ -50,7 +50,8 @@ says how many captures are held; if one did not run cleanly, the text says
 only that a held capture did not, and a counted run exits 3. Without the
 list or the salt no per-capture row is printed, and a counted run exits 3.
 A list that fails either check is refused, without printing it, and `check`
-exits 1.
+exits 1; so is any list on a counted run whose salt is weak (weak_salt: the
+repository's test salts among them).
 
 Usage: python3 -I hr23_feed.py pin DIR SUMS KEPT
        python3 -I hr23_feed.py extend HR23_SUMS DNP3_SUMS CASES SRC DIR OUT_SUMS
@@ -81,6 +82,12 @@ HELD = "held (D4-112 item 1.3)"
 # it. Only the form is checked here; no check can show entropy.
 SALT_MIN = 64
 SALT_FORM = re.compile("[0-9a-f]{%d,}" % SALT_MIN)
+# A counted run refuses a salt that is plainly not random (D3's N1 on #776,
+# D1's ruling 2): one with a period shorter than half its length (the
+# repository's test salts, and all one character, among them), or with
+# fewer than SALT_DISTINCT distinct characters. A random 64-character hex
+# salt has fewer than 10 distinct characters with a chance below 1e-11.
+SALT_DISTINCT = 10
 # The list's keyed digest for the counted run's salt, committed through D1
 # (D1's ruling 1 on #776): the value's line is its only line that is not
 # blank and does not start with #.
@@ -112,12 +119,19 @@ def case_captures(cases):
     return {r[0] for r in rows[1:]}
 
 
-def held_list(known, env=None):
+def weak_salt(s):
+    """True when S has a period shorter than half its length, or fewer
+    than SALT_DISTINCT distinct characters."""
+    return len(set(s)) < SALT_DISTINCT or any(s[p:] == s[:-p] for p in range(1, len(s) // 2 + 1))
+
+
+def held_list(known, env=None, counted=False):
     """(captures, why): the set named by HELD_ENV and None; or None and why
     when the list or the salt is not given; or False and why when the list
-    names anything that is not in KNOWN (the case captures) or does not
-    match the committed digest under the salt. No name from the list is
-    ever printed."""
+    names anything that is not in KNOWN (the case captures), when COUNTED
+    and the salt is weak (weak_salt), or when the list does not match the
+    committed digest under the salt. No name from the list, and not the
+    salt, is ever printed."""
     env = os.environ if env is None else env
     names = env.get(HELD_ENV, "").replace(",", " ").split()
     if not names:
@@ -128,6 +142,9 @@ def held_list(known, env=None):
     if salt is None:
         return None, (f"the salt ({SALT_ENV}) was not given, or is not at least {SALT_MIN} lowercase hex "
                       "characters")
+    if counted and weak_salt(salt):
+        return False, (f"the salt ({SALT_ENV}) is a test value or plainly not random, and this run is on "
+                       "refs/heads/main; refused")
     want = committed_digest(DIGEST)
     if want is None or not hmac.compare_digest(list_digest(names, salt), want):
         return False, f"the held list ({HELD_ENV}) does not match the committed digest under the salt; refused"
@@ -228,7 +245,7 @@ def check(out, sums, kept_file, counted, env=None, cases=None):
     fp = os.path.basename(sums) == "fp.sha256"
     held = set()
     if not fp:
-        held, why = held_list(case_captures(cases) if cases else set(), env)
+        held, why = held_list(case_captures(cases) if cases else set(), env, counted)
         if why:
             print(f"\n## HR-23's captures under C0, C1, C1p and C2: not printed\n\nNo per-capture row is printed: {why}"
                   " (D1's ruling 7056743490 on #776)." +
