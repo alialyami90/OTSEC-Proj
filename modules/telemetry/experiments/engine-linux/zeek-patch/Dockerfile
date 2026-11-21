@@ -105,3 +105,47 @@ COPY --from=controls /stage/m-raise-rethrow/usr/local/zeek/bin/zeek /usr/local/z
 
 FROM c2 AS m-no-violation
 COPY --from=controls /stage/m-no-violation/usr/local/zeek/bin/zeek /usr/local/zeek/bin/zeek
+
+# HR-25's option A with option (a), part HR25-B1 (D4-124; the design's
+# section 4, C1): the same tree, after C2, with hr25-resync.patch applied
+# after hr23-fc-dispatch.patch in that fixed order with no fuzz, rebuilt and
+# installed as C2A. build.sh checks that C2 and C2A differ only in files
+# that A's patch can change.
+FROM build AS build-a
+COPY hr25-resync.patch /src/hr25-resync.patch
+RUN --network=none patch -p1 --fuzz=0 --no-backup-if-mismatch < /src/hr25-resync.patch \
+ && ninja -C build \
+ && DESTDIR=/stage/c2a ninja -C build install \
+ && mkdir -p /stage/c2a/record \
+ && (cd build && sha256sum $(find . -name 'dnp3_pac.cc' -o -name 'dnp3_pac.h' | sort)) > /stage/c2a/record/generated.sha256
+
+# A's mutant controls, never shipped: the (i)+A tree with one control patch
+# from controls/ applied at a time, rebuilt and installed apart; only each
+# control's bin/zeek is kept. The list is build.env's HR25_CONTROLS.
+FROM build-a AS controls-a
+ARG HR25_CONTROLS
+COPY controls /src/controls
+RUN --network=none test -n "$HR25_CONTROLS" && mkdir -p /stage/m25 && for m in $HR25_CONTROLS; do \
+      patch -p1 --fuzz=0 --no-backup-if-mismatch < /src/controls/hr25-$m.patch \
+      && ninja -C build \
+      && DESTDIR=/stage/tmp ninja -C build install \
+      && cp /stage/tmp/usr/local/zeek/bin/zeek /stage/m25/$m \
+      && rm -rf /stage/tmp \
+      && patch -R -p1 --fuzz=0 --no-backup-if-mismatch < /src/controls/hr25-$m.patch \
+      || exit 1; \
+    done
+
+# C2A carries both patch files in its notices (the design's section 4, C2
+# and C5).
+FROM runtime AS c2a
+COPY --from=build-a /stage/c2a/usr/local/zeek /usr/local/zeek
+COPY --from=build-a /stage/c2a/record /usr/local/zeek/share/otsec-build
+COPY --from=build /stage/binpac.txt /build-packages.txt /usr/local/zeek/share/otsec-build/
+COPY --from=build /stage/notices/zeek-9.0.1 /usr/local/zeek/share/otsec-build/notices/zeek-9.0.1
+COPY COPYING hr23-fc-dispatch.patch hr25-resync.patch /usr/local/zeek/share/otsec-build/notices/
+RUN dpkg-query -W -f '${Package} ${Version}\n' > /usr/local/zeek/share/otsec-build/runtime-packages.txt
+
+# One control image: C2A with control MUTANT's bin/zeek.
+FROM c2a AS m25
+ARG MUTANT
+COPY --from=controls-a /stage/m25/${MUTANT} /usr/local/zeek/bin/zeek

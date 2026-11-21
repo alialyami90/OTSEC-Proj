@@ -1,0 +1,861 @@
+OTSEC patch for HR-25, option A with option (a): frame-by-frame recovery in
+Zeek 9.0.1's DNP3 analyzer, on top of HR-23's option (i)
+(docs/phase4/D4-hr25-design.md; D1's ruling 6893095629, D4-106; option (a),
+D4-112 item 3; D1's rulings on #782, D4-123). This file is part HR25-B1 of
+the build (D4-124): sections 2.1 to 2.6 and 2.9 of the design, the
+transport sequence check of section 2.3, the fourteen causes counted, and
+the event dnp3_resync raised with why "end". Confirmation, the budget, the
+other rows and the mark (sections 2.7 and 2.8) are HR25-B2's.
+
+Against: Zeek 9.0.1 (zeek-9.0.1.tar.gz, SHA-256 in build.env) with
+hr23-fc-dispatch.patch applied. Applied after it, from the top of the
+unpacked tree, with `patch -p1 --fuzz=0`.
+
+The three files changed are Zeek 9.0.1's, under the BSD-3-Clause licence in
+Zeek 9.0.1's COPYING, copied verbatim beside this patch as COPYING. The
+lines this patch adds are the project's own (LICENSE.md). No grant to offer
+them upstream exists, and any report to Zeek's maintainers waits for the
+owner's word (design section 4, C5).
+
+--- a/src/analyzer/protocol/dnp3/DNP3.h
++++ b/src/analyzer/protocol/dnp3/DNP3.h
+@@ -12,13 +12,37 @@
+ 
+ class DNP3_Base {
+ public:
+-    explicit DNP3_Base(analyzer::Analyzer* analyzer);
++    DNP3_Base(analyzer::Analyzer* analyzer, bool stream);
+     virtual ~DNP3_Base();
+ 
+-    binpac::DNP3::DNP3_Conn* Interpreter() { return interp; }
++    // OTSEC patch (HR-25, A): one interpreter per end. Every call names its
++    // end, so a call that names none does not compile (design 2.6, S2).
++    binpac::DNP3::DNP3_Conn* Interpreter(bool orig) { return orig ? orig_state.interp : resp_state.interp; }
++
++    // OTSEC patch (HR-25, A): the closed set of causes, in this order
++    // (design 2.8). `counts` in dnp3_resync follows it.
++    enum Cause {
++        MAGIC,
++        HEADER_CRC,
++        LINK_LENGTH,
++        CHUNK_CRC,
++        EMBEDDED_HEADER,
++        FIRST_CHUNK_MISSING,
++        FIR_RESTART,
++        TRANSPORT_SEQ,
++        FRAGMENT_LIMIT,
++        APP_PARSE,
++        GAP,
++        TRUNCATED,
++        BUDGET,
++        INVARIANT,
++        NUM_CAUSES
++    };
+ 
+ protected:
+     static const int MAX_BUFFER_SIZE = 300;
++    static const int HEADER_LEN = 10;    // the link header with its CRC
++    static const int LAST_SEG_SIZE = 250; // a frame's user data, at most
+ 
+     struct Endpoint {
+         u_char buffer[MAX_BUFFER_SIZE] = {0};
+@@ -27,7 +51,35 @@
+         int tpflags = 0;
+         int pkt_length = 0;
+         int pkt_cnt = 0;
++        // OTSEC patch (HR-25, A): true while a fragment is in progress on
++        // this end, that is while some part of it has reached binpac.
+         bool encountered_first_chunk = false;
++
++        // OTSEC patch (HR-25, A): this end's interpreter (design 2.6).
++        binpac::DNP3::DNP3_Conn* interp = nullptr;
++        // The fragment's application octets so far (design 2.2, N5).
++        int app_octets = 0;
++        // In a scan run (design 2.1).
++        bool scanning = false;
++        // The transport state (design 2.3): the number of the segment
++        // accepted last (-1: none), a copy of its user data, whether it
++        // carried FIN, and its FCB when it was a primary frame of confirmed
++        // user data with FCV set (-1: none).
++        int tseq = -1;
++        u_char last_seg[LAST_SEG_SIZE] = {0};
++        int last_seg_len = 0;
++        bool after_fin = false;
++        int fcb = -1;
++        // The embedded-header check past a failed frame's end (design 2.2):
++        // the frame's last 9 octets and up to 9 octets after them.
++        u_char emb[2 * (HEADER_LEN - 1)] = {0};
++        int emb_len = 0;
++        int emb_checked = 0;
++        bool emb_pending = false;
++        // The counters (design 2.8).
++        uint64_t counts[NUM_CAUSES] = {0};
++        uint64_t scanned_octets = 0;
++        int last_cause = -1;
+     };
+ 
+     bool ProcessData(int len, const u_char* data, bool orig);
+@@ -48,17 +100,35 @@
+      */
+     int AddToBuffer(Endpoint* endp, int target_len, const u_char** data, int* len);
+ 
+-    bool ParseAppLayer(Endpoint* endp);
++    void ParseAppLayer(bool orig, const u_char* hdr, const u_char* seg, int seg_len, bool fir, bool fin);
+     bool CheckCRC(int len, const u_char* data, const u_char* crc16, const char* where);
+     unsigned int CalcCRC(int len, const u_char* data);
+ 
++    // OTSEC patch (HR-25, A).
++    Endpoint* End(bool orig) { return orig ? &orig_state : &resp_state; }
++    bool CRCMatches(int len, const u_char* data, const u_char* crc16);
++    int HeaderCause(const u_char* hdr);
++    bool ProcessFrame(bool orig, const u_char* rest, int rest_len);
++    int CheckChunks(Endpoint* endp, u_char* seg, int* seg_len);
++    void TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len);
++    bool SameSegment(const Endpoint* endp, const u_char* seg, int seg_len);
++    bool EmbeddedCheck(Endpoint* endp, const u_char* rest, int rest_len);
++    bool EmbeddedPeek(Endpoint* endp, const u_char* data, int len);
++    void ResetFrame(Endpoint* endp);
++    void Count(bool orig, int cause);
++    void Drop(bool orig, int cause);
++    void DatagramEnd(bool orig);
++    void Gap(bool orig);
++    void EndOfStream(bool orig);
++    void ReportEnd();
++
+     static void PrecomputeCRCTable();
+ 
+     static bool crc_table_initialized;
+     static unsigned int crc_table[256];
+ 
+     analyzer::Analyzer* analyzer;
+-    binpac::DNP3::DNP3_Conn* interp;
++    bool stream; // TCP: a stream; UDP: datagrams
+ 
+     Endpoint orig_state;
+     Endpoint resp_state;
+@@ -82,6 +152,7 @@
+ public:
+     explicit DNP3_UDP_Analyzer(Connection* conn);
+ 
++    void Done() override;
+     void DeliverPacket(int len, const u_char* data, bool orig, uint64_t seq, const IP_Hdr* ip, int caplen) override;
+ 
+     static analyzer::Analyzer* Instantiate(Connection* conn) { return new DNP3_UDP_Analyzer(conn); }
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -110,7 +110,10 @@
+ #include "zeek/analyzer/protocol/dnp3/DNP3.h"
+ 
+ #include "zeek/Reporter.h"
++#include "zeek/ID.h"
++#include "zeek/Val.h"
+ #include "zeek/analyzer/protocol/dnp3/consts.bif.h"
++#include "zeek/analyzer/protocol/dnp3/events.bif.h"
+ 
+ constexpr unsigned int PSEUDO_LENGTH_INDEX = 2;        // index of len field of DNP3 Pseudo Link Layer
+ constexpr unsigned int PSEUDO_CONTROL_FIELD_INDEX = 3; // index of ctrl field of DNP3 Pseudo Link Layer
+@@ -125,9 +128,34 @@
+ bool DNP3_Base::crc_table_initialized = false;
+ unsigned int DNP3_Base::crc_table[256];
+ 
+-DNP3_Base::DNP3_Base(analyzer::Analyzer* arg_analyzer) {
++// OTSEC patch (HR-25, A; docs/phase4/D4-hr25-design.md): the names and weirds
++// of the closed set of causes, in DNP3_Base::Cause's order (design 2.8).
++static const char* const cause_name[] = {"magic",          "header_crc", "link_length", "chunk_crc",
++                                         "embedded_header", "first_chunk_missing", "fir_restart",
++                                         "transport_seq",  "fragment_limit", "app_parse", "gap",
++                                         "truncated",      "budget",     "invariant"};
++static const char* const cause_weird[] = {"dnp3_header_lacks_magic",
++                                          "dnp3_corrupt_header_checksum",
++                                          "dnp3_invalid_link_length",
++                                          "dnp3_corrupt_app_chunk_checksum",
++                                          "dnp3_embedded_header",
++                                          "dnp3_first_application_layer_chunk_missing",
++                                          "dnp3_fragment_restarted",
++                                          "dnp3_transport_sequence",
++                                          "dnp3_max_application_layer_fragment_size_exceeded",
++                                          "dnp3_app_parse_failed",
++                                          "dnp3_content_gap",
++                                          "dnp3_truncated_frame",
++                                          "dnp3_resync_budget_exhausted",
++                                          "dnp3_invariant"};
++static_assert(sizeof(cause_name) / sizeof(cause_name[0]) == DNP3_Base::NUM_CAUSES);
++static_assert(sizeof(cause_weird) / sizeof(cause_weird[0]) == DNP3_Base::NUM_CAUSES);
++
++DNP3_Base::DNP3_Base(analyzer::Analyzer* arg_analyzer, bool arg_stream) {
+     analyzer = arg_analyzer;
+-    interp = new binpac::DNP3::DNP3_Conn(analyzer);
++    stream = arg_stream;
++    orig_state.interp = new binpac::DNP3::DNP3_Conn(analyzer);
++    resp_state.interp = new binpac::DNP3::DNP3_Conn(analyzer);
+ 
+     ClearEndpointState(true);
+     ClearEndpointState(false);
+@@ -136,15 +164,23 @@
+         PrecomputeCRCTable();
+ }
+ 
+-DNP3_Base::~DNP3_Base() { delete interp; }
++DNP3_Base::~DNP3_Base() {
++    delete orig_state.interp;
++    delete resp_state.interp;
++}
+ 
+ bool DNP3_Base::ProcessData(int len, const u_char* data, bool orig) {
+-    Endpoint* endp = orig ? &orig_state : &resp_state;
++    Endpoint* endp = End(orig);
+ 
+-    while ( len ) {
++    // A failed frame's embedded-header check that waits for octets past the
++    // frame's end reads them here, without consuming them (design 2.2).
++    if ( endp->emb_pending && EmbeddedPeek(endp, data, len) )
++        Count(orig, EMBEDDED_HEADER);
++
++    while ( len > 0 ) {
+         if ( endp->in_hdr ) {
+-            // We're parsing the DNP3 header and link layer, get that in full.
+-            int res = AddToBuffer(endp, PSEUDO_APP_LAYER_INDEX, &data, &len);
++            // The header is judged at 10 octets (design 2.1).
++            int res = AddToBuffer(endp, HEADER_LEN, &data, &len);
+ 
+             if ( res == 0 )
+                 return true;
+@@ -152,92 +188,87 @@
+             if ( res < 0 )
+                 return false;
+ 
+-            // The first two bytes must always be 0x0564.
+-            if ( endp->buffer[0] != 0x05 || endp->buffer[1] != 0x64 ) {
+-                analyzer->Weird("dnp3_header_lacks_magic");
+-                return false;
+-            }
++            int cause = HeaderCause(endp->buffer);
+ 
+-            // Make sure header checksum is correct.
+-            if ( ! CheckCRC(PSEUDO_LINK_LAYER_LEN, endp->buffer, endp->buffer + PSEUDO_LINK_LAYER_LEN, "header") ) {
+-                analyzer->AnalyzerViolation("broken_checksum");
+-                return false;
++            if ( cause >= 0 ) {
++                // A failed header consumes 1 octet and scans. The run counts
++                // its first cause once and raises its weird once.
++                if ( ! endp->scanning ) {
++                    endp->scanning = true;
++                    Count(orig, cause);
++                }
++
++                ++endp->scanned_octets;
++                memmove(endp->buffer, endp->buffer + 1, HEADER_LEN - 1);
++                endp->buffer_len = HEADER_LEN - 1;
++                continue;
+             }
+ 
++            endp->scanning = false;
++
+             // If the checksum works out, we're pretty certainly DNP3.
+             analyzer->AnalyzerConfirmation();
+ 
+-            // DNP3 packets without transport and application
+-            // layers can happen, we ignore them.
+-            if ( (endp->buffer[PSEUDO_LENGTH_INDEX] + 3) == static_cast<char>(PSEUDO_LINK_LAYER_LEN) ) {
+-                ClearEndpointState(orig);
+-                return true;
++            u_char ctrl = endp->buffer[PSEUDO_CONTROL_FIELD_INDEX];
++
++            // A link-only frame consumes its 10 octets, and the rest of the
++            // delivery is parsed. A primary one clears this end's FCB
++            // (design 2.1, 2.3).
++            if ( endp->buffer[PSEUDO_LENGTH_INDEX] == 5 ) {
++                if ( ctrl & 0x40 )
++                    endp->fcb = -1;
++                endp->buffer_len = 0;
++                continue;
+             }
+ 
+             // Double check the direction in case the first
+             // received packet is a response.
+-            u_char ctrl = endp->buffer[PSEUDO_CONTROL_FIELD_INDEX];
+-
+             if ( orig != static_cast<bool>(ctrl & 0x80) )
+                 analyzer->Weird("dnp3_unexpected_flow_direction");
+ 
+-            // Update state.
+             endp->pkt_length = endp->buffer[PSEUDO_LENGTH_INDEX];
+-            endp->tpflags = endp->buffer[PSEUDO_TRANSPORT_INDEX];
+-            endp->in_hdr = false; // Now parsing application layer.
+-
+-            // For the first packet, we submit the header to
+-            // BinPAC.
+-            if ( ++endp->pkt_cnt == 1 )
+-                interp->NewData(orig, endp->buffer, endp->buffer + PSEUDO_LINK_LAYER_LEN);
++            endp->in_hdr = false;
+         }
+ 
+-        if ( ! endp->in_hdr ) {
+-            if ( endp->pkt_length <= 0 ) {
+-                analyzer->Weird("dnp3_negative_or_zero_length_link_layer");
+-                return false;
+-            }
+-
+-            // We're parsing the DNP3 application layer, get that
+-            // in full now as well. We calculate the number of
+-            // raw bytes the application layer consists of from
+-            // the packet length by determining how much 16-byte
+-            // chunks fit in there, and then add 2 bytes CRC for
+-            // each.
+-            int n = PSEUDO_APP_LAYER_INDEX + (endp->pkt_length - 5) + ((endp->pkt_length - 5) / 16) * 2 +
+-                    2 * (((endp->pkt_length - 5) % 16 == 0) ? 0 : 1) - 1;
++        if ( endp->pkt_length <= 0 ) {
++            Count(orig, INVARIANT);
++            analyzer->Weird("dnp3_negative_or_zero_length_link_layer");
++            return false;
++        }
+ 
+-            int res = AddToBuffer(endp, n, &data, &len);
++        // The whole frame: 10 + n + 2 * ceil(n / 16) octets, n = length - 5.
++        int n = PSEUDO_APP_LAYER_INDEX + (endp->pkt_length - 5) + ((endp->pkt_length - 5) / 16) * 2 +
++                2 * (((endp->pkt_length - 5) % 16 == 0) ? 0 : 1) - 1;
+ 
+-            if ( res == 0 )
+-                return true;
++        int res = AddToBuffer(endp, n, &data, &len);
+ 
+-            if ( res < 0 )
+-                return false;
++        if ( res == 0 )
++            return true;
+ 
+-            // Parse the application layer data.
+-            if ( ! ParseAppLayer(endp) )
+-                return false;
++        if ( res < 0 )
++            return false;
+ 
+-            // Done with this packet, prepare for next.
+-            endp->buffer_len = 0;
+-            endp->in_hdr = true;
+-        }
++        if ( ! ProcessFrame(orig, data, len) )
++            return false;
+     }
+ 
+     return true;
+ }
+ 
+ int DNP3_Base::AddToBuffer(Endpoint* endp, int target_len, const u_char** data, int* len) {
++    bool orig = (endp == &orig_state);
++
+     if ( ! target_len )
+         return 1;
+ 
+     if ( *len < 0 ) {
++        Count(orig, INVARIANT);
+         reporter->AnalyzerError(analyzer, "dnp3 negative input length: %d", *len);
+         return -1;
+     }
+ 
+     if ( target_len < endp->buffer_len ) {
++        Count(orig, INVARIANT);
+         reporter->AnalyzerError(analyzer, "dnp3 invalid target length: %d - %d", target_len, endp->buffer_len);
+         return -1;
+     }
+@@ -245,6 +276,7 @@
+     int to_copy = min(*len, target_len - endp->buffer_len);
+ 
+     if ( endp->buffer_len + to_copy > MAX_BUFFER_SIZE ) {
++        Count(orig, INVARIANT);
+         reporter->AnalyzerError(analyzer, "dnp3 buffer length exceeded: %d + %d", endp->buffer_len, to_copy);
+         return -1;
+     }
+@@ -260,85 +292,339 @@
+     return 0;
+ }
+ 
+-bool DNP3_Base::ParseAppLayer(Endpoint* endp) {
+-    bool orig = (endp == &orig_state);
+-    binpac::DNP3::DNP3_Flow* flow = orig ? interp->upflow() : interp->downflow();
++// The header's cause, or -1 when it passes: the magic, then the header CRC,
++// then a length of 5 to 255 (design 2.1).
++int DNP3_Base::HeaderCause(const u_char* hdr) {
++    if ( hdr[0] != 0x05 || hdr[1] != 0x64 )
++        return MAGIC;
++
++    if ( ! CRCMatches(PSEUDO_LINK_LAYER_LEN, hdr, hdr + PSEUDO_LINK_LAYER_LEN) )
++        return HEADER_CRC;
++
++    if ( hdr[PSEUDO_LENGTH_INDEX] < 5 )
++        return LINK_LENGTH;
++
++    return -1;
++}
++
++// A whole frame, its header passed. Nothing of it reaches binpac before it
++// passes every check (design 2.2). `rest` is what follows it in the same
++// delivery. False only at a broken invariant.
++bool DNP3_Base::ProcessFrame(bool orig, const u_char* rest, int rest_len) {
++    Endpoint* endp = End(orig);
++    u_char hdr[PSEUDO_LINK_LAYER_LEN];
++    memcpy(hdr, endp->buffer, PSEUDO_LINK_LAYER_LEN);
++    u_char ctrl = hdr[PSEUDO_CONTROL_FIELD_INDEX];
++    u_char seg[sizeof(endp->last_seg)];
++    int seg_len = 0;
+ 
+-    u_char* data = endp->buffer + PSEUDO_TRANSPORT_INDEX; // The transport layer byte counts as app-layer it seems.
+-    int len = endp->pkt_length - 5;
++    int res = CheckChunks(endp, seg, &seg_len);
++
++    if ( res < 0 )
++        return false;
++
++    if ( res == 0 ) {
++        // A chunk CRC failed: the frame is consumed by its length, and a
++        // header inside it is flagged, never parsed (design 2.2).
++        bool found = EmbeddedCheck(endp, rest, rest_len);
++        ResetFrame(endp);
++        Drop(orig, CHUNK_CRC);
++
++        if ( found )
++            Count(orig, EMBEDDED_HEADER);
++
++        return true;
++    }
++
++    ResetFrame(endp);
++    TransportRule(orig, ctrl, hdr, seg, seg_len);
++    return true;
++}
+ 
+-    // DNP3 Packet :  DNP3 Pseudo Link Layer | DNP3 Pseudo Transport Layer | DNP3 Pseudo Application
+-    // Layer DNP3 Serial Transport Layer data is always 1 byte. Get FIN FIR seq field in transport
+-    // header. FIR indicate whether the following DNP3 Serial Application Layer is first chunk of
+-    // bytes or not. FIN indicate whether the following DNP3 Serial Application Layer is last chunk
+-    // of bytes or not.
++// Checks every chunk CRC of the whole frame in the buffer, and copies its
++// user data (the transport octet and the application octets, without CRCs)
++// into seg. 1: every chunk passed; 0: one failed; -1: a broken invariant.
++int DNP3_Base::CheckChunks(Endpoint* endp, u_char* seg, int* seg_len) {
++    bool orig = (endp == &orig_state);
++    int len = endp->pkt_length - 5;
+ 
+-    int is_first = (endp->tpflags & 0x40) >> 6; // Initial chunk of data in this packet.
+-    int is_last = (endp->tpflags & 0x80) >> 7;  // Last chunk of data in this packet.
++    // Design 2.9 item 5: the user data must fit last_seg's own buffer
++    // (sizeof, not a literal), checked before the copy and the compare.
++    if ( len > static_cast<int>(sizeof(endp->last_seg)) ) {
++        Count(orig, INVARIANT);
++        reporter->AnalyzerError(analyzer, "dnp3 transport segment exceeds its buffer: %d", len);
++        return -1;
++    }
+ 
+-    int transport = PSEUDO_TRANSPORT_LEN;
++    const u_char* data = endp->buffer + PSEUDO_TRANSPORT_INDEX;
++    int out = 0;
+ 
+-    int i = 0;
+     while ( len > 0 ) {
+         int n = min(len, 16);
+ 
+-        // Make sure chunk has a correct checksum.
+-        if ( ! CheckCRC(n, data, data + n, "app_chunk") )
+-            return false;
+-
+         if ( data + n >= endp->buffer + endp->buffer_len ) {
++            Count(orig, INVARIANT);
+             reporter->AnalyzerError(analyzer, "dnp3 app layer parsing overflow %d - %d", endp->buffer_len, n);
+-            return false;
++            return -1;
+         }
+ 
+-        auto* fb = flow->flow_buffer();
++        if ( ! CRCMatches(n, data, data + n) )
++            return 0;
+ 
+-        // We're reassembling a DNP3 Application Layer Fragment here. When
+-        // the accumulated buffer becomes larger than the configured limit,
+-        // raise a limit reached weird and stop analysis. It appears Application
+-        // Layer Fragments should range between 2k and 4k in size. Zeek's
+-        // default of 100k should be more than sufficient to cover normal uses
+-        // and capping here prevents resource exhaustion in face of abnormal
+-        // traffic.
+-        //
+-        // If you see this triggering on benign DNP3 traffic in the wild,
+-        // please report to upstream!
+-        if ( BifConst::DNP3::max_application_layer_fragment_size > 0 &&
+-             static_cast<size_t>(fb->data_length()) > BifConst::DNP3::max_application_layer_fragment_size ) {
+-            analyzer->LimitReachedWeird("dnp3_max_application_layer_fragment_size_exceeded",
+-                                        BifConst::DNP3::max_application_layer_fragment_size);
+-            return false;
++        memcpy(seg + out, data, n);
++        out += n;
++        data += n + 2;
++        len -= n;
++    }
++
++    *seg_len = out;
++    return 1;
++}
++
++// One compare for a repeat inside a fragment and after FIN: the whole
++// segment, its transport octet and every application octet, with equal
++// lengths (design 2.3, D3's C1).
++bool DNP3_Base::SameSegment(const Endpoint* endp, const u_char* seg, int seg_len) {
++    return seg_len == endp->last_seg_len && memcmp(seg, endp->last_seg, seg_len) == 0;
++}
++
++// The transport rule and the fragment-size limit (design 2.2 steps 2 and 3,
++// 2.3), on a frame whose every CRC passed.
++void DNP3_Base::TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len) {
++    Endpoint* endp = End(orig);
++    int& tseq = endp->tseq;
++    u_char t = seg[0];
++    bool fir = t & 0x40;
++    bool fin = t & 0x80;
++    int n = t & 0x3f;
++
++    // A primary frame of confirmed user data (link function 3) with FCV set
++    // has an FCB; a repeat of it whose FCB is not toggled is a link-layer
++    // retry (D1's ruling 1 on #782).
++    bool confirmed = (ctrl & 0x40) && (ctrl & 0x10) && (ctrl & 0x0f) == 3;
++    int fcb = (ctrl & 0x20) ? 1 : 0;
++    bool link_retry = confirmed && endp->fcb == fcb;
++
++    if ( fir ) {
++        // A FIR frame accepts any number; one inside a fragment drops it.
++        if ( endp->encountered_first_chunk )
++            Drop(orig, FIR_RESTART);
++    }
++    else if ( endp->encountered_first_chunk ) {
++        if ( n == (tseq + 1) % 64 ) {
++            // Append.
+         }
++        else if ( n == tseq && link_retry && SameSegment(endp, seg, seg_len) )
++            return; // A link-layer retry: discarded, nothing counted.
++        else {
++            Drop(orig, TRANSPORT_SEQ);
++            return;
++        }
++    }
++    else {
++        // Identical link-layer retries of the last segment after its FIN.
++        if ( endp->after_fin && n == tseq && link_retry && SameSegment(endp, seg, seg_len) )
++            return;
++
++        Drop(orig, FIRST_CHUNK_MISSING);
++        return;
++    }
++
++    // The fragment-size limit, in application octets: a sum equal to the
++    // limit passes (design 2.2, D6's N5).
++    int app = seg_len - PSEUDO_TRANSPORT_LEN;
++    int base = fir ? 0 : endp->app_octets;
++
++    if ( BifConst::DNP3::max_application_layer_fragment_size > 0 &&
++         static_cast<size_t>(base + app) > BifConst::DNP3::max_application_layer_fragment_size ) {
++        Drop(orig, FRAGMENT_LIMIT);
++        return;
++    }
++
++    tseq = n;
++    memcpy(endp->last_seg, seg, seg_len);
++    endp->last_seg_len = seg_len;
++    endp->after_fin = fin;
++    endp->fcb = confirmed ? fcb : -1;
++    endp->app_octets = base + app;
++    endp->tpflags = t;
++    ++endp->pkt_cnt;
++    endp->encountered_first_chunk = true;
+ 
+-        // Pass on to BinPAC.
+-        fb->BufferData(data + transport, data + n);
+-        transport = 0;
++    // The catch inside the loop (design 2.6, T3): binpac::Exception only.
++    bool thrown = false;
+ 
+-        data += n + 2;
+-        len -= n;
++    try {
++        ParseAppLayer(orig, hdr, seg, seg_len, fir, fin);
++    } catch ( const binpac::Exception& ) {
++        thrown = true;
+     }
+ 
+-    if ( is_first )
+-        endp->encountered_first_chunk = true;
++    if ( thrown ) {
++        Drop(orig, APP_PARSE);
++        return;
++    }
+ 
+-    if ( ! is_first && ! endp->encountered_first_chunk ) {
+-        // We lost the first chunk.
+-        analyzer->Weird("dnp3_first_application_layer_chunk_missing");
+-        return false;
++    if ( fin ) {
++        endp->encountered_first_chunk = false;
++        endp->app_octets = 0;
++        endp->pkt_cnt = 0;
+     }
++}
++
++// Feeds a checked frame to this end's interpreter: the header at a FIR, then
++// the application octets, and at FIN the end of the fragment. It may throw
++// binpac::Exception; its caller catches it.
++void DNP3_Base::ParseAppLayer(bool orig, const u_char* hdr, const u_char* seg, int seg_len, bool fir, bool fin) {
++    binpac::DNP3::DNP3_Conn* interp = Interpreter(orig);
++    binpac::DNP3::DNP3_Flow* flow = orig ? interp->upflow() : interp->downflow();
++
++    if ( fir )
++        interp->NewData(orig, hdr, hdr + PSEUDO_LINK_LAYER_LEN);
+ 
+-    if ( is_last ) {
++    flow->flow_buffer()->BufferData(seg + PSEUDO_TRANSPORT_LEN, seg + seg_len);
++
++    if ( fin ) {
+         flow->flow_buffer()->FinishBuffer();
+         flow->FlowEOF();
+-        ClearEndpointState(orig);
+     }
++}
+ 
+-    return true;
++// The embedded-header check over a failed frame's offsets 1 to len - 1
++// (design 2.2). Candidates that start in its last 9 octets read up to 9
++// octets past its end: from `rest` and, on TCP, from later deliveries.
++bool DNP3_Base::EmbeddedCheck(Endpoint* endp, const u_char* rest, int rest_len) {
++    int total = endp->buffer_len;
++
++    for ( int k = 1; k + HEADER_LEN <= total; ++k )
++        if ( HeaderCause(endp->buffer + k) < 0 )
++            return true;
++
++    memcpy(endp->emb, endp->buffer + total - (HEADER_LEN - 1), HEADER_LEN - 1);
++    endp->emb_len = HEADER_LEN - 1;
++    endp->emb_checked = 0;
++    endp->emb_pending = true;
++    return EmbeddedPeek(endp, rest, rest_len);
++}
++
++bool DNP3_Base::EmbeddedPeek(Endpoint* endp, const u_char* data, int len) {
++    int take = min(len, static_cast<int>(sizeof(endp->emb)) - endp->emb_len);
++
++    if ( take > 0 ) {
++        memcpy(endp->emb + endp->emb_len, data, take);
++        endp->emb_len += take;
++    }
++
++    for ( ; endp->emb_checked + HEADER_LEN <= endp->emb_len; ++endp->emb_checked )
++        if ( HeaderCause(endp->emb + endp->emb_checked) < 0 ) {
++            endp->emb_pending = false;
++            return true;
++        }
++
++    // On UDP only octets of the same datagram are read.
++    if ( endp->emb_len == static_cast<int>(sizeof(endp->emb)) || ! stream )
++        endp->emb_pending = false;
++
++    return false;
++}
++
++void DNP3_Base::ResetFrame(Endpoint* endp) {
++    endp->in_hdr = true;
++    endp->buffer_len = 0;
++    endp->pkt_length = 0;
++}
++
++void DNP3_Base::Count(bool orig, int cause) {
++    Endpoint* endp = End(orig);
++    ++endp->counts[cause];
++    endp->last_cause = cause;
++    analyzer->Weird(cause_weird[cause]);
++}
++
++// The one drop function (design 2.6): counts the cause, clears this end's
++// state, and remakes this end's interpreter if a fragment is in progress.
++// The other end is not touched.
++void DNP3_Base::Drop(bool orig, int cause) {
++    Endpoint* endp = End(orig);
++    Count(orig, cause);
++    bool remake = endp->encountered_first_chunk;
++    ClearEndpointState(orig);
++
++    if ( remake ) {
++        delete endp->interp;
++        endp->interp = new binpac::DNP3::DNP3_Conn(analyzer);
++    }
++}
++
++// UDP: the end of a datagram (design 2.4). A scan run ends here and its held
++// octets go with it; any other octets left are `truncated`.
++void DNP3_Base::DatagramEnd(bool orig) {
++    Endpoint* endp = End(orig);
++    endp->emb_pending = false;
++
++    if ( endp->scanning ) {
++        endp->scanning = false;
++        ResetFrame(endp);
++        return;
++    }
++
++    if ( ! endp->in_hdr || endp->buffer_len > 0 )
++        Drop(orig, TRUNCATED);
++}
++
++// TCP: a content gap drops this end, which then scans (design 2.5).
++void DNP3_Base::Gap(bool orig) {
++    Endpoint* endp = End(orig);
++    endp->emb_pending = false;
++    Drop(orig, GAP);
++    endp->scanning = true;
++}
++
++// TCP: the end of this end's stream, inside A's catch (design 2.6, T11).
++void DNP3_Base::EndOfStream(bool orig) {
++    End(orig)->emb_pending = false;
++    bool thrown = false;
++
++    try {
++        Interpreter(orig)->FlowEOF(orig);
++    } catch ( const binpac::Exception& ) {
++        thrown = true;
++    }
++
++    if ( thrown )
++        Drop(orig, APP_PARSE);
++}
++
++// dnp3_resync with why "end", for each end whose counts are not all zero
++// (design 2.8; B1 raises only this one).
++void DNP3_Base::ReportEnd() {
++    if ( ! ::dnp3_resync )
++        return;
++
++    for ( bool orig : {true, false} ) {
++        Endpoint* endp = End(orig);
++        bool any = false;
++
++        for ( auto c : endp->counts )
++            any = any || c > 0;
++
++        if ( ! any )
++            continue;
++
++        auto counts = make_intrusive<VectorVal>(id::index_vec);
++
++        for ( auto c : endp->counts )
++            counts->Append(val_mgr->Count(c));
++
++        analyzer->EnqueueConnEvent(::dnp3_resync, analyzer->ConnVal(), val_mgr->Bool(orig),
++                                   make_intrusive<StringVal>("end"),
++                                   make_intrusive<StringVal>(endp->last_cause >= 0 ? cause_name[endp->last_cause] : ""),
++                                   std::move(counts), val_mgr->Count(endp->scanned_octets));
++    }
+ }
+ 
+ void DNP3_Base::ClearEndpointState(bool orig) {
+-    Endpoint* endp = orig ? &orig_state : &resp_state;
+-    binpac::DNP3::DNP3_Flow* flow = orig ? interp->upflow() : interp->downflow();
++    Endpoint* endp = End(orig);
+ 
+     endp->in_hdr = true;
+     endp->encountered_first_chunk = false;
+@@ -346,13 +632,23 @@
+     endp->pkt_length = 0;
+     endp->tpflags = 0;
+     endp->pkt_cnt = 0;
++    endp->app_octets = 0;
++    endp->scanning = false;
++    endp->tseq = -1;
++    endp->last_seg_len = 0;
++    endp->after_fin = false;
++    endp->fcb = -1;
+ }
+ 
+ void DNP3_Base::DiscardFlowBuffer(bool orig) {
+-    auto* flow = orig ? Interpreter()->upflow() : Interpreter()->downflow();
++    auto* flow = orig ? Interpreter(true)->upflow() : Interpreter(false)->downflow();
+     flow->flow_buffer()->DiscardData();
+ }
+ 
++bool DNP3_Base::CRCMatches(int len, const u_char* data, const u_char* crc16) {
++    unsigned int crc = CalcCRC(len, data);
++    return crc16[0] == (crc & 0xff) && crc16[1] == (crc & 0xff00) >> 8;
++}
+ bool DNP3_Base::CheckCRC(int len, const u_char* data, const u_char* crc16, const char* where) {
+     unsigned int crc = CalcCRC(len, data);
+ 
+@@ -390,13 +686,14 @@
+ }
+ 
+ } // namespace detail
+-DNP3_TCP_Analyzer::DNP3_TCP_Analyzer(Connection* c) : DNP3_Base(this), TCP_ApplicationAnalyzer("DNP3_TCP", c) {}
++DNP3_TCP_Analyzer::DNP3_TCP_Analyzer(Connection* c) : DNP3_Base(this, true), TCP_ApplicationAnalyzer("DNP3_TCP", c) {}
+ 
+ void DNP3_TCP_Analyzer::Done() {
+     TCP_ApplicationAnalyzer::Done();
+ 
+-    Interpreter()->FlowEOF(true);
+-    Interpreter()->FlowEOF(false);
++    EndOfStream(true);
++    EndOfStream(false);
++    ReportEnd();
+ }
+ 
+ void DNP3_TCP_Analyzer::DeliverStream(int len, const u_char* data, bool orig) {
+@@ -416,15 +713,20 @@
+ 
+ void DNP3_TCP_Analyzer::Undelivered(uint64_t seq, int len, bool orig) {
+     TCP_ApplicationAnalyzer::Undelivered(seq, len, orig);
+-    Interpreter()->NewGap(orig, len);
++    Gap(orig);
+ }
+ 
+ void DNP3_TCP_Analyzer::EndpointEOF(bool is_orig) {
+     TCP_ApplicationAnalyzer::EndpointEOF(is_orig);
+-    Interpreter()->FlowEOF(is_orig);
++    EndOfStream(is_orig);
+ }
+ 
+-DNP3_UDP_Analyzer::DNP3_UDP_Analyzer(Connection* c) : DNP3_Base(this), Analyzer("DNP3_UDP", c) {}
++DNP3_UDP_Analyzer::DNP3_UDP_Analyzer(Connection* c) : DNP3_Base(this, false), Analyzer("DNP3_UDP", c) {}
++
++void DNP3_UDP_Analyzer::Done() {
++    Analyzer::Done();
++    ReportEnd();
++}
+ 
+ void DNP3_UDP_Analyzer::DeliverPacket(int len, const u_char* data, bool orig, uint64_t seq, const IP_Hdr* ip,
+                                       int caplen) {
+@@ -433,6 +735,8 @@
+     try {
+         if ( ! ProcessData(len, data, orig) )
+             SetSkip(true);
++        else
++            DatagramEnd(orig);
+     }
+ 
+     catch ( const binpac::Exception& e ) {
+--- a/src/analyzer/protocol/dnp3/events.bif
++++ b/src/analyzer/protocol/dnp3/events.bif
+@@ -268,3 +268,23 @@
+ ## generates this for unknown "cases". The user can use it to debug the byte
+ ## string to check what caused the malformed network packets.
+ event dnp3_debug_byte%(c: connection, is_orig: bool, debug: string%);
++
++## OTSEC patch (HR-25, A; docs/phase4/D4-hr25-design.md, section 2.8):
++## generated with the resynchronisation counts of one end. Causes and counts
++## only; never a payload octet.
++##
++## c: The connection the DNP3 communication is part of.
++##
++## is_orig: True if this reflects originator-side activity.
++##
++## why: "end" when the analyzer is done (the only one raised in this build).
++##
++## cause: the cause counted last on this end, or "" if none.
++##
++## counts: one count per cause, cumulative from the analyzer's start, in the
++##         order magic, header_crc, link_length, chunk_crc, embedded_header,
++##         first_chunk_missing, fir_restart, transport_seq, fragment_limit,
++##         app_parse, gap, truncated, budget, invariant.
++##
++## scanned_octets: the octets consumed by scan runs on this end.
++event dnp3_resync%(c: connection, is_orig: bool, why: string, cause: string, counts: index_vec, scanned_octets: count%);

@@ -1,0 +1,15 @@
+HR-25 option A's control `no-seq-check` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'Drop on any other number': A as it stood before option (a), which checks no number and appends every frame without FIR inside a fragment.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -411,7 +411,7 @@
+             Drop(orig, FIR_RESTART);
+     }
+     else if ( endp->encountered_first_chunk ) {
+-        if ( n == (tseq + 1) % 64 ) {
++        if ( true ) {
+             // Append.
+         }
+         else if ( n == tseq && link_retry && SameSegment(endp, seg, seg_len) )

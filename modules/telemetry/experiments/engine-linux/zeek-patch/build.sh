@@ -20,6 +20,13 @@
 #                               plugins-c2.txt (`zeek -NN`) and binpac.txt
 #                               (CMakeCache's binpac lines); selftest.sh
 #                               runs it on made-up lists
+#
+# HR-25's option A, part HR25-B1 (D4-124; the design's section 4, C1): the
+# same tree, after C2, with hr25-resync.patch applied after the HR-23 patch,
+# in that fixed order and with no fuzz, is built as a third image, C2A
+# (HR25_C2A_IMAGE), with A's mutant controls (HR25_M_<NAME>_IMAGE, one per
+# build.env's HR25_CONTROLS). verify checks that both patches apply in that
+# order; the record check also reads files-c2a.txt and plugins-c2a.txt.
 # ZEEK_TARBALL_DIR, if set, is read for zeek-9.0.1.tar.gz and its .asc
 # instead of fetching them; they are checked the same way.
 #
@@ -44,7 +51,7 @@ fail() { echo "build.sh: $*" >&2; exit 1; }
 #   ZeekControl, Broker's Python bindings, the JavaScript and ZeroMQ plugins.
 #   (`--disable-af-packet` has no effect in 9.0.1; see the Dockerfile.)
 record_check() {
-  for f in files-c1p.txt files-c2.txt plugins-c1p.txt plugins-c2.txt binpac.txt; do
+  for f in files-c1p.txt files-c2.txt files-c2a.txt plugins-c1p.txt plugins-c2.txt plugins-c2a.txt binpac.txt; do
     [ -s "$work/$f" ] || fail "record check: $f is missing or empty"
   done
   awk 'NR == FNR { h[$2] = $1; next } { if (!($2 in h) || h[$2] != $1) print $2; delete h[$2] } END { for (p in h) print p }' \
@@ -53,10 +60,21 @@ record_check() {
     ./include/zeek/analyzer/protocol/dnp3/dnp3-protocol.pac ./share/otsec-build/generated.sha256 > "$work/changed-want.txt"
   cmp -s "$work/changed.txt" "$work/changed-want.txt" \
     || { cat "$work/changed.txt" >&2; fail "record check: C1p and C2 differ in other files than the patch's four, so they are not one tree"; }
+  # C2 and C2A: A's patch changes DNP3.h, DNP3.cc and events.bif, so C2A's
+  # bin/zeek must differ from C2's, and nothing may differ but bin/zeek,
+  # the DNP3 analyzer's installed headers and its events' generated script
+  # (the exact list is in the record, for D6 and D7 to pin from a build).
+  awk 'NR == FNR { h[$2] = $1; next } { if (!($2 in h) || h[$2] != $1) print $2; delete h[$2] } END { for (p in h) print p }' \
+    "$work/files-c2.txt" "$work/files-c2a.txt" | sort > "$work/changed-a.txt"
+  grep -qx './bin/zeek' "$work/changed-a.txt" \
+    || fail "record check: C2A's bin/zeek is C2's, so A's patch was not built"
+  if grep -vE '^\./(bin/zeek|include/zeek/analyzer/protocol/dnp3/[^/]+|share/zeek/base/bif/plugins/Zeek_DNP3\.events\.bif\.zeek)$' "$work/changed-a.txt" >&2; then
+    fail "record check: C2 and C2A differ in files A's patch does not change, so they are not one tree"
+  fi
   grep -qx 'BinPAC_EXE:STRING=binpac' "$work/binpac.txt" \
     && grep -q '^BinPAC_INCLUDE_DIR:STRING=/src/zeek/tools/binpac/lib' "$work/binpac.txt" \
     || { cat "$work/binpac.txt" >&2; fail "record check: CMake's binpac is not the tarball's in-tree target"; }
-  for v in c1p c2; do
+  for v in c1p c2 c2a; do
     if grep -E '^[0-9a-f]+  \./(bin/zkg|bin/zeekctl|lib/zeek/python/broker/)' "$work/files-$v.txt" >&2; then
       fail "record check: $v installs what --disable-zkg, --disable-zeekctl or --disable-python leave out"
     fi
@@ -64,7 +82,7 @@ record_check() {
       fail "record check: $v's zeek -NN lists what --disable-javascript or --disable-cluster-backend-zeromq leave out"
     fi
   done
-  echo "build.sh: record checked: one tree (four files differ), the in-tree binpac, nothing the five options leave out"
+  echo "build.sh: record checked: one tree (four files differ, and C2A differs from C2 in A's files only), the in-tree binpac, nothing the five options leave out"
 }
 if [ "$mode" = record-check ]; then
   record_check
@@ -79,6 +97,7 @@ pin() {
 pin COPYING "$COPYING_SHA256"
 pin zeek-release-key.asc "$ZEEK_KEY_SHA256"
 pin hr23-fc-dispatch.patch "$HR23_PATCH_SHA256"
+pin hr25-resync.patch "$HR25_PATCH_SHA256"
 
 # 2. The key's fingerprints, read from the committed file in an empty home:
 # no default keyring is read and no keyserver is asked.
@@ -111,7 +130,8 @@ rm -rf "$GNUPGHOME"
 
 # 4. The patch must apply with no fuzz and no offset (D7's C1). This is
 # checked on the DNP3 folder alone, unpacked apart, so that the build's
-# context stays unpatched for C1p.
+# context stays unpatched for C1p. A's patch is checked the same way, after
+# the HR-23 patch, in that fixed order (the HR-25 design's section 4, C1).
 dry=$work/zeek-dry
 rm -rf "$dry"
 mkdir -p "$dry"
@@ -120,8 +140,15 @@ patch -d "$dry/zeek-9.0.1" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/hr23-fc
   || { cat "$work/patch-dry.txt" >&2; fail "the patch does not apply with no fuzz"; }
 ! grep -qiE 'fuzz|offset|hunk .* (failed|ignored)' "$work/patch-dry.txt" \
   || { cat "$work/patch-dry.txt" >&2; fail "the patch applied only with an offset or fuzz"; }
+patch -d "$dry/zeek-9.0.1" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/hr25-resync.patch" > "$work/patch-dry-a.txt" 2>&1 \
+  || { cat "$work/patch-dry-a.txt" >&2; fail "A's patch does not apply with no fuzz after the HR-23 patch"; }
+! grep -qiE 'fuzz|offset|hunk .* (failed|ignored)' "$work/patch-dry-a.txt" \
+  || { cat "$work/patch-dry-a.txt" >&2; fail "A's patch applied only with an offset or fuzz"; }
+for m in $HR25_CONTROLS; do
+  [ -f "$here/controls/hr25-$m.patch" ] || fail "control hr25-$m.patch is missing"
+done
 rm -rf "$dry"
-echo "build.sh: inputs checked: tarball, signature (subkey $ZEEK_SIGNING_SUBKEY_FPR), key, COPYING, patch (applies with no fuzz)"
+echo "build.sh: inputs checked: tarball, signature (subkey $ZEEK_SIGNING_SUBKEY_FPR), key, COPYING, patches (each applies with no fuzz, A's after HR-23's)"
 [ "$mode" = verify ] && exit 0
 [ "$mode" = build ] || fail "unknown mode $mode"
 
@@ -130,14 +157,20 @@ ctx=$work/zeek-ctx
 rm -rf "$ctx"
 mkdir -p "$ctx"
 tar xzf "$tarball" -C "$ctx"
-cp "$here/hr23-fc-dispatch.patch" "$here/COPYING" "$ctx/"
+cp "$here/hr23-fc-dispatch.patch" "$here/hr25-resync.patch" "$here/COPYING" "$ctx/"
 cp -R "$here/controls" "$ctx/"
 
 # 5. Both images from one build stage, which BuildKit builds once and
 # reuses for the second target; then (B')'s three controls, each C2 with
 # one control patch's bin/zeek (the Dockerfile's `controls` stage).
-for v in c1p c2 m-stock-catch m-raise-rethrow m-no-violation; do
+for v in c1p c2 m-stock-catch m-raise-rethrow m-no-violation c2a; do
   docker build --progress=plain --target "$v" --build-arg "BASE_IMAGE=$BASE_IMAGE" -t "otsec-zeek:$v" -f "$here/Dockerfile" "$ctx"
+done
+# A's mutant controls (HR25-B1): each C2A with one control's bin/zeek, from
+# the Dockerfile's `controls-a` stage, which BuildKit builds once.
+for m in $HR25_CONTROLS; do
+  docker build --progress=plain --target m25 --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+    --build-arg "HR25_CONTROLS=$HR25_CONTROLS" --build-arg "MUTANT=$m" -t "otsec-zeek:m25-$m" -f "$here/Dockerfile" "$ctx"
 done
 
 # 6. The record: what was built, from what, and the hashes that tie a run to
@@ -148,13 +181,14 @@ rec=$work/zeek-build.txt
   echo "base image: $BASE_IMAGE"
   echo "tarball: $ZEEK_TARBALL_URL sha256 $ZEEK_TARBALL_SHA256"
   echo "signature: $(grep '^\[GNUPG:\] VALIDSIG' "$work/gpgv.txt" | cut -d' ' -f3,12)"
-  echo "patch: hr23-fc-dispatch.patch sha256 $HR23_PATCH_SHA256 (C2 only)"
+  echo "patch: hr23-fc-dispatch.patch sha256 $HR23_PATCH_SHA256 (C2 and C2A)"
+  echo "patch: hr25-resync.patch sha256 $HR25_PATCH_SHA256 (C2A only, applied after hr23-fc-dispatch.patch)"
   echo "configure: $(sed -n '/^RUN --network=none \.\/configure/,/af-packet$/p' "$here/Dockerfile" | tr -d '\\' | tr -s ' \n' '  ')"
 } > "$rec"
-for v in c1p c2; do
+for v in c1p c2 c2a; do
   id=$(docker image inspect -f '{{.Id}}' "otsec-zeek:$v")
   V=$(echo "$v" | tr a-z A-Z)
-  echo "HR23_${V}_IMAGE=$id" >> "$work/images.env"
+  if [ "$v" = c2a ]; then echo "HR25_${V}_IMAGE=$id"; else echo "HR23_${V}_IMAGE=$id"; fi >> "$work/images.env"
   docker run --rm --network none "$id" sh -c 'cd /usr/local/zeek && find . -type f | sort | xargs sha256sum' > "$work/files-$v.txt"
   docker run --rm --network none "$id" zeek -NN > "$work/plugins-$v.txt"
   docker run --rm --network none "$id" cat /usr/local/zeek/share/otsec-build/binpac.txt > "$work/binpac.txt"
@@ -191,7 +225,19 @@ for m in stock-catch raise-rethrow no-violation; do
     echo "zeek binary sha256: $(docker run --rm --network none "$id" sha256sum /usr/local/zeek/bin/zeek | cut -c1-64)"
   } >> "$rec"
 done
+for m in $HR25_CONTROLS; do
+  id=$(docker image inspect -f '{{.Id}}' "otsec-zeek:m25-$m")
+  V=$(echo "$m" | tr a-z- A-Z_)
+  echo "HR25_M_${V}_IMAGE=$id" >> "$work/images.env"
+  {
+    echo
+    echo "## control m25-$m (C2A with controls/hr25-$m.patch; never shipped): image $id"
+    echo "control patch sha256: $(sha256sum < "$here/controls/hr25-$m.patch" | cut -c1-64)"
+    echo "zeek binary sha256: $(docker run --rm --network none "$id" sha256sum /usr/local/zeek/bin/zeek | cut -c1-64)"
+  } >> "$rec"
+done
 # Not in a pipe: a failed check must stop this script.
 record_check >> "$rec"
+{ echo; echo "## files that differ between C2 and C2A"; cat "$work/changed-a.txt"; } >> "$rec"
 tail -1 "$rec"
 cat "$work/images.env"

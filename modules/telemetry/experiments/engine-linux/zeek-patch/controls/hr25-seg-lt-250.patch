@@ -1,0 +1,15 @@
+HR-25 option A's control `seg-lt-250` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'Off by one: the 250-octet bound on last_seg': a check of < 250.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -350,7 +350,7 @@
+ 
+     // Design 2.9 item 5: the user data must fit last_seg's own buffer
+     // (sizeof, not a literal), checked before the copy and the compare.
+-    if ( len > static_cast<int>(sizeof(endp->last_seg)) ) {
++    if ( len >= static_cast<int>(sizeof(endp->last_seg)) ) {
+         Count(orig, INVARIANT);
+         reporter->AnalyzerError(analyzer, "dnp3 transport segment exceeds its buffer: %d", len);
+         return -1;
