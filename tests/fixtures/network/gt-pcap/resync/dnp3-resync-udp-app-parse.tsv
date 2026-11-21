@@ -26,7 +26,7 @@ dnp3-resync-udp-app-parse--nowrite	20000	m	Q	valid	-	4	24	Q	1	g60v2,g60v3,g60v4	
 dnp3-resync-udp-app-parse--nowrite	20000	o	R(Q)	valid	-	5	17	R(Q)	129	-	seen	-
 dnp3-resync-udp-app-parse--otherend	20000	m	P	valid	-	1	18	P	1	g60v1	seen	-
 dnp3-resync-udp-app-parse--otherend	20000	o	R(P)	valid	-	2	17	R(P)	129	-	seen	-
-dnp3-resync-udp-app-parse--otherend	20000	o	X	valid	throw	3	16	X	129	-	absent	throws
+dnp3-resync-udp-app-parse--otherend	20000	o	X	valid	throw	3	18	X	129	-	absent	throws
 dnp3-resync-udp-app-parse--otherend	20000	m	W	valid	-	4	35	W	5	g12v1	seen	-
 dnp3-resync-udp-app-parse--otherend	20000	o	R(W)	valid	-	5	37	R(W)	129	g12v1	seen	-
 dnp3-resync-udp-app-parse--otherend	20000	m	Q	valid	-	6	24	Q	1	g60v2,g60v3,g60v4	seen	-

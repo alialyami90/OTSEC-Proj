@@ -20,8 +20,8 @@ import dnp3
 HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "resync-cases.tsv")
 CONDITIONS = os.path.join(HERE, "resync-conditions.tsv")
-CASES_SHA256 = "05b52c6a27e308b6ffe95df97ec919d8c0027760ad6f4fc894ddd39c0babb809"
-CONDITIONS_SHA256 = "d5bc7bee4959dc7a65b0cece8fdff82ff145b18e176aed158ccd2f67a4a3beb1"
+CASES_SHA256 = "5801290f39a6aeb3f44b511ef34d2d18fd2bbe2fcd1ca9b800bd3f041ad1da40"
+CONDITIONS_SHA256 = "9e3b8ca006acd1edf1f0d03dff6f6d00483c54a043670d0734861420b348bbaf"
 
 # The closed set of causes and their weirds (design section 2.8).
 WEIRDS = {
@@ -32,6 +32,7 @@ WEIRDS = {
     "embedded_header": "dnp3_embedded_header",
     "first_chunk_missing": "dnp3_first_application_layer_chunk_missing",
     "fir_restart": "dnp3_fragment_restarted",
+    "transport_seq": "dnp3_transport_sequence",   # option (a), design 2.3 and 2.8 (P4-4-HR2325S deliverable 3)
     "fragment_limit": "dnp3_max_application_layer_fragment_size_exceeded",
     "app_parse": "dnp3_app_parse_failed",
     "gap": "dnp3_content_gap",
@@ -40,7 +41,8 @@ WEIRDS = {
     "invariant": "dnp3_invariant",
 }
 ROUTES = {"R1", "R2", "R3", "R4"}
-KINDS = ROUTES | {"trace", "insert", "budget", "benign", "invariant", "changed", "report", "bound", "fp"}
+# seq: design 2.3's transport rule; surface: D3's parse-surface cases (design 3.2, P4-4-HR2325S deliverable 3).
+KINDS = ROUTES | {"trace", "insert", "budget", "benign", "invariant", "changed", "report", "bound", "fp", "seq", "surface"}
 TWINS = {"nofail", "nowrite", "otherend"}
 
 
@@ -149,7 +151,7 @@ def test_the_conditions_are_whole_and_hold_the_values():
     assert int(v["val-F"]) <= 64
     for need in ("cov-causes", "cov-drop", "cov-delete", "cov-paths", "cov-udp", "cov-tcp", "cov-not", "cov-left",
                  "pin-files", "pin-builder", "judge-ctl", "judge-route", "judge-r3", "fp-counts", "rerun-ed403",
-                 "report-no-new-field", "s5-inputs", "builder-s5-7", "static-control"):
+                 "report-no-new-field", "s5-inputs", "builder-s5-7", "static-control", "builder-seq", "judge-viol"):
         assert need in v, need
 
 
@@ -250,3 +252,168 @@ def test_the_weird_counts_follow_the_sampling_rule():
     a = {r["case"]: r["a"] for r in rows(CASES)}
     assert sampled(2000) == 26 and "passes as 26 events" in a["dnp3-resync-udp-weird-burst"]
     assert sampled(201) == 25 and "dnp3_corrupt_app_chunk_checksum=25" in a["dnp3-resync-udp-report-cap"]
+
+
+# P4-4-HR2325S deliverable 3: the cases of design 3.2 (D4-112 item 3.5, D4-122 item 2.8), each citing its item.
+# Items 12 and 18 are pinned as their variants only (12a, 12b; 18a to 18c).
+ITEMS = {str(i) for i in range(1, 19)} - {"12", "18"} | {"9a", "9b", "9c", "10a", "10b", "12a", "12b", "18a", "18b", "18c"}
+FIRST_D3 = "dnp3-resync-udp-insert-valid-middle"
+
+
+def check_items(rs):
+    names = [r["case"] for r in rs]
+    new = rs[names.index(FIRST_D3):]
+    assert all(r["route"] in ("seq", "surface") and "design 3.2 item" in r["a"] for r in new)
+    assert {m.group(1) for r in new for m in re.finditer(r"design 3\.2 item (\d+[abc]?)\b", r["a"])} == ITEMS
+    # Design 3.3: link-retry-middle's a cell narrows from report.
+    lrm = next(r for r in rs if r["case"] == "dnp3-resync-udp-link-retry-middle")
+    assert lrm["a"].startswith("P=seen; W=seen; Q=seen; rows=none;") and lrm["ctl"] == "report"
+
+
+def test_every_design_3_2_item_has_its_cases():
+    check_items(rows(CASES))
+
+
+def test_the_item_check_fails_its_control():
+    # Control: the wrap case (item 4) left out.
+    rs = [r for r in rows(CASES) if r["case"] != "dnp3-resync-udp-seq-wrap"]
+    try:
+        check_items(rs)
+    except AssertionError:
+        return
+    raise AssertionError("the item check passed with item 4 left out")
+
+
+# D1's rulings on #787 (to be recorded in D4-124). Each check has a control below: its text as it stood at
+# 9e3da29e, which the check must fail.
+
+# Ruling 1 (D3's B1): HR-25 closes on these routes (judge-route).
+CLOSURE = ROUTES | {"insert", "seq", "surface"}
+
+
+def conds():
+    return {r["id"]: r["rule"] for r in rows(CONDITIONS)}
+
+
+def check_closure(rule, rs):
+    m = re.search(r"Routes: (.*?)\. HR-25 closes only if every case of every route passes under C2A and is valid",
+                  rule)
+    assert m, rule
+    assert {item.split(",")[0] for item in m.group(1).split("; ")} == CLOSURE
+    assert CLOSURE <= {r["route"] for r in rs}
+    # judge-ctl's validity rule reaches insert, whose controls each name the write absent.
+    assert "judge-ctl's validity rule (W seen under a control reads unknown) holds for R1 to R4 and insert" in rule
+    assert all(tokens(r["ctl"])[0] in ("W=absent", "W6=absent") for r in rs if r["route"] == "insert")
+    assert "dnp3-resync-udp-substitution-missed passes only as pinned (missed)" in rule
+
+
+def test_hr25_closes_only_when_every_route_of_the_fix_passes():
+    check_closure(conds()["judge-route"], rows(CASES))
+
+
+# Ruling 2 (finding A): rule (A) (HR-23 design 2.3) as the pinned rows read the arms (arm-3bdata).
+def rule_a_throws(code, n):
+    """An n-octet fragment with this code under rule (A): True if its parser rejects it, False if it parses, None
+    where these rows do not say. 129 to 131 at 4 octets or more go to the response parser, which takes a bare
+    header and rejects one object octet (badobj, HR-23 design 4.7). Every other fragment goes to the request
+    parser, whose default arm takes codes 34 to 255 with 2 octets or more and parses (arm-3bdata)."""
+    if 129 <= code <= 131 and n >= 4:
+        return {4: False, 5: True}.get(n)
+    if 34 <= code <= 255 and n >= 2:
+        return False
+    return None
+
+
+def check_short_129s(c):
+    # judge-twins: the other end's throw is builder-seq's badobj, which rule (A) rejects.
+    assert re.search(r"throw becomes (\w+)", c["judge-twins"]).group(1) == "badobj"
+    code, n = map(int, re.search(r"badobj: a (\d+) of (\d+) application octets", c["builder-seq"]).groups())
+    assert rule_a_throws(code, n) is True
+    # chg-malformed: a 129 to 131 of 2 or 3 octets parses by rule (A), so it counts nothing.
+    clause = re.search(r"a code of 129 to 131 with 2 or 3 octets, from either side: ([^;]+);", c["chg-malformed"])
+    assert "no count" in clause.group(1) and "app_parse" not in clause.group(1), clause.group(1)
+    assert all(rule_a_throws(code, k) is False for code in (129, 130, 131) for k in (2, 3))
+
+
+def test_the_other_ends_throw_and_the_short_129s_follow_rule_a():
+    check_short_129s(conds())
+
+
+# Ruling 3 (finding B): a UDP flow's first datagram that throws.
+def check_first_datagram_throws(rs):
+    """Its controls differ: a silent stop under C0 and C1p (run 43772135241), one violation under C2 by (B') (HR-23
+    design 2.3). So a UDP cell names no viol= and gives the run; over TCP, NextStream's catch gives viol=1."""
+    first = [r for r in rs if r["build"].startswith("fresh 5-tuple | T:throw")]
+    assert {r["case"] for r in first} == {"dnp3-resync-udp-throw-alone", "dnp3-resync-tcp-throw-alone",
+                                          "dnp3-resync-udp-short-read-first"}
+    for r in first:
+        named = [t for t in tokens(r["ctl"]) if t.startswith("viol=")]
+        if r["l4"] == "udp":
+            assert not named and "43772135241" in r["ctl"], r["case"]
+        else:
+            assert named == ["viol=1"], r["case"]
+
+
+def test_a_first_datagram_that_throws_names_viol_by_transport():
+    check_first_datagram_throws(rows(CASES))
+
+
+# Ruling 4, D4's N1: an inserted middle segment I is absent under C2A, and seen under the controls, which check
+# no transport number (design 3.2 items 1 to 3, 5 and 6).
+def check_inserted_middles(rs):
+    mids = [r for r in rs if re.search(r"\bI:(seg|sub)\(", r["build"])]
+    assert len(mids) == 6
+    for r in mids:
+        assert "I=absent" in tokens(r["a"]) and "I=seen" in tokens(r["ctl"]), r["case"]
+
+
+def test_an_inserted_middle_is_absent_and_seen_by_the_controls():
+    check_inserted_middles(rows(CASES))
+
+
+# Ruling 4, D3's N2: the default's "no analyzer violation" is viol=0 by judge-viol's count.
+def check_viol_default(c):
+    assert "no analyzer violation" in c["judge-defaults"]
+    assert "The default's no analyzer violation (judge-defaults) is viol=0 by this count" in c["judge-viol"]
+
+
+def test_the_default_violation_is_judge_viols_count():
+    check_viol_default(conds())
+
+
+def fails(check, *args):
+    try:
+        check(*args)
+    except AssertionError:
+        return True
+    return False
+
+
+def test_the_ruling_checks_fail_their_controls():
+    rs, c = rows(CASES), conds()
+    by = {r["case"]: r for r in rs}
+    old_route = ("The run reports, per route, n of m cases that pass under C2A and are valid under the controls. "
+                 "HR-25 closes only if every case of every route does. A route with a failing or unknown case stays "
+                 "open in HR-25's row or moves to a row of its own (D1's ruling 6879752967 item 5). Routes: R1 a "
+                 "failed frame then a write; R2 a bad header before confirmation then a session; R3 a TCP gap that "
+                 "splits a frame then a write; R4 a link-only frame then a write.")
+    assert fails(check_closure, old_route, rs)
+    assert fails(check_closure, c["judge-route"].replace("; surface, D3's parse-surface cases", ""), rs)
+    old = dict(c, **{"judge-twins": c["judge-twins"].replace(
+        "throw becomes badobj (builder-seq), a 129 of 5 application octets that the response parser rejects, since "
+        "rule (A) sends a 129 of 2 or 3 octets to the request parser's default arm, where it parses (D1's ruling 2 "
+        "on #787);",
+        "throw becomes C0h 81h 00h, 3 application octets, short of the 4-octet response header;")})
+    assert old["judge-twins"] != c["judge-twins"] and fails(check_short_129s, old)
+    old = dict(c, **{"chg-malformed": c["chg-malformed"].replace(
+        "1 application octet: app_parse; a code of 129 to 131 with 2 or 3 octets, from either side: parsed by the "
+        "request parser's default arm (rule (A), arm-3bdata), no count",
+        "1 application octet, and a code of 129 to 131 with 2 or 3 octets, from either side: app_parse")})
+    assert old["chg-malformed"] != c["chg-malformed"] and fails(check_short_129s, old)
+    alone = dict(by["dnp3-resync-udp-throw-alone"],
+                 ctl="named=yes; viol=1; note:conn.log's reading; the link-row reading is unknown (HR-23 note 4.1)")
+    assert fails(check_first_datagram_throws, [alone if r["case"] == alone["case"] else r for r in rs])
+    item5 = by["dnp3-resync-udp-fcb-repeat-middle"]
+    item5 = dict(item5, a=item5["a"].replace("I=absent; ", ""), ctl="W=absent")
+    assert fails(check_inserted_middles, [item5 if r["case"] == item5["case"] else r for r in rs])
+    assert fails(check_viol_default, dict(c, **{"judge-viol": c["judge-viol"].split(" The default's")[0]}))
