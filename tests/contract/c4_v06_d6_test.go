@@ -138,6 +138,14 @@ func c4v6Edit(base, set map[string]string, del ...string) map[string]string {
 	return d
 }
 
+// c4v6Padded is v with whitespace or a line break around it, ending once
+// in a forged Syslog line. A detail value is checked whole and never
+// trimmed (D3's N1 on #778): the envelope checks no detail value, so one
+// that passes here reaches C6's hd="key=value" as it is.
+func c4v6Padded(v string) []string {
+	return []string{" " + v, v + " ", "\t" + v, v + "\n", v + "\r\n<13>forged"}
+}
+
 // c4v6One is a valid counts event with one reason (§2.1).
 func c4v6One() map[string]string {
 	return map[string]string{
@@ -277,6 +285,17 @@ func TestC4v06E61ObservationRefused(t *testing.T) {
 	for _, v := range []string{"10-9", "9-11", "0-5", "9", "9-", "-10", "9-10-11", "09-10", "9-010", "nine-ten", ""} {
 		want("unsure "+v+", through 10", c4v6Edit(one, map[string]string{"unsure": v}), c4v6D("unsure", event.CodeEnum))
 	}
+	// Each valid value padded is refused under the key's own code.
+	valid := c4v6Edit(one, map[string]string{"unsure": "9-10"})
+	for _, k := range []string{"stream", "since", "netobs", "unsure"} {
+		code := event.CodeEnum
+		if k == "since" {
+			code = event.CodeTimeFormat
+		}
+		for _, v := range c4v6Padded(valid[k]) {
+			want(fmt.Sprintf("%s %q", k, v), c4v6Edit(valid, map[string]string{k: v}), c4v6D(k, code))
+		}
+	}
 }
 
 // E6-2 (C4-0.6-2): detector.baseline-refused's form at the reader's own
@@ -331,6 +350,15 @@ func TestC4v06E62BaselineRefused(t *testing.T) {
 		c4v6D("schema", event.CodeEnum))
 	want("an unknown cause with unreadable", c4v6Edit(base, map[string]string{"schema": "unreadable", "cause": "later"}),
 		c4v6D("cause", event.CodeEnum))
+	// Each valid value padded is refused (enum).
+	for _, k := range []string{"hash", "schema", "cause"} {
+		for _, v := range c4v6Padded(base[k]) {
+			want(fmt.Sprintf("%s %q", k, v), c4v6Edit(base, map[string]string{k: v}), c4v6D(k, event.CodeEnum))
+		}
+	}
+	for _, v := range c4v6Padded("unreadable") {
+		want(fmt.Sprintf("schema %q", v), c4v6Edit(base, map[string]string{"schema": v}), c4v6D("schema", event.CodeEnum))
+	}
 }
 
 // E6-3 (§2, "Rules for both types"): minor gating. Each type is refused
@@ -381,6 +409,12 @@ func TestC4v06E63Gating(t *testing.T) {
 		c4v6D("first_seq.later-minor", event.CodeForbidden), c4v6D("last_seq.later-minor", event.CodeForbidden))
 	c4v6Want(t, "a malformed netobs at "+later, c4v6Detector(t, later, c4v6Obs, c4v6Edit(obs, map[string]string{"netobs": event.Identifier})),
 		c4v6D("netobs", event.CodeEnum))
+	c4v6Want(t, "a stream that is not a token at "+later, c4v6Detector(t, later, c4v6Obs, c4v6Edit(obs, map[string]string{"stream": "Not A Token"})),
+		c4v6D("stream", event.CodeEnum))
+	c4v6Want(t, "a since that is not RFC 3339 at "+later, c4v6Detector(t, later, c4v6Obs, c4v6Edit(obs, map[string]string{"since": "2026-11-21 08:00:00Z"})),
+		c4v6D("since", event.CodeTimeFormat))
+	c4v6Want(t, "unsure 10-9 at "+later, c4v6Detector(t, later, c4v6Obs, c4v6Edit(obs, map[string]string{"unsure": "10-9"})),
+		c4v6D("unsure", event.CodeEnum))
 
 	// An unknown reason one minor later: accepted with its seq pair and
 	// summed into count; refused when count leaves it out, or without its
@@ -400,6 +434,14 @@ func TestC4v06E63Gating(t *testing.T) {
 	c4v6Want(t, "an unknown cause at "+later, c4v6Detector(t, later, c4v6Base, c4v6Edit(base, map[string]string{"cause": "d6-later"})))
 	c4v6Want(t, "a cause that is not a token at "+later, c4v6Detector(t, later, c4v6Base, c4v6Edit(base, map[string]string{"cause": "Not A Token"})),
 		c4v6D("cause", event.CodeEnum))
+	// The token is checked over its whole length: at most 64 characters,
+	// and nothing after them (D3's N1 on #778).
+	tok64 := "d6-" + strings.Repeat("x", 61)
+	c4v6Want(t, "a 64-character cause at "+later, c4v6Detector(t, later, c4v6Base, c4v6Edit(base, map[string]string{"cause": tok64})))
+	for _, v := range append([]string{tok64 + "x", tok64 + "\r\n<13>forged"}, c4v6Padded("d6-later")...) {
+		c4v6Want(t, fmt.Sprintf("cause %q at %s", v, later), c4v6Detector(t, later, c4v6Base, c4v6Edit(base, map[string]string{"cause": v})),
+			c4v6D("cause", event.CodeEnum))
+	}
 	c4v6Want(t, "a malformed hash at "+later, c4v6Detector(t, later, c4v6Base, c4v6Edit(base, map[string]string{"hash": "sha256:x"})),
 		c4v6D("hash", event.CodeEnum))
 	c4v6Want(t, "a malformed schema at "+later, c4v6Detector(t, later, c4v6Base, c4v6Edit(base, map[string]string{"schema": event.Identifier})),
