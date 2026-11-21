@@ -26,7 +26,8 @@
 # in that fixed order and with no fuzz, is built as a third image, C2A
 # (HR25_C2A_IMAGE), with A's mutant controls (HR25_M_<NAME>_IMAGE, one per
 # build.env's HR25_CONTROLS). verify checks that both patches apply in that
-# order; the record check also reads files-c2a.txt and plugins-c2a.txt.
+# order, and that each control applies after them; the record check also
+# reads files-c2a.txt and plugins-c2a.txt.
 # ZEEK_TARBALL_DIR, if set, is read for zeek-9.0.1.tar.gz and its .asc
 # instead of fetching them; they are checked the same way.
 #
@@ -62,13 +63,14 @@ record_check() {
     || { cat "$work/changed.txt" >&2; fail "record check: C1p and C2 differ in other files than the patch's four, so they are not one tree"; }
   # C2 and C2A: A's patch changes DNP3.h, DNP3.cc and events.bif, so C2A's
   # bin/zeek must differ from C2's, and nothing may differ but bin/zeek,
-  # the DNP3 analyzer's installed headers and its events' generated script
-  # (the exact list is in the record, for D6 and D7 to pin from a build).
+  # the DNP3 analyzer's installed headers, its events' generated script and
+  # A's patch file in C2A's notices, by that one path (D7's B1 on #789; the
+  # exact list is in the record, for D6 and D7 to pin from a build).
   awk 'NR == FNR { h[$2] = $1; next } { if (!($2 in h) || h[$2] != $1) print $2; delete h[$2] } END { for (p in h) print p }' \
     "$work/files-c2.txt" "$work/files-c2a.txt" | sort > "$work/changed-a.txt"
   grep -qx './bin/zeek' "$work/changed-a.txt" \
     || fail "record check: C2A's bin/zeek is C2's, so A's patch was not built"
-  if grep -vE '^\./(bin/zeek|include/zeek/analyzer/protocol/dnp3/[^/]+|share/zeek/base/bif/plugins/Zeek_DNP3\.events\.bif\.zeek)$' "$work/changed-a.txt" >&2; then
+  if grep -vE '^\./(bin/zeek|include/zeek/analyzer/protocol/dnp3/[^/]+|share/zeek/base/bif/plugins/Zeek_DNP3\.events\.bif\.zeek|share/otsec-build/notices/hr25-resync\.patch)$' "$work/changed-a.txt" >&2; then
     fail "record check: C2 and C2A differ in files A's patch does not change, so they are not one tree"
   fi
   grep -qx 'BinPAC_EXE:STRING=binpac' "$work/binpac.txt" \
@@ -82,7 +84,7 @@ record_check() {
       fail "record check: $v's zeek -NN lists what --disable-javascript or --disable-cluster-backend-zeromq leave out"
     fi
   done
-  echo "build.sh: record checked: one tree (four files differ, and C2A differs from C2 in A's files only), the in-tree binpac, nothing the five options leave out"
+  echo "build.sh: record checked: one tree (four files differ, and C2A differs from C2 in A's files and A's notice only), the in-tree binpac, nothing the five options leave out"
 }
 if [ "$mode" = record-check ]; then
   record_check
@@ -144,11 +146,21 @@ patch -d "$dry/zeek-9.0.1" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/hr25-re
   || { cat "$work/patch-dry-a.txt" >&2; fail "A's patch does not apply with no fuzz after the HR-23 patch"; }
 ! grep -qiE 'fuzz|offset|hunk .* (failed|ignored)' "$work/patch-dry-a.txt" \
   || { cat "$work/patch-dry-a.txt" >&2; fail "A's patch applied only with an offset or fuzz"; }
+# Each of A's controls must apply to that tree with no fuzz and no offset,
+# and reverse (D7's N1 on #789), so a control that does not fits fails here
+# and not inside the controls-a stage, after the images are built.
 for m in $HR25_CONTROLS; do
-  [ -f "$here/controls/hr25-$m.patch" ] || fail "control hr25-$m.patch is missing"
+  c=$here/controls/hr25-$m.patch
+  [ -f "$c" ] || fail "control hr25-$m.patch is missing"
+  patch -d "$dry/zeek-9.0.1" -p1 --fuzz=0 --no-backup-if-mismatch < "$c" > "$work/patch-dry-m.txt" 2>&1 \
+    || { cat "$work/patch-dry-m.txt" >&2; fail "control hr25-$m.patch does not apply with no fuzz after A's patch"; }
+  ! grep -qiE 'fuzz|offset|hunk .* (failed|ignored)' "$work/patch-dry-m.txt" \
+    || { cat "$work/patch-dry-m.txt" >&2; fail "control hr25-$m.patch applied only with an offset or fuzz"; }
+  patch -d "$dry/zeek-9.0.1" -R -p1 --fuzz=0 --no-backup-if-mismatch < "$c" > "$work/patch-dry-m.txt" 2>&1 \
+    || { cat "$work/patch-dry-m.txt" >&2; fail "control hr25-$m.patch does not reverse"; }
 done
 rm -rf "$dry"
-echo "build.sh: inputs checked: tarball, signature (subkey $ZEEK_SIGNING_SUBKEY_FPR), key, COPYING, patches (each applies with no fuzz, A's after HR-23's)"
+echo "build.sh: inputs checked: tarball, signature (subkey $ZEEK_SIGNING_SUBKEY_FPR), key, COPYING, patches (each applies with no fuzz, A's after HR-23's, and each of A's controls after A's)"
 [ "$mode" = verify ] && exit 0
 [ "$mode" = build ] || fail "unknown mode $mode"
 

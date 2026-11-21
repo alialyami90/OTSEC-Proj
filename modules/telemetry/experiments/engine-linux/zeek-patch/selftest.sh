@@ -110,6 +110,12 @@ expect "A's patch hunk moved and pinned: it applies only at an offset" "A's patc
 fresh
 rm "$work/case/controls/hr25-no-mod64.patch"
 expect "a control that build.env names is missing" "control hr25-no-mod64.patch is missing"
+fresh
+sed -i 's/^@@ -411,7 +411,7 @@$/@@ -409,7 +409,7 @@/' "$work/case/controls/hr25-no-mod64.patch"
+expect "a control's hunk moved: it applies only at an offset" "control hr25-no-mod64.patch applied only with an offset or fuzz"
+fresh
+sed -i 's/^             \/\/ Append\.$/             \/\/ Appended./' "$work/case/controls/hr25-no-mod64.patch"
+expect "a control's context changed: it needs fuzz" "control hr25-no-mod64.patch does not apply with no fuzz"
 
 rm -rf "$work/case" "$work/case-cache"
 
@@ -131,12 +137,15 @@ rec_fresh() {
       echo "$h  ./include/zeek/analyzer/protocol/dnp3/dnp3-protocol.pac"
       echo "$a  ./lib/zeek/python/zeekclient/cli.py"
       echo "$h  ./share/otsec-build/generated.sha256"
+      echo "$a  ./share/otsec-build/notices/COPYING"
       echo "$a  ./share/zeek/base/init-bare.zeek"; } > "$r/files-$v.txt"
     printf 'Zeek::AF_Packet - Packet acquisition via AF_Packet (built-in)\nZeek::DNP3 - DNP3 analyzer (built-in)\n' > "$r/plugins-$v.txt"
   done
-  # C2A: C2 with A's bin/zeek and one installed DNP3 header changed.
+  # C2A: C2 with A's bin/zeek and one installed DNP3 header changed, and
+  # A's patch file in its notices (D7's B1 on #789).
   c=$(printf '%064d' 3)
-  sed -e "s|^$b  ./bin/zeek$|$c  ./bin/zeek|" -e "s|^$a  ./include/zeek/analyzer/protocol/dnp3/DNP3.h$|$c  ./include/zeek/analyzer/protocol/dnp3/DNP3.h|"     "$r/files-c2.txt" > "$r/files-c2a.txt"
+  { sed -e "s|^$b  ./bin/zeek$|$c  ./bin/zeek|" -e "s|^$a  ./include/zeek/analyzer/protocol/dnp3/DNP3.h$|$c  ./include/zeek/analyzer/protocol/dnp3/DNP3.h|"     "$r/files-c2.txt"
+    echo "$c  ./share/otsec-build/notices/hr25-resync.patch"; } | sort -k2 > "$r/files-c2a.txt"
   cp "$r/plugins-c2.txt" "$r/plugins-c2a.txt"
   printf '//BinPAC executable\nBinPAC_EXE:STRING=binpac\nBinPAC_INCLUDE_DIR:STRING=/src/zeek/tools/binpac/lib;/src/zeek/build/tools/binpac/lib\n' > "$r/binpac.txt"
 }
@@ -175,6 +184,9 @@ rexpect "record: the ZeroMQ plugin in zeek -NN" "zeek -NN lists"
 rec_fresh
 sed -i "s|^$a  ./share/zeek/base/init-bare.zeek$|$b  ./share/zeek/base/init-bare.zeek|" "$r/files-c2a.txt"
 rexpect "record: C2A differs from C2 in a file A's patch does not change" "C2 and C2A differ in files A's patch does not change"
+rec_fresh
+sed -i "s|^$a  ./share/otsec-build/notices/COPYING$|$c  ./share/otsec-build/notices/COPYING|" "$r/files-c2a.txt"
+rexpect "record: C2A differs from C2 in another file of its notices" "C2 and C2A differ in files A's patch does not change"
 rec_fresh
 sed -i "s|^$c  ./bin/zeek$|$b  ./bin/zeek|" "$r/files-c2a.txt"
 rexpect "record: C2A's bin/zeek is C2's" "A's patch was not built"
