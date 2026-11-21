@@ -86,7 +86,7 @@ func TestLateRecordTied(t *testing.T) {
 }
 
 // TestLateRecordShape is D1's rulings 1 and 7 on #770 (D3's B1 and N1): a
-// late record ties an entry only as Result would tie its flow. A failed
+// late record ties an entry only in the shape section 1.6 gives. A failed
 // dial's entry ties only a syn_only end: a full connection from the node's
 // address, its start read 5 s after the Result and then its FIN end, and a
 // record that is only an established end, each commit untied, and the
@@ -129,6 +129,23 @@ func TestLateRecordShape(t *testing.T) {
 		untiedOwnKey(t, r.one(40001))
 		untiedOwnKey(t, r.one(40002))
 	})
+	// D6's N6 on #770 (probe P12): the shape is checked before the skew
+	// gate. T-13 (a)'s setup, both clocks stepped back 300 s after the
+	// dial, so the gate would refuse the entry, with a flow start in place
+	// of the syn_only end: it commits untied under its own key, unmarked,
+	// and no skew count moves. Control: D6's mutant F7, the check after
+	// laterRefusal, under which the start is counted and marked
+	// node.skewed.
+	t.Run("a wrong shape before the skew gate", func(t *testing.T) {
+		r, s, _ := t13(t, 60*time.Second, nil, nil)
+		s.dialFails(1, 10*time.Second)
+		s.pass(2 * time.Second)
+		s.step(-300*time.Second, -300*time.Second)
+		s.pass(338 * time.Second)
+		s.flow(40001, s.now(), time.Time{}, false)
+		untiedOwnKey(t, r.one(40001))
+		noOtherWindows(t, r.l.SkewStats(), -1, 0)
+	})
 }
 
 // TestLateIndexSpentByBacklog is D1's ruling 2 on #770 (D3's B2, D4's N1),
@@ -151,6 +168,28 @@ func TestLateIndexSpentByBacklog(t *testing.T) {
 	if st := r.l.Stats().Hold; st.Late != 0 || st.LateTied != 0 {
 		t.Fatalf("hold %+v: want the entry spent by the backlog record", st)
 	}
+	// D6's N5 on #770 (probe P11): two entries, the one the backlog record
+	// matches second in the index. The record spends that entry and leaves
+	// the first, so a live record in the second dial's window commits
+	// untied. Control: D6's mutant F10, the first entry spent, under which
+	// the live record ties.
+	t.Run("the entry it matches, not the first", func(t *testing.T) {
+		r, s := breakRig(t, 30*time.Second)
+		s.dialFails(1, 2*time.Second)
+		s.pass(2 * time.Minute)
+		d := s.dialFails(2, 2*time.Second)
+		s.cut()
+		s.synEnd(40001, d.StartedAt.Add(time.Second), time.Time{})
+		s.pass(70 * time.Second)
+		s.connect(true)
+		backlogUntied(t, r.one(40001))
+		if st := r.l.Stats().Hold; st.Late != 1 {
+			t.Fatalf("hold %+v: want the first entry left", st)
+		}
+		s.pass(time.Second)
+		s.synEnd(40002, d.StartedAt.Add(time.Second), time.Time{})
+		untiedOwnKey(t, r.one(40002))
+	})
 }
 
 // TestLateIndexWaitingNotIndexed is D1's ruling 5 on #770, D6's probe P5:

@@ -93,9 +93,12 @@ func (l *Link) lateFind(k FlowKey, st *netobs.Observation) int {
 	return -1
 }
 
-// lateShapeTies reports whether a late record st may tie s's entry, as
-// Result would tie its flow: a failed dial ties only a syn_only end (part
-// (c)), and a 0.8 result never one (D3's B1 and N1 on #770).
+// lateShapeTies reports whether a late record st may tie s's entry: a
+// failed dial ties only a syn_only end, as Result's part (c) does, and a
+// 0.8 result never one (D3's B1 and N1 on #770). The 0.8 rule is stricter
+// than Result, which ties a 0.8 run's held syn_only end by part (c), since
+// a 0.8 run has no local address; it fails closed, one more untied record
+// and never one fewer (D6's N4 on #770).
 func lateShapeTies(s Session, st *netobs.Observation) bool {
 	synEnd := isEnd(st) && st.Flow.SynOnly != nil && *st.Flow.SynOnly
 	switch {
