@@ -1,8 +1,11 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -193,12 +196,45 @@ func TestObservationRefusedMapKey(t *testing.T) {
 	noMarker(t, st, logged)
 }
 
+// T2, third and fourth legs (D3's B1 on #777): a record that observationOf
+// refuses but that it still decodes, of the node's own sensor and with a
+// readable first_utc, so Observe alone would judge it: a node.dst_asset
+// that conflicts with the event's source.asset, and a port out of range.
+// Each is refused, counted under malformed and never judged, so it raises
+// no network alert. Control, first: observationOf returns the decoded
+// observation beside its error. Mutant: observeTo's o = nil made a no-op,
+// which judges the record and counts nothing.
+func TestObservationRefusedNotJudged(t *testing.T) {
+	for name, set := range map[string]map[string]string{
+		"asset": {"node.dst_asset": `"99999999-8888-4777-8666-555555555555"`},
+		"port":  {"ip.sport": `70000`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var alerts int
+			r, st, _, _, _ := storeAfterCheckpoint(t, func(r *Runtime, base []byte) [][]byte {
+				alerts = storedAlerts(t, r)
+				return [][]byte{editNetobs(t, base, set)}
+			}, nil)
+			defer r.Close()
+			o, err := observationOf(storedObservation(t, r, 2))
+			if err == nil || o == nil || o.SensorID != sensorID {
+				t.Fatalf("control: observationOf gave %+v, %v", o, err)
+			}
+			d := detectorStatus(t, st)
+			if d.Through != 2 || d.Refused != 1 || d.RefusedBy[RefusedMalformed] != 1 || len(refusedAlarms(st)) != 1 || storedAlerts(t, r) != alerts {
+				t.Fatalf("status %+v, alarms %q, %d alerts stored, %d before", d, refusedAlarms(st), storedAlerts(t, r), alerts)
+			}
+		})
+	}
+}
+
 // T3: a stored observation of another sensor is refused under
 // detector-refused, and the alarm says so from the record, not from
 // Observe's error. Control: the node's own sensor's record stored beside
-// it is judged and not counted.
+// it is judged and not counted. The alarm is on the network database and
+// the observation stream (D6's N3 on #777).
 func TestObservationRefusedOtherSensor(t *testing.T) {
-	r, st, _, _, _ := storeAfterCheckpoint(t, func(_ *Runtime, base []byte) [][]byte {
+	r, st, logged, _, _ := storeAfterCheckpoint(t, func(_ *Runtime, base []byte) [][]byte {
 		return [][]byte{editNetobs(t, base, map[string]string{"sensor_id": `"` + otherSensor + `"`}), base}
 	}, nil)
 	defer r.Close()
@@ -207,6 +243,15 @@ func TestObservationRefusedOtherSensor(t *testing.T) {
 	if d.Through != 3 || d.Refused != 1 || d.RefusedBy[RefusedByDetector] != 1 || d.RefusedBy[RefusedMalformed] != 0 || len(got) != 1 ||
 		!strings.Contains(got[0], "(another sensor's)") || !strings.Contains(got[0], "First at seq 2.") {
 		t.Fatalf("status %+v, alarms %q", d, got)
+	}
+	for _, a := range st.Snapshot("n").Alarms {
+		if a.Code == AlarmObservationRefused && (a.Database != NetworkDB || a.Stream != string(NetObservationStream(sensorID))) {
+			t.Fatalf("the alarm is on database %q, stream %q", a.Database, a.Stream)
+		}
+	}
+	line := "otsec store " + string(NetworkDB) + ": " + AlarmObservationRefused + " "
+	if !slices.ContainsFunc(*logged, func(l string) bool { return strings.HasPrefix(l, line) }) {
+		t.Fatalf("no OS log line %q in %q", line, *logged)
 	}
 }
 
@@ -239,10 +284,11 @@ func TestObservationRefusedOncePerReason(t *testing.T) {
 }
 
 // T7, first leg (section 4): a checkpoint that does not restore, followed
-// by fresh starts that fail for three ticks, raises no not-restored and one
-// not-started, whose text names the restore's failure; the start that then
-// succeeds raises exactly one not-restored. Mutant: the raise put back
-// before the fresh start, which raises it at every try.
+// by fresh starts that fail for three ticks at their last step that can
+// fail (D6's N1 on #777), raises no not-restored and one not-started, whose
+// text holds the restore's own error (N2); the start that then succeeds
+// raises exactly one not-restored, which holds it too. Mutant: the raise
+// put anywhere before that step, which raises it at every try.
 func TestDetectorNotRestoredOnceStarted(t *testing.T) {
 	c, dir := holdConfig(t)
 	r, _, _ := start(t, c, dir)
@@ -254,13 +300,13 @@ func TestDetectorNotRestoredOnceStarted(t *testing.T) {
 	r.Close()
 	var tries, left atomic.Int64
 	left.Store(1 << 40)
-	t.Cleanup(func() { newDetector = netdetect.NewDetector })
-	newDetector = func(cfg netdetect.DetectorConfig) (*netdetect.Detector, error) {
+	t.Cleanup(func() { rebuildIndex = (*Runtime).rebuildFrameIndex })
+	rebuildIndex = func(r *Runtime, ctx context.Context, nd *netDetector) error {
 		tries.Add(1)
 		if left.Load() > 0 {
-			return nil, errors.New("test: the fresh start fails")
+			return errors.New("test: the fresh start fails")
 		}
-		return netdetect.NewDetector(cfg)
+		return r.rebuildFrameIndex(ctx, nd)
 	}
 	r, st, _ := start(t, c, dir)
 	defer r.Close()
@@ -269,14 +315,11 @@ func TestDetectorNotRestoredOnceStarted(t *testing.T) {
 	}
 	var down bool
 	heldManager(r, func() { down = r.detector == nil })
-	var started string
-	for _, a := range st.Snapshot("n").Alarms {
-		if a.Code == AlarmDetectorNotStarted {
-			started = a.Detail
-		}
-	}
+	// restoreErr is RestoreDetector's own text for foreignCheckpoint's node.
+	const restoreErr = "site-b-node1"
+	started := adminAlarm(st, AlarmDetectorNotStarted)
 	if tries.Load() < 4 || !down || countAlarms(st, AlarmDetectorNotRestored) != 0 || countAlarms(st, AlarmDetectorNotStarted) != 1 ||
-		!strings.Contains(started, "the stored checkpoint did not restore either: ") {
+		!strings.Contains(started, "the stored checkpoint did not restore either: ") || !strings.Contains(started, restoreErr) {
 		t.Fatalf("%d tries, detector down %v, %d not-restored, %d not-started %q", tries.Load(), down,
 			countAlarms(st, AlarmDetectorNotRestored), countAlarms(st, AlarmDetectorNotStarted), started)
 	}
@@ -284,9 +327,10 @@ func TestDetectorNotRestoredOnceStarted(t *testing.T) {
 	tick(t, r)
 	tick(t, r)
 	d := detectorStatus(t, st)
-	if d.Restored || d.Through != 1 || countAlarms(st, AlarmDetectorNotRestored) != 1 || countAlarms(st, AlarmDetectorNotStarted) != 1 {
-		t.Fatalf("after the start succeeds: status %+v, %d not-restored, %d not-started", d,
-			countAlarms(st, AlarmDetectorNotRestored), countAlarms(st, AlarmDetectorNotStarted))
+	restored := adminAlarm(st, AlarmDetectorNotRestored)
+	if d.Restored || d.Through != 1 || !strings.Contains(restored, restoreErr) || countAlarms(st, AlarmDetectorNotStarted) != 1 {
+		t.Fatalf("after the start succeeds: status %+v, %d not-restored %q, %d not-started", d,
+			countAlarms(st, AlarmDetectorNotRestored), restored, countAlarms(st, AlarmDetectorNotStarted))
 	}
 }
 
@@ -314,8 +358,9 @@ func TestDetectorConfigNoBaseline(t *testing.T) {
 	}
 }
 
-// refusalAt reads the first typed error of a join, cuts a health.details
-// key to the map's name, and gives "-" for an untyped error.
+// refusalAt reads the first typed error of a join or of a single wrap
+// (D6's N4 on #777), cuts a health.details key to the map's name, and
+// gives "-" for an untyped error.
 func TestRefusalAt(t *testing.T) {
 	for _, tc := range []struct {
 		err         error
@@ -323,6 +368,7 @@ func TestRefusalAt(t *testing.T) {
 	}{
 		{errors.Join(errors.New("x"), &netobs.Error{Code: netobs.CodeForm, Field: "first_utc"}, &event.Error{Code: event.CodeEnum, Field: "kind"}), "form", "first_utc"},
 		{&event.Error{Code: event.CodeEnum, Field: "health.details." + refusalMarker}, "enum", "health.details"},
+		{fmt.Errorf("x: %w", &netobs.Error{Code: netobs.CodeForm, Field: "ip.sport"}), "form", "ip.sport"},
 		{errors.New(refusalMarker), "-", "-"},
 	} {
 		if code, field := refusalAt(tc.err); code != tc.code || field != tc.field {

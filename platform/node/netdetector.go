@@ -335,7 +335,7 @@ func (r *Runtime) startDetector(ctx context.Context) (err error) {
 		}
 	}
 	if nd.d == nil {
-		if nd.d, err = newDetector(nd.cfg); err != nil {
+		if nd.d, err = netdetect.NewDetector(nd.cfg); err != nil {
 			return err
 		}
 	}
@@ -345,7 +345,7 @@ func (r *Runtime) startDetector(ctx context.Context) (err error) {
 	}
 	through := c5.Seq(nd.d.Through())
 	nd.pruned = first > through+1 || (first == 0 && head > through)
-	if err := r.rebuildFrameIndex(ctx, nd); err != nil {
+	if err := rebuildIndex(r, ctx, nd); err != nil {
 		return err
 	}
 	if !nd.restored {
@@ -373,9 +373,9 @@ func (r *Runtime) startDetector(ctx context.Context) (err error) {
 	return nil
 }
 
-// newDetector is startDetector's fresh start. A test swaps it to fail the
-// start after a restore that failed.
-var newDetector = netdetect.NewDetector
+// rebuildIndex is startDetector's last step that can fail. A test swaps it
+// to fail the start there, after a restore that failed.
+var rebuildIndex = (*Runtime).rebuildFrameIndex
 
 // observationOf decodes a stored observation.
 func observationOf(st c5.Stored) (*netobs.Observation, error) {
