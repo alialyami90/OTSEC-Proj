@@ -63,8 +63,13 @@ The rules, each named in the message of a failure:
 `/out` is the only exemption, by that name. Any other writable mount fails
 `read-only`, and any mount that is not hashed fails `every-mount-hashed`.
 
-Usage: python3 -I mountcheck.py run DIR [--] DOCKER-CREATE-ARGS...
+Usage: python3 -I mountcheck.py run DIR [--no-count] [--] DOCKER-CREATE-ARGS...
        python3 -I mountcheck.py summary DIR [--no-count]
+With --no-count (run.sh's hr23-unit, and dnp3 when it feeds HR-23's
+captures), an output folder's hash is printed without its entry count, and
+an `output-unchanged` failure, or an output folder that could not be
+hashed, names only the container, never the folder's entries (D1's ruling 2
+on #769).
        python3 -I mountcheck.py selftest IMAGE EXPDIR DIR
 `selftest` shows, on this runner's Docker, the pass case and one control
 per rule, each failing on its own rule and no other; it exits 1 otherwise.
@@ -491,7 +496,7 @@ def digest(lines):
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
 
-def run(d, argv, log_argv=None, between=None):
+def run(d, argv, log_argv=None, between=None, counts=True):
     """One container under every rule. Returns (exit code, failed rules)."""
     os.makedirs(d, exist_ok=True)
     n = len([x for x in os.listdir(d) if x.isdigit()]) + 1
@@ -529,7 +534,8 @@ def run(d, argv, log_argv=None, between=None):
                 try:
                     out["lines"] = hash_tree(out["path"])
                 except OSError as e:
-                    probs[R_OUT] = [f"could not hash the output folder {out['path']} when its container exited: {e}"]
+                    probs[R_OUT] = [f"could not hash the output folder {out['path']} when its container exited: {e}"
+                                    if counts else "could not hash its output folder when it exited"]
             with open(os.path.join(rd, "after.json"), "w", encoding="utf-8") as fh:
                 json.dump(out, fh)
         with open(os.path.join(rd, "before.json"), "w", encoding="utf-8") as fh:
@@ -548,9 +554,10 @@ def containers(d):
     return sorted((x for x in (os.listdir(d) if os.path.isdir(d) else []) if x.isdigit()), key=int)
 
 
-def output_changes(d):
+def output_changes(d, counts=True):
     """`output-unchanged`: each output folder hashed when its container
-    exited, hashed again now."""
+    exited, hashed again now. With counts False, a failure names only the
+    container."""
     msgs = []
     for x in containers(d):
         p = os.path.join(d, x, "after.json")
@@ -563,9 +570,14 @@ def output_changes(d):
         try:
             now = hash_tree(rec["path"])
         except OSError as e:
-            msgs.append(f"rule {R_OUT} failed (container {x}): could not hash {rec['path']} again: {e}")
+            msgs.append(f"rule {R_OUT} failed (container {x}): " + (f"could not hash {rec['path']} again: {e}" if counts
+                                                                     else "could not hash its output folder again"))
             continue
-        for m in compare({rec["path"]: rec["lines"]}, {rec["path"]: now}):
+        diff = compare({rec["path"]: rec["lines"]}, {rec["path"]: now})
+        if diff and not counts:
+            msgs.append(f"rule {R_OUT} failed (container {x}): its output folder changed after it exited")
+            continue
+        for m in diff:
             msgs.append(f"rule {R_OUT} failed (container {x}): {m}")
     return msgs
 
@@ -601,7 +613,7 @@ def summary(d, counts=True):
                        if out is not None else "")
                     + "docker create " + shlex.join(line))
     failed = os.path.exists(os.path.join(d, "FAILED"))
-    changed = output_changes(d)
+    changed = output_changes(d, counts)
     for x in sorted(os.listdir(d) if os.path.isdir(d) else []):
         if x.startswith("image-") and x.endswith("-zeek.json"):
             with open(os.path.join(d, x), encoding="utf-8") as fh:
@@ -736,10 +748,13 @@ def selftest(image, exp, d):
 def main(argv):
     if len(argv) >= 3 and argv[0] == "run":
         rest = argv[2:]
+        counts = rest[:1] != ["--no-count"]
+        if not counts:
+            rest = rest[1:]
         if rest and rest[0] == "--":
             rest = rest[1:]
         try:
-            rc, _ = run(argv[1], rest)
+            rc, _ = run(argv[1], rest, counts=counts)
         except Exception as e:  # any fault of the check fails the run, never passes it
             text = f"mountcheck: the check did not finish: {e!r}\n"
             try:
