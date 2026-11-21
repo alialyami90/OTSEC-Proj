@@ -61,6 +61,32 @@ func codesOf(err error) []Code {
 	return slices.Compact(c)
 }
 
+// refusal returns each *Error in err as "<detail> <code>", sorted, with
+// the health.details. prefix dropped, so that a case pins which detail
+// each refusal names and how many there are (D3's N1 on #772).
+func refusal(err error) []string {
+	var out []string
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, x := range j.Unwrap() {
+			out = append(out, refusal(x)...)
+		}
+	} else if ve, ok := err.(*Error); ok {
+		out = append(out, strings.TrimPrefix(ve.Field, "health.details.")+" "+string(ve.Code))
+	}
+	slices.Sort(out)
+	return out
+}
+
+// refusalOf is the refusal of code naming each space-separated detail.
+func refusalOf(code Code, details string) []string {
+	var out []string
+	for _, d := range strings.Fields(details) {
+		out = append(out, d+" "+string(code))
+	}
+	slices.Sort(out)
+	return out
+}
+
 // E6-1 (C4-0.6-1): the form of detector.observation-refused.
 func TestObservationRefused06Form(t *testing.T) {
 	if err := load(t, obsRefused06).Validate(); err != nil {
@@ -98,65 +124,82 @@ func TestObservationRefused06Form(t *testing.T) {
 	}
 
 	refuse := []struct {
-		name string
-		mut  func(d map[string]string)
-		want Code
+		name   string
+		mut    func(d map[string]string)
+		want   Code
+		fields string
 	}{
-		{"reason at 0", func(d map[string]string) { d["reason.later-minor"] = "0" }, CodeEnum},
-		{"reason at 01", func(d map[string]string) { d["reason.later-minor"] = "01" }, CodeEnum},
-		{"reason at 2^64", func(d map[string]string) { d["reason.later-minor"] = "18446744073709551616" }, CodeEnum},
+		{"reason at 0", func(d map[string]string) { d["reason.later-minor"] = "0" }, CodeEnum, "reason.later-minor"},
+		{"reason at 01", func(d map[string]string) { d["reason.later-minor"] = "01" }, CodeEnum, "reason.later-minor"},
+		{"reason at 2^64", func(d map[string]string) { d["reason.later-minor"] = "18446744073709551616" }, CodeEnum, "reason.later-minor"},
 		{"reason.other, summed into count", func(d map[string]string) {
 			d["reason.other"], d["first_seq.other"], d["last_seq.other"], d["count"] = "1", "1", "1", "4"
-		}, CodeEnum},
-		{"first_seq without reason", func(d map[string]string) { d["first_seq.malformed"] = "1" }, CodeForbidden},
-		{"last_seq without reason", func(d map[string]string) { d["last_seq.malformed"] = "1" }, CodeForbidden},
-		{"reason without first_seq", func(d map[string]string) { delete(d, "first_seq.later-minor") }, CodeMissing},
-		{"reason without last_seq", func(d map[string]string) { delete(d, "last_seq.later-minor") }, CodeMissing},
-		{"count one above the sum", func(d map[string]string) { d["count"] = "4" }, CodeEnum},
-		{"count one below the sum", func(d map[string]string) { d["count"] = "2" }, CodeEnum},
-		{"count as the number of reasons", func(d map[string]string) { d["count"] = "1" }, CodeEnum},
+		}, CodeEnum, "first_seq.other last_seq.other reason.other"},
+		{"first_seq without reason", func(d map[string]string) { d["first_seq.malformed"] = "1" }, CodeForbidden, "first_seq.malformed"},
+		{"last_seq without reason", func(d map[string]string) { d["last_seq.malformed"] = "1" }, CodeForbidden, "last_seq.malformed"},
+		{"reason without first_seq", func(d map[string]string) { delete(d, "first_seq.later-minor") }, CodeMissing, "first_seq.later-minor"},
+		{"reason without last_seq", func(d map[string]string) { delete(d, "last_seq.later-minor") }, CodeMissing, "last_seq.later-minor"},
+		{"count one above the sum", func(d map[string]string) { d["count"] = "4" }, CodeEnum, "count"},
+		{"count one below the sum", func(d map[string]string) { d["count"] = "2" }, CodeEnum, "count"},
+		{"count as the number of reasons", func(d map[string]string) { d["count"] = "1" }, CodeEnum, "count"},
 		{"the wrapped sum", func(d map[string]string) {
 			d["reason.later-minor"], d["reason.malformed"], d["count"] = max64, "2", "1"
 			d["first_seq.malformed"], d["last_seq.malformed"] = "1", "2"
-		}, CodeEnum},
-		{"first_seq above last_seq", func(d map[string]string) { d["first_seq.later-minor"] = "11"; d["through"] = "11" }, CodeEnum},
-		{"first_seq 10, last_seq 9", func(d map[string]string) { d["first_seq.later-minor"], d["last_seq.later-minor"] = "10", "9" }, CodeEnum},
-		{"last_seq above through", func(d map[string]string) { d["last_seq.later-minor"] = "11" }, CodeEnum},
-		{"last_seq 10, through 9", func(d map[string]string) { d["first_seq.later-minor"], d["through"] = "8", "9" }, CodeEnum},
-		{"since not RFC 3339", func(d map[string]string) { d["since"] = "2026-11-21 09:00:00" }, CodeTimeFormat},
-		{"stream not a token", func(d map[string]string) { d["stream"] = "Network Observation" }, CodeEnum},
-		{"netobs as a baseline identifier", func(d map[string]string) { d["netobs"] = "otsec.netbaseline/0.1" }, CodeEnum},
-		{"netobs as free text", func(d map[string]string) { d["netobs"] = "netobs 0.3" }, CodeEnum},
-		{"netobs empty", func(d map[string]string) { d["netobs"] = "" }, CodeEnum},
-		{"an unknown detail", func(d map[string]string) { d["note"] = "x" }, CodeEnum},
+		}, CodeEnum, "count"},
+		{"first_seq above last_seq", func(d map[string]string) { d["first_seq.later-minor"] = "11"; d["through"] = "11" }, CodeEnum, "first_seq.later-minor"},
+		{"first_seq 10, last_seq 9", func(d map[string]string) { d["first_seq.later-minor"], d["last_seq.later-minor"] = "10", "9" }, CodeEnum, "first_seq.later-minor"},
+		{"last_seq above through", func(d map[string]string) { d["last_seq.later-minor"] = "11" }, CodeEnum, "last_seq.later-minor"},
+		{"last_seq 10, through 9", func(d map[string]string) { d["first_seq.later-minor"], d["through"] = "8", "9" }, CodeEnum, "last_seq.later-minor"},
+		{"since not RFC 3339", func(d map[string]string) { d["since"] = "2026-11-21 09:00:00" }, CodeTimeFormat, "since"},
+		{"stream not a token", func(d map[string]string) { d["stream"] = "Network Observation" }, CodeEnum, "stream"},
+		{"netobs as a baseline identifier", func(d map[string]string) { d["netobs"] = "otsec.netbaseline/0.1" }, CodeEnum, "netobs"},
+		{"netobs as free text", func(d map[string]string) { d["netobs"] = "netobs 0.3" }, CodeEnum, "netobs"},
+		{"netobs empty", func(d map[string]string) { d["netobs"] = "" }, CodeEnum, "netobs"},
+		{"an unknown detail", func(d map[string]string) { d["note"] = "x" }, CodeEnum, "note"},
+		{"first_seq malformed", func(d map[string]string) { d["first_seq.later-minor"] = "x" }, CodeEnum, "first_seq.later-minor"},
+		{"last_seq malformed", func(d map[string]string) { d["last_seq.later-minor"] = "x" }, CodeEnum, "last_seq.later-minor"},
+		{"through malformed", func(d map[string]string) { d["through"] = "010" }, CodeEnum, "through"},
+		{"count at 2^64, the sum at 2^64 - 1", func(d map[string]string) {
+			d["reason.later-minor"], d["count"] = max64, "18446744073709551616"
+		}, CodeEnum, "count"},
 		{"no reason", func(d map[string]string) {
 			for k := range d {
 				if strings.Contains(k, "later-minor") {
 					delete(d, k)
 				}
 			}
-		}, CodeMissing},
+		}, CodeMissing, "reason"},
 	}
 	for _, s := range []string{"10-9", "9-11", "0-5", "9", "9-", "-10", "9-10-11", "nine to ten", ""} {
 		refuse = append(refuse, struct {
-			name string
-			mut  func(d map[string]string)
-			want Code
-		}{"unsure " + strconv.Quote(s), func(d map[string]string) { d["unsure"] = s }, CodeEnum})
+			name   string
+			mut    func(d map[string]string)
+			want   Code
+			fields string
+		}{"unsure " + strconv.Quote(s), func(d map[string]string) { d["unsure"] = s }, CodeEnum, "unsure"})
 	}
 	for _, k := range []string{"stream", "since", "through", "netobs", "count"} {
 		refuse = append(refuse, struct {
-			name string
-			mut  func(d map[string]string)
-			want Code
-		}{"no " + k, func(d map[string]string) { delete(d, k) }, CodeMissing})
+			name   string
+			mut    func(d map[string]string)
+			want   Code
+			fields string
+		}{"no " + k, func(d map[string]string) { delete(d, k) }, CodeMissing, k})
 	}
 	for _, tc := range refuse {
 		e := obsOne(t)
 		tc.mut(e.Health.Details)
-		if got := codesOf(e.Validate()); !slices.Equal(got, []Code{tc.want}) {
-			t.Errorf("%s: %v, want only [%s]", tc.name, got, tc.want)
+		if got, want := refusal(e.Validate()), refusalOf(tc.want, tc.fields); !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", tc.name, got, want)
 		}
+	}
+
+	// unsure's relation is not checked over a missing through (D3's N2 on
+	// #772): the golden, which has unsure, without through.
+	e := load(t, obsRefused06)
+	delete(e.Health.Details, "through")
+	if got, want := refusal(e.Validate()), refusalOf(CodeMissing, "through"); !slices.Equal(got, want) {
+		t.Errorf("the golden without through: %v, want %v", got, want)
 	}
 }
 
@@ -227,32 +270,33 @@ func TestBaselineRefused06Form(t *testing.T) {
 	}
 	hash := baselineOne(t).Health.Details["hash"]
 	refuse := []struct {
-		name string
-		m    map[string]string
-		want Code
+		name   string
+		m      map[string]string
+		want   Code
+		fields string
 	}{
-		{"hash in upper case", map[string]string{"hash": "sha256:" + strings.ToUpper(hash[7:])}, CodeEnum},
-		{"hash with 63 digits", map[string]string{"hash": hash[:len(hash)-1]}, CodeEnum},
-		{"hash without sha256:", map[string]string{"hash": hash[7:]}, CodeEnum},
-		{"schema of another contract", map[string]string{"schema": Identifier}, CodeEnum},
-		{"schema as free text", map[string]string{"schema": "baseline 0.2"}, CodeEnum},
-		{"schema empty", map[string]string{"schema": ""}, CodeEnum},
-		{"cause outside the set", map[string]string{"cause": "expired"}, CodeEnum},
-		{"later-minor with unreadable", map[string]string{"schema": "unreadable", "cause": "later-minor"}, CodeEnum},
-		{"an unknown detail", map[string]string{"note": "x"}, CodeEnum},
+		{"hash in upper case", map[string]string{"hash": "sha256:" + strings.ToUpper(hash[7:])}, CodeEnum, "hash"},
+		{"hash with 63 digits", map[string]string{"hash": hash[:len(hash)-1]}, CodeEnum, "hash"},
+		{"hash without sha256:", map[string]string{"hash": hash[7:]}, CodeEnum, "hash"},
+		{"schema of another contract", map[string]string{"schema": Identifier}, CodeEnum, "schema"},
+		{"schema as free text", map[string]string{"schema": "baseline 0.2"}, CodeEnum, "schema"},
+		{"schema empty", map[string]string{"schema": ""}, CodeEnum, "schema"},
+		{"cause outside the set", map[string]string{"cause": "expired"}, CodeEnum, "cause"},
+		{"later-minor with unreadable", map[string]string{"schema": "unreadable", "cause": "later-minor"}, CodeEnum, "cause"},
+		{"an unknown detail", map[string]string{"note": "x"}, CodeEnum, "note"},
 	}
 	for _, tc := range refuse {
 		e := baselineOne(t)
 		maps.Copy(e.Health.Details, tc.m)
-		if got := codesOf(e.Validate()); !slices.Equal(got, []Code{tc.want}) {
-			t.Errorf("%s: %v, want only [%s]", tc.name, got, tc.want)
+		if got, want := refusal(e.Validate()), refusalOf(tc.want, tc.fields); !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", tc.name, got, want)
 		}
 	}
 	for _, k := range []string{"hash", "schema", "cause"} {
 		e := baselineOne(t)
 		delete(e.Health.Details, k)
-		if got := codesOf(e.Validate()); !slices.Equal(got, []Code{CodeMissing}) {
-			t.Errorf("no %s: %v, want only [missing]", k, got)
+		if got, want := refusal(e.Validate()), refusalOf(CodeMissing, k); !slices.Equal(got, want) {
+			t.Errorf("no %s: %v, want %v", k, got, want)
 		}
 	}
 }
@@ -315,6 +359,12 @@ func TestDetectorTypes06Gating(t *testing.T) {
 	if err := b.Validate(); err != nil {
 		t.Errorf("a later minor's cause: %v", err)
 	}
+	// Above self, cause is still a token (D3's N3 on #772, D4-121).
+	b.Health.Details["cause"] = "any text\r\n<13>forged"
+	if got, want := refusal(b.Validate()), refusalOf(CodeEnum, "cause"); !slices.Equal(got, want) {
+		t.Errorf("at %s, a cause that is not a token: %v, want %v", laterMinor(), got, want)
+	}
+	b.Health.Details["cause"] = "added-later"
 	b.Health.Details["hash"] = "sha256:x"
 	if !slices.Contains(Codes(b.Validate()), CodeEnum) {
 		t.Errorf("at %s, a malformed hash: accepted", laterMinor())

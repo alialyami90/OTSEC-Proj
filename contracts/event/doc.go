@@ -140,8 +140,8 @@
 //     ("unreadable" or an otsec.netbaseline identifier) and a
 //     BaselineRefusedCauses cause; later-minor with an unreadable schema
 //     is refused. C4-0.6-3, a later minor's network-observation and
-//     collection.run refused at judging, is in contracts/netobs and the
-//     node, not in Decode or Validate. No envelope field or flag changes.
-//     Identifier is one constant, so every event this code stamps says
-//     0.6.
+//     collection.run refused at judging, lands in a later step, in
+//     contracts/netobs and the node, not in Decode or Validate. No
+//     envelope field or flag changes. Identifier is one constant, so
+//     every event this code stamps says 0.6.
 package event

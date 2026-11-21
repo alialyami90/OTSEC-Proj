@@ -216,6 +216,12 @@ func checkBaselineRefused(c *checker, e *Event) {
 		c.fail(CodeEnum, f+"cause", "%q is not a cause of %s in %s", cause, HealthBaselineRefused, e.Schema)
 		causeOK = false
 	}
+	// Above self, cause is open but still a token, as evidence_class is
+	// (D1-23, D4-121).
+	if causeOK && later && !tokenPattern.MatchString(cause) {
+		c.fail(CodeEnum, f+"cause", "%q is not a token", cause)
+		causeOK = false
+	}
 	if causeOK && schemaOK && cause == "later-minor" && schema == BaselineSchemaUnreadable {
 		c.fail(CodeEnum, f+"cause", "later-minor is known only from a stamp that parsed; schema is %s", BaselineSchemaUnreadable)
 	}
