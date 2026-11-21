@@ -45,9 +45,8 @@ package contract
 //     exported field of event.Event, nested types included, and the key
 //     paths of its network-observation and collection.run events must be
 //     c4v6Pinned05, the set that fill gives in the 0.5 code (D6's N17).
-//     From the 0.6 code on, the same comparison is (c)'s head leg. D6 owes
-//     (c)'s run on the 0.6 code, with its control, after step 1
-//     (P4-4-C4-06-S1).
+//     From the 0.6 code on, the same comparison is (c)'s head leg,
+//     TestC4v06E64cHeadLeg in c4_v06_d6_test.go (brief P4-4-C4-06-D6R).
 //   - (b) A one-time desk run on the C4 0.3 code at 4bcffe88 and the C4 0.4
 //     code at d48b2f0a, recorded below.
 //
