@@ -273,6 +273,31 @@ func TestRunSessionOfOrder(t *testing.T) {
 	}
 }
 
+// E6-14, the alarm once per process run across drives (D6's N1 on #780): a
+// later-C4 collection.run refused in a first drive raises
+// network-session-refused; the detector's health position is then moved
+// back, so a second drive of the same process reads the refused run again.
+// Positive control: the second drive read it, counted again in
+// runs_session_missing. Then still one alarm. Mutant: nd.sessionRefused
+// reset at the start of each drive, which raises a second alarm.
+func TestRunSessionRefusedSecondDrive(t *testing.T) {
+	c4, later := stamp(event.Identifier), stamp(laterID(t, event.Identifier))
+	r, st, _ := storeRuns(t, [][][2]string{{{c4, later}}})
+	defer r.Close()
+	if d, got := detectorStatus(t, st), sessionRefusedAlarms(st); d.NotJudged["session-missing"] != 1 || len(got) != 1 {
+		t.Fatalf("first drive: status %+v, alarms %q", d, got)
+	}
+	r.detector.health = 0
+	tick(t, r)
+	d, got := detectorStatus(t, st), sessionRefusedAlarms(st)
+	if d.NotJudged["session-missing"] != 2 {
+		t.Fatalf("positive control: the second drive did not read the run again: status %+v", d)
+	}
+	if len(got) != 1 {
+		t.Fatalf("second drive: %d network-session-refused alarms, want 1: %q", len(got), got)
+	}
+}
+
 // E6-15, the link leg: a held record of a later C13 minor, left in the
 // hold's releasing record by a build of that minor, is committed by this
 // build's RecoverHold as held, stamped event.Identifier, and refused at
