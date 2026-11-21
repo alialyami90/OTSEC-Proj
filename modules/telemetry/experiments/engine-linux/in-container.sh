@@ -4,7 +4,7 @@
 # /pcaps, or over every capture there when CAPTURE is `all`, each into
 # /out/<capture>/<config>/, with the engine's exit code in exit-code. A
 # failure on one capture is printed with the tail of the engine's stderr,
-# and the loop goes on: that capture reads "not run". run.sh gives each Zeek
+# indented, and the loop goes on: that capture reads "not run". run.sh gives each Zeek
 # container one capture, so that mountcheck.py's rules are read before every
 # Zeek process (D1's ruling 6955678741 on #744); Suricata's take `all`.
 # Usage: in-container.sh zeek|zeek-pipe|suricata|suricata-fifo CONFIG CAPTURE|all [engine arguments...]
@@ -55,7 +55,9 @@ for p in /pcaps/*; do
   rc=$?
   echo "$rc" > exit-code
   [ "$eng" = suricata-fifo ] && [ "$rc" = 124 ] && timed_out=1
-  [ "$rc" = 0 ] || { echo "$eng failed on $n ($cfg), exit $rc:"; tail -5 "$eng.stderr"; }
+  # The tail is indented, so that no line of the engine's own stderr has the
+  # form of the line above (table.py held-log; D6's B1 on #776).
+  [ "$rc" = 0 ] || { echo "$eng failed on $n ($cfg), exit $rc:"; tail -5 "$eng.stderr" | sed 's/^/  /'; }
   # An engine that exits 0 can still warn about the capture (truncated,
   # unsupported, unreadable): print its first such lines either way.
   grep -iE '^[WE]: |warn|error|truncat|unknown file format' "$eng.stderr" 2> /dev/null | head -3 | sed "s|^|$eng $n ($cfg) says: |"

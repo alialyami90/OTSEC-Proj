@@ -85,9 +85,6 @@ type refusedCounts struct {
 	// unsure is the lasting not-exact mark, and why its cause for status.
 	unsure refusedRange
 	why    string
-	// rangeOwed: a start set or widened unsure, so an event is owed for it
-	// with the counts unchanged.
-	rangeOwed bool
 	// owing: an event is owed since owedAt (the monotonic clock); pending
 	// are the seqs counted since the last event, and forced says a
 	// checkpoint was stored past RefusedCountsWait while it is owed.
@@ -97,12 +94,14 @@ type refusedCounts struct {
 	forced  bool
 	// cause is why the owed event was last held; raisedAt the last raise
 	// of AlarmRefusedCountsUnwritten, failRaised that store-commit-failed
-	// is raised for this owed event, and writes the writes in the last hour.
+	// is raised for this owed event, and lastWrite the last write, when
+	// hasWritten.
 	cause      string
 	raisedAt   time.Duration
 	raised     bool
 	failRaised bool
-	writes     []time.Duration
+	lastWrite  time.Duration
+	hasWritten bool
 }
 
 // countsOwed reports whether the counts changed since the newest event.
@@ -130,16 +129,17 @@ func (rc *refusedCounts) count(reason string, seq uint64, now time.Duration) {
 	rc.owe(now)
 }
 
-// room reports whether the budget allows a write now.
+// room reports whether the budget allows a write now: no sooner than
+// time.Hour/RefusedCountsPerHour after the last, so a held checkpoint waits
+// at most that long for the budget (section 5; D3's B1 on #779).
 func (rc *refusedCounts) room(now time.Duration) bool {
-	rc.writes = slices.DeleteFunc(rc.writes, func(at time.Duration) bool { return now-at >= time.Hour })
-	return len(rc.writes) < RefusedCountsPerHour
+	return !rc.hasWritten || now-rc.lastWrite >= time.Hour/RefusedCountsPerHour
 }
 
 // wrote notes the event written at through.
 func (rc *refusedCounts) wrote(now time.Duration, through uint64) {
-	rc.written, rc.through, rc.writes = maps.Clone(rc.by), through, append(rc.writes, now)
-	rc.rangeOwed, rc.owing, rc.pending, rc.forced, rc.raised, rc.failRaised = false, false, refusedRange{}, false, false, false
+	rc.written, rc.through, rc.lastWrite, rc.hasWritten = maps.Clone(rc.by), through, now, true
+	rc.owing, rc.pending, rc.forced, rc.raised, rc.failRaised = false, refusedRange{}, false, false, false
 }
 
 // details are the counts event's details at through (C4-0.6-1).
@@ -298,7 +298,7 @@ func (r *Runtime) restoreRefused(ctx context.Context, nd *netDetector) error {
 	if rc.unsure.set() {
 		why = "carried from an earlier start and widened: " + why
 	}
-	rc.unsure, rc.why, rc.rangeOwed = w, why, true
+	rc.unsure, rc.why = w, why
 	rc.owe(r.opt.Mono())
 	return nil
 }
