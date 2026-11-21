@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"otsec.local/otsec/contracts/event"
@@ -73,6 +75,22 @@ const (
 	// status and the OS log only, with no health event; a restore that
 	// skips none raises nothing. The alerts stay in the store.
 	AlarmAlertUnreadable = "network-alert-unreadable"
+	// AlarmObservationRefused: the detector refused a stored observation,
+	// so it did not judge it and raised no network alert for it. Raised at
+	// the first refusal of each reason in the node's process run (R1); every
+	// refusal is counted in observations_refused_by
+	// (docs/phase4/D5-refusal-alarms-options.md section 2, D4-120 item 2.5).
+	AlarmObservationRefused = "network-observation-refused"
+)
+
+// The reasons of a refused stored observation (C4-0.6-1's reason.<r>).
+// later-minor comes with C4 0.6 step 3.
+const (
+	// RefusedMalformed: observationOf refused the record.
+	RefusedMalformed = "malformed"
+	// RefusedByDetector: observationOf read it and Detector.Observe
+	// refused it.
+	RefusedByDetector = "detector-refused"
 )
 
 // FrameIndexEntries bounds the frame index, from a cited frame's SHA-256
@@ -103,8 +121,10 @@ type DetectorStatus struct {
 	// AlertCommitFailures the commits of them that failed since start.
 	AlertsPending       int   `json:"alerts_pending"`
 	AlertCommitFailures int64 `json:"alert_commit_failures"`
-	// Refused are observations the detector refused, still taken.
-	Refused int64 `json:"observations_refused"`
+	// Refused are observations the detector refused, still taken, and
+	// RefusedBy the same by reason, since start.
+	Refused   int64            `json:"observations_refused"`
+	RefusedBy map[string]int64 `json:"observations_refused_by"`
 	// NotJudged are the sessions not judged, by reason (D4-74).
 	NotJudged map[string]int64 `json:"not_judged"`
 	// OpenFlowSeen counts the sessions seen through a reused conversation,
@@ -173,6 +193,12 @@ type netDetector struct {
 	raised   map[string]bool
 	// lagging: AlarmDetectorLag is raised for this stretch.
 	lagging bool
+	// refusedBy counts the refused observations by reason, and
+	// refusedRaised holds the reasons whose AlarmObservationRefused is
+	// raised. r.detector is set once per process, so both last the
+	// process run.
+	refusedBy     map[string]int64
+	refusedRaised map[string]bool
 }
 
 // unsentAlert is what the node keeps of an unsent alert beside its record:
@@ -248,9 +274,21 @@ func (r *Runtime) detectorConfig() netdetect.DetectorConfig {
 // startDetector restores the detector from its newest checkpoint, or starts
 // it at the oldest retained observation, after the intake's start repair
 // (D4-72). It rebuilds the frame index from the retained first sights.
-func (r *Runtime) startDetector(ctx context.Context) error {
+//
+// A checkpoint that does not restore is raised as not-restored only by the
+// start that then succeeds, after its last step that can fail. A start that
+// fails names the restore's error in its own, which tickSensor raises once
+// as not-started (D5-refusal-alarms-options.md section 4).
+func (r *Runtime) startDetector(ctx context.Context) (err error) {
+	var notRestored error
+	defer func() {
+		if err != nil && notRestored != nil {
+			err = fmt.Errorf("%w; the stored checkpoint did not restore either: %v", err, notRestored)
+		}
+	}()
 	s := r.cfg.NetworkSensor
-	nd := &netDetector{cfg: r.detectorConfig(), obs: NetObservationStream(s.SensorID), start: r.opt.Mono(), raised: map[string]bool{}}
+	nd := &netDetector{cfg: r.detectorConfig(), obs: NetObservationStream(s.SensorID), start: r.opt.Mono(), raised: map[string]bool{},
+		refusedBy: map[string]int64{}, refusedRaised: map[string]bool{}}
 	odb := r.Store(nd.obs)
 	if odb == nil {
 		return errors.New("the network database is not open")
@@ -288,7 +326,7 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 			nd.d, err = netdetect.RestoreDetector(nd.cfg, doc, committed, head)
 		}
 		if err != nil {
-			r.opt.Status.Raise("", AlarmDetectorNotRestored, "the detector's checkpoint did not restore, so it starts again from the oldest retained observation: "+err.Error())
+			notRestored = err
 		} else {
 			// The health read starts after the last session taken, so a
 			// run before it, one that doesn't parse included, is not
@@ -307,7 +345,7 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 	}
 	through := c5.Seq(nd.d.Through())
 	nd.pruned = first > through+1 || (first == 0 && head > through)
-	if err := r.rebuildFrameIndex(ctx, nd); err != nil {
+	if err := rebuildIndex(r, ctx, nd); err != nil {
 		return err
 	}
 	if !nd.restored {
@@ -328,9 +366,16 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 		nd.st.AlertsUnreadable = skipped
 		r.opt.Status.Raise("", AlarmAlertUnreadable, fmt.Sprintf("the restore skipped %d stored alerts it could not read, so it does not hold them back; a replay that raises one again stores it a second time and may store the alerts after it a second time too, each counted under mismatches; they stay in the store", skipped))
 	}
+	if notRestored != nil {
+		r.opt.Status.Raise("", AlarmDetectorNotRestored, "the detector's checkpoint did not restore, so the detector started again from the oldest retained observation: "+notRestored.Error())
+	}
 	r.detector = nd
 	return nil
 }
+
+// rebuildIndex is startDetector's last step that can fail. A test swaps it
+// to fail the start there, after a restore that failed.
+var rebuildIndex = (*Runtime).rebuildFrameIndex
 
 // observationOf decodes a stored observation.
 func observationOf(st c5.Stored) (*netobs.Observation, error) {
@@ -724,8 +769,8 @@ func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64, dv 
 				f()
 			}
 			id := event.EventID{NodeID: r.cfg.NodeID, Stream: event.Stream(nd.obs), Seq: st.Key.Seq}
-			o, err := observationOf(st)
-			if err != nil {
+			o, oerr := observationOf(st)
+			if oerr != nil {
 				o = nil // refused by Observe, which still takes its seq
 			}
 			nd.index.note(o)
@@ -734,13 +779,75 @@ func (r *Runtime) observeTo(ctx context.Context, nd *netDetector, to uint64, dv 
 			}
 			alerts, err := nd.d.Observe(id, o)
 			if err != nil {
-				nd.st.Refused++
+				r.refuseObservation(nd, st.Key.Seq, o, oerr)
 			}
 			if r.commitAlerts(ctx, nd, alerts); len(nd.unsent) > 0 {
 				return
 			}
 		}
 	}
+}
+
+// refuseObservation counts a stored observation the detector refused, by
+// reason, and raises AlarmObservationRefused at the first refusal of its
+// reason in this process run (R1). The reason is the first refusal on the
+// record's path: malformed when observationOf refused it, else
+// detector-refused. The alarm goes to the OS log, so it carries the reason,
+// the error's code and field and the seq, never the error's detail or text,
+// which can quote the record (D5-refusal-alarms-options.md section 2).
+func (r *Runtime) refuseObservation(nd *netDetector, seq c5.Seq, o *netobs.Observation, decodeErr error) {
+	nd.st.Refused++
+	reason := RefusedByDetector
+	if decodeErr != nil {
+		reason = RefusedMalformed
+	}
+	nd.refusedBy[reason]++
+	if nd.refusedRaised[reason] {
+		return
+	}
+	nd.refusedRaised[reason] = true
+	var detail string
+	if decodeErr != nil {
+		code, field := refusalAt(decodeErr)
+		detail = fmt.Sprintf("a stored observation did not decode (%s at %s), so the detector did not judge it and raised no network alert for it. Every such record is counted. First at seq %d.", code, field, seq)
+	} else {
+		// Observe's errors are untyped, so the wording is chosen from the
+		// record, never from the error's text.
+		why := "no readable time"
+		if o.SensorID != nd.cfg.SensorID {
+			why = "another sensor's"
+		}
+		detail = fmt.Sprintf("the detector refused a stored observation (%s), so it raised no network alert for it. Every such record is counted. First at seq %d.", why, seq)
+	}
+	r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmObservationRefused, At: r.opt.Now(), Stream: nd.obs, Detail: detail})
+}
+
+// refusalAt is the code and field of the first typed error in err's tree,
+// a *event.Error or a *netobs.Error, or "-" and "-" when it holds none. A
+// field that names a key of health.details, which C4's validator takes from
+// the record, is cut to health.details (D3's F4 on #766).
+func refusalAt(err error) (code, field string) {
+	switch e := err.(type) {
+	case *event.Error:
+		code, field = string(e.Code), e.Field
+	case *netobs.Error:
+		code, field = string(e.Code), e.Field
+	case interface{ Unwrap() []error }:
+		for _, x := range e.Unwrap() {
+			if code, field = refusalAt(x); code != "-" {
+				return code, field
+			}
+		}
+		return "-", "-"
+	case interface{ Unwrap() error }:
+		return refusalAt(e.Unwrap())
+	default:
+		return "-", "-"
+	}
+	if strings.HasPrefix(field, "health.details.") {
+		field = "health.details"
+	}
+	return code, field
 }
 
 // commitAlerts builds each alert's capture from the first-sight captures
@@ -1025,6 +1132,7 @@ func (r *Runtime) detectorStatus(nd *netDetector) {
 	if h := (r.opt.Mono() - nd.start).Hours(); h > 0 {
 		nd.st.EarlyClosesPerHour = float64(nd.st.EarlyCloses) / h
 	}
+	nd.st.RefusedBy = maps.Clone(nd.refusedBy)
 	nd.st.NotYetSeen = nil
 	for _, e := range d.NotYetSeen() {
 		nd.st.NotYetSeen = append(nd.st.NotYetSeen, e.AssetID+" "+e.L4+" "+e.Addr+":"+strconv.Itoa(e.Port))
