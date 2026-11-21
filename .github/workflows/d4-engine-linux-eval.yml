@@ -26,6 +26,18 @@
 # two builds beside the stock image. The images never leave the runner: only
 # the tables, versions and the build record are uploaded. Every HR-23 result
 # is a rehearsal until D6 pins stage 2's cases and conditions.
+#
+# HR-25's option A, part HR25-B1 (D4-124): build.sh also builds C2A, the
+# tree with option (i)'s patch and then A's, and A's mutant controls. Two
+# more inputs, each of which runs the `hr23` job alone (the `dnp3-public`
+# and `prp` jobs are skipped):
+# - `build_only` builds and records the images, after selftest.sh, and runs
+#   no engine over any capture (GT-PCAP, public, PRP or HR-23's) and no unit
+#   test. It uploads only the build record. It wins over the other inputs.
+#   test_build_only.py checks that every other step is skipped under it.
+# - `hr25_unit` builds the images and runs only D4's unit tests of A's
+#   patch (run.sh hr25-unit) on D4's own synthetic inputs, under C2A and
+#   its controls; no capture of GT-PCAP or of D6's cases is read.
 name: d4-engine-linux-eval
 on:
   workflow_dispatch:
@@ -34,10 +46,19 @@ on:
         description: "Also build the project's Zeek (HR-23, option (i)) and run it beside the stock image"
         type: boolean
         default: false
+      build_only:
+        description: "Only build and record the project's Zeek images (HR-23 C1p and C2, HR-25 C2A and its controls); run no engine and no test"
+        type: boolean
+        default: false
+      hr25_unit:
+        description: "Build the images and run only D4's unit tests of HR-25 option A's patch (no capture of GT-PCAP or of D6's cases)"
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   dnp3-public:
+    if: ${{ !inputs.build_only && !inputs.hr25_unit }}
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
@@ -58,6 +79,7 @@ jobs:
             ${{ runner.temp }}/e-d4-03/versions.txt
           if-no-files-found: warn
   prp:
+    if: ${{ !inputs.build_only && !inputs.hr25_unit }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -81,7 +103,7 @@ jobs:
             ${{ runner.temp }}/e-d4-03/versions.txt
           if-no-files-found: warn
   hr23:
-    if: ${{ inputs.hr23_build }}
+    if: ${{ inputs.hr23_build || inputs.build_only || inputs.hr25_unit }}
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
@@ -93,39 +115,51 @@ jobs:
       - name: build.sh refuses every changed input (selftest.sh, before any build)
         shell: bash
         run: sh modules/telemetry/experiments/engine-linux/zeek-patch/selftest.sh "$RUNNER_TEMP/hr23-selftest" | tee "$RUNNER_TEMP/hr23-selftest.md"
-      - name: Build C1p and C2 from one pinned tree
+      - name: Build C1p, C2, C2A and the controls from one pinned tree
         id: build
         run: |
           sh modules/telemetry/experiments/engine-linux/zeek-patch/build.sh build "$RUNNER_TEMP/e-d4-03"
           cat "$RUNNER_TEMP/e-d4-03/images.env" >> "$GITHUB_ENV"
       - name: D4's unit and negative tests of the patch, on both builds
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh hr23-unit "$RUNNER_TEMP/e-d4-03"
       - name: Install tshark (the labeller prp_check.py pins)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: |
           sudo apt-get update -q
           echo "wireshark-common wireshark-common/install-setuid boolean false" | sudo debconf-set-selections
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends tshark
           tshark -v | head -1
       - name: Fetch the public captures (pinned SHA-256s)
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps" || echo "one or more captures did not match; run.sh checks each again and drops it, its rows read not run (not fetched), and on refs/heads/main the public step then fails"
       - name: GT-PCAP cases under every configuration, the two builds included
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh dnp3 "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - name: Public and extra captures under every configuration, the two builds included
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh public "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
       - name: PRP pairs under every configuration, the two builds included
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !inputs.build_only && !inputs.hr25_unit }}
         run: sh modules/telemetry/experiments/engine-linux/run.sh prp "$RUNNER_TEMP/e-d4-03" "$RUNNER_TEMP/caps"
+      - name: D4's unit tests of HR-25 option A's patch, on C2A and its controls
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && inputs.hr25_unit && !inputs.build_only }}
+        run: sh modules/telemetry/experiments/engine-linux/run.sh hr25-unit "$RUNNER_TEMP/e-d4-03"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always()
+        if: ${{ always() && inputs.build_only }}
+        with:
+          name: d4-engine-linux-eval-build
+          path: |
+            ${{ runner.temp }}/e-d4-03/zeek-build.txt
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ always() && !inputs.build_only }}
         with:
           name: d4-engine-linux-eval-hr23
           path: |
             ${{ runner.temp }}/hr23-selftest.md
             ${{ runner.temp }}/e-d4-03/hr23-unit.md
+            ${{ runner.temp }}/e-d4-03/hr25-unit.md
             ${{ runner.temp }}/e-d4-03/zeek-build.txt
             ${{ runner.temp }}/e-d4-03/dnp3.md
             ${{ runner.temp }}/e-d4-03/public.md

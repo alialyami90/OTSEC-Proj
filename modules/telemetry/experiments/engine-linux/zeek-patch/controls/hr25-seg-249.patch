@@ -1,0 +1,15 @@
+HR-25 option A's control `seg-249` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'Off by one: the 250-octet bound on last_seg': a last_seg buffer one octet short, which design 2.9 item 5's sizeof check must catch.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.h
++++ b/src/analyzer/protocol/dnp3/DNP3.h
+@@ -66,7 +66,7 @@
+         // carried FIN, and its FCB when it was a primary frame of confirmed
+         // user data with FCV set (-1: none).
+         int tseq = -1;
+-        u_char last_seg[LAST_SEG_SIZE] = {0};
++        u_char last_seg[LAST_SEG_SIZE - 1] = {0};
+         int last_seg_len = 0;
+         bool after_fin = false;
+         int fcb = -1;

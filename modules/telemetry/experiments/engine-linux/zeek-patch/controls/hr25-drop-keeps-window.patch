@@ -1,0 +1,15 @@
+HR-25 option A's control `drop-keeps-window` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'A drop ends the window': a first_chunk_missing that is counted and does not end the window.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -426,7 +426,7 @@
+         if ( endp->after_fin && n == tseq && link_retry && SameSegment(endp, seg, seg_len) )
+             return;
+ 
+-        Drop(orig, FIRST_CHUNK_MISSING);
++        Count(orig, FIRST_CHUNK_MISSING);
+         return;
+     }
+ 

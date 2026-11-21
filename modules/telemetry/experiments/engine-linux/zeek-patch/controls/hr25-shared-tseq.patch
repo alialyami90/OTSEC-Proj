@@ -1,0 +1,15 @@
+HR-25 option A's control `shared-tseq` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'Per-end state': one tseq for both ends.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -392,7 +392,7 @@
+ // 2.3), on a frame whose every CRC passed.
+ void DNP3_Base::TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len) {
+     Endpoint* endp = End(orig);
+-    int& tseq = endp->tseq;
++    int& tseq = orig_state.tseq;
+     u_char t = seg[0];
+     bool fir = t & 0x40;
+     bool fin = t & 0x80;

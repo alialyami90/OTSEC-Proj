@@ -94,6 +94,23 @@ sed -i 's/^@@ -25,6 +25,17 @@$/@@ -20,6 +20,17 @@/' "$work/case/hr23-fc-dispatch
 setpin HR23_PATCH_SHA256 "$(sha "$work/case/hr23-fc-dispatch.patch")"
 expect "patch hunk moved and pinned: it applies only at an offset" "only with an offset or fuzz"
 
+# HR-25's A patch (HR25-B1): its pin, its order after the HR-23 patch, and
+# its controls.
+fresh
+printf '\n' >> "$work/case/hr25-resync.patch"
+expect "A's patch changed, pin kept" "hr25-resync.patch has SHA-256"
+fresh
+sed -i 's/^ bool DNP3_Base::crc_table_initialized = false;$/ bool DNP3_Base::crc_table_initialised = false;/' "$work/case/hr25-resync.patch"
+setpin HR25_PATCH_SHA256 "$(sha "$work/case/hr25-resync.patch")"
+expect "A's patch context changed and pinned: it needs fuzz" "A's patch does not apply with no fuzz"
+fresh
+sed -i 's/^@@ -12,13 +12,37 @@$/@@ -10,13 +10,37 @@/' "$work/case/hr25-resync.patch"
+setpin HR25_PATCH_SHA256 "$(sha "$work/case/hr25-resync.patch")"
+expect "A's patch hunk moved and pinned: it applies only at an offset" "A's patch applied only with an offset or fuzz"
+fresh
+rm "$work/case/controls/hr25-no-mod64.patch"
+expect "a control that build.env names is missing" "control hr25-no-mod64.patch is missing"
+
 rm -rf "$work/case" "$work/case-cache"
 
 # build.sh's record checks (D6's N4 and N5 on #715), on made-up lists:
@@ -109,6 +126,7 @@ rec_fresh() {
     h=$a
     [ $v = c2 ] && h=$b
     { echo "$h  ./bin/zeek"
+      echo "$a  ./include/zeek/analyzer/protocol/dnp3/DNP3.h"
       echo "$h  ./include/zeek/analyzer/protocol/dnp3/dnp3-analyzer.pac"
       echo "$h  ./include/zeek/analyzer/protocol/dnp3/dnp3-protocol.pac"
       echo "$a  ./lib/zeek/python/zeekclient/cli.py"
@@ -116,6 +134,10 @@ rec_fresh() {
       echo "$a  ./share/zeek/base/init-bare.zeek"; } > "$r/files-$v.txt"
     printf 'Zeek::AF_Packet - Packet acquisition via AF_Packet (built-in)\nZeek::DNP3 - DNP3 analyzer (built-in)\n' > "$r/plugins-$v.txt"
   done
+  # C2A: C2 with A's bin/zeek and one installed DNP3 header changed.
+  c=$(printf '%064d' 3)
+  sed -e "s|^$b  ./bin/zeek$|$c  ./bin/zeek|" -e "s|^$a  ./include/zeek/analyzer/protocol/dnp3/DNP3.h$|$c  ./include/zeek/analyzer/protocol/dnp3/DNP3.h|"     "$r/files-c2.txt" > "$r/files-c2a.txt"
+  cp "$r/plugins-c2.txt" "$r/plugins-c2a.txt"
   printf '//BinPAC executable\nBinPAC_EXE:STRING=binpac\nBinPAC_INCLUDE_DIR:STRING=/src/zeek/tools/binpac/lib;/src/zeek/build/tools/binpac/lib\n' > "$r/binpac.txt"
 }
 rexpect() {
@@ -145,10 +167,20 @@ rexpect "record: CMake's binpac from the PATH" "not the tarball's in-tree target
 rec_fresh
 echo "$a  ./bin/zkg" >> "$r/files-c1p.txt"
 echo "$a  ./bin/zkg" >> "$r/files-c2.txt"
+echo "$a  ./bin/zkg" >> "$r/files-c2a.txt"
 rexpect "record: zkg installed" "installs what"
 rec_fresh
 echo "Zeek::Cluster_Backend_ZeroMQ - ZeroMQ cluster backend (built-in)" >> "$r/plugins-c2.txt"
 rexpect "record: the ZeroMQ plugin in zeek -NN" "zeek -NN lists"
+rec_fresh
+sed -i "s|^$a  ./share/zeek/base/init-bare.zeek$|$b  ./share/zeek/base/init-bare.zeek|" "$r/files-c2a.txt"
+rexpect "record: C2A differs from C2 in a file A's patch does not change" "C2 and C2A differ in files A's patch does not change"
+rec_fresh
+sed -i "s|^$c  ./bin/zeek$|$b  ./bin/zeek|" "$r/files-c2a.txt"
+rexpect "record: C2A's bin/zeek is C2's" "A's patch was not built"
+rec_fresh
+rm "$r/files-c2a.txt"
+rexpect "record: C2A's list missing" "missing or empty"
 rec_fresh
 rm "$r/plugins-c1p.txt"
 rexpect "record: a list missing" "missing or empty"

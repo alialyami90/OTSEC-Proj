@@ -1,0 +1,16 @@
+HR-25 option A's control `linkonly-clears` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'A link-only frame and a failed header leave the state': a link-only frame that clears this end's state.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -215,8 +215,7 @@
+             // delivery is parsed. A primary one clears this end's FCB
+             // (design 2.1, 2.3).
+             if ( endp->buffer[PSEUDO_LENGTH_INDEX] == 5 ) {
+-                if ( ctrl & 0x40 )
+-                    endp->fcb = -1;
++                ClearEndpointState(orig);
+                 endp->buffer_len = 0;
+                 continue;
+             }
