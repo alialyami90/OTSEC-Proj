@@ -160,11 +160,12 @@ func (r *healthRig) beat(p *peer, hs ...*netobs.Heartbeat) {
 	p.ack(num(hs[len(hs)-1].Seq))
 }
 
-// settleFile lets the run file's minute pass and flushes, as the manager's
-// tick does.
+// settleFile lets the run file's minute pass on both of the node's clocks
+// (so the step check finds no step) and flushes, as the manager's tick
+// does.
 func (r *healthRig) settleFile() {
 	r.t.Helper()
-	r.clk.add(time.Minute)
+	r.pass(time.Minute)
 	if err := r.h.Flush(bg); err != nil {
 		r.t.Fatal(err)
 	}
@@ -412,9 +413,9 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	// 9 counts nothing. Control: the start leaving the cursor's 5, so that
 	// the resend counts the 4 again.
 	r, p = base()
-	r.clk.add(time.Minute)
+	r.pass(time.Minute)
 	r.cs.failNext(2) // the write number's save, then the baselines': killed before it
-	r.clk.add(cursorSpacing)
+	r.pass(cursorSpacing)
 	p.send(hb(2, capture(9, 0, 0)))
 	p.closed()
 	r.restart()
@@ -425,7 +426,7 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	p.send(resume(2, 20))
 	p.ack(1)
 	r.beat(p, hb(2, capture(9, 0, 0)))
-	r.clk.add(CountersSpacing)
+	r.pass(CountersSpacing)
 	if err := r.h.Flush(bg); err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +438,7 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	// twice and never not at all. Control: the file written without the
 	// counts before the event commits, killed between: none.
 	r, p = base()
-	r.clk.add(CountersSpacing)
+	r.pass(CountersSpacing)
 	runFileFault = func() error { return errors.New("test: killed before the file's rename") }
 	t.Cleanup(func() { runFileFault = nil })
 	r.beat(p, hb(2, capture(9, 0, 0)))
@@ -455,13 +456,13 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	// writes nothing, which reports 3.
 	r, p = base()
 	r.sink.failing(errDown, EventCounters)
-	r.clk.add(time.Minute)
+	r.pass(time.Minute)
 	r.beat(p, hb(2, capture(9, 0, 0)))
 	older, err := os.ReadFile(r.path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.clk.add(time.Minute)
+	r.pass(time.Minute)
 	r.beat(p, hb(3, capture(12, 0, 0)))
 	p.end()
 	if err := os.WriteFile(r.path, older, 0o600); err != nil {
@@ -491,10 +492,10 @@ func TestCaptureLossAcrossRestart(t *testing.T) {
 	w0 := r.file.doc.WriteNo
 	r.file.mu.Unlock()
 	for i := 2; i <= 61; i++ {
-		r.clk.add(10*time.Second - cursorSpacing)
+		r.pass(10*time.Second - cursorSpacing)
 		r.beat(p, hb(i, capture(uint64(5+i), 0, 0)))
 	}
-	r.clk.add(CountersSpacing)
+	r.pass(CountersSpacing)
 	if err := r.h.Flush(bg); err != nil {
 		t.Fatal(err)
 	}

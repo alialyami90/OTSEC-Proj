@@ -97,6 +97,11 @@ type Health struct {
 	// fileErr is the run file's last write error while a failing stretch
 	// stands, raised once at its first failure.
 	fileErr error
+	// watched is the link's earlier of W and R, zero when it holds none;
+	// copyFile is the copy the run file had at the start, written again
+	// while the link holds none (watch.go).
+	watched  func() time.Time
+	copyFile time.Time
 	// Status.
 	possiblyLost []string
 	runFile      string
@@ -461,7 +466,25 @@ func (h *Health) entry() runFileSensor {
 	if h.run != "" {
 		e.Capture = &captureState{RunID: h.run, Key: h.key, Totals: totalsMap(h.totals)}
 	}
+	c := h.copyFile
+	if h.watched != nil {
+		if w := h.watched(); !w.IsZero() {
+			c = w
+		}
+	}
+	if !c.IsZero() {
+		e.Copy = canonUTC(c)
+	}
 	return e
+}
+
+// persistNow writes the run file at once, as a step of the node's clock
+// asks (watch.go).
+func (h *Health) persistNow(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.dirty = true
+	return h.persist(ctx, true)
 }
 
 // The capture-loss counters (C4-0.4-2), in CaptureLossCounters' order.
@@ -554,6 +577,10 @@ func (h *Health) start(e *runFileSensor, usable, held bool, cause string, cur *C
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.cfg.Now()
+	if e != nil && e.Copy != "" {
+		// A file that is behind only moves a reach-back earlier.
+		h.copyFile = parseUTC(e.Copy)
+	}
 	if !usable {
 		h.runFile = cause
 		h.raise(AlarmStateUnread, fmt.Sprintf("sensor %s: cause run-file: sensorrun.json is %s; its values for the sensor read as lost", h.cfg.SensorID, cause))

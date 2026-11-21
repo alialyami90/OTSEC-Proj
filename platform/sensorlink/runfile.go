@@ -16,9 +16,9 @@ import (
 // sensor database's cursor. This build keeps sensor-transmitted's standing
 // state and latest raise, the held pool events (as counts and facts, never
 // as event bytes), and the run and capture totals the held capture loss
-// counts up to. SL-30's dial counts and proofs, the re-arm's spent set, the
-// run's second copy, the poison record, the cap's record times and the
-// copy of the earlier of W and R are P4-4-DE's and part 2c's.
+// counts up to, and the copy of the earlier of W and R (2e-1). SL-30's
+// dial counts and proofs, the re-arm's spent set, the run's second copy,
+// the poison record and the cap's record times are P4-4-DE's.
 //
 // The write number (section 1.1): each write carries write_no, one above
 // the last, and after the rename the node saves it in the cursor of every
@@ -41,6 +41,9 @@ type runFileSensor struct {
 	Transmitted *transmitState `json:"transmitted,omitempty"`
 	Held        []HeldEvent    `json:"held,omitempty"`
 	Capture     *captureState  `json:"capture,omitempty"`
+	// Copy is the earlier of W and R (section 1.9 item 5; watch.go), for
+	// a start whose sensor database is lost (2e-3).
+	Copy string `json:"w_r_copy,omitempty"`
 }
 
 type transmitState struct {

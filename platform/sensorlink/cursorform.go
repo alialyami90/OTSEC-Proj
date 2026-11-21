@@ -33,11 +33,15 @@ import (
 //	  owed mark, span count (6), and 8 x (from, to, cut end, mark) (32)
 //
 // This build fills the position, write_no, the digest, Ds, newest_seq, the
-// heartbeat baselines (section 1.8), M (section 1.5), the spans and prior.
-// W, R and the gap held for the floor are the gap model's: they are
-// written "-", and a cursor that carries any of them is refused, so a
-// later build's cursor is never read as this one's. Its largest is 2,026 bytes (section 1.4), within
-// MaxLinkCursorBytes by construction.
+// heartbeat baselines (section 1.8), W with its seq and at_utc, R with the
+// interfaces' packets and last rises (INT-D5 2e-1, watch.go), M (section
+// 1.5), the spans and prior. W's causes and the gap held for the floor
+// are the gap model's later parts (2e-2): they are written "-", and a
+// cursor that carries any of them is refused, so a later build's cursor
+// is never read as this one's. W and its seq and at_utc are written
+// together or not at all; the interface count is "-" when none is held,
+// and its slots past the count "-". Its largest is 2,026 bytes (section
+// 1.4), within MaxLinkCursorBytes by construction.
 const (
 	cursorFormTag    = "sp2"
 	cursorFields     = 118
@@ -46,7 +50,7 @@ const (
 )
 
 // The reserved fields this build writes "-": their first index and count.
-var cursorReserved = [][2]int{{18, 4}, {22, 18}, {40, 6}}
+var cursorReserved = [][2]int{{21, 1}, {40, 6}}
 
 // The egress mark (section 1.8): whether the run's baseline heartbeat
 // carried egress_check, "-" when no baseline is held.
@@ -106,7 +110,8 @@ func encodeCursor(c *Cursor) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("sensorlink: the egress mark %q cannot be saved", c.Egress)
 	}
-	for range 4 + 18 + 6 { // W, R, the gap held: the gap model's
+	f = appendWatch(f, c)
+	for range 6 { // the gap held for the floor: 2e-2's
 		f = append(f, cursorAbsent)
 	}
 	if c.M.IsZero() {
@@ -285,6 +290,9 @@ func decodeCursor(b []byte) (*Cursor, error) {
 		c.Digest = f[10]
 		bad = bad || !cursorDigest.MatchString(c.Digest)
 	}
+	if !readWatch(f, c) {
+		return nil, errCursorForm
+	}
 	if f[46] != cursorAbsent {
 		if !cursorDecimal.MatchString(f[46]) {
 			return nil, errCursorForm
@@ -364,4 +372,99 @@ func allAbsent(s []string) bool {
 		}
 	}
 	return true
+}
+
+// appendWatch is W, its seq, its at_utc and its causes ("-", 2e-2's), R,
+// the interface count and its 8 slots (fields 18 to 39). Every time is
+// clamped to the field's range, as M is, so a sensor time out of it never
+// stops a save.
+func appendWatch(f []string, c *Cursor) []string {
+	tm := func(t time.Time) string {
+		if t.IsZero() {
+			return cursorAbsent
+		}
+		return strconv.FormatInt(clampNano(t), 10)
+	}
+	if c.W.IsZero() {
+		f = append(f, cursorAbsent, cursorAbsent, cursorAbsent)
+	} else {
+		f = append(f, tm(c.W), strconv.FormatUint(c.WSeq, 10), strconv.FormatInt(clampNano(c.WAtUTC), 10))
+	}
+	f = append(f, cursorAbsent, tm(c.R))
+	if len(c.Ifaces) == 0 {
+		f = append(f, cursorAbsent)
+	} else {
+		f = append(f, strconv.Itoa(len(c.Ifaces)))
+	}
+	for i := range netobs.MaxInterfaces {
+		if i >= len(c.Ifaces) {
+			f = append(f, cursorAbsent, cursorAbsent)
+			continue
+		}
+		f = append(f, strconv.FormatUint(c.Ifaces[i].Packets, 10), strconv.FormatInt(clampNano(c.Ifaces[i].RiseUTC), 10))
+	}
+	return f
+}
+
+// readWatch reads fields 18 to 39 into c, false for any other form.
+func readWatch(f []string, c *Cursor) bool {
+	ok := true
+	tm := func(i int) time.Time {
+		if !cursorDecimal.MatchString(f[i]) {
+			ok = false
+			return time.Time{}
+		}
+		n, err := strconv.ParseInt(f[i], 10, 64)
+		ok = ok && err == nil
+		return time.Unix(0, n).UTC()
+	}
+	switch {
+	case allAbsent(f[18:21]):
+	case f[18] == cursorAbsent || f[19] == cursorAbsent || f[20] == cursorAbsent:
+		return false
+	default:
+		c.W, c.WAtUTC = tm(18), tm(20)
+		if !cursorDecimal.MatchString(f[19]) {
+			return false
+		}
+		v, err := strconv.ParseUint(f[19], 10, 64)
+		ok = ok && err == nil
+		c.WSeq = v
+	}
+	if f[22] != cursorAbsent {
+		c.R = tm(22)
+	}
+	n := 0
+	if f[23] != cursorAbsent {
+		var err error
+		n, err = strconv.Atoi(f[23])
+		if err != nil || n < 1 || n > netobs.MaxInterfaces || f[23] != strconv.Itoa(n) {
+			return false
+		}
+	}
+	for k := range netobs.MaxInterfaces {
+		s := f[24+2*k : 26+2*k]
+		if k >= n {
+			ok = ok && allAbsent(s)
+			continue
+		}
+		if !cursorDecimal.MatchString(s[0]) {
+			return false
+		}
+		p, err := strconv.ParseUint(s[0], 10, 64)
+		ok = ok && err == nil
+		c.Ifaces = append(c.Ifaces, IfaceMark{Packets: p, RiseUTC: tm(25 + 2*k)})
+	}
+	return ok
+}
+
+// clampNano is t in Unix nanoseconds, clamped to 1970 to 2262 as M is.
+func clampNano(t time.Time) int64 {
+	switch {
+	case t.Before(time.Unix(0, 0)):
+		return 0
+	case t.After(time.Unix(0, math.MaxInt64)):
+		return math.MaxInt64
+	}
+	return t.UnixNano()
 }

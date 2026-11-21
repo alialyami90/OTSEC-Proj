@@ -71,7 +71,9 @@ func refusedBy(t *testing.T, r *rig, i int, by string, capt time.Time) {
 // D6's mutants X2 and X4 (the stored-time half's session check and its
 // node-start check). Controls: a node with no first half, its stored
 // times compared as they are (skewNoStored), which ties (a) and (b); for
-// (c), a node that ties by the late index rebuilt at a start.
+// (b)'s steps, with the step check run every second, a node that compares
+// only the steps its check finds (stepFoundOnly, 2e-1; D6's N2 on #770);
+// for (c), a node that ties by the late index rebuilt at a start.
 func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 	// (a): tie_grace_s 60 s; a failing dial recorded as [X, X + 10 s];
 	// 2 s after it both clocks stepped back 300 s; 340 s after the dial's
@@ -113,7 +115,10 @@ func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 		if steps {
 			left := 300 * time.Second
 			for left > 0 {
-				s.pass(2 * time.Second)
+				// The step check every second, so no check spans two steps.
+				s.pass(time.Second)
+				r.l.CheckStep(bg)
+				s.pass(time.Second)
 				d := min(left, 1900*time.Millisecond)
 				s.step(-d, -d)
 				left -= d
@@ -139,6 +144,12 @@ func TestTieStoredTimeAfterNodeStep(t *testing.T) {
 				withSeam(t, &skewNoStored)
 				tiedTo(t, b(t, steps).one(40001), 1)
 			})
+			if steps {
+				t.Run("control: only the steps the check finds", func(t *testing.T) {
+					withSeam(t, &stepFoundOnly)
+					tiedTo(t, b(t, steps).one(40001), 1)
+				})
+			}
 		})
 	}
 	// (c): tie_grace_s 600 s, both clocks true; a failing dial that ended
@@ -422,6 +433,14 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 			r := k(t, rekey, false)
 			skewedUntied(t, r.one(40001))
 			refusedBy(t, r, cPrestart, skewPrestart, time.Time{})
+			if !rekey {
+				// 2e-1; D6's N2 on #770. The node-start gap's close is
+				// 2e-3's: until then the control caps at every check.
+				t.Run("control: the step rule applied to the capture floor, M and the start bound", func(t *testing.T) {
+					withSeam(t, &stepCapsCaptureFloor)
+					tiedTo(t, k(t, false, false).one(40001), 1)
+				})
+			}
 			if rekey {
 				t.Run("control: M read as none with the lower generation's position", func(t *testing.T) {
 					tiedTo(t, k(t, true, true).one(40001), 1)
@@ -436,7 +455,7 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 	// record written at its end, after the hello. Mutant: a node that
 	// starts with no floor, no M and no raise from the first break's
 	// heartbeats, which ties it.
-	t.Run("(l)", func(t *testing.T) {
+	l := func(t *testing.T) (*rig, time.Time) {
 		r, s, _ := t13(t, 30*time.Second, nil, nil)
 		s.beat()
 		at := s.now()
@@ -451,8 +470,18 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		s.dialFails(1, 2*time.Second)
 		s.pass(time.Second)
 		s.synEnd(40001, at, time.Time{})
+		return r, at
+	}
+	t.Run("(l)", func(t *testing.T) {
+		r, at := l(t)
 		skewedUntied(t, r.one(40001))
 		refusedBy(t, r, cPrestart, skewPrestart, at)
+		// 2e-1; D6's N2 on #770, as for (k).
+		t.Run("control: the step rule applied to the capture floor, M and the start bound", func(t *testing.T) {
+			withSeam(t, &stepCapsCaptureFloor)
+			r, _ := l(t)
+			tiedTo(t, r.one(40001), 1)
+		})
 	})
 	// (m): both clocks true, heartbeats on; the node stopped for ten
 	// minutes from S; a session at S + 5 min stamped so; both clocks
@@ -616,24 +645,40 @@ func heldTick(t *testing.T, s *sim, hs *holdingStore) {
 // the step and the tie. The closure stands: the dial is refused at its
 // Dispatch, counted skew_moved_windows, and the record commits untied and
 // marked. Mutant: a node without the closure, which ties it. The step-
-// check variant, counted under skew_latest_windows, needs the step check
-// of the gap model (2e).
+// check variant (2e-1; D6's N2 on #770): a node tick runs the step check
+// between the step and the dial, which moves E's held samples back by the
+// step, so the latest sample is outside max_skew_ms: the refusal is
+// counted once, under skew_latest_windows. Control: a node whose step
+// check moves no sample, which counts it under skew_moved_windows.
 func TestTieNodeMovedSinceSample(t *testing.T) {
-	r, s, _ := t13(t, 30*time.Second, nil, nil)
-	s.manual = true
-	s.tick()
-	at := s.now().Add(-294 * time.Second)
-	s.pass(3 * time.Second)
-	s.step(-300*time.Second, 0)
-	s.pass(time.Second)
-	ss := s.dialFails(1, 2*time.Second)
-	if !ss.StartedAt.Equal(at.Add(-2*time.Second)) || !ss.EndedAt.Equal(at) {
-		t.Fatalf("the dial was recorded as [%s, %s], want [T - 2 s, T]", ss.StartedAt, ss.EndedAt)
+	h := func(t *testing.T, check bool) *rig {
+		r, s, _ := t13(t, 30*time.Second, nil, nil)
+		s.manual = true
+		s.tick()
+		at := s.now().Add(-294 * time.Second)
+		s.pass(3 * time.Second)
+		s.step(-300*time.Second, 0)
+		if check {
+			r.l.CheckStep(bg)
+		}
+		s.pass(time.Second)
+		ss := s.dialFails(1, 2*time.Second)
+		if !ss.StartedAt.Equal(at.Add(-2*time.Second)) || !ss.EndedAt.Equal(at) {
+			t.Fatalf("the dial was recorded as [%s, %s], want [T - 2 s, T]", ss.StartedAt, ss.EndedAt)
+		}
+		s.pass(time.Second)
+		s.synEnd(40001, at, time.Time{})
+		skewedUntied(t, r.one(40001))
+		return r
 	}
-	s.pass(time.Second)
-	s.synEnd(40001, at, time.Time{})
-	skewedUntied(t, r.one(40001))
-	refusedBy(t, r, cMoved, "", time.Time{})
+	refusedBy(t, h(t, false), cMoved, "", time.Time{})
+	t.Run("a step check in the interval", func(t *testing.T) {
+		refusedBy(t, h(t, true), cLatest, "", time.Time{})
+		t.Run("control: no sample moved by the step", func(t *testing.T) {
+			withSeam(t, &stepNoSamples)
+			refusedBy(t, h(t, true), cMoved, "", time.Time{})
+		})
+	})
 }
 
 // TestSkewCountPrecedence: T-13 (r), which count takes a refusal when two

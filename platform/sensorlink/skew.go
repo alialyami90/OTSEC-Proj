@@ -129,7 +129,13 @@ type skew struct {
 	// samples is the connection's: the hello's o until the first tick,
 	// then the last SkewSamples ticks'.
 	samples []time.Duration
-	ticked  bool
+	// shift is how far the step check has moved each sample back since it
+	// was taken (watch.go), and latestShift the latest sample's: W and R
+	// are placed with the samples moved, and the latest sample's gate
+	// reads it moved. The alarm reads the samples as taken.
+	shift       []time.Duration
+	latestShift time.Duration
+	ticked      bool
 	// latestOff is the node's offset (wall less monotonic) at the latest
 	// sample's receipt; has, that a sample was taken since the start.
 	latest    time.Duration
@@ -149,6 +155,8 @@ type skew struct {
 	bl           backlog
 	lateRaisedAt *conn // the connection sensor-records-late was raised for
 	stats        SkewStats
+	// wt is the gap model's W, R and step check (watch.go).
+	wt watch
 }
 
 // skewOn reports whether the gate applies: the 0.2 intake's link.
@@ -244,16 +252,17 @@ func (l *Link) sample(sensorUTC string, hello, held bool) (raised, onset bool) {
 	before := l.standingLocked()
 	switch {
 	case hello:
-		s.samples, s.ticked = []time.Duration{o}, false
+		s.samples, s.shift, s.ticked = []time.Duration{o}, []time.Duration{0}, false
 	case !s.ticked:
-		s.samples, s.ticked = []time.Duration{o}, true
+		s.samples, s.shift, s.ticked = []time.Duration{o}, []time.Duration{0}, true
 	default:
-		s.samples = append(s.samples, o)
+		s.samples, s.shift = append(s.samples, o), append(s.shift, 0)
 		if len(s.samples) > SkewSamples {
 			s.samples = s.samples[len(s.samples)-SkewSamples:]
+			s.shift = s.shift[len(s.shift)-SkewSamples:]
 		}
 	}
-	s.latest, s.latestOff, s.has = o, wall.UnixNano()-int64(mono), true
+	s.latest, s.latestShift, s.latestOff, s.has = o, 0, wall.UnixNano()-int64(mono), true
 	e := s.minE()
 	raise := false
 	switch {
@@ -303,7 +312,7 @@ func (l *Link) standingLocked() string {
 	switch {
 	case !s.has:
 		return ""
-	case absDur(s.latest) > MaxSkew && !skewGateEOnly:
+	case absDur(s.latest-s.latestShift) > MaxSkew && !skewGateEOnly:
 		return skewLatest
 	case s.alarm:
 		return skewAlarm
@@ -363,7 +372,7 @@ func (l *Link) storedRefusal(off int64, live bool) string {
 		return ""
 	case !live:
 		return skewPrestart
-	case absDur(time.Duration(l.offNow()-off)) > MaxSkew:
+	case absDur(time.Duration(l.offStored()-off)) > MaxSkew:
 		return skewMoved
 	}
 	return ""

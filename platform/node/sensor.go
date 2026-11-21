@@ -455,6 +455,7 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 		return false
 	}
 	in.link.TickHold(ctx)
+	in.link.CheckStep(ctx) // the step check at the tick (section 1.9 item 5)
 	r.pruneIntake(ctx, "")
 	if r.detector == nil {
 		// After the intake's start repair, so the sessions it wrote are
