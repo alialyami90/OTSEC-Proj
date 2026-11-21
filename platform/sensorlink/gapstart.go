@@ -42,15 +42,15 @@ import (
 // back only to its own first heartbeat; frozenUnwatchedOnly clears frozen
 // only at an unwatched close; gapDropReversed drops a closed record whose
 // end is before its start; stepFloorUnmoved moves W, R and the copy back
-// at a step, not the floor; capFloorOnly caps the floor but not W and R;
-// floorNoCap caps the floor at no point and keeps it, at an unwatched
-// close, as the later of its value and the close's to_utc; stepKeepsOld
-// moves nothing back at a step; placeAtSensor places W and R at the
-// heartbeat's at_utc; raiseNoHeld saves an unwatched close's raise with no
-// gap held for the floor; gapWMovesAtOpen moves W to the wall clock at a
+// at a step, and neither moves nor caps the floor; floorNoCap caps the
+// floor at no point and keeps it, at an unwatched close, as the later of
+// its value and the close's to_utc; stepKeepsOld neither moves nor caps
+// anything at a step; placeAtSensor places W and R at the heartbeat's
+// at_utc; raiseNoHeld saves an unwatched close's raise with no gap held
+// for the floor; gapWMovesAtOpen moves W and R to the wall clock at a
 // gap's open.
 var startGapOff, startFromNow, startCapsAtOnce, startMarkAtCapOnly, startCopyUncapped, gapOpenWallW, gapChainFromFirst bool
-var frozenUnwatchedOnly, gapDropReversed, stepFloorUnmoved, capFloorOnly, floorNoCap, stepKeepsOld, placeAtSensor, raiseNoHeld, gapWMovesAtOpen bool
+var frozenUnwatchedOnly, gapDropReversed, stepFloorUnmoved, floorNoCap, stepKeepsOld, placeAtSensor, raiseNoHeld, gapWMovesAtOpen bool
 
 // The run file's copy (CH-45): copyHeldIgnored takes it as the earlier of
 // W and R alone; copyHeldFromSave holds the held gap's start in it only
@@ -106,6 +106,9 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 	if startFromNow {
 		from, bound = wall, false
 	}
+	if gapFromW && !wt.w.IsZero() {
+		from = wt.w // the control: the gap from W, not the earlier of W and R
+	}
 	for _, t := range []time.Time{wt.w, wt.r, wt.floor} {
 		if t.After(wall) && !startMarkAtCapOnly {
 			stepped = true
@@ -115,6 +118,11 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 	// the wall clock (CH-45, "When it is written"), and never past 60 s
 	// after the open.
 	wMono := min(mono-wall.Sub(from), mono)
+	// At a start the floor is where the gap begins (CH-45, "The floor"),
+	// so a placement before the cap at its close is never below it.
+	if from.After(wt.floor) {
+		wt.floor = from
+	}
 	wt.open = &openGap{from: from, cause: CauseNodeStart, causes: gapCauseBit(CauseNodeStart), openMono: mono, wMono: wMono, stepped: stepped, bound: bound}
 	wt.gapDue = true
 	if !wt.w.IsZero() {

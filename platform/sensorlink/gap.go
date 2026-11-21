@@ -316,8 +316,9 @@ func (wt *watch) earlierWR() time.Time {
 }
 
 // openLocked opens a gap of cause from the earlier of W and R, or adds
-// cause to the gap open now. With neither held it opens nothing: a gap
-// from a bound is 2e-3's and P4-4-DE's. The caller holds s.mu.
+// cause to the gap open now. With neither held it opens nothing: the gap
+// from a bound at a start is gapstart.go's, and while the node runs
+// P4-4-DE's. The caller holds s.mu.
 func (s *skew) openLocked(cause string, wall time.Time, mono time.Duration) {
 	wt := &s.wt
 	if gapsOff {
@@ -341,7 +342,7 @@ func (s *skew) openLocked(cause string, wall time.Time, mono time.Duration) {
 		from = wall
 	}
 	if gapWMovesAtOpen && !wt.w.IsZero() {
-		wt.w = wall
+		wt.w, wt.r = wall, wall
 	}
 	wMono := mono
 	if wt.placed {
@@ -621,7 +622,9 @@ func (l *Link) connEnded(ctx context.Context, accepted bool) {
 	}
 	l.gmu.Lock()
 	defer l.gmu.Unlock()
-	l.measureStep()
+	if !stepTickOnly {
+		l.measureStep()
+	}
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()
@@ -644,7 +647,9 @@ func (l *Link) SensorFailed(ctx context.Context) {
 	}
 	l.gmu.Lock()
 	defer l.gmu.Unlock()
-	l.measureStep()
+	if !stepTickOnly {
+		l.measureStep()
+	}
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()

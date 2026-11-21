@@ -48,15 +48,15 @@ import (
 //     step, the cursor and the run file are saved at once, and
 //     time.node-stepped is written once. Then W or R still later than the
 //     wall clock takes the wall-clock time, acted on the same way; before
-//     W's first placement since the start a check only measures (the
-//     node-start gap's close is 2e-3's). It never moves the capture floor,
-//     M or the start bound (section 1.5).
-//   - The run file's copy is the earlier of W and R as the link holds them
-//     when the file is written; with none held, the copy the file had.
+//     W's first placement since the start a check only measures, and the
+//     node-start gap's close caps (gapstart.go). It never moves the capture
+//     floor, M or the start bound (section 1.5).
+//   - The run file's copy is the earliest of W, R and the start of the gap
+//     held for the floor as the link holds them when the file is written,
+//     never rising while a gap is held; with none held, the copy last
+//     written.
 //
-// Not here (2e-2 and 2e-3): the gaps, their causes and the chain, the gap
-// floor and the gap held for the floor, the budgets, the node-start gap
-// and its cap, and the reach-back to the copy.
+// The gaps are gap.go's (2e-2) and gapstart.go's (2e-3).
 
 // DefaultBlindAfter is blind_after_s's default (CH-31).
 const DefaultBlindAfter = 300 * time.Second
@@ -131,8 +131,8 @@ type watch struct {
 	liveTotal uint64
 	// The gap model (gap.go, 2e-2): the gap open, the closing record that
 	// waits, the gap floor; frozen: W and R were taken from the cursor
-	// at the start and are not moved until a gap closes unwatched (2e-3
-	// builds the node-start gap); heldSave: an unwatched close's raise is
+	// at the start and are not moved until a gap closes, the node-start
+	// gap's close included (gapstart.go); heldSave: an unwatched close's raise is
 	// not yet saved; gapDue: a record may be due; current: a connection
 	// whose hello is current is live; wRecv and wMono: the receipt of W's
 	// heartbeat and W itself on the monotonic clock; ch: the chain.
@@ -176,9 +176,9 @@ func (l *Link) takeWatch(c *Cursor) {
 	}
 	wt.w, wt.wSeq, wt.wAt, wt.r = c.W, c.WSeq, c.WAtUTC, c.R
 	wt.startG, wt.startD = c.G, c.D
-	// Until 2e-3's node-start gap, W and R saved before the stop are not
-	// moved by a placement, so a gap after the start reaches back across
-	// the stop (D1's 7056051455 on #770).
+	// W and R saved before the stop are not moved by a placement until a
+	// gap closes, so a gap after the start reaches back across the stop
+	// (D1's 7056051455 on #770); the node-start gap is that gap.
 	wt.frozen = !c.W.IsZero() || !c.R.IsZero()
 	if c.Held != nil {
 		// A gap held for the floor at the stop is written first (CH-45).
@@ -516,9 +516,9 @@ func (s *skew) capLocked(wall time.Time) {
 	wt := &s.wt
 	ts := []*time.Time{&wt.w, &wt.r, &wt.floor}
 	switch {
-	case capFloorOnly:
-		ts = ts[2:]
-	case floorNoCap:
+	case stepKeepsOld:
+		return
+	case floorNoCap || stepFloorUnmoved:
 		ts = ts[:2]
 	}
 	capped := time.Duration(0)
