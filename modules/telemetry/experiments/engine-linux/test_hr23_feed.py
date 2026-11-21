@@ -445,7 +445,7 @@ FEED_MUTANTS = {
     "counted-dropped": ('"$work/hr23-kept.txt" $hr23_counted', '"$work/hr23-kept.txt"'),
     "ref-is-main": ("!= refs/heads/main ]", "!= main ]"),
     "engine-output-printed": ('} > "$work/hr23-engines.txt" 2>&1\n', "}\n"),
-    "pin-dropped": ('  python3 -I -B "$here/hr23_feed.py" pin', '  : python3 -I -B "$here/hr23_feed.py" pin'),
+    "pin-dropped": ('  python3 -I -B "$here/hr23_feed.py" pin "$h"', '  : python3 -I -B "$here/hr23_feed.py" pin "$h"'),
     # D6's N1 on #769: the five wiring mutants.
     "c1p-on-stock": ("    img=$HR23_C1P_IMAGE\n", ""),
     "c2-on-c1p": ("    img=$HR23_C2_IMAGE\n", ""),
