@@ -2118,6 +2118,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no device contact (the TCP-after-bad-CRC H-row needs the owner's authorization); no reading of session content.
 - Uncertainty or safety risks: new hand-written C++ in `DNP3.cc`'s buffer code (D3), and a scan that an attacker could use to smuggle frames (D2, D3).
 - Scratch files: `d4-hr25-*`, `d6-hr25-*`
+- Result: the design is #782 (`c3edfd8a`); deliverable 2's cases are #787 (`1ac35c4b`); deliverable 3 is split into HR25-B1 (#789), B2 and B3 (D4-124 item 2.2).
 
 ## After D4-102: the approved contracts in code (issued 2026-11-14, D4-103)
 
