@@ -1,0 +1,29 @@
+{
+  "schema": "otsec.event/0.6",
+  "id": {"node_id": "d6-node", "stream": "platform/health", "seq": 55},
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {"origin_auth": "platform"},
+  "received": {"utc": "2026-11-21T09:00:02.000250Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "health": {
+    "type": "collection.run",
+    "details": {
+      "asset_id": "3f2a1b0c-9d8e-4f7a-a6b5-c4d3e2f1a0b9",
+      "schedule": "d6-ser-read",
+      "operation": "sel.ser.read_all",
+      "request_id": "6e1d2c3b-4a59-4687-9a1b-2c3d4e5f6a7b",
+      "invocation_id": "0b9a6e2c-5d4f-4e3a-9b1c-000000000009",
+      "status": "ok",
+      "events": "1",
+      "endpoint": "192.0.2.20:23",
+      "l4": "tcp",
+      "local_addr": "192.0.2.14:49812",
+      "started_at": "2026-11-21T08:59:58.1Z",
+      "connected_at": "2026-11-21T08:59:58.2Z",
+      "ended_at": "2026-11-21T09:00:01.9Z",
+      "connected": "true",
+      "open_flow": "false",
+      "after_seq": "941"
+    }
+  }
+}
