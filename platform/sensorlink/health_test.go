@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,6 +94,7 @@ type healthRig struct {
 	sink *memSink
 	file *RunFile
 	h    *Health
+	gen  *linkGen
 }
 
 // newHealthRig makes the rig for a sensor that has just been enrolled: no
@@ -105,11 +107,59 @@ func newHealthRig(t *testing.T) *healthRig {
 
 func (r *healthRig) restartNoStart() {
 	r.file = OpenRunFile(r.path)
+	// Each link's own view of the stores and the stream, so a kill can end
+	// an old link's writes while its connection is still open (gapstart_test.go).
+	gen := &linkGen{}
+	r.gen = gen
 	r.rig.opt = func(o *Options) {
-		r.h = NewHealth(HealthConfig{SensorID: testSensor, Sink: r.sink, Monotonic: r.clk.mono, Now: r.now, Raise: o.Raise, File: r.file})
-		o.Health, o.Owed = r.h, nil
+		r.h = NewHealth(HealthConfig{SensorID: testSensor, Sink: genSink{gen, r.sink}, Monotonic: r.clk.mono, Now: r.now, Raise: o.Raise, File: r.file})
+		o.Health, o.Owed, o.Cursor = r.h, nil, genCursor{gen, o.Cursor}
 	}
 	r.rig.restart()
+}
+
+// linkGen is one link's life: once dead, its stores and stream refuse it.
+type linkGen struct {
+	dead atomic.Bool
+	// beforeSave, when set, runs before each cursor save that is let
+	// through.
+	beforeSave func()
+}
+
+var errKilled = errors.New("test: the link was killed")
+
+type genCursor struct {
+	g  *linkGen
+	cs CursorStore
+}
+
+func (c genCursor) SourceCursor(ctx context.Context) ([]byte, error) {
+	if c.g.dead.Load() {
+		return nil, errKilled
+	}
+	return c.cs.SourceCursor(ctx)
+}
+
+func (c genCursor) SaveSourceCursor(ctx context.Context, b []byte) error {
+	if c.g.dead.Load() {
+		return errKilled
+	}
+	if c.g.beforeSave != nil {
+		c.g.beforeSave()
+	}
+	return c.cs.SaveSourceCursor(ctx, b)
+}
+
+type genSink struct {
+	g *linkGen
+	s HealthSink
+}
+
+func (s genSink) WriteHealth(ctx context.Context, typ string, d map[string]string) error {
+	if s.g.dead.Load() {
+		return errKilled
+	}
+	return s.s.WriteHealth(ctx, typ, d)
 }
 
 // restart is a node restart: a new link and Health over the same stores

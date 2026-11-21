@@ -1812,7 +1812,7 @@ func TestGapBoundaries(t *testing.T) {
 	dueAt := func(since time.Duration) bool {
 		var s skew
 		s.wt.open = &openGap{from: at0, cause: CauseLink, causes: gapCauseBit(CauseLink), openMono: time.Hour, wMono: time.Hour}
-		d, _ := s.nextRecordLocked(time.Hour+since, false)
+		d, _ := s.nextRecordLocked(at0, time.Hour+since, false)
 		return d != nil
 	}
 	if !dueAt(gapOpenAfter) || dueAt(gapOpenAfter-1) {

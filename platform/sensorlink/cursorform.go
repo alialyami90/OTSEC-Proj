@@ -39,7 +39,8 @@ import (
 // nanoseconds, in either order, since a step back can put the end before
 // the start), the cause at the open (a token of gapCauses), the causes
 // (bits), the gaps it carries (at least 1), and its mark (1
-// clock_stepped, 2 from_bound). W and its seq and at_utc are written
+// clock_stepped, 2 from_bound, 4 covered: a covered close waiting for its
+// budget, D1's ruling on #788). W and its seq and at_utc are written
 // together or not at all; the interface count is "-" when none is held,
 // and its slots past the count "-". Its largest is 2,026 bytes (section
 // 1.4), within MaxLinkCursorBytes by construction.
@@ -482,6 +483,9 @@ func appendHeld(f []string, g *HeldGap) []string {
 	if g.Bound {
 		m |= 2
 	}
+	if g.Covered {
+		m |= 4
+	}
 	return append(f, strconv.FormatInt(clampNano(g.From), 10), strconv.FormatInt(clampNano(g.To), 10), causeCode(g.Cause),
 		strconv.FormatUint(uint64(g.Causes), 10), strconv.FormatUint(g.Gaps, 10), strconv.Itoa(m))
 }
@@ -510,10 +514,10 @@ func readHeld(f []string, c *Cursor) bool {
 	}
 	n, err := strconv.ParseUint(s[4], 10, 64)
 	m, err2 := strconv.Atoi(s[5])
-	if err != nil || n == 0 || err2 != nil || m < 0 || m > 3 || s[5] != strconv.Itoa(m) {
+	if err != nil || n == 0 || err2 != nil || m < 0 || m > 7 || s[5] != strconv.Itoa(m) {
 		return false
 	}
-	c.Held = &HeldGap{From: t[0], To: t[1], Cause: cause, Causes: bits, Gaps: n, Stepped: m&1 != 0, Bound: m&2 != 0}
+	c.Held = &HeldGap{From: t[0], To: t[1], Cause: cause, Causes: bits, Gaps: n, Stepped: m&1 != 0, Bound: m&2 != 0, Covered: m&4 != 0}
 	return true
 }
 
