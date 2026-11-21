@@ -313,8 +313,13 @@ def cases():
     # A failed header consumes 1 octet (design 2.1; T9's first case): a
     # false 05 64, then W's frame 2 octets later, in one datagram.
     f = Flow().start()
-    f.send(M, b"d" + whole(M, 1, W))
+    f.send(M, b"\x05\x64" + whole(M, 1, W))
     out["d4u-hr25-false-magic"] = f.finish(2)
+    # The same with W at an odd offset (3), so a scan that consumes 2
+    # octets steps over it (D6's B2 residual on #789).
+    f = Flow().start()
+    f.send(M, b"\x05\x64\x00" + whole(M, 1, W))
+    out["d4u-hr25-false-magic-odd"] = f.finish(2)
 
     # A link-only frame goes on with the rest of the delivery (design 2.1,
     # R4): Test Link States, then W, in one datagram.
@@ -433,6 +438,8 @@ EXPECT = [
     ("d4u-hr25-failed-header-mid-tcp", "a failed header leaves the state, TCP", ALL, {("m", "magic"): 1},
      ["scan-clears"]),
     ("d4u-hr25-false-magic", "a failed header consumes 1 octet", ALL, {("m", "header_crc"): 1}, ["header-skip-10"]),
+    ("d4u-hr25-false-magic-odd", "a failed header consumes 1 octet: W at an odd offset", ALL,
+     {("m", "header_crc"): 1}, ["header-skip-2"]),
     ("d4u-hr25-link-only-then-w", "a link-only frame goes on with the rest of the delivery (R4)", ALL, {},
      ["linkonly-ends-delivery"]),
     ("d4u-hr25-chunk-crc-then-w", "skip by length: the octets after a failed frame are parsed (R1)", ALL,

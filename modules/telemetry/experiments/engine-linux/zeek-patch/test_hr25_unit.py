@@ -106,7 +106,7 @@ class Model:
                         e.clear()
                     e.scanning = True
                     self.count(orig, cause)
-                e.buf = e.buf[10:] if self.mut == "header-skip-10" else e.buf[1:]
+                e.buf = e.buf[{"header-skip-10": 10, "header-skip-2": 2}.get(self.mut, 1):]
                 continue
             e.scanning = False
             length, ctrl = e.buf[2], e.buf[3]
