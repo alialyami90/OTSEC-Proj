@@ -468,7 +468,9 @@ func clampNano(t time.Time) int64 {
 	return t.UnixNano()
 }
 
-// appendHeld is the gap held for the floor (fields 40 to 45).
+// appendHeld is the gap held for the floor (fields 40 to 45). The cause at
+// its open is one character, its place in gapCauses, as section 1.4 gives
+// it (D6's N5 on #781).
 func appendHeld(f []string, g *HeldGap) []string {
 	if g == nil {
 		return append(f, cursorAbsent, cursorAbsent, cursorAbsent, cursorAbsent, cursorAbsent, cursorAbsent)
@@ -480,7 +482,7 @@ func appendHeld(f []string, g *HeldGap) []string {
 	if g.Bound {
 		m |= 2
 	}
-	return append(f, strconv.FormatInt(clampNano(g.From), 10), strconv.FormatInt(clampNano(g.To), 10), g.Cause,
+	return append(f, strconv.FormatInt(clampNano(g.From), 10), strconv.FormatInt(clampNano(g.To), 10), causeCode(g.Cause),
 		strconv.FormatUint(uint64(g.Causes), 10), strconv.FormatUint(g.Gaps, 10), strconv.Itoa(m))
 }
 
@@ -502,7 +504,8 @@ func readHeld(f []string, c *Cursor) bool {
 		t[i] = time.Unix(0, n).UTC()
 	}
 	bits, ok := causeBits(s[3])
-	if !ok || gapCauseBit(s[2]) == 0 || !cursorDecimal.MatchString(s[4]) {
+	cause, ok2 := causeOfCode(s[2])
+	if !ok || !ok2 || !cursorDecimal.MatchString(s[4]) {
 		return false
 	}
 	n, err := strconv.ParseUint(s[4], 10, 64)
@@ -510,8 +513,26 @@ func readHeld(f []string, c *Cursor) bool {
 	if err != nil || n == 0 || err2 != nil || m < 0 || m > 3 || s[5] != strconv.Itoa(m) {
 		return false
 	}
-	c.Held = &HeldGap{From: t[0], To: t[1], Cause: s[2], Causes: bits, Gaps: n, Stepped: m&1 != 0, Bound: m&2 != 0}
+	c.Held = &HeldGap{From: t[0], To: t[1], Cause: cause, Causes: bits, Gaps: n, Stepped: m&1 != 0, Bound: m&2 != 0}
 	return true
+}
+
+// causeCode is cause's one-character code, its place in gapCauses.
+func causeCode(cause string) string {
+	for i, c := range gapCauses {
+		if c == cause {
+			return strconv.Itoa(i)
+		}
+	}
+	return cursorAbsent // never a cause the model holds; read back as a bad form
+}
+
+// causeOfCode reads a cause's one-character code.
+func causeOfCode(s string) (string, bool) {
+	if len(s) != 1 || s[0] < '0' || int(s[0]-'0') >= len(gapCauses) {
+		return "", false
+	}
+	return gapCauses[s[0]-'0'], true
 }
 
 // causeBits reads a set of causes, 1 to the full set.

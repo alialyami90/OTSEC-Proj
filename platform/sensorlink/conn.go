@@ -1291,11 +1291,7 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 	// An unwatched close's raise is saved before its record is written; a
 	// save that fails closes store, and the raise is saved with the next
 	// save (CH-18).
-	l.gmu.Lock()
-	l.place(cn, h, late)
-	err := l.gapAct(ctx, cn)
-	l.gmu.Unlock()
-	if err != nil {
+	if err := l.placeAndAct(ctx, cn, h, late); err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: a gap's raise was not saved: %v", l.cfg.SensorID, err))
 		return netobs.CloseStore
 	}

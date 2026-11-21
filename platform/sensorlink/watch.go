@@ -86,6 +86,10 @@ type IfaceMark struct {
 var k1ProcessOnly, placeAtReceipt, stepNoSamples, stepCapsCaptureFloor, stepFoundOnly, stepAnyBack, stepTickOnly bool
 var stepClocksBeforeLock, watchSetResets, stepCopyUnmoved, k1KeptAnySeq, sampleClocksBeforeLock bool
 
+// stepMinuteOnly acts only on a step back of a minute or more: V-9's
+// eleventh case's second control (D6's N3 on #781).
+var stepMinuteOnly bool
+
 // ifLive is an interface's CH-31 state in this process.
 type ifLive struct {
 	packets  uint64
@@ -344,7 +348,7 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 		ic, lv := byName[n], wt.live[n]
 		if ic.Packets > lv.packets && totalRose {
 			lv.riseAt, lv.riseMono, lv.rose = at, mono, true
-			rose = rose || ic.Carrier != "down"
+			rose = rose || ic.Carrier != "down" || gapBlindFromAnyRise
 		}
 		lv.packets = ic.Packets
 		if ic.Carrier != "down" && (lv.rose && mono-lv.riseMono <= blind || lv.fromBegin && wt.beganOK && mono-wt.began <= blind) {
@@ -386,7 +390,7 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 				return
 			}
 			s.closeLocked(false, wall)
-		case s.chainCoversLocked(cn, mono):
+		case (!gapSilentNeverCovered || g.causes&gapCauseBit(CauseSilent) == 0) && s.chainCoversLocked(cn, wall, mono):
 			s.closeLocked(true, wall)
 		case capture:
 			s.closeLocked(false, wall)
@@ -402,8 +406,14 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	}
 	if rose {
 		wt.r = p
+		if gapRAtReceipt {
+			wt.r = wall
+		}
 	}
 	if capture {
+		if gapWAtReceipt {
+			p = wall
+		}
 		wt.w, wt.wSeq, wt.wAt, wt.placed = p, num(h.Seq), at, true
 		wt.wRecv, wt.wMono = mono, mono-wall.Sub(p)
 		wt.run, wt.kept = h.RunID, make([]IfaceMark, len(names))
@@ -469,7 +479,7 @@ func (l *Link) measureStep() bool {
 	wt := &s.wt
 	if wt.checked {
 		diff := wall.Sub(wt.chkWall) - (mono - wt.chkMono)
-		if back := -diff; back > MaxSkew || stepAnyBack && back > 0 {
+		if back := -diff; back > MaxSkew && (!stepMinuteOnly || back >= time.Minute) || stepAnyBack && back > 0 {
 			s.moveBackLocked(back)
 		} else {
 			wt.unfound += diff
@@ -622,7 +632,9 @@ func (l *Link) saveMoved(ctx context.Context) error {
 // back if it finds a step; its event and the cursor's save wait for the
 // next check that can act, since the run file is being written.
 func (l *Link) watchedCopy() (c time.Time, back time.Duration) {
-	l.measureStep()
+	if !stepTickOnly {
+		l.measureStep()
+	}
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()

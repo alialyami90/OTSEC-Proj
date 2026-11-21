@@ -1,6 +1,7 @@
 package sensorlink
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -11,9 +12,10 @@ import (
 
 // INT-D5 2e-2 (gap.go; docs/phase4/D5-sensor-node.md section 1.9 item 5;
 // C13 CH-39, CH-45): the gaps while the node runs, C8-7's legs V-2 to
-// V-8, V-10's first three cases, V-13, V-16, V-17 (the gap only), V-9's
-// third and eleventh cases and V-14's fourth to seventh, each with its
-// control. Desk only: the in-memory pipe and the rig's test clocks, a
+// V-8, V-10's first three cases, V-13, V-16 but its fifth case's step,
+// V-17 but its fifth case (the gap only), V-9's third and eleventh cases
+// and V-14's fourth to seventh, each with its control; and D1's rulings 1
+// to 3 on #781. Desk only: the in-memory pipe and the rig's test clocks, a
 // test source in place of the sensor, and the health stream an in-memory
 // sink. No sensor produced the records and no device was contacted.
 
@@ -520,6 +522,7 @@ func TestGapSensorFailedOpen(t *testing.T) {
 	if d := g.openRecord(); d == nil || d["cause"] != CauseSensorFailed || !fromOf(d).Equal(recv) {
 		t.Fatalf("records %v, want sensor-failed open from %s at the panic", g.gaps(), recv)
 	}
+	g.live(3, true) // later heartbeats close nothing (D6's M7 and PF on #781)
 	g.cut()
 	g.idle(10 * time.Minute)
 	if len(g.gaps()) != 1 || !g.r.l.GapStatus().Open {
@@ -577,6 +580,9 @@ func (g *gsrc) flush() {
 //     later the link is cut for two minutes and restored with a full
 //     chain: the link gap is covered, from no earlier than t1. Control: no
 //     floor, which starts it about 15 s before t1.
+//   - The second case's control: a silent gap closed only unwatched. The
+//     fifth and eighth cases, and three of D6's probes on #781 (PJ, PM and
+//     the cause's end at its bound), as each subtest states.
 func TestGapHeartbeatSilence(t *testing.T) {
 	five := func(t *testing.T) (*gsrc, time.Time) {
 		g := newGsrc(t)
@@ -604,15 +610,24 @@ func TestGapHeartbeatSilence(t *testing.T) {
 			t.Fatalf("records %v under the control", g.gaps())
 		}
 	})
-	t.Run("four minutes late", func(t *testing.T) {
+	fourLate := func(t *testing.T) *gsrc {
 		g := newGsrc(t)
 		g.live(6, true)
 		g.queue(24, true)
 		g.flush()
 		g.live(3, true)
-		if d := g.lastGap(); d == nil || d["covered"] != "true" || g.r.l.GapStatus().Open {
+		return g
+	}
+	t.Run("four minutes late", func(t *testing.T) {
+		if g := fourLate(t); g.lastGap() == nil || g.lastGap()["covered"] != "true" || g.r.l.GapStatus().Open {
 			t.Fatalf("records %v, want closed covered", g.gaps())
 		}
+		t.Run("control: silent closed only unwatched", func(t *testing.T) {
+			withSeam(t, &gapSilentNeverCovered)
+			if g := fourLate(t); g.anyCovered() {
+				t.Fatalf("records %v: the control closed it as covered", g.gaps())
+			}
+		})
 	})
 	twoLate := func(t *testing.T) *gsrc {
 		g := newGsrc(t)
@@ -697,6 +712,176 @@ func TestGapHeartbeatSilence(t *testing.T) {
 			}
 		})
 	})
+	// The reset at once after t1, before any later heartbeat: the link gap
+	// from no earlier than t1 (D6's M5 and PJ on #781).
+	t.Run("the reset at once after the close", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.idle(2 * time.Minute)
+		g.ahead = -25 * time.Second
+		g.live(1, true)
+		t1 := g.r.now()
+		g.cut()
+		g.idle(70 * time.Second)
+		if d := g.lastGap(); d == nil || d["cause"] != CauseLink || fromOf(d).Before(t1) {
+			t.Fatalf("records %v, want the link gap from no earlier than %s", g.gaps(), t1)
+		}
+	})
+	// A 40 s silence with no node tick before the next heartbeat: the
+	// silent gap opens at that heartbeat and closes unwatched, part 3
+	// failing (D6's M35 and PM on #781).
+	t.Run("40 s with no tick", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		w := g.w()
+		g.r.pass(40 * time.Second)
+		g.send(g.mk(true))
+		if d := g.lastGap(); d == nil || d["cause"] != CauseSilent || d["covered"] != "false" || !fromOf(d).Equal(w) {
+			t.Fatalf("records %v, want silent closed unwatched from %s", g.gaps(), w)
+		}
+	})
+	// The cause's end at its bound: a heartbeat exactly HeartbeatGapMax
+	// late leaves the gap open, and one 1 ns less late closes it (D6's M3
+	// on #781).
+	t.Run("the end at its bound", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.idle(70 * time.Second)
+		g.ahead = -HeartbeatGapMax
+		g.live(1, true)
+		if st := g.r.l.GapStatus(); !st.Open || st.Cause != CauseSilent {
+			t.Fatalf("gap %+v: closed by a heartbeat HeartbeatGapMax late", st)
+		}
+		g.ahead = -HeartbeatGapMax + 1
+		g.live(1, true)
+		if st := g.r.l.GapStatus(); st.Open {
+			t.Fatalf("gap %+v: not closed by a heartbeat less late", st)
+		}
+	})
+	// Fifth case: the delay raised by 10 s a heartbeat to 120 s, then no
+	// heartbeat made while those held are sent; ticks at 10 s, 20 s and
+	// 45 s after the last receipt: the silent gap is open by the tick at
+	// 45 s, from no later than the last heartbeat's at_utc + E (E is 0
+	// here). Controls: W and R at their receipts, about 120 s late; W at its
+	// receipt and R as built, from_utc passes but the record is not yet due.
+	lateStopped := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(3, true)
+		q, lastAt := g.ramp(6, nil)
+		g.drain(q)
+		for _, d := range []time.Duration{10, 10, 25} {
+			g.r.pass(d * time.Second)
+			g.tick()
+		}
+		return g, lastAt
+	}
+	t.Run("fifth: late, then stopped", func(t *testing.T) {
+		g, lastAt := lateStopped(t)
+		if d := g.openRecord(); d == nil || d["cause"] != CauseSilent || fromOf(d).After(lastAt) {
+			t.Fatalf("records %v, want silent open from no later than %s", g.gaps(), lastAt)
+		}
+		t.Run("control: W and R at their receipts", func(t *testing.T) {
+			withSeam(t, &placeAtReceipt)
+			if g, lastAt := lateStopped(t); !g.r.l.GapStatus().From.After(lastAt.Add(time.Minute)) {
+				t.Fatalf("gap %+v: the control did not start it late", g.r.l.GapStatus())
+			}
+		})
+		t.Run("control: W at its receipt", func(t *testing.T) {
+			withSeam(t, &gapWAtReceipt)
+			if g, _ := lateStopped(t); g.openRecord() != nil {
+				t.Fatalf("records %v: the control wrote it by the tick at 45 s", g.gaps())
+			}
+		})
+	})
+	// Eighth case: the floor case with the node's wall clock stepped back
+	// 60 s, 5 s before t1, and no tick between: the silent record carries
+	// clock_stepped, time.node-stepped is written once, and the link gap is
+	// from no earlier than t1. Control: the step check at the tick only,
+	// which writes the silent record unmarked and starts the link gap
+	// before t1.
+	stepAtClose := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.idle(2 * time.Minute)
+		g.ahead = -25 * time.Second
+		g.r.pass(5 * time.Second)
+		g.r.addWall(-time.Minute) // the node's clock alone
+		g.ahead += time.Minute
+		g.r.pass(5 * time.Second)
+		g.send(g.mk(true)) // t1, no tick since the step
+		t1 := g.r.now()
+		g.live(1, true)
+		g.cut()
+		g.buffer(12, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g, t1
+	}
+	t.Run("eighth: a step found at the close", func(t *testing.T) {
+		g, t1 := stepAtClose(t)
+		gs := g.gaps()
+		if len(gs) != 4 || gs[1]["cause"] != CauseSilent || gs[1]["clock_stepped"] != "true" || g.r.sink.count("time.node-stepped") != 1 {
+			t.Fatalf("records %v and %d steps, want the silent record marked and one step", gs, g.r.sink.count("time.node-stepped"))
+		}
+		if d := g.lastGap(); d["cause"] != CauseLink || fromOf(d).Before(t1) {
+			t.Fatalf("records %v, want the link gap from no earlier than %s", gs, t1)
+		}
+		t.Run("control: the step check at the tick only", func(t *testing.T) {
+			withSeam(t, &stepTickOnly)
+			g, t1 := stepAtClose(t)
+			if g.gaps()[1]["clock_stepped"] == "true" || !fromOf(g.lastGap()).Before(t1) {
+				t.Fatalf("records %v: the control marked the record or started the link gap at %s", g.gaps(), t1)
+			}
+		})
+	})
+}
+
+// pend is a heartbeat made and held by the source until due.
+type pend struct {
+	due time.Time
+	h   *netobs.Heartbeat
+}
+
+// ramp makes heartbeats every 10 s, a node tick before each, raising
+// their delay by 10 s a heartbeat to 120 s, and sends each once due: 12
+// rising to reach 120 s, then n more. rise, when set, is called before the
+// i-th of the n is made, and says whether its packets rise; nil, they
+// rise. It returns what the source still holds and the at_utc of the last
+// made.
+func (g *gsrc) ramp(n int, rise func(i int) bool) (q []pend, lastAt time.Time) {
+	d := time.Duration(0)
+	for i := range 12 + n {
+		g.r.pass(10 * time.Second)
+		g.tick()
+		up := true
+		if rise != nil && i >= 12 {
+			up = rise(i - 12)
+		}
+		h := g.mk(up)
+		lastAt = parseUTC(h.AtUTC)
+		d = min(d+10*time.Second, 120*time.Second)
+		q = append(q, pend{g.r.now().Add(d), h})
+		q = g.due(q)
+	}
+	return q, lastAt
+}
+
+// due sends what q holds that is due now.
+func (g *gsrc) due(q []pend) []pend {
+	for len(q) > 0 && !q[0].due.After(g.r.now()) {
+		g.send(q[0].h)
+		q = q[1:]
+	}
+	return q
+}
+
+// drain sends what q holds as each falls due, a node tick every 10 s.
+func (g *gsrc) drain(q []pend) {
+	for len(q) > 0 {
+		g.r.pass(10 * time.Second)
+		g.tick()
+		q = g.due(q)
+	}
 }
 
 // TestGapFlatCountsCarrierUp (V-17, the gap only: sensor.past-blind is
@@ -713,7 +898,10 @@ func TestGapHeartbeatSilence(t *testing.T) {
 //   - Flat from four minutes before W, no restart: from R. Control: a gap
 //     from W.
 //   - The cables pulled after W's heartbeat: the next heartbeat's packets
-//     rose, every carrier down: a blind gap from W.
+//     rose, every carrier down: a blind gap from W. Control: R taken at any
+//     rise, whatever its carrier, and the gap from R.
+//   - The third and fourth cases' control: a chain judged on stretches as
+//     long as blind_after_s. The ninth case, as its subtest states.
 func TestGapFlatCountsCarrierUp(t *testing.T) {
 	flatCut := func(t *testing.T) *gsrc {
 		g := newGsrc(t)
@@ -769,22 +957,30 @@ func TestGapFlatCountsCarrierUp(t *testing.T) {
 		g.live(3, true)
 		return g
 	}
-	t.Run("carrier down for 60 s", func(t *testing.T) {
-		g := inside(t, func(g *gsrc) {
-			g.carrier = "down"
-			g.buffer(6, true)
-			g.carrier = "up"
+	// The third and fourth cases' control: a chain judged on stretches as
+	// long as blind_after_s (D6's N3 on #781).
+	down60 := func(g *gsrc) {
+		g.carrier = "down"
+		g.buffer(6, true)
+		g.carrier = "up"
+	}
+	flat7 := func(g *gsrc) { g.buffer(42, false) }
+	for _, c := range []struct {
+		what string
+		mid  func(*gsrc)
+	}{{"carrier down for 60 s", down60}, {"flat for seven minutes", flat7}} {
+		t.Run(c.what, func(t *testing.T) {
+			if d := inside(t, c.mid).lastGap(); d == nil || d["covered"] != "false" {
+				t.Fatalf("records %v, want closed unwatched", d)
+			}
+			t.Run("control: stretches as long as blind_after_s", func(t *testing.T) {
+				withSeam(t, &gapChainStretch)
+				if g := inside(t, c.mid); !g.anyCovered() {
+					t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+				}
+			})
 		})
-		if d := g.lastGap(); d == nil || d["covered"] != "false" {
-			t.Fatalf("records %v, want closed unwatched", g.gaps())
-		}
-	})
-	t.Run("flat for seven minutes", func(t *testing.T) {
-		g := inside(t, func(g *gsrc) { g.buffer(42, false) })
-		if d := g.lastGap(); d == nil || d["covered"] != "false" {
-			t.Fatalf("records %v, want closed unwatched", g.gaps())
-		}
-	})
+	}
 	flatBefore := func(t *testing.T) (*gsrc, time.Time, time.Time) {
 		g := newGsrc(t)
 		g.live(6, true)
@@ -809,15 +1005,72 @@ func TestGapFlatCountsCarrierUp(t *testing.T) {
 			}
 		})
 	})
-	t.Run("the cables pulled", func(t *testing.T) {
+	pulled := func(t *testing.T) (*gsrc, time.Time) {
 		g := newGsrc(t)
 		g.live(6, true)
 		w := g.w()
 		g.carrier = "down"
 		g.live(1, true)
+		return g, w
+	}
+	t.Run("the cables pulled", func(t *testing.T) {
+		g, w := pulled(t)
 		if d := g.openRecord(); d == nil || d["cause"] != CauseBlind || fromOf(d).After(w) {
 			t.Fatalf("records %v, want blind open from no later than W %s", g.gaps(), w)
 		}
+		t.Run("control: R at any rise, the gap from R", func(t *testing.T) {
+			withSeam(t, &gapBlindFromAnyRise)
+			if g, w := pulled(t); g.openRecord() == nil || !fromOf(g.openRecord()).After(w) {
+				t.Fatalf("records %v: the control did not start it after W %s", g.gaps(), w)
+			}
+		})
+	})
+	// Ninth case: the delay raised by 10 s a heartbeat to 120 s, the link
+	// current; every carrier down 3 s after the heartbeat made at h, whose
+	// packets rose: the blind gap from no later than h's at_utc + E (E is
+	// 0 here). Control: W and R at their receipts, about 120 s late. Its
+	// second half: every packets flat, carrier up, from h until the
+	// carriers go down 60 s later: the same. Control: R at its receipt and
+	// W as built, from W, about 60 s late.
+	lateBlind := func(t *testing.T, flat int) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(3, true)
+		var h time.Time
+		q, _ := g.ramp(flat+3, func(i int) bool {
+			if i == 0 {
+				h = g.r.now().Add(-10 * time.Second) // the last made, which rose
+			}
+			if i >= flat {
+				g.carrier = "down"
+			}
+			return i >= flat
+		})
+		g.drain(q)
+		return g, h
+	}
+	t.Run("ninth: R with heartbeats late", func(t *testing.T) {
+		g, h := lateBlind(t, 0)
+		if d := g.openRecord(); d == nil || d["cause"] != CauseBlind || fromOf(d).After(h) {
+			t.Fatalf("records %v, want blind open from no later than %s", g.gaps(), h)
+		}
+		t.Run("control: W and R at their receipts", func(t *testing.T) {
+			withSeam(t, &placeAtReceipt)
+			if g, h := lateBlind(t, 0); g.openRecord() == nil || !fromOf(g.openRecord()).After(h.Add(time.Minute)) {
+				t.Fatalf("records %v: the control did not start it late", g.gaps())
+			}
+		})
+		t.Run("flat for 60 s from h", func(t *testing.T) {
+			g, h := lateBlind(t, 6)
+			if d := g.openRecord(); d == nil || d["cause"] != CauseBlind || fromOf(d).After(h) {
+				t.Fatalf("records %v, want blind open from no later than %s", g.gaps(), h)
+			}
+			t.Run("control: R at its receipt", func(t *testing.T) {
+				withSeam(t, &gapRAtReceipt)
+				if g, h := lateBlind(t, 6); g.openRecord() == nil || !fromOf(g.openRecord()).After(h.Add(30*time.Second)) {
+					t.Fatalf("records %v: the control did not start it late", g.gaps())
+				}
+			})
+		})
 	})
 }
 
@@ -838,7 +1091,9 @@ func (g *gsrc) twoIf(c1 string) {
 // capture: closed unwatched. Control: a name's rise_utc kept as the
 // heartbeat it was first seen in, which carries the chain on eth2 and
 // closes it as covered. Second case: a name changed inside the chain
-// fails it. Control: a chain that takes a new name as it comes.
+// fails it. Control: a chain that takes a new name as it comes. And two
+// of D6's probes on #781: a name dropped (PL) and a seq skipped (PG) inside
+// the chain, each unwatched.
 func TestGapChainNoRiseHeld(t *testing.T) {
 	run := func(t *testing.T) *gsrc {
 		g := newGsrc(t)
@@ -885,6 +1140,40 @@ func TestGapChainNoRiseHeld(t *testing.T) {
 				t.Fatalf("records %v: the control did not close it as covered", g.gaps())
 			}
 		})
+	})
+	// A name dropped for one heartbeat inside the chain, eth2 flat at 0:
+	// unwatched (D6's M11 and PL on #781).
+	t.Run("a name dropped in the chain", func(t *testing.T) {
+		g := newGsrc(t)
+		two := func(h *netobs.Heartbeat) { ifs([]string{"eth1", "eth2"}, []uint64{g.pk, 0})(h) }
+		g.f = two
+		g.live(6, true)
+		g.cut()
+		g.buffer(10, true)
+		g.f = func(h *netobs.Heartbeat) { ifs([]string{"eth1"}, []uint64{g.pk})(h) }
+		g.buffer(1, true)
+		g.f = two
+		g.buffer(10, true)
+		g.reconnect(false)
+		g.live(3, true)
+		if g.lastGap() == nil || g.anyCovered() {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
+	})
+	// One seq skipped inside an otherwise full chain: part 1 fails (D6's
+	// M1 and PG on #781).
+	t.Run("a seq skipped in the chain", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(30, true)
+		g.buf = append(g.buf[:15], g.buf[16:]...)
+		g.buffer(29, true)
+		g.reconnect(false)
+		g.live(3, true)
+		if g.lastGap() == nil || g.anyCovered() {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
 	})
 }
 
@@ -956,6 +1245,9 @@ func TestCaptureShuffleNotARise(t *testing.T) {
 //     clock_stepped and no time.node-stepped; and one step back of 3 s:
 //     unwatched with clock_stepped. Control: a check that acts on any
 //     backward difference, which marks the slewed gap.
+//   - The second controls: the length taken from the wall clock, which
+//     leaves the forward case unwatched; a step acted on only at a minute
+//     or more, which closes the 3 s case as covered.
 func TestGapClockStepped(t *testing.T) {
 	stepped := func(t *testing.T, step time.Duration, slew bool) *gsrc {
 		g := newGsrc(t)
@@ -993,6 +1285,12 @@ func TestGapClockStepped(t *testing.T) {
 		if g := stepped(t, 30*time.Minute, false); !g.anyCovered() || g.lastGap()["clock_stepped"] != "" {
 			t.Fatalf("records %v, want closed covered", g.gaps())
 		}
+		t.Run("control: the length from the wall clock", func(t *testing.T) {
+			withSeam(t, &gapLengthWall)
+			if g := stepped(t, 30*time.Minute, false); g.anyCovered() {
+				t.Fatalf("records %v: the control closed it as covered", g.gaps())
+			}
+		})
 	})
 	t.Run("slewed", func(t *testing.T) {
 		g := stepped(t, 0, true)
@@ -1011,6 +1309,12 @@ func TestGapClockStepped(t *testing.T) {
 		if d := g.lastGap(); d["covered"] != "false" || d["clock_stepped"] != "true" || stepEvents(g) != 1 {
 			t.Fatalf("records %v and %d steps, want unwatched with clock_stepped and one step", g.gaps(), stepEvents(g))
 		}
+		t.Run("control: a threshold of a minute", func(t *testing.T) {
+			withSeam(t, &stepMinuteOnly)
+			if g := stepped(t, -3*time.Second, false); !g.anyCovered() {
+				t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+			}
+		})
 	})
 }
 
@@ -1037,8 +1341,10 @@ func (g *gsrc) restartGap() {
 // two more gaps follow, each closing unwatched within seconds with a
 // sensor restart inside it: once the budget allows, one record holds the
 // three, from the first gap's start, merged 3, covered false and
-// clock_stepped, pairing with the first gap's open record. Control: a
-// merge from the last gap's start, which leaves the open record unpaired.
+// clock_stepped, pairing with the first gap's open record. Controls: a
+// merge from the last gap's start, which leaves the open record unpaired;
+// a merge that keeps the last gap's mark only, which writes no
+// clock_stepped. The third case is TestLostGapNotBehindOtherGaps.
 func TestGapLostOwnBudget(t *testing.T) {
 	lost := func(t *testing.T) *gsrc {
 		g := newGsrc(t)
@@ -1112,6 +1418,15 @@ func TestGapLostOwnBudget(t *testing.T) {
 				t.Fatalf("records %v: the control paired the open record", g.gaps())
 			}
 		})
+		t.Run("control: the last gap's mark only", func(t *testing.T) {
+			withSeam(t, &gapMergeLastMark)
+			g, _ := merge(t)
+			g.r.pass(time.Hour)
+			g.tick()
+			if g.gaps()[4]["clock_stepped"] == "true" {
+				t.Fatalf("records %v: the control marked the merged record", g.gaps())
+			}
+		})
 	})
 }
 
@@ -1170,10 +1485,13 @@ func held(t *testing.T, mid func(g *gsrc), during func(g *gsrc)) (g *gsrc, r0, t
 //     is held and none is open: the merged record carries clock_stepped,
 //     and time.node-stepped is written once. Control: a step that marks
 //     only the gap open then.
-//   - Sixth, the order: only the held gap's closing record refused; the
-//     second gap's open record is never written, and the merged record is
-//     written before any record of the link gap. Control: later records
-//     written while a closing record waits.
+//   - Sixth, the order and the pairing: only the held gap's closing record
+//     refused; after t2, while the field is held, the node's wall clock
+//     stepped back a minute, found at a tick; the connection reset and
+//     never restored, so C opens between R0 and t2 by number; the second
+//     gap's open record is never written, and the merged record, marked,
+//     is written before C's open record, which it does not pair. Control:
+//     later records written while a closing record waits.
 //   - Seventh, a step while the second gap is open: the merged record
 //     carries clock_stepped. Control: a step that marks only the gap open
 //     then, and a merge that keeps only the held gap's mark.
@@ -1240,7 +1558,7 @@ func TestGapHeldInW(t *testing.T) {
 			}
 		})
 	})
-	order := func(t *testing.T) (*gsrc, time.Time) {
+	order := func(t *testing.T) (*gsrc, time.Time, time.Time) {
 		g := newGsrc(t)
 		g.live(6, true)
 		r0 := g.w()
@@ -1253,24 +1571,38 @@ func TestGapHeldInW(t *testing.T) {
 		g.ahead = 0
 		g.idle(2 * time.Minute) // the second gap, written open past 60 s if nothing holds it
 		g.ahead = -25 * time.Second
-		g.live(2, true)
+		g.live(1, true)
+		t2 := g.r.now()
+		g.live(1, true)
+		// While the field is held, the node's wall clock alone stepped back
+		// a minute, more than the time since t2 and less than the time
+		// since R0, found at a tick (D6's N4 and PI on #781).
+		g.r.pass(time.Second)
+		g.r.addWall(-time.Minute)
+		g.ahead += time.Minute
+		g.tick()
 		g.cut()
 		g.idle(90 * time.Second)
 		g.r.sink.refuse = nil
 		g.tick()
-		return g, r0
+		return g, r0, t2
 	}
-	t.Run("sixth: the order", func(t *testing.T) {
-		g, r0 := order(t)
+	t.Run("sixth: the order and the pairing", func(t *testing.T) {
+		g, r0, t2 := order(t)
 		gs := g.gaps()
-		// The first gap's open record, then the merged record, then the
-		// link gap's open record.
-		if len(gs) != 3 || gs[0]["state"] != "open" || gs[1]["merged"] != "2" || !fromOf(gs[1]).Equal(r0) || gs[2]["cause"] != CauseLink {
-			t.Fatalf("records %v, want open, merged and link open in that order", gs)
+		// The first gap's open record, then the merged record, marked, then
+		// C's open record, between R0 and t2 by number, which the merged
+		// record does not pair.
+		if len(gs) != 3 || gs[0]["state"] != "open" || gs[1]["merged"] != "2" || gs[1]["clock_stepped"] != "true" ||
+			!fromOf(gs[1]).Equal(r0) || !parseUTC(gs[1]["to_utc"]).Equal(t2) || gs[2]["cause"] != CauseLink || gs[2]["state"] != "open" {
+			t.Fatalf("records %v, want open, the merged record marked, and C open, in that order", gs)
+		}
+		if c := fromOf(gs[2]); !c.After(r0) || !c.Before(t2) {
+			t.Fatalf("C from %s, want after R0 %s and before t2 %s", c, r0, t2)
 		}
 		t.Run("control: written behind", func(t *testing.T) {
 			withSeam(t, &gapWriteBehind)
-			g, _ := order(t)
+			g, _, _ := order(t)
 			if len(g.gaps()) <= 3 {
 				t.Fatalf("records %v: the control wrote nothing behind the held record", g.gaps())
 			}
@@ -1441,7 +1773,8 @@ func TestGapRaiseNotSaved(t *testing.T) {
 // HeartbeatGapMax passes and 1 ns over fails; its count at exactly the
 // length passes and 1 ns of length over fails; a silent gap opens at
 // exactly HeartbeatGapMax from W's receipt and not 1 ns before; a link
-// gap's open record is due at exactly 60 s from W and not 1 ns before.
+// gap's open record is due at exactly 60 s from W and not 1 ns before;
+// part 2 at both its bounds; a heartbeat read again is not counted again.
 func TestGapBoundaries(t *testing.T) {
 	blind := DefaultBlindAfter
 	at0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
@@ -1463,7 +1796,7 @@ func TestGapBoundaries(t *testing.T) {
 		cn := &conn{cur: &Cursor{RunID: testRun}}
 		s.wt.ch = chain{ok: true, run: testRun, n: 2}
 		s.wt.open = &openGap{cause: CauseLink, causes: gapCauseBit(CauseLink)}
-		return s.chainCoversLocked(cn, length)
+		return s.chainCoversLocked(cn, time.Time{}, length)
 	}
 	if !covers(2*HeartbeatGapMax) || covers(2*HeartbeatGapMax+1) {
 		t.Fatal("part 4 at its bound")
@@ -1484,5 +1817,257 @@ func TestGapBoundaries(t *testing.T) {
 	}
 	if !dueAt(gapOpenAfter) || dueAt(gapOpenAfter-1) {
 		t.Fatal("the open record's 60 s at its bound")
+	}
+	// Part 2 at both its bounds (D6's M2 on #781, D1's ruling 1): a rise
+	// at the heartbeat's own at_utc and one blind before it count; one 1 ns
+	// after it, or 1 ns more than blind before it, does not.
+	shows := func(rise time.Time) bool {
+		h := beat(1, at0, 100)
+		return chainShows(h, map[string]*chainIf{"eth1": {rise: rise}}, at0, blind)
+	}
+	if !shows(at0) || !shows(at0.Add(-blind)) || shows(at0.Add(1)) || shows(at0.Add(-blind-1)) {
+		t.Fatal("part 2 at its bounds")
+	}
+	// A heartbeat read again, as after a save that failed and a resume from
+	// before the chain's last seq, is not counted again (D6's M6 on #781).
+	var s skew
+	s.wt.live = map[string]*ifLive{"eth1": {riseAt: at0}}
+	s.startChainLocked(nil, beat(1, at0, 100), at0, 0, blind)
+	two := beat(2, at0.Add(10*time.Second), 200)
+	s.extendChainLocked(two, at0.Add(10*time.Second), blind)
+	s.extendChainLocked(two, at0.Add(10*time.Second), blind)
+	if s.wt.ch.n != 2 || !s.wt.ch.ok {
+		t.Fatalf("chain %+v, want two heartbeats counted", s.wt.ch)
+	}
+}
+
+// TestGapChainClockBack (D6's B1 on #781, D1's ruling 1; D6's probe PA):
+// CH-39 part 2 counts a rise only at or before the heartbeat's own
+// at_utc, and part 3 fails the chain when at_utc falls back. PA is V-17's
+// fourth case, ten heartbeats rising, 42 flat and ten rising in one cut,
+// with the sensor's clock stepped back five minutes just before the flat
+// stretch: closed unwatched. Control: both parts read signed, which
+// closes it as covered. Each one-line change is the control of a case of
+// its own: the step inside a cut whose counts keep rising, where part 3
+// alone fails the chain (control: at_utc let fall back); and the step just
+// before W's heartbeat, which is flat, then rising through the cut, where
+// part 2 alone fails it at W (control: part 2 read signed).
+func TestGapChainClockBack(t *testing.T) {
+	pa := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(10, true)
+		g.ahead -= 5 * time.Minute // the sensor's clock alone
+		g.buffer(42, false)
+		g.buffer(10, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	if g := pa(t); g.lastGap() == nil || g.anyCovered() {
+		t.Fatalf("records %v, want closed unwatched", g.gaps())
+	}
+	t.Run("control: both parts signed", func(t *testing.T) {
+		withSeams(t, &gapChainSignedRise, &gapChainFallBackOK)
+		if g := pa(t); !g.anyCovered() {
+			t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+		}
+	})
+	rising := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		g.buffer(10, true)
+		g.ahead -= 5 * time.Minute
+		g.buffer(52, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	t.Run("part 3: the step with the counts rising", func(t *testing.T) {
+		if g := rising(t); g.lastGap() == nil || g.anyCovered() {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
+		t.Run("control: at_utc let fall back", func(t *testing.T) {
+			withSeam(t, &gapChainFallBackOK)
+			if g := rising(t); !g.anyCovered() {
+				t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+			}
+		})
+	})
+	atW := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.ahead -= 2 * time.Minute
+		g.live(1, false) // W's heartbeat: its last rise lies after its at_utc
+		g.cut()
+		g.buffer(20, true)
+		g.reconnect(false)
+		g.live(3, true)
+		return g
+	}
+	t.Run("part 2: the step before W's heartbeat", func(t *testing.T) {
+		if g := atW(t); g.lastGap() == nil || g.anyCovered() {
+			t.Fatalf("records %v, want closed unwatched", g.gaps())
+		}
+		t.Run("control: part 2 signed", func(t *testing.T) {
+			withSeam(t, &gapChainSignedRise)
+			if g := atW(t); !g.anyCovered() {
+				t.Fatalf("records %v: the control did not close it as covered", g.gaps())
+			}
+		})
+	})
+}
+
+// TestGapLockReleasedAtPanic (D6's N1 on #781): a panic while a heartbeat
+// is placed leaves gmu free, so SensorFailed, the end of a connection and
+// the tick still run. Here the heartbeat is nil, which panics in place.
+func TestGapLockReleasedAtPanic(t *testing.T) {
+	g := newGsrc(t)
+	g.live(6, true)
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("no panic")
+			}
+		}()
+		_ = g.r.l.placeAndAct(bg, &conn{}, nil, false)
+	}()
+	if !g.r.l.gmu.TryLock() {
+		t.Fatal("gmu held after the panic")
+	}
+	g.r.l.gmu.Unlock()
+	g.r.l.SensorFailed(bg)
+	if d := g.openRecord(); d == nil || d["cause"] != CauseSensorFailed {
+		t.Fatalf("records %v, want sensor-failed open", g.gaps())
+	}
+}
+
+// secondSensor is the second sensor of V-6's third case.
+const secondSensor = "7a2d3b4c-5e6f-4a71-8b82-a3c4d5e6f708"
+
+// spendLost writes four lost gaps under their budget and leaves a fifth
+// waiting for it.
+func spendLost(t *testing.T, h *Health) {
+	t.Helper()
+	span := func(m int) HeldSpan {
+		f := time.Date(2026, 11, 7, 9, m, 0, 0, time.UTC)
+		return HeldSpan{FromUTC: canonUTC(f), ToUTC: canonUTC(f.Add(time.Minute)), CutUTC: canonUTC(f.Add(time.Minute)), Owed: true}
+	}
+	for i := range GapLostPerHour {
+		if err := h.WriteOwed(bg, Owed{Generation: 2, RunCounter: 5, RunID: testRun, Spans: []HeldSpan{span(2 * i)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.WriteOwed(bg, Owed{Generation: 2, RunCounter: 5, RunID: testRun, Spans: []HeldSpan{span(20)}}); !errors.Is(err, ErrHealthHeld) {
+		t.Fatalf("a fifth lost gap: %v, want it waiting", err)
+	}
+}
+
+// linkOpen is sensor's link gap's open record, nil when none.
+func (g *gsrc) linkOpen(sensor string) map[string]string {
+	for _, d := range g.r.sink.of(EventCoverageGap) {
+		if d["cause"] == CauseLink && d["state"] == "open" && d["sensor_id"] == sensor {
+			return d
+		}
+	}
+	return nil
+}
+
+// secondOn is a second sensor's link and Health over g's health sink, or,
+// for the control, over g's Health.
+func secondOn(t *testing.T, g *gsrc, sharedHealth bool) *gsrc {
+	r2 := newHealthRig(t)
+	r2.sink = g.r.sink
+	r2.rig.opt = func(o *Options) {
+		r2.h = NewHealth(HealthConfig{SensorID: secondSensor, Sink: r2.sink, Monotonic: r2.clk.mono, Now: r2.now, Raise: o.Raise, File: r2.file})
+		if sharedHealth {
+			r2.h = g.r.h
+		}
+		o.Health, o.Owed = r2.h, nil
+	}
+	r2.rig.restart()
+	return &gsrc{t: t, r: r2, p: r2.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
+}
+
+// TestLostGapNotBehindOtherGaps (V-6's third case). The lost budget spent
+// within the hour, so a fifth lost record waits; then a link gap of the
+// same sensor stands 90 s: its open record is in the health stream within
+// 60 s plus one node tick of its open. Control: one budget for every
+// cause, which holds it behind the waiting lost record. Second half, in
+// platform/sensorlink: a second sensor on the same health sink, its budget
+// of the causes other than lost spent and its closing record waiting; a
+// link gap of the first sensor that stands 90 s is written open within
+// the same bound. Control: the two sensors' records under one Health, so
+// one budget, which holds the first sensor's record behind the second's.
+func TestLostGapNotBehindOtherGaps(t *testing.T) {
+	same := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		spendLost(t, g.r.h)
+		g.cut()
+		g.idle(70 * time.Second) // 60 s plus one tick
+		return g
+	}
+	if g := same(t); g.linkOpen(testSensor) == nil {
+		t.Fatalf("records %v, want the link gap open", g.gaps())
+	}
+	t.Run("control: one budget", func(t *testing.T) {
+		withSeam(t, &gapOneBudget)
+		if g := same(t); g.linkOpen(testSensor) != nil {
+			t.Fatalf("records %v: the control wrote the link gap", g.gaps())
+		}
+	})
+	other := func(t *testing.T, shared bool) (*gsrc, *gsrc) {
+		g := newGsrc(t)
+		g2 := secondOn(t, g, shared)
+		g2.live(1, true)
+		for range GapOtherPerHour + 1 {
+			g2.restartGap()
+		}
+		g.live(6, true)
+		g.cut()
+		g.idle(70 * time.Second)
+		return g, g2
+	}
+	t.Run("another sensor's record waits", func(t *testing.T) {
+		g, g2 := other(t, false)
+		if g2.r.l.GapStatus().Waiting == nil {
+			t.Fatal("the second sensor's closing record does not wait")
+		}
+		if g.linkOpen(testSensor) == nil {
+			t.Fatalf("records %v, want the first sensor's link gap open", g.r.sink.of(EventCoverageGap))
+		}
+		t.Run("control: one Health for both", func(t *testing.T) {
+			if g, _ := other(t, true); g.linkOpen(testSensor) != nil {
+				t.Fatalf("records %v: the control wrote the first sensor's link gap", g.r.sink.of(EventCoverageGap))
+			}
+		})
+	})
+}
+
+// TestGapMergeIntoCoveredWait (D6's M4 and PK on #781): a link gap written
+// open closes as covered while the class refuses its closing record; a
+// silent gap then closes unwatched and merges into it: the one record is
+// covered false, merged 2.
+func TestGapMergeIntoCoveredWait(t *testing.T) {
+	g := newGsrc(t)
+	g.live(6, true)
+	g.cut()
+	g.buffer(12, true) // two minutes: written open
+	g.r.sink.refuse = func(typ string, d map[string]string) bool { return typ == EventCoverageGap && d["state"] == "closed" }
+	g.reconnect(false)
+	g.live(3, true)
+	if st := g.r.l.GapStatus(); st.Waiting == nil {
+		t.Fatalf("gap %+v, want the covered close waiting", st)
+	}
+	g.idle(2 * time.Minute)
+	g.live(3, true)
+	g.r.sink.refuse = nil
+	g.tick()
+	d := g.lastGap()
+	if d == nil || d["state"] != "closed" || d["covered"] != "false" || d["merged"] != "2" || d["causes"] != "link silent" {
+		t.Fatalf("records %v, want one closed record, covered false, merged 2", g.gaps())
 	}
 }

@@ -92,7 +92,22 @@ const gapOpenAfter = 60 * time.Second
 // gapMergeHeldMark keeps at a merge only the held gap's mark.
 // gapRecordFirst writes an unwatched close's record before its raise is
 // saved.
-var gapMarkOpenOnly, gapMergeHeldMark, gapRecordFirst bool
+// gapChainSignedRise reads part 2 signed, so a rise later than the
+// heartbeat's own at_utc counts; gapChainFallBackOK lets at_utc fall back
+// within a chain (D6's B1 on #781, D1's ruling 1).
+var gapMarkOpenOnly, gapMergeHeldMark, gapRecordFirst, gapChainSignedRise, gapChainFallBackOK bool
+
+// The named controls of section 15 committed as seams (D6's N3 on #781):
+// gapChainStretch fails part 2 only on a stretch longer than blind with no
+// heartbeat showing capture (V-17's third and fourth cases);
+// gapBlindFromAnyRise takes R at any rise, whatever its carrier, and
+// starts a gap from R (V-17's seventh); gapMergeLastMark keeps at a merge
+// the last gap's mark only (V-6's second); gapLengthWall takes the
+// chain's length from the wall clock (V-9's third); gapSilentNeverCovered
+// closes a silent gap only unwatched (V-16's second); gapWAtReceipt places
+// W at its receipt and R as built, gapRAtReceipt R at its receipt and W as
+// built (V-16's fifth, V-17's ninth).
+var gapChainStretch, gapBlindFromAnyRise, gapMergeLastMark, gapLengthWall, gapSilentNeverCovered, gapWAtReceipt, gapRAtReceipt bool
 var gapFromW, gapChainAnyRun, gapOpenNever, gapNeedsObservation, gapSilentEndsAtCurrent, gapChainAnyNames bool
 var gapChainSeqOnly, gapChainNoSpacing, gapChainNoCount, gapChainCarrierOnly, gapChainIgnoresStep, gapCloseAtReconnect bool
 
@@ -140,18 +155,20 @@ type chain struct {
 	total  uint64
 	ifs    map[string]*chainIf
 	wMono  time.Duration
-	reason string // why it failed, for the tests
+	reason string    // why it failed, for the tests
+	shown  time.Time // gapChainStretch's control only: the last heartbeat that showed capture
 }
 
 // chainShows is CH-39's part 2 for one heartbeat, by at_utc: some
-// interface's carrier is not down and its last rise is within blind of at.
+// interface's carrier is not down and its last rise is at or before at,
+// within blind of it (D1's ruling 1 on #781).
 func chainShows(h *netobs.Heartbeat, ifs map[string]*chainIf, at time.Time, blind time.Duration) bool {
 	for _, i := range h.Interfaces {
 		c := ifs[i.Name]
 		if c == nil || i.Carrier == "down" {
 			continue
 		}
-		if gapChainCarrierOnly || at.Sub(c.rise) <= blind {
+		if gapChainCarrierOnly || (gapChainSignedRise || !at.Before(c.rise)) && at.Sub(c.rise) <= blind {
 			return true
 		}
 	}
@@ -170,7 +187,11 @@ func (s *skew) startChainLocked(cn *conn, h *netobs.Heartbeat, at time.Time, wMo
 		lv := wt.live[i.Name]
 		ch.ifs[i.Name] = &chainIf{packets: i.Packets, rise: lv.riseAt}
 	}
-	if !gapChainSeqOnly && !chainShows(h, ch.ifs, at, blind) {
+	switch {
+	case gapChainSeqOnly:
+	case chainShows(h, ch.ifs, at, blind):
+		ch.shown = at
+	case !gapChainStretch:
 		ch.ok, ch.reason = false, "part 2 at W"
 	}
 	wt.ch = ch
@@ -220,6 +241,10 @@ func (s *skew) extendChainLocked(h *netobs.Heartbeat, at time.Time, blind time.D
 		ch.ok, ch.reason = false, "part 3"
 		return
 	}
+	if !gapChainFallBackOK && at.Before(ch.at) {
+		ch.ok, ch.reason = false, "part 3, at_utc fell back" // D1's ruling 1 on #781
+		return
+	}
 	totalRose := h.Counters.Packets > ch.total || gapRiseNoTotal
 	for _, i := range h.Interfaces {
 		c := ch.ifs[i.Name]
@@ -230,15 +255,17 @@ func (s *skew) extendChainLocked(h *netobs.Heartbeat, at time.Time, blind time.D
 	}
 	ch.total, ch.seq, ch.at = h.Counters.Packets, n, at
 	ch.n++
-	if !chainShows(h, ch.ifs, at, blind) {
+	if chainShows(h, ch.ifs, at, blind) {
+		ch.shown = at
+	} else if !gapChainStretch || at.Sub(ch.shown) > blind {
 		ch.ok, ch.reason = false, "part 2"
 	}
 }
 
 // chainCoversLocked reports whether the chain closes the open gap as
-// covered at a current heartbeat read at mono (CH-39's four parts). The
-// caller holds s.mu.
-func (s *skew) chainCoversLocked(cn *conn, mono time.Duration) bool {
+// covered at a current heartbeat read at wall and mono (CH-39's four
+// parts). The caller holds s.mu.
+func (s *skew) chainCoversLocked(cn *conn, wall time.Time, mono time.Duration) bool {
 	wt := &s.wt
 	g, ch := wt.open, &wt.ch
 	if g.causes&(gapCauseBit(CauseBlind)|gapCauseBit(CauseSensorFailed)) != 0 {
@@ -260,6 +287,9 @@ func (s *skew) chainCoversLocked(cn *conn, mono time.Duration) bool {
 		return true
 	}
 	length := mono - ch.wMono
+	if gapLengthWall {
+		length = wall.Sub(wt.w)
+	}
 	return time.Duration(ch.n)*HeartbeatGapMax >= length // part 4
 }
 
@@ -289,6 +319,9 @@ func (s *skew) openLocked(cause string, wall time.Time, mono time.Duration) {
 	from := wt.earlierWR()
 	if gapFromW && !wt.w.IsZero() {
 		from = wt.w
+	}
+	if gapBlindFromAnyRise && !wt.r.IsZero() {
+		from = wt.r
 	}
 	if from.IsZero() {
 		return
@@ -352,7 +385,10 @@ func (s *skew) mergeLocked(g *openGap, to time.Time) {
 		w.From = g.from
 	}
 	w.To, w.Causes, w.Gaps, w.covered = to, w.Causes|g.causes, w.Gaps+1, false
-	if !gapMergeHeldMark {
+	switch {
+	case gapMergeLastMark:
+		w.Stepped = g.stepped
+	case !gapMergeHeldMark:
 		w.Stepped = w.Stepped || g.stepped
 	}
 }
@@ -498,6 +534,16 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 		}
 		s.mu.Unlock()
 	}
+}
+
+// placeAndAct places W and R at heartbeat h and acts on the gap model
+// under gmu, released by defer, so a panic in either leaves gmu free for
+// SensorFailed, the connection's end and the tick (D6's N1 on #781).
+func (l *Link) placeAndAct(ctx context.Context, cn *conn, h *netobs.Heartbeat, late bool) error {
+	l.gmu.Lock()
+	defer l.gmu.Unlock()
+	l.place(cn, h, late)
+	return l.gapAct(ctx, cn)
 }
 
 // GapStatus is the gap model's state, for status and the tests.

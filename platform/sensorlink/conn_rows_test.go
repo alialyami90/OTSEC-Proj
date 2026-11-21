@@ -1017,6 +1017,11 @@ func TestCursorTextForm(t *testing.T) {
 	if n := len(strings.Split(string(b), " ")); n != 118 {
 		t.Fatalf("%d fields", n)
 	}
+	// The held gap's cause at its open is one character, as section 1.4
+	// gives it (D6's N5 on #781).
+	if f := strings.Split(string(b), " "); f[42] != "6" {
+		t.Fatalf("field 42 %q, want silent's code 6", f[42])
+	}
 	none := *c
 	none.Prior, none.Spans, none.Digest = nil, []HeldSpan{}, ""
 	none.W, none.WSeq, none.WAtUTC, none.R, none.Ifaces = time.Time{}, 0, time.Time{}, time.Time{}, nil
