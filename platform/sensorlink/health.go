@@ -97,10 +97,11 @@ type Health struct {
 	// fileErr is the run file's last write error while a failing stretch
 	// stands, raised once at its first failure.
 	fileErr error
-	// watched is the link's earlier of W and R, zero when it holds none;
-	// copyFile is the copy the run file had at the start, written again
-	// while the link holds none (watch.go).
-	watched  func() time.Time
+	// watched is the link's earlier of W and R, zero when it holds none,
+	// and the steps back found since its last call; copyFile is the copy
+	// the run file had at the start, moved back by those steps and written
+	// again while the link holds none (watch.go).
+	watched  func() (time.Time, time.Duration)
 	copyFile time.Time
 	// Status.
 	possiblyLost []string
@@ -466,11 +467,17 @@ func (h *Health) entry() runFileSensor {
 	if h.run != "" {
 		e.Capture = &captureState{RunID: h.run, Key: h.key, Totals: totalsMap(h.totals)}
 	}
-	c := h.copyFile
+	var w time.Time
 	if h.watched != nil {
-		if w := h.watched(); !w.IsZero() {
-			c = w
+		var back time.Duration
+		w, back = h.watched()
+		if !h.copyFile.IsZero() {
+			h.copyFile = h.copyFile.Add(-back)
 		}
+	}
+	c := h.copyFile
+	if !w.IsZero() {
+		c = w
 	}
 	if !c.IsZero() {
 		e.Copy = canonUTC(c)

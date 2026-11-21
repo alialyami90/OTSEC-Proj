@@ -438,8 +438,30 @@ func refused(l *Link, reason string) uint64 { return l.Stats().Refused[reason] }
 func closes(l *Link, reason string) uint64 { return l.ConnStats().Closes[reason] }
 
 // aclock is the test's monotonic clock, safe to move while the link reads
-// it.
-type aclock struct{ n atomic.Int64 }
+// it. A hold armed by holdNext stops the next reader after its reading.
+type aclock struct {
+	n    atomic.Int64
+	hold atomic.Pointer[clockHold]
+}
 
-func (c *aclock) mono() time.Duration { return time.Hour + time.Duration(c.n.Load()) }
+// clockHold is one reader held: reached is closed when it has read, and it
+// returns once release is closed.
+type clockHold struct{ reached, release chan struct{} }
+
+func (c *aclock) mono() time.Duration {
+	v := time.Hour + time.Duration(c.n.Load())
+	if h := c.hold.Swap(nil); h != nil {
+		close(h.reached)
+		<-h.release
+	}
+	return v
+}
+
 func (c *aclock) add(d time.Duration) { c.n.Add(int64(d)) }
+
+// holdNext arms a hold for the next reader of the clock.
+func (c *aclock) holdNext() *clockHold {
+	h := &clockHold{reached: make(chan struct{}), release: make(chan struct{})}
+	c.hold.Store(h)
+	return h
+}

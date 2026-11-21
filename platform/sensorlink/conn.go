@@ -1247,13 +1247,14 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 		l.takeRefused(cn, n, RefusedCounterDecrease)
 		return ""
 	}
-	late := l.late(cn, h.AtUTC) // counted; a heartbeat is never a skew sample (CH-23)
-	// The step check before W and R take the receipt's time; a save that
-	// fails closes before the heartbeat is taken, so its resend follows.
+	// The step check before lateness is judged and W and R take the
+	// receipt's time (D3's N1 on #774); a save that fails closes before the
+	// heartbeat is taken, so its resend follows.
 	if err := l.stepAtReceipt(ctx); err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: W and R moved by a step of the node's clock were not saved: %v", l.cfg.SensorID, err))
 		return netobs.CloseStore
 	}
+	late := l.late(cn, h.AtUTC, true) // counted; a heartbeat is never a skew sample (CH-23)
 	if l.heartbeatRaise(h) {
 		if r := l.saveFloor(ctx, cn); r != "" {
 			return r
@@ -1440,7 +1441,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	if observeFault != nil {
 		observeFault()
 	}
-	l.observe(ctx, o, n, lost, l.late(cn, o.MadeUTC))
+	l.observe(ctx, o, n, lost, l.late(cn, o.MadeUTC, false))
 	l.cmu.Lock()
 	l.inflight = nil
 	l.cmu.Unlock()

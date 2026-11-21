@@ -24,18 +24,24 @@ import (
 //     through (CH-39), and not late (CH-23).
 //   - Showing capture (CH-31 at the receipt): some interface's carrier is
 //     not down and its packets rose within the last blind_after_s of the
-//     node's monotonic time, or its run began within it. A rise is packets
-//     above the same interface's in the run's heartbeat before, or above
-//     the value kept with W after a node start.
+//     node's monotonic time, or its run began within it and the interface
+//     was named in the run's first heartbeat read here. A rise is packets
+//     above the same name's in the run's heartbeat before, or above the
+//     value kept with W after a node start. The state is kept by name: a
+//     name absent from a heartbeat is dropped, and a name first seen
+//     within a run shows capture only once its own packets rise.
 //   - R is the last current heartbeat in which an interface's packets rose
 //     with that interface's carrier not down, placed as W is.
 //   - The cursor keeps, with W, each interface's packets at W's heartbeat
 //     and the at_utc of its last rise in the run (or of the run's first
 //     heartbeat for one that never rose), in the bytewise order of the
-//     names. After a node start they are K-1's baseline: a falling packets
-//     in the run is refused as order and counted counter-decrease.
+//     names. After a node start they are K-1's baseline for a heartbeat
+//     numbered above W's: a falling packets in the run is refused as order
+//     and counted counter-decrease. One at or below W's is a resend.
 //   - The step check compares the wall clock with the monotonic clock since
-//     the check before. It runs before a heartbeat's placement, before a
+//     the check before, both read under the skew's lock, as W's placement
+//     reads them, so one step is handled once. It runs before a heartbeat's
+//     lateness is judged and before its placement, before a
 //     hello's or a tick's sample, before the run file's copy is taken, and
 //     at the node's tick (CheckStep). It acts only on a step back of more
 //     than MaxSkew: W, R, the copy and E's held samples move back by the
@@ -69,8 +75,15 @@ type IfaceMark struct {
 // the capture floor and the start bound at the wall clock at every check;
 // stepFoundOnly compares a stored time with the steps the check found
 // alone; stepAnyBack acts on any backward difference; stepTickOnly runs
-// the check only at the node's tick.
+// the check only at the node's tick. The fix's controls (D1's 7057035425
+// on #774): stepClocksBeforeLock reads both clocks before the skew's lock
+// in the step check and W's placement; watchSetResets starts the run's
+// began again, for every name, when the interface set changes;
+// stepCopyUnmoved leaves the run file's copy where a step found it;
+// k1KeptAnySeq judges any heartbeat after a start against the packets
+// kept with W.
 var k1ProcessOnly, placeAtReceipt, stepNoSamples, stepCapsCaptureFloor, stepFoundOnly, stepAnyBack, stepTickOnly bool
+var stepClocksBeforeLock, watchSetResets, stepCopyUnmoved, k1KeptAnySeq bool
 
 // ifLive is an interface's CH-31 state in this process.
 type ifLive struct {
@@ -78,6 +91,9 @@ type ifLive struct {
 	riseAt   time.Time // sensor time: the last rise, or the run's first heartbeat
 	riseMono time.Duration
 	rose     bool // a rise was seen in this process
+	// fromBegin: named in the run's first heartbeat read in this process,
+	// so the run's start counts for it.
+	fromBegin bool
 }
 
 // watch is W, R and the step check, under the skew's leaf lock.
@@ -87,10 +103,11 @@ type watch struct {
 	// run is the run kept's values belong to.
 	run  string
 	kept []IfaceMark
-	// The CH-31 state of liveRun in this process; began is the receipt of
-	// the run's first heartbeat when the run was accepted as new here.
+	// The CH-31 state of liveRun in this process, by interface name; began
+	// is the receipt of the run's first heartbeat read here when the run
+	// was accepted as new here, set once.
 	liveRun  string
-	live     []ifLive
+	live     map[string]*ifLive
 	began    time.Duration
 	beganOK  bool
 	newRun   string // the run last accepted as new in this process
@@ -102,6 +119,7 @@ type watch struct {
 	unfound  time.Duration // the movement the checks did not act on (stepFoundOnly)
 	owedStep time.Duration // found, its event not yet written
 	owedSave bool          // found, the cursor and the run file not yet saved
+	copyBack time.Duration // found, not yet applied to the run file's copy
 }
 
 // blindAfter is blind_after_s.
@@ -154,8 +172,11 @@ func (l *Link) runBegan(run string) {
 }
 
 // keptHeartbeat is K-1's baseline after a node start: the packets kept with
-// W, as a heartbeat of h's run, nil when none is kept for it or the
-// interfaces do not match one for one. Its seq is 0, so only the counts are
+// W, as a heartbeat of h's run, nil when none is kept for it, the
+// interfaces do not match one for one, or h is numbered at or below W's
+// heartbeat. Within a connection a seq at or below L is refused before
+// this is reached, so such a heartbeat is a resend after a start, judged
+// when first read (D6's B2 on #774). Its seq is 0, so only the counts are
 // judged.
 func (l *Link) keptHeartbeat(h *netobs.Heartbeat) *netobs.Heartbeat {
 	if !l.skewOn() || k1ProcessOnly {
@@ -166,7 +187,7 @@ func (l *Link) keptHeartbeat(h *netobs.Heartbeat) *netobs.Heartbeat {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	wt := &s.wt
-	if wt.run != h.RunID || len(wt.kept) != len(names) {
+	if wt.run != h.RunID || len(wt.kept) != len(names) || num(h.Seq) <= wt.wSeq && !k1KeptAnySeq {
 		return nil
 	}
 	p := &netobs.Heartbeat{RunID: h.RunID, Seq: "0"}
@@ -187,12 +208,19 @@ func ifaceNames(h *netobs.Heartbeat) []string {
 }
 
 // place takes heartbeat h, read and taken: CH-31's state, and W and R when
-// it is current. late: it is later than late_bound_s.
+// it is current. late: it is later than late_bound_s. CH-31's state is
+// taken from every heartbeat read, late and backlog ones included: a rise
+// first seen in one is placed at no later receipt, so R and the blind
+// window only end sooner (D4's N1 on #774).
 func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	if !l.skewOn() {
 		return
 	}
-	wall, mono := l.now(), l.opt.Monotonic()
+	var wall time.Time
+	var mono time.Duration
+	if stepClocksBeforeLock {
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
 	at := parseUTC(h.AtUTC)
 	byName := map[string]netobs.InterfaceCount{}
 	for _, i := range h.Interfaces {
@@ -204,31 +232,56 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !stepClocksBeforeLock {
+		// Under the lock, so a step check on another goroutine is wholly
+		// before or after this placement (D3's B2, D6's B1 on #774).
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
 	wt := &s.wt
-	if wt.liveRun != h.RunID || len(wt.live) != len(names) {
-		wt.liveRun, wt.live, wt.beganOK = h.RunID, make([]ifLive, len(names)), false
+	if wt.liveRun != h.RunID {
+		// The run's first heartbeat read in this process.
+		wt.liveRun, wt.live, wt.beganOK = h.RunID, map[string]*ifLive{}, false
 		kept := wt.run == h.RunID && len(wt.kept) == len(names)
 		for i, n := range names {
 			if kept {
-				wt.live[i] = ifLive{packets: wt.kept[i].Packets, riseAt: wt.kept[i].RiseUTC}
+				wt.live[n] = &ifLive{packets: wt.kept[i].Packets, riseAt: wt.kept[i].RiseUTC, fromBegin: true}
 			} else {
 				// CH-31 starts again at the run's first heartbeat read.
-				wt.live[i] = ifLive{packets: byName[n].Packets, riseAt: at}
+				wt.live[n] = &ifLive{packets: byName[n].Packets, riseAt: at, fromBegin: true}
 			}
 		}
 		if !kept && wt.newRun == h.RunID {
 			wt.began, wt.beganOK = mono, true
 		}
 	}
+	changed := len(wt.live) != len(names)
+	for n := range wt.live {
+		if _, ok := byName[n]; !ok {
+			delete(wt.live, n) // absent: a name seen again starts afresh
+		}
+	}
+	for _, n := range names {
+		if wt.live[n] == nil {
+			// First seen within the run: no rise and no grace of the run's
+			// start until its own packets rise (D3's B1 on #774).
+			wt.live[n], changed = &ifLive{packets: byName[n].Packets, riseAt: at}, true
+		}
+	}
+	if watchSetResets && changed && wt.newRun == h.RunID {
+		wt.began, wt.beganOK = mono, true
+		for _, lv := range wt.live {
+			lv.fromBegin = true
+		}
+	}
 	capture, rose := false, false
-	for i, n := range names {
-		ic, lv := byName[n], &wt.live[i]
+	for _, n := range names {
+		ic, lv := byName[n], wt.live[n]
 		if ic.Packets > lv.packets {
 			lv.riseAt, lv.riseMono, lv.rose = at, mono, true
 			rose = rose || ic.Carrier != "down"
 		}
 		lv.packets = ic.Packets
-		if ic.Carrier != "down" && (lv.rose && mono-lv.riseMono <= blind || wt.beganOK && mono-wt.began <= blind) {
+		if ic.Carrier != "down" && (lv.rose && mono-lv.riseMono <= blind || lv.fromBegin && wt.beganOK && mono-wt.began <= blind) {
 			capture = true
 		}
 	}
@@ -248,8 +301,8 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	if capture {
 		wt.w, wt.wSeq, wt.wAt, wt.placed = p, num(h.Seq), at, true
 		wt.run, wt.kept = h.RunID, make([]IfaceMark, len(names))
-		for i := range names {
-			wt.kept[i] = IfaceMark{Packets: wt.live[i].packets, RiseUTC: wt.live[i].riseAt}
+		for i, n := range names {
+			wt.kept[i] = IfaceMark{Packets: wt.live[n].packets, RiseUTC: wt.live[n].riseAt}
 		}
 	}
 }
@@ -288,10 +341,21 @@ func (l *Link) measureStep() bool {
 	if !l.skewOn() {
 		return false
 	}
-	wall, mono := l.now(), l.opt.Monotonic()
+	var wall time.Time
+	var mono time.Duration
+	if stepClocksBeforeLock {
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !stepClocksBeforeLock {
+		// Under the lock: two checks, or a check and a placement, on
+		// different goroutines never interleave their readings, so one step
+		// is found once (D3's B2, D6's B1 on #774). The clocks take no lock
+		// of the link's.
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
 	wt := &s.wt
 	if wt.checked {
 		diff := wall.Sub(wt.chkWall) - (mono - wt.chkMono)
@@ -326,14 +390,18 @@ func (l *Link) measureStep() bool {
 	return wt.owedSave || wt.owedStep > 0
 }
 
-// moveBackLocked moves W, R and E's held samples back by d. The caller
-// holds s.mu.
+// moveBackLocked moves W, R, the run file's copy and E's held samples back
+// by d; the copy is moved when the run file next takes it, whether or not
+// W or R is held (D3's B3 on #774). The caller holds s.mu.
 func (s *skew) moveBackLocked(d time.Duration) {
 	wt := &s.wt
 	for _, t := range []*time.Time{&wt.w, &wt.r} {
 		if !t.IsZero() {
 			*t = t.Add(-d)
 		}
+	}
+	if !stepCopyUnmoved {
+		wt.copyBack += d
 	}
 	if !stepNoSamples {
 		for i := range s.shift {
@@ -434,22 +502,24 @@ func (l *Link) saveMoved(ctx context.Context) error {
 }
 
 // watchedCopy is the run file's copy: the earlier of W and R, zero when
-// neither is held. The step check runs first, and moves them back if it
-// finds a step; its event and the cursor's save wait for the next check
-// that can act, since the run file is being written.
-func (l *Link) watchedCopy() time.Time {
+// neither is held; and back, the steps found since the last call, by which
+// the file's own copy moves. The step check runs first, and moves them
+// back if it finds a step; its event and the cursor's save wait for the
+// next check that can act, since the run file is being written.
+func (l *Link) watchedCopy() (c time.Time, back time.Duration) {
 	l.measureStep()
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	w, r := s.wt.w, s.wt.r
+	back, s.wt.copyBack = s.wt.copyBack, 0
 	switch {
 	case w.IsZero():
-		return r
+		return r, back
 	case r.IsZero() || w.Before(r):
-		return w
+		return w, back
 	}
-	return r
+	return r, back
 }
 
 // watchNow is W and R as the link holds them.

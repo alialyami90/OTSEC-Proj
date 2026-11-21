@@ -440,3 +440,464 @@ func TestStepSaveFails(t *testing.T) {
 		t.Fatalf("time.node-stepped %d", n)
 	}
 }
+
+// The fix to D1's rulings 7057035425 on #774 (D4-122): a test for each
+// blocking finding, with its control, and D6's probes P3, P4 and P8 to P11
+// as tests that kill the named mutants.
+
+// placed2 is a rig with run 5 accepted as new and heartbeats 1 and 2
+// placed, the second with a rise: W and R are its receipt.
+func placed2(t *testing.T) (*healthRig, *peer, time.Time) {
+	r := newHealthRig(t)
+	p := r.accepted(live02())
+	r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), pk(100, "up")))
+	r.beatAt(p, hbWith(2, at(r.now().Add(time.Second)), pk(200, "up")))
+	w := r.now()
+	wantW(t, r, w, w, "placed")
+	return r, p, w
+}
+
+// TestStepFoundOnceAcrossGoroutines (D6's B1, P1, on #774): the step
+// check reads both clocks under the skew's lock. A check that has read
+// the clocks is held; the wall clock steps back 5 s and a second passes; a
+// second check runs; then the first; a second later a third. One step of
+// 5 s is found once: W and R 5 s back and one time.node-stepped. Control:
+// the clocks read before the lock, under which the first check measures
+// itself against the second and the third finds the step again: W and R
+// 10 s back and two events.
+func TestStepFoundOnceAcrossGoroutines(t *testing.T) {
+	run := func(t *testing.T) (*healthRig, time.Time) {
+		r, p, w := placed2(t)
+		p.end()
+		r.l.CheckStep(bg)
+		r.pass(time.Second)
+		hold := r.clk.holdNext()
+		a, b := make(chan struct{}), make(chan struct{})
+		go func() { r.l.CheckStep(bg); close(a) }()
+		<-hold.reached
+		r.addWall(-5 * time.Second)
+		r.pass(time.Second)
+		go func() { r.l.CheckStep(bg); close(b) }()
+		if stepClocksBeforeLock {
+			<-b // the second check is not held by the first's lock
+		}
+		close(hold.release)
+		<-a
+		<-b
+		r.pass(time.Second)
+		r.l.CheckStep(bg)
+		return r, w
+	}
+	r, w := run(t)
+	wantW(t, r, w.Add(-5*time.Second), w.Add(-5*time.Second), "one step of 5 s")
+	if d := r.sink.of(event.HealthTimeNodeStepped); len(d) != 1 || d[0]["step_back_ms"] != "5000" {
+		t.Fatalf("time.node-stepped: %v", d)
+	}
+	t.Run("control: the clocks read before the lock", func(t *testing.T) {
+		withSeam(t, &stepClocksBeforeLock)
+		r, w := run(t)
+		wantW(t, r, w.Add(-10*time.Second), w.Add(-10*time.Second), "the step handled twice")
+		if n := r.sink.count(event.HealthTimeNodeStepped); n != 2 {
+			t.Fatalf("time.node-stepped %d under the control, want 2", n)
+		}
+	})
+}
+
+// TestStepCheckBesidePlacement (D3's B2 on #774): the tick's check has read
+// the clocks and is held; a second later a heartbeat with a rise is read.
+// No clock stepped, so no time.node-stepped is written, and W and R are
+// that heartbeat's receipt. Control: the clocks read before the lock,
+// under which the held check finds W later than its stale wall clock and
+// writes time.node-stepped of 1,000 ms.
+func TestStepCheckBesidePlacement(t *testing.T) {
+	run := func(t *testing.T) (*healthRig, time.Time) {
+		r, p, _ := placed2(t)
+		p.taken()
+		r.l.CheckStep(bg)
+		hold := r.clk.holdNext()
+		a := make(chan struct{})
+		go func() { r.l.CheckStep(bg); close(a) }()
+		<-hold.reached
+		r.pass(time.Second)
+		recv := r.now()
+		p.send(hbWith(3, at(recv), pk(300, "up")))
+		if stepClocksBeforeLock {
+			p.ack(3) // placed while the check is held before its lock
+		}
+		close(hold.release)
+		<-a
+		if !stepClocksBeforeLock {
+			p.ack(3)
+		}
+		return r, recv
+	}
+	r, recv := run(t)
+	if d := r.sink.of(event.HealthTimeNodeStepped); len(d) != 0 {
+		t.Fatalf("time.node-stepped with no step: %v", d)
+	}
+	wantW(t, r, recv, recv, "the heartbeat's receipt")
+	t.Run("control: the clocks read before the lock", func(t *testing.T) {
+		withSeam(t, &stepClocksBeforeLock)
+		r, _ := run(t)
+		if d := r.sink.of(event.HealthTimeNodeStepped); len(d) != 1 || d[0]["step_back_ms"] != "1000" {
+			t.Fatalf("time.node-stepped under the control: %v", d)
+		}
+	})
+}
+
+// ifs sets the coverage statement's interfaces and the heartbeat's
+// together, each carrier up, and the run's totals to their sum.
+func ifs(names []string, packets []uint64) func(*netobs.Heartbeat) {
+	return func(h *netobs.Heartbeat) {
+		h.Coverage.Interfaces, h.Interfaces = nil, nil
+		var sum uint64
+		for i, n := range names {
+			h.Coverage.Interfaces = append(h.Coverage.Interfaces, netobs.Interface{Name: n, Attachment: "span", LAN: "single"})
+			h.Interfaces = append(h.Interfaces, netobs.InterfaceCount{Name: n, Carrier: "up", Packets: packets[i]})
+			sum += packets[i]
+		}
+		h.Counters.Packets, h.Counters.Bytes = sum, sum*90
+	}
+}
+
+// TestCaptureStateByName (D3's B1 on #774): CH-31's state is kept by
+// interface name, and the run's start counts only for the names of its
+// first heartbeat read here. Run 5 accepted as new, every named
+// interface's packets flat for 31 minutes, a heartbeat a minute: W moves
+// within blind_after_s of the run's start and then stays, and R never
+// moves, when the interface count alternates ({eth1}, {eth1, eth2}) and
+// when, at a fixed count, the names alternate ({eth1: 100, eth2: 0},
+// {eth0: 0, eth1: 100}). Control: a change of the interface set starts the
+// run's began again, under which W moves through the flat stretch.
+func TestCaptureStateByName(t *testing.T) {
+	for _, c := range []struct {
+		what string
+		set  func(i int) func(*netobs.Heartbeat)
+	}{
+		{"the count alternating", func(i int) func(*netobs.Heartbeat) {
+			if i%2 == 0 {
+				return ifs([]string{"eth1"}, []uint64{100})
+			}
+			return ifs([]string{"eth1", "eth2"}, []uint64{100, 0})
+		}},
+		{"the names alternating", func(i int) func(*netobs.Heartbeat) {
+			if i%2 == 0 {
+				return ifs([]string{"eth1", "eth2"}, []uint64{100, 0})
+			}
+			return ifs([]string{"eth0", "eth1"}, []uint64{0, 100})
+		}},
+	} {
+		run := func(t *testing.T) (r *healthRig, last, want time.Time) {
+			r = newHealthRig(t)
+			p := r.accepted(live02())
+			r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), c.set(0)))
+			began := r.now()
+			want = began
+			for i := 1; i <= 31; i++ {
+				r.pass(59 * time.Second)
+				r.beatAt(p, hbWith(1+i, at(r.now().Add(time.Second)), c.set(i)))
+				if r.now().Sub(began) <= DefaultBlindAfter {
+					want = r.now()
+				}
+			}
+			if n := r.l.Stats().Heartbeats; n != 32 {
+				t.Fatalf("%d heartbeats taken, want 32", n)
+			}
+			return r, r.now(), want
+		}
+		t.Run(c.what, func(t *testing.T) {
+			r, _, want := run(t)
+			wantW(t, r, want, time.Time{}, "flat for 31 minutes")
+			t.Run("control: began again at a set change", func(t *testing.T) {
+				withSeam(t, &watchSetResets)
+				r, last, _ := run(t)
+				if w, _ := r.l.watchNow(); !w.Equal(last) {
+					t.Fatalf("W %s under the control, want it moved to %s", w, last)
+				}
+			})
+		})
+	}
+}
+
+// TestCaptureNewNameWithinRun: the two halves of the rule by name. A name
+// first seen within the run gets no grace of the run's start: run 5's
+// first heartbeat has eth1 alone with its carrier down, and the next, 30 s
+// later, adds eth2 up and flat; W stays unplaced. A name absent from a
+// heartbeat is dropped: eth2 at 50, then absent, then back at 80 shows no
+// rise, so R stays unplaced (eth1 carries the run's totals with its
+// carrier down, so they do not fall and raise no R). Mutants (the PR's comment): the run's start
+// counted for every name, and absent names kept, each of which moves one.
+func TestCaptureNewNameWithinRun(t *testing.T) {
+	down := func(h *netobs.Heartbeat) { h.Interfaces[0].Carrier = "down" }
+	r := newHealthRig(t)
+	p := r.accepted(live02())
+	r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), ifs([]string{"eth1"}, []uint64{100}), down))
+	r.pass(29 * time.Second)
+	r.beatAt(p, hbWith(2, at(r.now().Add(time.Second)), ifs([]string{"eth1", "eth2"}, []uint64{100, 0}), down))
+	wantW(t, r, time.Time{}, time.Time{}, "a name first seen within the run, flat")
+	if n := r.l.Stats().Heartbeats; n != 2 {
+		t.Fatalf("%d heartbeats taken, want 2", n)
+	}
+	r = newHealthRig(t)
+	p = r.accepted(live02())
+	r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), ifs([]string{"eth1", "eth2"}, []uint64{100, 50})))
+	r.beatAt(p, hbWith(2, at(r.now().Add(time.Second)), ifs([]string{"eth1"}, []uint64{150}), down))
+	r.beatAt(p, hbWith(3, at(r.now().Add(time.Second)), ifs([]string{"eth1", "eth2"}, []uint64{150, 80}), down))
+	if n := r.l.Stats().Heartbeats; n != 3 {
+		t.Fatalf("%d heartbeats taken, want 3", n)
+	}
+	if _, gr := r.l.watchNow(); !gr.IsZero() {
+		t.Fatalf("R %s: a name seen again read as a rise", gr)
+	}
+}
+
+// TestStepMovesFileCopyWithNoW (D3's B3 on #774): with W and R placed and
+// the run file's copy settled, the sensor database lost and the node
+// started, the link holds no W or R; a step back of an hour found by the
+// check moves the file's copy back by it, and time.node-stepped is
+// written once. Control: a copy the step leaves where it was.
+func TestStepMovesFileCopyWithNoW(t *testing.T) {
+	run := func(t *testing.T) (*healthRig, time.Time) {
+		r, p, w := placed2(t)
+		r.settleFile()
+		if got := runFileCopy(t, r.path); got != canonUTC(w) {
+			t.Fatalf("the copy %q, want %s", got, canonUTC(w))
+		}
+		p.end()
+		r.loseDatabase()
+		r.restart()
+		r.l.CheckStep(bg)
+		r.pass(time.Second)
+		r.addWall(-time.Hour)
+		r.l.CheckStep(bg)
+		return r, w
+	}
+	r, w := run(t)
+	if gw, gr := r.l.watchNow(); !gw.IsZero() || !gr.IsZero() {
+		t.Fatalf("the link holds W %s and R %s", gw, gr)
+	}
+	if got := runFileCopy(t, r.path); got != canonUTC(w.Add(-time.Hour)) {
+		t.Fatalf("the copy %q, want %s", got, canonUTC(w.Add(-time.Hour)))
+	}
+	if d := r.sink.of(event.HealthTimeNodeStepped); len(d) != 1 || d[0]["step_back_ms"] != "3600000" {
+		t.Fatalf("time.node-stepped: %v", d)
+	}
+	t.Run("control: the copy unmoved", func(t *testing.T) {
+		withSeam(t, &stepCopyUnmoved)
+		r, w := run(t)
+		if got := runFileCopy(t, r.path); got != canonUTC(w) {
+			t.Fatalf("the copy %q under the control, want %s", got, canonUTC(w))
+		}
+	})
+}
+
+// TestK1ResendAfterStart (D6's B2, P6b, on #774): heartbeats 1 and 2
+// saved; 3 and 4 read within the cursor's spacing; the run file written,
+// which saves the position as last written (T 2) with W at 4; the node
+// killed before the close's save. After the start the sensor resends 3
+// (300 packets) and 4: both are taken, since a heartbeat at or below W's
+// is a resend. Control: the kept packets judged at any seq, which refuses
+// 3 as counter-decrease.
+func TestK1ResendAfterStart(t *testing.T) {
+	run := func(t *testing.T) *healthRig {
+		r := newHealthRig(t)
+		p := r.accepted(live02())
+		r.beat(p, hbWith(1, at(r.now()), pk(100, "up")))
+		r.beat(p, hbWith(2, at(r.now().Add(cursorSpacing)), pk(200, "up")))
+		p.taken()
+		p.send(hbWith(3, at(r.now()), pk(300, "up")), hbWith(4, at(r.now()), pk(400, "up")))
+		p.taken()
+		r.settleFile()
+		if c := cursorNow(t, r.cs); c.Taken != 2 || c.WSeq != 4 {
+			t.Fatalf("the cursor holds T %d and W at seq %d, want 2 and 4", c.Taken, c.WSeq)
+		}
+		r.cs.failNext(1) // killed before the close's save
+		p.end()
+		r.restart()
+		p = r.dial(enrolment())
+		p.send(r.resumeAt(3, 4))
+		p.ack(2)
+		p.send(hbWith(3, at(r.now()), pk(300, "up")), hbWith(4, at(r.now()), pk(400, "up")))
+		p.taken()
+		return r
+	}
+	if n := refused(run(t).l, RefusedCounterDecrease); n != 0 {
+		t.Fatalf("counter-decrease %d for a resend", n)
+	}
+	t.Run("control: the kept packets at any seq", func(t *testing.T) {
+		withSeam(t, &k1KeptAnySeq)
+		if n := refused(run(t).l, RefusedCounterDecrease); n != 1 {
+			t.Fatalf("counter-decrease %d under the control, want 1", n)
+		}
+	})
+}
+
+// TestK1AtWSeqNotJudged: the boundary of TestK1ResendAfterStart's rule.
+// Heartbeats 1 to 3 saved, 4 read within the cursor's spacing, the run
+// file written (T 3, W at 4 with 400 packets), the node killed before the
+// close's save; after the start the first heartbeat is 4 again, at 350
+// packets: numbered at W's, it is not judged against the kept packets and
+// is taken. Mutant (the PR's comment): the rule with < in place of <=,
+// which refuses it. TestK1FallingPacketsAcrossRestart holds the other
+// side: a heartbeat numbered one above W's is judged.
+func TestK1AtWSeqNotJudged(t *testing.T) {
+	r := newHealthRig(t)
+	p := r.accepted(live02())
+	r.beat(p, hbWith(1, at(r.now()), pk(100, "up")))
+	for i := 2; i <= 3; i++ {
+		r.beat(p, hbWith(i, at(r.now().Add(cursorSpacing)), pk(uint64(100*i), "up")))
+	}
+	p.taken()
+	p.send(hbWith(4, at(r.now()), pk(400, "up")))
+	p.taken()
+	r.settleFile()
+	if c := cursorNow(t, r.cs); c.Taken != 3 || c.WSeq != 4 {
+		t.Fatalf("the cursor holds T %d and W at seq %d, want 3 and 4", c.Taken, c.WSeq)
+	}
+	r.cs.failNext(1) // killed before the close's save
+	p.end()
+	r.restart()
+	p = r.dial(enrolment())
+	p.send(r.resumeAt(4, 4))
+	p.ack(3)
+	p.send(hbWith(4, at(r.now()), pk(350, "up")))
+	p.taken()
+	if n := refused(r.l, RefusedCounterDecrease); n != 0 {
+		t.Fatalf("counter-decrease %d at W's seq", n)
+	}
+}
+
+// TestStepNoCapBeforePlacement (D6's P3 on #774; kills M1, the cap with
+// no placement guard): W saved, the wall clock stepped back 10 minutes
+// across the stop, and two checks after the start: W, R and the cursor
+// are unchanged, and no time.node-stepped is written, since before W's
+// first placement since the start a check only measures.
+func TestStepNoCapBeforePlacement(t *testing.T) {
+	r, p, w := placed2(t)
+	p.end()
+	r.addWall(-10 * time.Minute)
+	r.restart()
+	r.l.CheckStep(bg)
+	r.pass(time.Second)
+	r.l.CheckStep(bg)
+	wantW(t, r, w, w, "after the start")
+	if c := cursorNow(t, r.cs); !c.W.Equal(w) || !c.R.Equal(w) {
+		t.Fatalf("the cursor holds W %s and R %s, want %s", c.W, c.R, w)
+	}
+	if n := r.sink.count(event.HealthTimeNodeStepped); n != 0 {
+		t.Fatalf("time.node-stepped %d", n)
+	}
+}
+
+// TestWPlacedWithMovedSamples (D6's P4 on #774; kills M2, W placed with
+// E's samples as taken): the node's clock alone stepped back 300 s; a
+// heartbeat made before the step, queued 60 s, is read after it and before
+// any tick. W is its at_utc + E moved, 300 s before the moment it was
+// made, not its receipt.
+func TestWPlacedWithMovedSamples(t *testing.T) {
+	r, p, _ := placed2(t)
+	p.taken()
+	made := r.now()
+	r.pass(60 * time.Second)
+	r.addWall(-300 * time.Second)
+	p.send(hbWith(3, at(made), pk(300, "up")))
+	p.ack(3)
+	want := made.Add(-300 * time.Second)
+	wantW(t, r, want, want, "placed with the moved samples")
+}
+
+// TestK1NewRunInProcess (D6's P8 on #774; kills M3, the kept packets
+// judged without their run): run 5 with W at 300 packets, then run 6
+// accepted in the same process; its heartbeats at 10 and 20 packets,
+// numbered above W's, are taken.
+func TestK1NewRunInProcess(t *testing.T) {
+	r := newHealthRig(t)
+	p := r.accepted(live02())
+	for i := 1; i <= 3; i++ {
+		r.beatAt(p, hbWith(i, at(r.now().Add(time.Second)), pk(uint64(100*i), "up")))
+	}
+	p.end()
+	h6 := run6()
+	h6.FirstSeq, h6.NewestSeq, h6.SensorUTC = "4", "3", canonUTC(r.now())
+	p = r.accepted(h6)
+	for i, n := range []uint64{10, 20} {
+		h := hbWith(4+i, at(r.now().Add(time.Second)), pk(n, "up"))
+		h.RunID = testRun2
+		r.beatAt(p, h)
+	}
+	if n := refused(r.l, RefusedCounterDecrease); n != 0 {
+		t.Fatalf("run 6 judged against run 5's packets: counter-decrease %d", n)
+	}
+}
+
+// TestResumedRunStartNotCounted (D6's P9 on #774; kills M4, the run's start
+// counted for a run not accepted as new in this process): run 5 accepted
+// with no heartbeat, the node started, the run resumed and two flat
+// heartbeats read: neither shows capture, so W stays unplaced.
+func TestResumedRunStartNotCounted(t *testing.T) {
+	r := newHealthRig(t)
+	p := r.accepted(live02())
+	p.end()
+	r.restart()
+	p = r.dial(enrolment())
+	p.send(r.resumeAt(1, 0))
+	p.ack(0)
+	r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), pk(100, "up")))
+	r.beatAt(p, hbWith(2, at(r.now().Add(time.Second)), pk(100, "up")))
+	wantW(t, r, time.Time{}, time.Time{}, "a resumed run, flat")
+}
+
+// TestK1PreviousAfterStart (D6's P10 on #774; kills M5, the kept packets
+// preferred to the previous heartbeat): after a start, heartbeat 3 at 500
+// packets with its carrier down is taken and W stays at 2; heartbeat 4 at
+// 450 falls below 3's and is refused as counter-decrease.
+func TestK1PreviousAfterStart(t *testing.T) {
+	r, p, _ := placed2(t)
+	p.end()
+	r.restart()
+	p = r.dial(enrolment())
+	p.send(r.resumeAt(3, 2))
+	p.ack(2)
+	r.beatAt(p, hbWith(3, at(r.now().Add(time.Second)), pk(500, "down")))
+	if c := cursorNow(t, r.cs); c.WSeq != 2 {
+		t.Fatalf("W at seq %d, want 2", c.WSeq)
+	}
+	r.beatAt(p, hbWith(4, at(r.now().Add(time.Second)), pk(450, "up")))
+	if n := refused(r.l, RefusedCounterDecrease); n != 1 {
+		t.Fatalf("counter-decrease %d, want 1", n)
+	}
+}
+
+// TestFileCopyCheckFirst (D6's P11 on #774; kills M10, the run file's copy
+// taken without the step check): a step back of 5 s, and the run file
+// written before any other check: its copy is W moved back by the step.
+func TestFileCopyCheckFirst(t *testing.T) {
+	r, p, w := placed2(t)
+	p.taken()
+	r.l.CheckStep(bg)
+	r.addWall(-5 * time.Second)
+	r.settleFile()
+	if got := runFileCopy(t, r.path); got != canonUTC(w.Add(-5*time.Second)) {
+		t.Fatalf("the copy %q, want %s", got, canonUTC(w.Add(-5*time.Second)))
+	}
+}
+
+// TestHeartbeatLateWithMovedE (D3's N1 on #774): the step check runs
+// before a heartbeat's lateness is judged, and lateness reads E's samples
+// moved. The node's clock alone stepped back 5 s; a heartbeat made
+// late_bound_s + 3 s before its receipt, true time, is read before any
+// tick: it is counted late. Mutant (the PR's comment): the check after
+// the lateness, or lateness with E unmoved, which reads it 2 s inside.
+func TestHeartbeatLateWithMovedE(t *testing.T) {
+	r, p, _ := placed2(t)
+	p.taken()
+	r.pass(time.Second)
+	r.addWall(-5 * time.Second)
+	// The sensor's clock reads the node's + 5 s now.
+	made := r.now().Add(5*time.Second - DefaultLateBound - 3*time.Second)
+	p.send(hbWith(3, at(made), pk(300, "up")))
+	p.ack(3)
+	if n := r.l.SkewStats().Late; n != 1 {
+		t.Fatalf("late %d, want 1", n)
+	}
+}

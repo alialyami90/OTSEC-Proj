@@ -346,8 +346,10 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 	})
 	// (i): both clocks true, tie_grace_s 3 s; a tick sent at R - 3 s and
 	// read at R after a read loop held 3 s; a session at R + 5 s stamped
-	// so; both clocks stepped back 1.5 s at R + 5.5 s and at R + 6.5 s;
-	// the next tick at R + 7 s, on time; a failing dial at R + 9 s for 2 s,
+	// so; both clocks stepped back 1.5 s at R + 5.5 s and at R + 6.5 s,
+	// the step check running every second, so no check spans both steps
+	// (D6's N1 on #774); the next tick at R + 7 s, on time; a failing dial
+	// at R + 9 s for 2 s,
 	// recorded as [R + 6 s, R + 8 s]; the session's start record read
 	// after it, placed at R + 5 s. The floor rises to about R + 9 s at the
 	// tick of R + 7 s. Mutant (X9, X10): a K read after a held loop taken
@@ -361,9 +363,12 @@ func TestTieRecordBeforeSensorStep(t *testing.T) {
 		rt := r.now()
 		s.pass(5 * time.Second)
 		at := s.now()
+		r.l.CheckStep(bg)
 		s.pass(500 * time.Millisecond)
 		s.step(-1500*time.Millisecond, -1500*time.Millisecond)
-		s.pass(time.Second)
+		s.pass(500 * time.Millisecond)
+		r.l.CheckStep(bg)
+		s.pass(500 * time.Millisecond)
 		s.step(-1500*time.Millisecond, -1500*time.Millisecond)
 		s.pass(500 * time.Millisecond)
 		s.tick()
@@ -678,6 +683,74 @@ func TestTieNodeMovedSinceSample(t *testing.T) {
 			withSeam(t, &stepNoSamples)
 			refusedBy(t, h(t, true), cMoved, "", time.Time{})
 		})
+	})
+}
+
+// TestTieLatestAsTakenAndMoved (D4's B1 on #774; CH-22): the latest
+// sample's o is +3 s, outside max_skew_ms, with the alarm not standing; the
+// node's clock then stepped back 3 s, found by a check, and a second later
+// stepped forward 3 s, before the next sample. A failing dial of 10 s and
+// the node's own SYN inside it: the latest o as taken still refuses the
+// tie, counted skew_latest_windows, as it does with no step. Control: the
+// latest o read only as moved by the step, which ties the record.
+func TestTieLatestAsTakenAndMoved(t *testing.T) {
+	run := func(t *testing.T, steps bool) *rig {
+		r, s, _ := t13(t, 30*time.Second, nil, nil)
+		s.manual = true
+		s.tick()
+		s.pass(10 * time.Second)
+		s.step(3*time.Second, 0)
+		s.tick()
+		if st := r.l.SkewStats(); st.Alarm || st.Latest != 3*time.Second {
+			t.Fatalf("want the latest o +3 s alone: %+v", st)
+		}
+		if steps {
+			s.step(-3*time.Second, 0)
+			r.l.CheckStep(bg)
+			s.pass(time.Second)
+			s.step(3*time.Second, 0)
+		}
+		at := s.now().Add(5 * time.Second)
+		s.dialFails(1, 10*time.Second)
+		s.pass(time.Second)
+		s.synEnd(40001, at, time.Time{})
+		return r
+	}
+	for _, steps := range []bool{false, true} {
+		r := run(t, steps)
+		skewedUntied(t, r.one(40001))
+		refusedBy(t, r, cLatest, "", time.Time{})
+	}
+	t.Run("control: the latest read as moved only", func(t *testing.T) {
+		withSeam(t, &skewLatestMovedOnly)
+		tiedTo(t, run(t, true).one(40001), 1)
+	})
+}
+
+// TestSkewAlarmSamplesAsTaken (D6's N1 on #774): both clocks stepped back
+// 300 s together and the step found by a check, then the next tick: o is
+// unchanged, so sensor-clock-skew is not raised. Control: the alarm on
+// E's samples moved by the step, which raises it.
+func TestSkewAlarmSamplesAsTaken(t *testing.T) {
+	run := func(t *testing.T) *rig {
+		r, s, _ := t13(t, 30*time.Second, nil, nil)
+		s.manual = true
+		s.tick()
+		s.pass(time.Second)
+		s.step(-300*time.Second, -300*time.Second)
+		r.l.CheckStep(bg)
+		s.pass(10 * time.Second)
+		s.tick()
+		return r
+	}
+	if r := run(t); r.l.SkewStats().Alarm || r.raised(AlarmClockSkew, "") {
+		t.Fatalf("sensor-clock-skew raised: %+v", r.l.SkewStats())
+	}
+	t.Run("control: the alarm on the moved samples", func(t *testing.T) {
+		withSeam(t, &skewAlarmMoved)
+		if r := run(t); !r.l.SkewStats().Alarm {
+			t.Fatal("no alarm under the control")
+		}
 	})
 }
 
