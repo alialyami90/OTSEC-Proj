@@ -249,11 +249,22 @@ func (l *Link) sample(sensorUTC string, hello, held bool) (raised, onset bool) {
 	if err != nil {
 		return false, false
 	}
-	wall, mono := l.now(), l.opt.Monotonic()
-	o := wall.Sub(su)
-	k := su.Add(-mono)
+	var wall time.Time
+	var mono time.Duration
+	if sampleClocksBeforeLock {
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
 	s := &l.skew
 	s.mu.Lock()
+	if !sampleClocksBeforeLock {
+		// Under the lock, as in the step check and W's placement: a step
+		// check on another goroutine is wholly before or after this
+		// sample, so a step it finds moves this sample or was taken into
+		// its reading, never neither (D6's B5 on #774).
+		wall, mono = l.now(), l.opt.Monotonic()
+	}
+	o := wall.Sub(su)
+	k := su.Add(-mono)
 	before := l.standingLocked()
 	switch {
 	case hello:

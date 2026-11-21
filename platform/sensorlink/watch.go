@@ -81,9 +81,10 @@ type IfaceMark struct {
 // began again, for every name, when the interface set changes;
 // stepCopyUnmoved leaves the run file's copy where a step found it;
 // k1KeptAnySeq judges any heartbeat after a start against the packets
-// kept with W.
+// kept with W. sampleClocksBeforeLock reads both clocks before the skew's
+// lock in E's sample (D1's 7058929380 on #774).
 var k1ProcessOnly, placeAtReceipt, stepNoSamples, stepCapsCaptureFloor, stepFoundOnly, stepAnyBack, stepTickOnly bool
-var stepClocksBeforeLock, watchSetResets, stepCopyUnmoved, k1KeptAnySeq bool
+var stepClocksBeforeLock, watchSetResets, stepCopyUnmoved, k1KeptAnySeq, sampleClocksBeforeLock bool
 
 // ifLive is an interface's CH-31 state in this process.
 type ifLive struct {

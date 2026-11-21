@@ -445,6 +445,16 @@ func TestStepSaveFails(t *testing.T) {
 // blocking finding, with its control, and D6's probes P3, P4 and P8 to P11
 // as tests that kill the named mutants.
 
+// boundedWait waits for c to close, or for 200 ms: one schedule for a
+// test and its control, whichever order the code under test allows (D6's
+// B4 on #774).
+func boundedWait(c chan struct{}) {
+	select {
+	case <-c:
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 // placed2 is a rig with run 5 accepted as new and heartbeats 1 and 2
 // placed, the second with a rise: W and R are its receipt.
 func placed2(t *testing.T) (*healthRig, *peer, time.Time) {
@@ -460,8 +470,9 @@ func placed2(t *testing.T) (*healthRig, *peer, time.Time) {
 // TestStepFoundOnceAcrossGoroutines (D6's B1, P1, on #774): the step
 // check reads both clocks under the skew's lock. A check that has read
 // the clocks is held; the wall clock steps back 5 s and a second passes; a
-// second check runs; then the first; a second later a third. One step of
-// 5 s is found once: W and R 5 s back and one time.node-stepped. Control:
+// second check is given 200 ms to end; then the first is released; a
+// second later a third. One step of 5 s is found once: W and R 5 s back
+// and one time.node-stepped. Control:
 // the clocks read before the lock, under which the first check measures
 // itself against the second and the third finds the step again: W and R
 // 10 s back and two events.
@@ -478,9 +489,10 @@ func TestStepFoundOnceAcrossGoroutines(t *testing.T) {
 		r.addWall(-5 * time.Second)
 		r.pass(time.Second)
 		go func() { r.l.CheckStep(bg); close(b) }()
-		if stepClocksBeforeLock {
-			<-b // the second check is not held by the first's lock
-		}
+		// One schedule whatever the code: the second check is given a
+		// bounded time to end before the first is released. Under the
+		// lock it cannot, and waits the time out (D6's B4 on #774).
+		boundedWait(b)
 		close(hold.release)
 		<-a
 		<-b
@@ -504,8 +516,9 @@ func TestStepFoundOnceAcrossGoroutines(t *testing.T) {
 }
 
 // TestStepCheckBesidePlacement (D3's B2 on #774): the tick's check has read
-// the clocks and is held; a second later a heartbeat with a rise is read.
-// No clock stepped, so no time.node-stepped is written, and W and R are
+// the clocks and is held; a second later a heartbeat with a rise is read,
+// and given 200 ms to be acked before the check is released. No clock
+// stepped, so no time.node-stepped is written, and W and R are
 // that heartbeat's receipt. Control: the clocks read before the lock,
 // under which the held check finds W later than its stale wall clock and
 // writes time.node-stepped of 1,000 ms.
@@ -521,14 +534,15 @@ func TestStepCheckBesidePlacement(t *testing.T) {
 		r.pass(time.Second)
 		recv := r.now()
 		p.send(hbWith(3, at(recv), pk(300, "up")))
-		if stepClocksBeforeLock {
-			p.ack(3) // placed while the check is held before its lock
-		}
+		// One schedule whatever the code: the heartbeat is given a bounded
+		// time to be placed and acked before the check is released (D6's
+		// B4 on #774). Under the lock its step check waits for the held one.
+		acked := make(chan struct{})
+		go func() { p.ack(3); close(acked) }()
+		boundedWait(acked)
 		close(hold.release)
 		<-a
-		if !stepClocksBeforeLock {
-			p.ack(3)
-		}
+		<-acked
 		return r, recv
 	}
 	r, recv := run(t)
@@ -648,6 +662,155 @@ func TestCaptureNewNameWithinRun(t *testing.T) {
 	}
 	if _, gr := r.l.watchNow(); !gr.IsZero() {
 		t.Fatalf("R %s: a name seen again read as a rise", gr)
+	}
+}
+
+// TestPlaceReadsClocksUnderLock (D6's B4, PR2, on #774): W's placement
+// reads both clocks under the skew's lock. Heartbeat 3, whose at_utc is a
+// second after its receipt, is held inside its placement's clock read; the
+// wall clock steps back 5 s; the node's tick is given 200 ms; then the
+// placement ends. W is never later than the wall clock, and one
+// time.node-stepped of 5,000 ms is written. Control: the clocks read
+// before the lock, under which the check runs between the placement's
+// reading and its lock, and W is placed a second after the wall clock.
+func TestPlaceReadsClocksUnderLock(t *testing.T) {
+	run := func(t *testing.T) (*healthRig, time.Duration) {
+		r, p, _ := placed2(t)
+		p.taken()
+		r.l.CheckStep(bg)
+		r.pass(time.Second)
+		hold := r.clk.holdIn(".(*Link).place")
+		p.send(hbWith(3, at(r.now().Add(time.Second)), pk(300, "up")))
+		<-hold.reached
+		r.addWall(-5 * time.Second)
+		done := make(chan struct{})
+		go func() { r.l.CheckStep(bg); close(done) }()
+		boundedWait(done)
+		close(hold.release)
+		<-done
+		p.ack(3)
+		gw, _ := r.l.watchNow()
+		ahead := gw.Sub(r.now())
+		r.pass(time.Second)
+		r.l.CheckStep(bg)
+		return r, ahead
+	}
+	r, ahead := run(t)
+	if ahead > 0 {
+		t.Fatalf("W placed %s after the wall clock", ahead)
+	}
+	if d := r.sink.of(event.HealthTimeNodeStepped); len(d) != 1 || d[0]["step_back_ms"] != "5000" {
+		t.Fatalf("time.node-stepped: %v", d)
+	}
+	t.Run("control: the clocks read before the lock", func(t *testing.T) {
+		withSeam(t, &stepClocksBeforeLock)
+		if _, ahead := run(t); ahead != time.Second {
+			t.Fatalf("W %s after the wall clock under the control, want 1s", ahead)
+		}
+	})
+}
+
+// TestSampleReadsClocksUnderLock (D6's B5, PR1, on #774): E's sample reads
+// both clocks under the skew's lock. A tick whose sensor_utc is the node's
+// wall clock (o 0) is read, and its sample held inside its clock read; the
+// wall clock steps back 5 s and the node's tick is given 200 ms; then the
+// sample ends. A heartbeat made after the step, on a sensor clock now 5 s
+// ahead of the node's, is read 30 s later: W is its making time on the
+// node's clock, and one time.node-stepped of 5,000 ms is written. Control:
+// the clocks read before the lock, under which the check moves the samples
+// held and the tick's sample, taken on the old clock, is stored unmoved:
+// W is placed 5 s after the making time.
+func TestSampleReadsClocksUnderLock(t *testing.T) {
+	run := func(t *testing.T) (*healthRig, time.Duration) {
+		r, p, _ := placed2(t)
+		p.taken()
+		r.l.CheckStep(bg)
+		r.pass(time.Second)
+		hold := r.clk.holdIn(".(*Link).sample")
+		tk := tick02(2, 2, 0)
+		tk.SensorUTC = canonUTC(r.now())
+		p.send(tk)
+		<-hold.reached
+		r.addWall(-5 * time.Second)
+		done := make(chan struct{})
+		go func() { r.l.CheckStep(bg); close(done) }()
+		boundedWait(done)
+		close(hold.release)
+		<-done
+		p.taken()
+		made := r.now().Add(5 * time.Second)
+		r.pass(30 * time.Second)
+		p.send(hbWith(3, at(made), pk(300, "up")))
+		p.ack(3)
+		r.pass(time.Second)
+		r.l.CheckStep(bg)
+		gw, _ := r.l.watchNow()
+		return r, gw.Sub(made.Add(-5 * time.Second))
+	}
+	r, late := run(t)
+	if late != 0 {
+		t.Fatalf("W placed %s from the making time on the node's clock", late)
+	}
+	if d := r.sink.of(event.HealthTimeNodeStepped); len(d) != 1 || d[0]["step_back_ms"] != "5000" {
+		t.Fatalf("time.node-stepped: %v", d)
+	}
+	t.Run("control: the clocks read before the lock", func(t *testing.T) {
+		withSeam(t, &sampleClocksBeforeLock)
+		if _, late := run(t); late != 5*time.Second {
+			t.Fatalf("W %s from the making time under the control, want 5s", late)
+		}
+	})
+}
+
+// TestStepMovesFileCopyOnce (D3's N-a on #774): with no W held, a step
+// back moves the run file's copy once. A step back of 1 h is found; the
+// file is written again, and the copy stays at W - 1 h; a step back of
+// 30 min is found, and the copy is at W - 90 min. Two time.node-stepped,
+// one for each step. It kills a watchedCopy that never resets copyBack.
+func TestStepMovesFileCopyOnce(t *testing.T) {
+	r, p, w := placed2(t)
+	r.settleFile()
+	p.end()
+	r.loseDatabase()
+	r.restart()
+	r.l.CheckStep(bg)
+	r.pass(time.Second)
+	want := func(back time.Duration, what string) {
+		t.Helper()
+		if got := runFileCopy(t, r.path); got != canonUTC(w.Add(-back)) {
+			t.Fatalf("%s: the copy %q, want %s", what, got, canonUTC(w.Add(-back)))
+		}
+	}
+	r.addWall(-time.Hour)
+	r.l.CheckStep(bg)
+	want(time.Hour, "after the first step")
+	r.settleFile()
+	want(time.Hour, "the file written again")
+	r.addWall(-30 * time.Minute)
+	r.l.CheckStep(bg)
+	want(90*time.Minute, "after the second step")
+	d := r.sink.of(event.HealthTimeNodeStepped)
+	if len(d) != 2 || d[0]["step_back_ms"] != "3600000" || d[1]["step_back_ms"] != "1800000" {
+		t.Fatalf("time.node-stepped: %v", d)
+	}
+}
+
+// TestStepLeavesNoCopyWithNone (D3's N-a on #774): a run file with no copy
+// gains none from a step: the entry moves only a copy it holds. A run
+// accepted, no heartbeat, a step back of 1 h found: the file has no copy.
+func TestStepLeavesNoCopyWithNone(t *testing.T) {
+	r := newHealthRig(t)
+	r.accepted(live02())
+	r.l.CheckStep(bg)
+	r.pass(time.Second)
+	r.addWall(-time.Hour)
+	r.l.CheckStep(bg)
+	if n := r.sink.count(event.HealthTimeNodeStepped); n != 1 {
+		t.Fatalf("time.node-stepped %d", n)
+	}
+	r.settleFile()
+	if got := runFileCopy(t, r.path); got != "" {
+		t.Fatalf("the copy %q, want none", got)
 	}
 }
 
