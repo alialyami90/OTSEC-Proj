@@ -2918,7 +2918,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Scratch files: `d7-c406-*`
 - Result: #784, merged as `3bf5397a`.
 
-## After D4-124: the blindness alarms (issued 2026-11-21, D4-125)
+## After D4-124: the blindness alarms (issued 2026-11-22, D4-125)
 
 ### P4-4-INT-D5-BLIND (D5; D6, D3 and D4 review): `sensor-blind`, `sensor-no-heartbeat` and `sensor.past-blind`
 - Objective and rationale: the node's alarms for a sensor that heartbeats but does not capture (R6.1 and R6.6, SL-20; ADR-0009, "A sensor that heartbeats but is blind"), held out of 2e by D4-121 item 2.5. Starts after #788 (2e-3) merges, and before P4-4-DE.

@@ -3033,3 +3033,32 @@ Evidence class: `desk` for the rulings and reviews; `CI-Linux` and `CI-Windows` 
   3. P4-4-INT-D5-BLIND (D5), after #788: D1 first issues its brief in `docs/agent-handoffs.md`, from D4-121 item 2.5.
   4. HR25-B2 and B3 (D4).
 - **Next decision number:** D4-125.
+
+## D4-125: #789's rounds and its build-only dispatch, #788's rulings, the blindness brief, and work paused at the owner's word (D1, 2026-11-22)
+
+Evidence class: `desk` for the rulings and reviews; `CI-Linux` for the `build_only` dispatches, which build and record images only and run no engine over any capture. Nothing merged in this session. Nothing was built or run against a device, and no counted run, rehearsal or engine run was made. It follows D4-124.
+
+- **1. Merged:** none.
+- **2. Rulings.**
+  1. **#789 (HR25-B1), first round** (D1's 7068924614, on D7's 7062671801, D3's 7068763144 and D6's 7068917019; D2 accepted, 7062698215): D7's B1 fixed as D4-124 item 3.1 asks; D6's B1 and B2 each an input and a control; D3's N1 and D6's N2 (the same defect) fixed by reading each condition as a conjunction; D6's N1 and N3 fixed; the text notes in the body.
+  2. **Mutants owed at HR-25's stage-2 run** (ruling 1's route for D6's B2; D4's 7069219439; D6 confirms in 7069389211): the catch inside the loop (T3), mutant "`TransportRule`'s `try` removed", carried by `dnp3-resync-udp-app-parse-same-datagram` and `dnp3-resync-tcp-app-parse-same-segment`; the TCP gap, mutant "`Undelivered` not calling `Gap`", carried by `dnp3-resync-tcp-gap-header` and `dnp3-resync-tcp-gap-data`.
+  3. **The length check's lower off-by-one (`< 4`) needs no control:** `d4u-hr25-link-length` kills it on every branch (D6's 7069389211).
+  4. **The upload steps' `!cancelled()`** (D4's change beyond the rulings) is accepted by D3 (7069239348) and D7 (7069279037): a cancelled or timed-out run loses its build record, which is visibility, not the trust boundary.
+  5. **#788 (2e-3), first round** (D1's 7069112910, on D4's 7068833642, D3's 7068895519 and D6's 7069105000): the 60 s before `open` count from W (D4's B1, D6's N1); a committed covered close is cleared from the cursor before the sensor's next gap record (D3's B2); the copy is written capped (D6's B2, option (a)); D6's N2 and N4 and D4's N2 tested; D4's N1 and N3 dropped.
+  6. **#788, options** (D1's 7069502767, on D5's 7069171243): (6) only the start's cursor read takes the gap state, option (a) (D6's B1); (7) with the database and the run file both lost, the `node-start` gap opens from the Unix epoch with `from_bound: true` until P4-4-DE supplies `enrolled_at`, since CH-45 requires an earlier bound (D3's B1 over D4's N1); D4 confirms as C13's owner in its re-review, and an objection reopens it; (8) the cursor keeps G and D at W's heartbeat, option (b), and D1 approves the change to `docs/phase4/D5-sensor-node.md` §1.4's form (two fields, within `MaxLinkCursorBytes`; no build reading the old form is released).
+- **3. Open items.**
+  1. **Owner P4-4-DE:** replace item 2.6 (7)'s epoch with `enrolled_at` (V-9's second case, V-15).
+  2. **Owner D4, before HR-23's or HR-25's counted run relies on the 330-minute limit:** quote the `build_only` run's build-step time and its `df` output (D7's ask on #789).
+  3. **`sensor-no-heartbeat` had no owner:** nothing on `main` raises it. It goes to P4-4-INT-D5-BLIND with `sensor-blind` and `sensor.past-blind` (CH-44).
+  4. D4-124 item 3.1 is fixed at #789's `e5d12a75` and closes when #789 merges. D4-124 items 3.2 to 3.4 stay open.
+- **4. Brief issued** (`docs/agent-handoffs.md`, "After D4-124"): P4-4-INT-D5-BLIND (D5), to start after #788 merges.
+- **5. Dispatches.** `build_only` at `dd96d767` (run 44950116889), after D3's and D7's acceptance as D4-124 item 2.2 provides, cancelled as superseded; `build_only` at `e5d12a75` (run 44952438265), after D7's confirm (7069589725), in progress at the pause.
+- **6. Paused at the owner's word** ("pause and update handoff"). No agent is running: D1 stopped D5 after it had pushed `254fe318` and posted 7069628039, while it waited on CI. Open PRs:
+  1. #789 (HR25-B1, D4, head `e5d12a75`, `full-ci`): D2 (7069606473), D3 (7069594655), D6 (7069588777) and D7 (7069589725) accept this head. It merges after a green `build_only` run 44952438265 and D1's merge check at this head.
+  2. #788 (2e-3, D5, head `254fe318`): rulings 1 to 8 built (7069628039); CI run 44952584353. Its re-review has not started.
+- **7. Next, in order, when work resumes:**
+  1. #789: read run 44952438265; if green, D1's merge check and merge; if not, `ci-triage`, then D4.
+  2. #788: D4 (its B1, and item 2.6 (7)'s confirmation), D3 (B1, B2) and D6 (B1, B2, N1 to N4) re-review `2dcf1e19..254fe318` together; then D5's fixes, `full-ci` and D1's merge check.
+  3. P4-4-INT-D5-BLIND (D5), after #788.
+  4. HR25-B2 and B3 (D4), after #789; D4-124 item 3.3's ruling before any `hr25_unit` dispatch.
+- **Next decision number:** D4-126.
