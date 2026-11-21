@@ -649,10 +649,21 @@ OTHER = "syn-other"
 DNP3_CAPS = ("syn-a", HOLD, OTHER)
 COND_COLS = ("capture", "condition", "l4", "src", "sport", "dst", "dport", "code", "objects", "sa", "show", "frames",
              "protocol", "direction")
-ENGINE_LINES = (f"zeek failed on {HOLD} (zeek-probe-c2), exit 139:\n{MARK} tail\n"
+# Lines as in-container.sh prints them: a failure's tail indented. syn-a's
+# lines show whether a run hides the case capture that is not held.
+ENGINE_LINES = (f"zeek failed on {HOLD} (zeek-probe-c2), exit 139:\n  {MARK} tail\n"
                 f"zeek {HOLD} (zeek) says: W: {MARK}\n"
-                f"zeek failed on {OTHER} (zeek), exit 1:\nother tail\n"
+                f"zeek failed on {OTHER} (zeek), exit 1:\n  other tail\n"
+                f"zeek failed on syn-a (zeek), exit 1:\n  syn-a tail\n"
                 f"suricata-fifo {HOLD} (suricata-fifo) says: {MARK}\n")
+# The pipe case's and the FIFO's engine lines, for run.sh's pipes and fifos
+# stubs in the block test.
+PIPE_LINES = (f"zeek-pipe failed on {HOLD} (zeek-pipe), exit 1:\n  {MARK} pipe\n"
+              f"zeek-pipe syn-a (zeek-pipe) says: W: syn-a pipe\n"
+              f"zeek-pipe failed on {OTHER} (zeek-pipe), exit 1:\n  other pipe\n")
+FIFO_LINES = (f"suricata-fifo failed on {HOLD} (suricata-fifo), exit 1:\n  {MARK} fifo\n"
+              f"suricata-fifo syn-a (suricata-fifo) says: W: syn-a fifo\n"
+              f"suricata-fifo failed on {OTHER} (suricata-fifo), exit 1:\n  other fifo\n")
 
 
 def consts(path, tables):
@@ -689,6 +700,11 @@ def dnp3_inputs(tmp_path):
     held = out / HOLD
     (held / "zeek-probe-c2" / "weird.log").write_text(json.dumps({"ts": 1.0, "name": "dnp3_" + MARK}) + "\n")
     (held / "zeek-probe-c2" / "only.log").write_text(json.dumps({"ts": 1.0, MARK: 1}) + "\n")
+    # A field that only OTHER emits under C2, and HOLD under C1 and C1p: the
+    # fields lines list it against both only while HOLD's logs are left out.
+    for cfg in ("zeek-probe", "zeek-probe-c1p"):
+        (held / cfg / "shared.log").write_text(json.dumps({"ts": 1.0, "SHARED": 1}) + "\n")
+    (out / OTHER / "zeek-probe-c2" / "shared.log").write_text(json.dumps({"ts": 1.0, "SHARED": 1}) + "\n")
     (held / "suricata" / "exit-code").write_text("1\n")
     (tmp_path / "engines.txt").write_text(ENGINE_LINES)
     return root, str(gt), str(work), str(out)
@@ -740,6 +756,8 @@ def dnp3_problems(tmp_path, here=HERE):
             bad.append(f"{case}: a count includes a capture left out")
         if text.count(f"| 0 of {n + 1} | {n} of {n} |") != len(table.PIPED):
             bad.append(f"{case}: the pipe case's count includes a capture left out")
+        if text.count("shared.log:SHARED") != 2:
+            bad.append(f"{case}: C1's or C1p's field set reads a capture left out")
         if text.count("is printed here") < 2:
             bad.append(f"{case}: the note is missing")
     return bad
@@ -754,6 +772,7 @@ DNP3_MUTANTS = {
     "dnp3-conditions": ('[r for r in tsv(cpath) if r["capture"] not in hide]', "tsv(cpath)"),
     "readings-rows": ("os.path.isdir(os.path.join(out, x)) and x not in hide)", "os.path.isdir(os.path.join(out, x)))"),
     "readings-fields": ('log_fields(out, "zeek-probe-c2", hide)', 'log_fields(out, "zeek-probe-c2")'),
+    "readings-fields-c1-c1p": ("sorted(c2 - log_fields(out, ref, hide))", "sorted(c2 - log_fields(out, ref))"),
     "fifo": ('os.path.isdir(os.path.join(out_pipe, c, "suricata-fifo")) and c not in hide)',
              'os.path.isdir(os.path.join(out_pipe, c, "suricata-fifo")))'),
     "engine-lines": ("skip = (m.group(1) or m.group(2)) in hide", "skip = False"),
@@ -799,16 +818,18 @@ def block_problems(tmp_path, text):
         stub = (d / "engines.txt").read_text()
         script = d / "block.sh"
         script.write_text("set -eu\npython3() { \"$PY\" \"$@\"; }\nheader() { echo HEADER; }\n"
-                          "engines() { printf '%s' \"$LINES\"; }\npipes() { :; }\nfifos() { :; }\n"
+                          "engines() { printf '%s' \"$LINES\"; }\npipes() { printf '%s' \"$PIPES\"; }\n"
+                          "fifos() { printf '%s' \"$FIFOS\"; }\n"
                           + text, newline="\n")
         e = run_env(dict(env, PY=sys.executable.replace("\\", "/"), here=HERE.replace("\\", "/"),
                          root=root.replace("\\", "/"), gt=gt.replace("\\", "/"), work=work.replace("\\", "/"),
-                         hr23="", LINES=stub, **({"GITHUB_REF": "refs/heads/main"} if counted else {})))
+                         hr23="", LINES=stub, PIPES=PIPE_LINES, FIFOS=FIFO_LINES, **({"GITHUB_REF": "refs/heads/main"} if counted else {})))
         r = subprocess.run([SH, str(script).replace("\\", "/")], env=e, capture_output=True, text=True)
         md = open(os.path.join(work, "dnp3.md"), encoding="utf-8").read() if os.path.exists(
             os.path.join(work, "dnp3.md")) else ""
         log = r.stdout + r.stderr
-        if r.returncode != 0 or f"| {OTHER} |" not in md or "other tail" not in log:
+        if r.returncode != 0 or f"| {OTHER} |" not in md or any(
+                f"other {x}" not in log for x in ("tail", "pipe", "fifo")):
             bad.append(f"block {i}: exit {r.returncode}, or a table or the engine lines are missing")
         if HOLD in md + log or MARK in md + log or ("syn-a" in md + log) != accepted:
             bad.append(f"block {i}: a capture left out reached dnp3.md or the job log")
@@ -834,3 +855,86 @@ def test_control_dnp3_mode_block_mutant_is_caught(tmp_path, old, new):
     text = run_sh_block()
     assert text.count(old) == 1, old
     assert block_problems(tmp_path, text.replace(old, new)) != []
+
+
+# D6's N1 at 61a916a6: the pipe case's and the FIFO's engine lines, and
+# held-log run without the counted flag. Each mutant must fail the rule
+# that a capture left out reaches neither dnp3.md nor the job log, not only
+# on an exit code or a missing file.
+LEAK_MUTANTS = {
+    "pipes-to-the-log": ('pipes "$work/dnp3" "$work/out-dnp3-pipe" >> "$work/dnp3-engines.txt"',
+                         'pipes "$work/dnp3" "$work/out-dnp3-pipe"'),
+    "fifos-to-the-log": ('fifos "$work/dnp3" "$work/out-dnp3-pipe" > "$work/dnp3-fifo-engines.txt"',
+                         'fifos "$work/dnp3" "$work/out-dnp3-pipe" > "$work/dnp3-fifo-engines.txt"; '
+                         'fifos "$work/dnp3" "$work/out-dnp3-pipe"'),
+    "held-log-without-counted": ('held-log "$work/dnp3-engines.txt" "$root" $dnp3_counted',
+                                 'held-log "$work/dnp3-engines.txt" "$root"'),
+    "fifo-held-log-without-counted": ('held-log "$work/dnp3-fifo-engines.txt" "$root" $dnp3_counted',
+                                      'held-log "$work/dnp3-fifo-engines.txt" "$root"'),
+}
+
+
+@needs_sh
+@pytest.mark.parametrize("old,new", LEAK_MUTANTS.values(), ids=LEAK_MUTANTS.keys())
+def test_control_engine_lines_mutant_fails_on_the_held_rule(tmp_path, old, new):
+    text = run_sh_block()
+    assert text.count(old) == 1, old
+    bad = block_problems(tmp_path, text.replace(old, new))
+    assert any("a capture left out reached" in b for b in bad), bad
+
+
+# D6's B1 at 61a916a6: in-container.sh indents a failure's stderr tail, so
+# that an engine's own line of the form `ENGINE failed on NAME (CFG), exit
+# N:` in a held capture's tail cannot end held-log's skip. The script runs
+# under sh over two empty synthetic captures, with a stub zeek that fails on
+# both; on HOLD, its stderr forges OTHER's header line before MARK. The
+# control is the old form, the tail not indented.
+
+def in_container_problems(tmp_path, text):
+    pcaps, out = tmp_path / "pcaps", tmp_path / "out"
+    pcaps.mkdir()
+    out.mkdir()
+    for c in (HOLD, OTHER):
+        (pcaps / f"{c}.pcap").write_bytes(b"")
+    for old, new in (("for p in /pcaps/*", 'for p in "$PCAPS"/*'), ("d=/out/$n/$cfg", 'd="$OUT/$n/$cfg"')):
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    stub = ('zeek() {\n  case "$3" in\n    *"$HOLD"*) printf \'%s failed on %s (zeek), exit 1:\\n%s\\n\' zeek "$OTHER" "$MARK" >&2 ;;\n'
+            '    *) echo "other tail" >&2 ;;\n  esac\n  return 1\n}\n')
+    script = tmp_path / "in-container.sh"
+    script.write_text(stub + text, newline="\n")
+    e = dict(os.environ, PCAPS=str(pcaps).replace("\\", "/"), OUT=str(out).replace("\\", "/"), HOLD=HOLD,
+             OTHER=OTHER, MARK=MARK)
+    r = subprocess.run([SH, str(script).replace("\\", "/"), "zeek", "zeek", "all"], env=e, capture_output=True,
+                       text=True)
+    lines = tmp_path / "lines.txt"
+    lines.write_text(r.stdout)
+    shown = subprocess.run([sys.executable, "-I", "-B", "-c",
+                            "import sys; sys.path.insert(0, sys.argv[1]); import table; "
+                            "table.held_log(sys.argv[2], {sys.argv[3]})", HERE, str(lines), HOLD],
+                           capture_output=True, text=True).stdout
+    bad = []
+    if r.returncode != 0 or f"zeek failed on {OTHER} (zeek), exit 1:" not in shown or "other tail" not in shown:
+        bad.append(f"exit {r.returncode}, or the capture not held is missing: {shown!r}")
+    if MARK in shown:
+        bad.append("a held capture's stderr reached held-log's copy")
+    return bad
+
+
+def in_container_text():
+    with open(os.path.join(HERE, "in-container.sh"), encoding="utf-8") as fh:
+        return fh.read().replace("\r", "")
+
+
+@needs_sh
+def test_a_header_shaped_line_in_a_held_tail_does_not_end_the_skip(tmp_path):
+    assert in_container_problems(tmp_path, in_container_text()) == []
+
+
+@needs_sh
+def test_control_the_tail_not_indented_leaks(tmp_path):
+    text = in_container_text()
+    old = """tail -5 "$eng.stderr" | sed 's/^/  /'"""
+    assert text.count(old) == 1, old
+    assert in_container_problems(tmp_path, text.replace(old, 'tail -5 "$eng.stderr"')) == [
+        "a held capture's stderr reached held-log's copy"]
