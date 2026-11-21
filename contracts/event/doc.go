@@ -139,9 +139,10 @@
 //     (C4-0.6-2) carries the refused baseline's hash, its schema
 //     ("unreadable" or an otsec.netbaseline identifier) and a
 //     BaselineRefusedCauses cause; later-minor with an unreadable schema
-//     is refused. C4-0.6-3, a later minor's network-observation and
-//     collection.run refused at judging, lands in a later step, in
-//     contracts/netobs and the node, not in Decode or Validate. No
+//     is refused. C4-0.6-3: a later minor's network-observation and
+//     collection.run are refused at judging by netobs.CheckEventMinor,
+//     with netobs.ErrLaterMinor, in contracts/netobs and the node, not in
+//     Decode or Validate, which still read every later minor forward. No
 //     envelope field or flag changes. Identifier is one constant, so
 //     every event this code stamps says 0.6.
 package event

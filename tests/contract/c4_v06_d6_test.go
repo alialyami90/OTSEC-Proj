@@ -4,8 +4,8 @@ package contract
 // 5e7f0487 on #768, D4-121), D6's independent rows E6-1, E6-2 and E6-3,
 // and E6-4 (c), the head leg, against step 1 (#772, merged as 9a6df521).
 // Brief P4-4-C4-06-D6R (D4-121 item 3.10). E6-4 (a), its strict leg and the
-// pins are in c4_v06_old_readers_d6_test.go. E6-6 (with step 3) and E6-17
-// (D4-120 item 3.4's workflow) are owed.
+// pins are in c4_v06_old_readers_d6_test.go, and E6-6 (with step 3, #780)
+// in c4_v06_e66_d6_test.go. E6-17 (D4-120 item 3.4's workflow) is owed.
 //
 // The events are D6's own, built from §2's text, not from D4's code or
 // tests. Each case pins the refusal as its exact list of (field, code)

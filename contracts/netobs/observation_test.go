@@ -255,10 +255,12 @@ func TestStoredRoundTrip(t *testing.T) {
 	if !bytes.Equal(mustJSON(t, o), b) {
 		t.Error("stored observation does not round trip")
 	}
-	later := strings.Replace(string(b), Identifier, "otsec.netobs/0.9", 1)
+	// A later minor is read forward and refused at judging (D4-c4-0.6
+	// §3.2), with ErrLaterMinor and a nil observation.
+	later := strings.Replace(string(b), Identifier, c13Later(), 1)
 	later = strings.Replace(later, `"kind":`, `"added_later":true,"kind":`, 1)
-	if _, err := DecodeStored([]byte(later)); err != nil {
-		t.Errorf("a later minor is read forward: %v", err)
+	if got, err := DecodeStored([]byte(later)); !laterRefusal(err, "schema") || got != nil {
+		t.Errorf("a later minor: %v, %v; want schema with ErrLaterMinor and nil", got, err)
 	}
 	if _, err := DecodeStored([]byte(strings.Replace(string(b), `"kind":`, `"added_later":true,"kind":`, 1))); err == nil {
 		t.Error("an unknown field at this minor was accepted")
@@ -266,7 +268,7 @@ func TestStoredRoundTrip(t *testing.T) {
 }
 
 func TestObservationFromEvent(t *testing.T) {
-	e := &event.Event{Kind: event.KindNetworkObservation, Netobs: mustJSON(t, fxStored()),
+	e := &event.Event{Schema: event.Identifier, Kind: event.KindNetworkObservation, Netobs: mustJSON(t, fxStored()),
 		Source: event.Source{Asset: &event.AssetRef{ID: fxAsset}}}
 	if _, err := ObservationFromEvent(e); err != nil {
 		t.Fatal(err)

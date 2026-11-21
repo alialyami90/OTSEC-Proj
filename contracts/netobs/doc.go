@@ -87,6 +87,16 @@
 //     (DecodeFromSensorIn). The node's two messages keep Identifier02.
 //   - The stored readers read 0.1, 0.2 and 0.3 strictly and a later minor
 //     forward; the bridge's unknown degraded value is read from 0.4 on.
+//   - At judging (C4 0.6, docs/phase4/D4-c4-0.6-proposal.md §3.1 and
+//     §3.2; no C13 minor): DecodeStored refuses a stored observation of a
+//     later minor than self, and ObservationFromEvent a network-observation
+//     event of a later C4 minor (CheckEventMinor). Each refusal is an
+//     *Error with CodeSchema and Field schema, alone and never joined, for
+//     which errors.Is(err, ErrLaterMinor) holds, and the observation
+//     returned is nil. ObservationFromEvent prefixes "netobs." to each
+//     Field of the body's errors (netobs.schema), except the whole-body
+//     Field netobs. A stored alert and a baseline of a later minor are
+//     still read forward.
 //   - The checkpoints: CheckpointIdentifier is otsec.netcheckpoint/0.3,
 //     which this code always writes, and the decoders read a 0.2 and a 0.1
 //     document strictly (CheckpointIdentifier02, CheckpointIdentifier01).

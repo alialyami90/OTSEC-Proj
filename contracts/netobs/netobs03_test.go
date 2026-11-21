@@ -222,10 +222,10 @@ func TestFlowEnd03Minors(t *testing.T) {
 		t.Errorf("a stored 0.3 end: %+v, %v", got, err)
 	}
 	later := asStored(fxEnd03("tcp"))
-	later.Schema = "otsec.netobs/0.4"
+	later.Schema = c13Later()
 	b := encodeWith(t, later, func(m map[string]any) { m["flow"].(map[string]any)["added_in_04"] = 1 })
-	if _, err := DecodeStored(b); err != nil {
-		t.Errorf("a stored 0.4 end with an added field: %v", err)
+	if got, err := DecodeStored(b); !laterRefusal(err, "schema") || got != nil {
+		t.Errorf("a stored later end with an added field: %v, %v; want schema with ErrLaterMinor (D4-c4-0.6 §3.2)", got, err)
 	}
 	b = encodeWith(t, asStored(fxEnd03("tcp")), func(m map[string]any) { m["flow"].(map[string]any)["added_in_04"] = 1 })
 	if _, err := DecodeStored(b); !hasCode(err, CodeDecode) {
