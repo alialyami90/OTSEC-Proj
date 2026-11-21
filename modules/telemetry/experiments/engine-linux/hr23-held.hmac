@@ -1,0 +1,5 @@
+# HR-23's held list, keyed digest (D1's ruling 1 on #776; hr23_feed.py's held_list and list_digest).
+# HMAC-SHA-256, keyed by the run's salt (OTSEC_HR23_SALT), of the held list's names sorted, each followed by a newline.
+# This is a TEST VALUE from a synthetic list: the list syn-held under the test salt 0123456789abcdef repeated four times.
+# A counted run refuses any other list until D1 commits the value for that run's salt.
+28e86cb351da6939b1fc01dacc16ff6e4d59204e80389e7554dc1ac211baa670

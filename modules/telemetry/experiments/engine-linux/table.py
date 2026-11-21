@@ -1770,13 +1770,15 @@ def mal_tokens(cell):
 def mal_labels(root, inp):
     """{message: (sender address, code, objects)} and the flow (l4, ends,
     ports) from the builder's labels. The flow's first address is the
-    sender of the earliest unit."""
+    sender of the earliest unit, whether or not it carries a message (the
+    label header's `flow`; D2's N1 on #776)."""
     rows = tsv(os.path.join(root, GT, HR23_DIR, inp + ".tsv"))
     l4, pair = rows[0]["flow"].split(" ", 1)
     a, b = pair.split(">")
     (ah, ap), (bh, bp) = a.rsplit(":", 1), b.rsplit(":", 1)
     units = [r for r in rows if r["message"] not in ("-", "")]
-    first = min(units, key=lambda r: int(r["packets"].split(",")[0]))["end"]
+    first = min((r for r in rows if r["packets"].split(",")[0].isdigit()),
+                key=lambda r: int(r["packets"].split(",")[0]))["end"]
     addr = {first: ah, ("o" if first == "m" else "m"): bh}
     msgs = {}
     for r in units:
@@ -1909,7 +1911,8 @@ def same_as(a, b, link):
 def judge_malformed(out, root, mal, ports_of, want):
     """{input: {cfg: (verdict, detail)}} for every hr23-malformed.tsv input.
     Verdicts: pass, fail, unknown (did not run, or cfg-ports) or reported
-    (mal-unknown's C2, a ? cell)."""
+    (mal-unknown's C2, or a cell made only of ? tokens, which mal-errors and
+    the fourth state still fail; D6's N1 on #776)."""
     res = {}
     for row in mal:
         inp = row["input"]
@@ -1954,7 +1957,8 @@ def judge_malformed(out, root, mal, ports_of, want):
                 continue
             toks, fails = judge_mal_cell(cell, rd, msgs)
             shown = "; ".join(f"{t} {h}" for t, h in toks)
-            res[inp][cfg] = ("fail", "; ".join(fails)) if fails else ("pass", shown)
+            only_q = bool(toks) and all(h == "reported" for _, h in toks)
+            res[inp][cfg] = ("fail", "; ".join(fails)) if fails else ("reported" if only_q else "pass", shown)
     return res
 
 
@@ -2031,33 +2035,51 @@ def judge_fp(out_fp, root, kept):
     return res
 
 
-DEP_CONTROL = "held (depends on a control)"
+DEP_HELD = "held (depends on a held row)"
 
 
-def cases(out, pcaps, root, ports_of, want, counted, env=None):
-    """hr23-cases.tsv's rows, under D1's ruling 7056743490 on #776 (D4-122).
-    The held list and the salt come from the environment (hr23_feed.py's
-    HELD_ENV and SALT_ENV), never from a committed file; without either, no
-    row is judged or printed, and a counted run exits 3. Every row of a held
-    capture reads HELD, and every fix reading that reads a capture of the
-    cross-capture control sets (SWAP, PREMISE, OBJ_CONTROL's values) reads
-    DEP_CONTROL, whether or not that control is held, so that the text does
-    not show which control is held (D1's 7057113098 on #776); no result, citation or finding of a held
-    capture is printed, and held captures are left out of the counts. One
-    SHA-256 is printed, over the salt and the held captures' verdict lines:
-    each held row's line as this table would print it, then each finding
-    that names a held capture, each followed by a newline. Returns the exit
-    code."""
+def held_gate(root, env):
+    """(held, salt, why) under D1's rulings 7056743490 and 7057468942 on
+    #776 (D4-122): hr23_feed.py's held_list over the captures of
+    hr23-cases.tsv, and the salt. HELD is a set when the list passed its
+    checks, None when the list or the salt was not given, and False when
+    the list was refused."""
     # Imported here, not at the top: table.py's other modes run without -B,
     # and the import would write __pycache__ into the mounted folder.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import hashlib
     import hr23_feed
+    held, why = hr23_feed.held_list(hr23_feed.case_captures(os.path.join(root, GP, "hr23-cases.tsv")), env)
+    return held, hr23_feed.salt_of(env), why
+
+
+def verdict_text(result):
+    """A result without its log-line citations and the engine's parser
+    notes, whose order the engine does not fix (D6's N2 on #776)."""
+    result = re.sub(r"; parser notes on this flow: .*? \(filler body refused\? D4's inference\)", "", result)
+    return re.sub(r"objects pass \S+", "objects pass", result)
+
+
+def cases(out, pcaps, root, ports_of, want, counted, env=None, mal_secret=()):
+    """hr23-cases.tsv's rows, under D1's rulings 7056743490 and 7057468942
+    on #776 (D4-122). The held list and the salt come from the environment
+    (held_gate), never from a committed file; without either, no row is
+    judged or printed, and a counted run exits 3; a refused list exits 1.
+    Every row of a held capture reads HELD, and every fix reading that reads
+    a held capture's rows reads DEP_HELD; no
+    result, citation or finding of a held capture is printed, and held
+    captures are left out of the counts. One SHA-256 is printed, over the
+    salt followed by a newline and then these lines, each followed by a
+    newline: MAL_SECRET (the malformed set's held lines), then in the
+    table's order each held row's line, its cells' verdicts without
+    citations (verdict_text), and each fix reading replaced by DEP_HELD, as
+    `| capture | condition | code | objects | fix reading |`, then each
+    finding that names a held capture. A counted run exits 3 when a case
+    capture was not fed under every configuration (D1's ruling 3). Returns
+    the exit code."""
+    import hashlib
+    hr23_feed = sys.modules.get("hr23_feed") or __import__("hr23_feed")
     print("\n### hr23-cases.tsv's rows\n")
-    held, why = hr23_feed.held_list(set(hr23_feed.pins(os.path.join(root, GT, HR23_DIR, "hr23.sha256"))), env)
-    salt = hr23_feed.salt_of(env)
-    if not why and salt is None:
-        why = f"the salt ({hr23_feed.SALT_ENV}) was not given, or is shorter than {hr23_feed.SALT_MIN} characters"
+    held, salt, why = held_gate(root, env)
     if why:
         print(f"Not judged or printed: {why} (D1's ruling 7056743490 on #776)." +
               (" **This run is on refs/heads/main, so it fails: no counted HR-23 result is taken without the cases' "
@@ -2079,22 +2101,25 @@ def cases(out, pcaps, root, ports_of, want, counted, env=None):
         return 1
     print("Each row under C0, C1, C1p and C2: `as pinned`, `not as pinned`, `unknown` or `reported`, with the result "
           f"and the log line it rests on; then the fix reading (judge-fix). Every row of a held capture reads "
-          f"`{hr23_feed.HELD}`, and every fix reading that reads a control capture of another case reads "
-          f"`{DEP_CONTROL}`, whether or not that control is held (D1's 7056743490 and 7057113098 on #776).\n")
-    controls = {SWAP, PREMISE, *OBJ_CONTROL.values()}
+          f"`{hr23_feed.HELD}`, and every fix reading that reads a held capture's rows reads `{DEP_HELD}` "
+          "(D1's 7056743490 and 7057468942 on #776).\n")
     print("| capture | condition | code | objects | " + " | ".join(CELL_OF[c] for c in JUDGED) + " | fix |")
     print("| --- | --- | --- | --- |" + " --- |" * len(JUDGED) + " --- |")
-    secret, tally, fixes = [], collections.Counter(), collections.Counter()
+    secret, tally, fixes = list(mal_secret), collections.Counter(), collections.Counter()
     for n, r in enumerate(conds):
         head = f"| {r['capture']} | {r['condition']} | {r['code']} | {r['objects']} | "
-        cells = [f"{oc[n][cfg]}: {res[cfg][n][0]} {res[cfg][n][1]}".strip().replace("|", "/") for cfg in JUDGED]
         if r["capture"] in held:
-            secret.append(head + " | ".join(cells) + f" | {fix[n]} |")
+            secret.append(head + " | ".join(f"{oc[n][cfg]}: {verdict_text(res[cfg][n][0])}".replace("|", "/")
+                                            for cfg in JUDGED) + f" | {fix[n]} |")
             print(head + " | ".join([hr23_feed.HELD] * (len(JUDGED) + 1)) + " |")
             continue
-        f = DEP_CONTROL if (deps[n] - {r["capture"]}) & controls else fix[n]
+        f = fix[n]
+        if (deps[n] - {r["capture"]}) & held:
+            secret.append(head + f"{f} |")
+            f = DEP_HELD
+        cells = [f"{oc[n][cfg]}: {res[cfg][n][0]} {res[cfg][n][1]}".strip().replace("|", "/") for cfg in JUDGED]
         tally.update(oc[n][cfg] for cfg in JUDGED)
-        fixes[f if f == DEP_CONTROL else f.split(" (")[0]] += 1
+        fixes[f if f == DEP_HELD else f.split(" (")[0]] += 1
         print(head + " | ".join(cells) + f" | {f} |")
     shown = [t for caps, t in findings if not caps & held]
     secret += [t for caps, t in findings if caps & held]
@@ -2102,9 +2127,20 @@ def cases(out, pcaps, root, ports_of, want, counted, env=None):
           ". Fix readings: " + (", ".join(f"{n} {k}" for k, n in sorted(fixes.items())) or "none") +
           f". {len(held)} held captures are left out of these counts.")
     print("\n**Findings:** " + ("; ".join(shown) if shown else "none") + ".")
+    # D1's ruling 3 on #776: a case capture with no exit code under a
+    # configuration was not fed, and its rows read unknown; a counted run
+    # takes no result from that.
+    unfed = sorted({r["capture"] for r in conds
+                    if any(not os.path.isfile(os.path.join(out, r["capture"], cfg, "exit-code")) for cfg in JUDGED)})
+    if unfed:
+        named = [c for c in unfed if c not in held]
+        print("\n**Case captures not fed under every configuration:** " +
+              "; ".join(named + ([f"{len(unfed) - len(named)} held capture(s)"] if len(named) < len(unfed) else [])) +
+              ". " + ("**This run is on refs/heads/main, so it fails.**" if counted else
+                      "This run is not on refs/heads/main, so it stays green; a counted run fails on this."))
     digest = hashlib.sha256((salt + "\n" + "".join(x + "\n" for x in secret)).encode("utf-8")).hexdigest()
     print(f"\nHeld captures' verdict lines, salted SHA-256 (D1's ruling 7056743490 on #776): `{digest}`.")
-    return 0
+    return 3 if unfed and counted else 0
 
 
 def kept_names(path):
@@ -2117,13 +2153,23 @@ def kept_names(path):
 def hr23judge(out, out_fp, fp_kept, root, ports_dir, pcaps, counted, env=None):
     """HR-23's judge: likely_server_ports under each configuration, the
     malformed set and the false-positive set judged, and hr23-cases.tsv's
-    rows (`cases`, on the captures in PCAPS). Returns cases' exit code."""
+    rows (`cases`, on the captures in PCAPS). The held list is read first
+    (held_gate): a refused list stops the judge with exit 1 before any
+    table; without the list or the salt the malformed set prints no row; a
+    held input's malformed row reads HELD in every cell, is left out of the
+    counts, and goes into the cases' hash (D1's ruling 2 on #776). Returns
+    cases' exit code."""
     ROOT_DIR[0] = root
     sys.path.insert(0, os.path.join(root, GP))
     import hr23_cases  # noqa: E402 (LIKELY: the pinned set, cfg-ports)
     want = hr23_cases.LIKELY
     ports_of = {cfg: read_ports(os.path.join(ports_dir, cfg + ".txt")) for cfg in JUDGED}
     print("\n## HR-23's judge (hr23-conditions.tsv)\n")
+    held, _, why = held_gate(root, env)
+    import hr23_feed
+    if held is False:
+        print(f"Not judged or printed: {why} (D1's ruling 7057468942 on #776). The job fails.")
+        return 1
     print("### likely_server_ports under each configuration (cfg-ports)\n")
     for cfg in JUDGED:
         p = ports_of[cfg]
@@ -2132,22 +2178,28 @@ def hr23judge(out, out_fp, fp_kept, root, ports_dir, pcaps, counted, env=None):
         same = "" if p is None else (" (the pinned set)" if p == {k: set(v) for k, v in want.items()} else
                                      " (differs from the pinned set: flows on a moved port read unknown)")
         print(f"- {CELL_OF[cfg]} ({cfg}): {shown}{same}")
-    mal = tsv(os.path.join(root, GP, "hr23-malformed.tsv"))
-    mres = judge_malformed(out, root, mal, ports_of, want)
     print("\n### The malformed set (mal- rows)\n")
-    print("Each input under C0, C1 and C1p on its c0 cell and under C2 on its c2 cell. An input that did not run "
-          "reads unknown, never pass; a non-zero exit is a crash and fails (mal-errors).\n")
-    print("| input | " + " | ".join(CELL_OF[c] for c in JUDGED) + " |")
-    print("| --- |" + " --- |" * len(JUDGED))
-    tally = collections.Counter()
-    for row in mal:
-        cells = []
-        for cfg in JUDGED:
-            v, detail = mres[row["input"]][cfg]
-            tally[v] += 1
-            cells.append(f"{v}: {detail}".replace("|", "/"))
-        print(f"| {row['input']} | " + " | ".join(cells) + " |")
-    print("\nMalformed cells: " + ", ".join(f"{tally[k]} {k}" for k in ("pass", "fail", "unknown", "reported")) + ".")
+    secret = []
+    if why:
+        print(f"Not printed: {why} (D1's ruling 7057468942 on #776).")
+    else:
+        mal = tsv(os.path.join(root, GP, "hr23-malformed.tsv"))
+        mres = judge_malformed(out, root, mal, ports_of, want)
+        print("Each input under C0, C1 and C1p on its c0 cell and under C2 on its c2 cell. An input that did not run "
+              "reads unknown, never pass; a non-zero exit is a crash and fails (mal-errors).\n")
+        print("| input | " + " | ".join(CELL_OF[c] for c in JUDGED) + " |")
+        print("| --- |" + " --- |" * len(JUDGED))
+        tally = collections.Counter()
+        for row in mal:
+            cells = [f"{v}: {detail}".replace("|", "/") for v, detail in (mres[row["input"]][c] for c in JUDGED)]
+            if row["input"] in held:
+                secret.append(f"| {row['input']} | " + " | ".join(cells) + " |")
+                print(f"| {row['input']} | " + " | ".join([hr23_feed.HELD] * len(JUDGED)) + " |")
+                continue
+            tally.update(mres[row["input"]][c][0] for c in JUDGED)
+            print(f"| {row['input']} | " + " | ".join(cells) + " |")
+        print("\nMalformed cells: " + ", ".join(f"{tally[k]} {k}" for k in ("pass", "fail", "unknown", "reported")) +
+              f". {len(held & {r['input'] for r in mal})} held inputs are left out of these counts.")
     fres = judge_fp(out_fp, root, kept_names(fp_kept))
     print("\n### The false-positive set (fp- rows)\n")
     print("Per class and configuration: flows named by conn.log, by a link row (C1, C1p, C2), DNP3 violations and "
@@ -2163,7 +2215,7 @@ def hr23judge(out, out_fp, fp_kept, root, ports_dir, pcaps, counted, env=None):
                          f"viol {x['viol']}; " + (", ".join(f"{k}={n}" for k, n in sorted(x["weirds"].items())) or "no weird"))
         rules = "; ".join(f"{k}: {v}" for k, v in r["rules"]) or "reported only"
         print(f"| {cls} | {r['items']} | " + " | ".join(cells) + f" | {rules} |")
-    return cases(out, pcaps, root, ports_of, want, counted, env)
+    return cases(out, pcaps, root, ports_of, want, counted, env, secret)
 
 if __name__ == "__main__":
     if sys.argv[1] == "hr23":

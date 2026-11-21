@@ -5,6 +5,7 @@ synthetic. Each rule has a named control, a case on which the rule must
 give the other answer, or a mutant of table.py's text that must make a
 check fail. Run: python -m pytest -q
 modules/telemetry/experiments/engine-linux/test_hr23_rules.py"""
+import collections
 import copy
 import importlib.util
 import json
@@ -158,13 +159,13 @@ def test_cfg_ports_turns_a_case_row_unknown(tmp_path):
     assert table.case_results(rows, str(tmp_path / "a"), C1, "", PORTS[C1], LIKELY)[0][0].startswith("pass")
 
 
-def link_case(tmp_path, ts):
+def link_case(tmp_path, ts, is_orig=True):
     tmp_path.mkdir(parents=True, exist_ok=True)
     pcap = tmp_path / "x.pcap"
     pcapfile.write(str(pcap), [pcapfile.Frame(n * 1_000_000_000 + 250_000_000, b"\0" * 60) for n in (1, 2, 3)])
     d = tmp_path / "out"
     write_logs(d, [conn("C1", "udp", M, O, "dnp3_udp")],
-               [{"ts": ts, "uid": "C1", "is_orig": True, "kind": "link", "link_dir": True}])
+               [{"ts": ts, "uid": "C1", "is_orig": is_orig, "kind": "link", "link_dir": True}])
     r = row("x", "link", show="a link row with is_orig true stamped with packet 3's time")
     return table.link_present(str(d), r, str(pcap))[0]
 
@@ -275,7 +276,7 @@ MAL = next(r for r in table.tsv(os.path.join(ROOT, table.GP, "hr23-malformed.tsv
 
 
 def mal_logs(d, svc="dnp3_udp", viol=0, x="code", q=True, reqhdr=1, other_analyzer=False, reporter=(), code="0",
-             weird=()):
+             weird=(), link=(), other_flow_viol=0):
     probe = [fc("C1", True, 1), obj("C1", True, 60, 1), fc("C1", False, 129)]
     if x in ("code", "seen"):
         probe += [fc("C1", True, 129, request_header=reqhdr > 0)]
@@ -283,7 +284,9 @@ def mal_logs(d, svc="dnp3_udp", viol=0, x="code", q=True, reqhdr=1, other_analyz
             probe += [obj("C1", True, 60, 1)]
     if q:
         probe += [fc("C1", True, 1), obj("C1", True, 60, 2), obj("C1", True, 60, 3), obj("C1", True, 60, 4)]
+    probe += [{"ts": 1.0, "uid": "C1", "is_orig": io, "kind": "link", "link_dir": ld} for io, ld in link]
     an = [{"uid": "C1", "analyzer_name": "DNP3_UDP", "failure_reason": "r"}] * viol
+    an += [{"uid": "C9", "analyzer_name": "DNP3_UDP", "failure_reason": "r"}] * other_flow_viol
     if other_analyzer:
         an.append({"uid": "C1", "analyzer_name": "PIA_UDP", "failure_reason": "r"})
     write_logs(d, [conn("C1", "udp", M, ("192.0.2.20", "20000"), svc)], probe, an,
@@ -464,3 +467,172 @@ def test_hr23judge_prints_every_configurations_ports_and_fails_a_counted_run(tmp
     mal = {r["input"] for r in table.tsv(os.path.join(ROOT, table.GP, "hr23-malformed.tsv"))}
     printed = {ln.split(" | ")[0][2:] for ln in capsys.readouterr().out.splitlines() if ln.startswith("| dnp3-")}
     assert not (printed & (cases - mal))
+
+
+# D6's B3 on #776: one test for each rule whose mutant survived at 4d7bab3b,
+# each with its control (the case on which the rule gives the other answer).
+
+def test_fix_a_does_not_need_c2():
+    rows = [row("x", "service", c0="fail", fix="a")]
+    assert judge(rows, {C0: ["fail"], C1: ["pass"], C1P: ["pass"], C2: ["unknown (not run)"]})[1][0] == "a shows"
+    # Control: fix b reads C2, so C2 not run leaves it unknown.
+    rows = [row("x", "function", "1", c0="fail", c1="fail", c1p="fail", fix="b")]
+    assert judge(rows, {C0: ["fail"], C1: ["fail"], C1P: ["fail"], C2: ["unknown (not run)"]})[1][0].startswith("unknown")
+
+
+def reading(**kw):
+    r = {"viol": collections.Counter(), "weirds": collections.Counter(), "reporter": collections.Counter(), "fn": [],
+         "link": [], "reqhdr": 0, "svc": set()}
+    r.update(kw)
+    return r
+
+
+def test_reqhdr_above_its_pin_fails():
+    assert table.judge_mal_cell("reqhdr=1", reading(reqhdr=2), {})[1] == ["reqhdr=1"]
+    assert table.judge_mal_cell("reqhdr=1", reading(reqhdr=1), {})[1] == []
+
+
+def test_a_weird_token_needs_the_weird():
+    assert table.judge_mal_cell("weird=dnp3_x", reading(), {})[1] == ["weird=dnp3_x"]
+    assert table.judge_mal_cell("weird=dnp3_x", reading(weirds=collections.Counter({"dnp3_x": 1})), {})[1] == []
+
+
+def test_code_needs_a_row_without_the_labelled_objects():
+    msgs = {"X": ("m", 129, frozenset({"g60v1"}))}
+    assert table.msg_states(msgs, [("X", "code")], [("m", 129, frozenset({"g60v1"}))])["X"] == "does not hold"
+    assert table.msg_states(msgs, [("X", "code")], [("m", 129, frozenset())])["X"] == "holds"
+
+
+def test_judge_link_reads_is_orig(tmp_path):
+    assert link_case(tmp_path / "a", 3.25, is_orig=False) == "absent"
+    assert link_case(tmp_path / "b", 3.25, is_orig=True) == "present"
+
+
+def test_mal_same_compares_link_rows_except_on_mal_link(tmp_path, monkeypatch):
+    mal = dict(MAL, c0="viol=0", c2="=c1p", judge="same")
+    per = {cfg: {} for cfg in table.JUDGED}
+    per[C2] = dict(link=[(True, True)])
+    v, detail = judge_mal(tmp_path / "a", per, mal)[C2]
+    assert v == "fail" and "link" in detail
+    # Control: an input of mal-link, whose link rows are reported, not judged.
+    monkeypatch.setattr(table, "MAL_LINK", (INP,))
+    assert judge_mal(tmp_path / "b", per, mal)[C2] == ("pass", "equals C1p")
+
+
+def both_out(tmp_path, caps):
+    for c in caps:
+        for cfg in table.JUDGED:
+            write_logs(tmp_path / c / cfg, [conn("C1", "udp", M, O, "dnp3_udp")],
+                       [{"ts": 1.0, "uid": "C1", "is_orig": True, "kind": "link", "link_dir": d} for d in (True, False)])
+    return str(tmp_path)
+
+
+def test_judge_both_finds_both_ends_outside_the_expected_pair(tmp_path):
+    found = table.both_findings(both_out(tmp_path, ["syn-x", table.BOTH_EXPECTED[0]]), ["syn-x", table.BOTH_EXPECTED[0]])
+    assert sorted(t for _, t in found) == [f"judge-both: syn-x under {c}" for c in (C1, C1P, C2)]
+
+
+def test_fp_3blink_bounds_link_rows(tmp_path):
+    r = fp_rules(table.judge_fp(fp_out(tmp_path / "a", "fp-udp-3b-link", link=True), ROOT, {"fp-udp-3b-link"}), "3b-link")
+    assert r["fp-3blink c1 link"].startswith("fail (1")
+    r = fp_rules(table.judge_fp(fp_out(tmp_path / "b", "fp-udp-3b-link"), ROOT, {"fp-udp-3b-link"}), "3b-link")
+    assert r["fp-3blink c1 link"].startswith("pass (0")
+
+
+def test_fp_3c_bound_is_one_violation_for_each_item(tmp_path):
+    n = len(table.tsv(os.path.join(ROOT, table.GT, "fp", "fp-udp-3c.tsv")))
+    for k, want in ((n, "pass"), (0, "fail")):
+        out = fp_out(tmp_path / str(k), "fp-udp-3c")
+        for cfg in table.JUDGED:
+            (tmp_path / str(k) / "out-fp" / "fp-udp-3c" / cfg / "analyzer.log").write_text(
+                "".join(json.dumps({"uid": "C1", "analyzer_name": "DNP3_UDP"}) + "\n" for _ in range(k)))
+        r = fp_rules(table.judge_fp(out, ROOT, {"fp-udp-3c"}), "3c")
+        assert r["fp-3c c0 viol"].startswith(f"{want} ({k}, bound {n})")
+
+
+def test_fp_6_hole_is_bounded_at_zero(tmp_path):
+    r = fp_rules(table.judge_fp(fp_out(tmp_path / "a", "fp-tcp-6-hole"), ROOT, {"fp-tcp-6-hole"}), "6-hole")
+    assert r["fp-6 c0 conn"].startswith("pass (0")
+    r = fp_rules(table.judge_fp(fp_out(tmp_path / "b", "fp-tcp-6-hole", named=True), ROOT, {"fp-tcp-6-hole"}), "6-hole")
+    assert r["fp-6 c0 conn"].startswith("fail (1")
+
+
+def test_mal_unknown_c2_still_fails_an_unnamed_reporter_error(tmp_path):
+    mal = dict(MAL, c2="viol=?; Q=?", judge="unknown")
+    per = {cfg: {} for cfg in table.JUDGED}
+    per[C2] = dict(reporter=[{"level": "Reporter::ERROR", "message": "something else"}])
+    v, detail = judge_mal(tmp_path / "a", per, mal)[C2]
+    assert v == "fail" and "mal-errors" in detail
+    per[C2] = dict(reporter=[{"level": "Reporter::WARNING", "message": "something else"}])
+    assert judge_mal(tmp_path / "b", per, mal)[C2][0] == "reported"
+
+
+def test_same_still_fails_an_unnamed_reporter_error(tmp_path):
+    mal = dict(MAL, c0="viol=0", c2="=c1p", judge="same")
+    err = dict(reporter=[{"level": "Reporter::ERROR", "message": "something else"}])
+    per = {C0: {}, C1: {}, C1P: err, C2: err}
+    v, detail = judge_mal(tmp_path / "a", per, mal)[C2]
+    assert v == "fail" and "mal-errors" in detail
+    per = {C0: {}, C1: {}, C1P: {}, C2: {}}
+    assert judge_mal(tmp_path / "b", per, mal)[C2] == ("pass", "equals C1p")
+
+
+def test_viol_counts_only_the_inputs_flow(tmp_path):
+    per = dict(GOOD)
+    per[C0] = dict(other_flow_viol=2)
+    assert judge_mal(tmp_path / "a", per)[C0][0] == "pass"
+    # Control: the same rows on the input's own flow.
+    per[C0] = dict(viol=2)
+    assert judge_mal(tmp_path / "b", per)[C0][0] == "fail"
+
+
+def test_fp_b_reads_the_link_rows(tmp_path):
+    out = fp_out(tmp_path, "fp-udp-3b-data")
+    write_logs(tmp_path / "out-fp" / "fp-udp-3b-data" / C2,
+               [conn("C1", "udp", ("192.0.2.100", "50000"), ("192.0.2.200", "40001"), "dns")],
+               [{"ts": 1.0, "uid": "C1", "is_orig": True, "kind": "link", "link_dir": False}])
+    r = fp_rules(table.judge_fp(out, ROOT, {"fp-udp-3b-data"}), "3b-data")
+    assert r["fp-b link"].startswith("fail") and r["fp-b conn"] == "pass"
+
+
+# D6's N1 on #776: a cell made only of ? tokens reads reported, never pass;
+# mal-errors and the fourth state still fail it.
+
+def test_a_cell_of_only_question_marks_reads_reported(tmp_path):
+    mal = dict(MAL, c0="viol=?; Q=?", c2="=c1p", judge="same")
+    per = {cfg: {} for cfg in table.JUDGED}
+    assert judge_mal(tmp_path / "a", per, mal)[C0][0] == "reported"
+    per[C0] = dict(other_analyzer=True)
+    assert judge_mal(tmp_path / "b", per, mal)[C0][0] == "fail"
+    # Control: a ? beside a judged token still passes.
+    mal = dict(mal, c0="viol=0; Q=?")
+    assert judge_mal(tmp_path / "c", {cfg: {} for cfg in table.JUDGED}, mal)[C0][0] == "pass"
+
+
+def test_control_a_question_mark_cell_read_as_pass_is_caught(tmp_path):
+    m = mutant(tmp_path, 'only_q = bool(toks) and all(h == "reported" for _, h in toks)', "only_q = False")
+    mal = dict(MAL, c0="viol=?; Q=?", c2="=c1p", judge="same")
+    out = tmp_path / "out"
+    for cfg in table.JUDGED:
+        mal_logs(out / mal["input"] / cfg)
+    assert m.judge_malformed(str(out), ROOT, [mal], PORTS, LIKELY)[mal["input"]][C0][0] == "pass"
+
+
+# D2's N1 on #776: the flow's first sender is the sender of the earliest
+# unit, whether or not that unit carries a message (the label header).
+
+def first_sender_labels(tmp_path):
+    d = tmp_path / table.GT / table.HR23_DIR
+    d.mkdir(parents=True)
+    flow = "udp 192.0.2.20:20000>192.0.2.14:20000"
+    (d / "syn-mal.tsv").write_text("flow\tend\tpackets\tmessage\tcode\tobjects\n"
+                                   f"{flow}\to\t1\t-\t-\t-\n{flow}\tm\t2\tP\t1\tg60v1\n")
+    return str(tmp_path)
+
+
+def test_the_first_sender_is_the_earliest_units(tmp_path):
+    msgs = table.mal_labels(first_sender_labels(tmp_path), "syn-mal")[0]
+    assert msgs["P"][0] == "192.0.2.14"
+    # Control: the earliest unit that carries a message, as at 4d7bab3b.
+    m = mutant(tmp_path, 'first = min((r for r in rows if r["packets"]', 'first = min((r for r in units if r["packets"]')
+    assert m.mal_labels(str(tmp_path), "syn-mal")[0]["P"][0] == "192.0.2.20"

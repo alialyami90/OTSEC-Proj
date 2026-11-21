@@ -51,6 +51,8 @@ def load_feed(tmp_path, old, new):
         text = mutate(fh.read(), old, new)
     p = tmp_path / "mutant_hr23_feed.py"
     p.write_text(text, encoding="utf-8")
+    # The committed digest beside it, which the mutant reads as its own.
+    shutil.copy(hr23_feed.DIGEST, tmp_path / "hr23-held.hmac")
     spec = importlib.util.spec_from_file_location("mutant_hr23_feed", p)
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
@@ -167,11 +169,25 @@ def kept_file(d, names):
     return str(p)
 
 
-# A held capture with a neutral name, added to a copy of the pin file, and
-# the held list that names it (D1's ruling 7056743490 on #776). No real
-# capture is named as held in any test.
+# A held capture with a neutral name, added to a copy of the pin file and
+# of hr23-cases.tsv, and the held list that names it with the test salt
+# under which hr23-held.hmac's committed test value was made (D1's rulings
+# 7056743490 and 7057468942 on #776). No real capture is named as held in
+# any test.
 HELD = "syn-held"
-ENV = {hr23_feed.HELD_ENV: HELD}
+SALT = "0123456789abcdef" * 4
+ENV = {hr23_feed.HELD_ENV: HELD, hr23_feed.SALT_ENV: SALT}
+CASES = os.path.join(ROOT, "tests", "integration", "gt_pcap", "hr23-cases.tsv")
+
+
+def cases_with_held(d):
+    """hr23-cases.tsv with one more row, of the held capture."""
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / "hr23-cases.tsv"
+    text = open(CASES, encoding="utf-8").read()
+    first = next(ln for ln in text.split("\n")[1:] if ln and not ln.startswith("#") and not ln.startswith("capture\t"))
+    p.write_text(text + ("" if text.endswith("\n") else "\n") + HELD + first[first.index("\t"):] + "\n", newline="\n")
+    return str(p)
 
 
 def sums_with_held(d):
@@ -196,7 +212,7 @@ def test_check_prints_only_ran_or_not_and_fails_a_counted_partial_run(tmp_path, 
     out = tmp_path / "out"
     outs(out, caps + [HELD], {(caps[i], cfg) for i, cfg in skip}, code)
     assert hr23_feed.check(str(out), sums_with_held(tmp_path / "s"), kept_file(tmp_path, caps + [HELD]), counted,
-                           ENV) == want
+                           ENV, cases_with_held(tmp_path / "cases")) == want
     md = capsys.readouterr().out
     assert MARK not in md
     assert sum(1 for ln in md.splitlines() if ln.startswith("| dnp3-")) == 81
@@ -216,17 +232,18 @@ def check_failures(m, tmp_path, capsys):
     kept list."""
     bad, caps = [], pinned() + [HELD]
     sums = sums_with_held(tmp_path / "s")
+    cases = cases_with_held(tmp_path / "cases")
     # Fed but not kept: an output folder of a capture pin did not keep.
     out = tmp_path / "fed"
     outs(out, caps + ["stray"])
-    if m.check(str(out), sums, kept_file(tmp_path / "k-fed", caps), True, ENV) != 3:
+    if m.check(str(out), sums, kept_file(tmp_path / "k-fed", caps), True, ENV, cases) != 3:
         bad.append("fed but not kept: not failed")
     capsys.readouterr()
     # Kept but not fed is "not run"; and a pinned capture pin did not keep,
     # though fed, reads "not run".
     out = tmp_path / "notkept"
     outs(out, caps)
-    rc = m.check(str(out), sums, kept_file(tmp_path / "k-notkept", caps[1:]), True, ENV)
+    rc = m.check(str(out), sums, kept_file(tmp_path / "k-notkept", caps[1:]), True, ENV, cases)
     md = capsys.readouterr().out
     if rc != 3 or f"| {caps[0]} | not run | not run | not run | not run |" not in md:
         bad.append("a capture pin did not keep reads as run")
@@ -234,7 +251,7 @@ def check_failures(m, tmp_path, capsys):
     out = tmp_path / "text"
     outs(out, caps)
     (out / caps[0] / "zeek-probe" / "exit-code").write_text(TEXT + "\n")
-    rc = m.check(str(out), sums, kept_file(tmp_path / "k-text", caps), True, ENV)
+    rc = m.check(str(out), sums, kept_file(tmp_path / "k-text", caps), True, ENV, cases)
     md = capsys.readouterr().out
     if rc != 3 or TEXT in md or "exit code not a number" not in md:
         bad.append("a non-numeric exit code was printed, or read as clean")
@@ -245,9 +262,9 @@ def check_failures(m, tmp_path, capsys):
         outs(out, caps)
         s2 = d / "s.sha256"
         s2.write_text(open(sums, encoding="utf-8").read() + f"{'0' * 64}  {name}.pcap\n")
-        if m.check(str(out), str(s2), kept_file(d, caps), False, ENV) != 1:
+        if m.check(str(out), str(s2), kept_file(d, caps), False, ENV, cases) != 1:
             bad.append(f"pin file name {name!r} not refused")
-        if m.check(str(out), sums, kept_file(d, caps + [name]), False, ENV) != 1:
+        if m.check(str(out), sums, kept_file(d, caps + [name]), False, ENV, cases) != 1:
             bad.append(f"kept name {name!r} not refused")
         capsys.readouterr()
     return bad
@@ -269,6 +286,34 @@ CHECK_MUTANTS = {
 def test_check_mutant_is_killed(tmp_path, capsys, old, new):
     m = load_feed(tmp_path, old, new)
     assert check_failures(m, tmp_path, capsys) != []
+
+
+# hr23_feed.py's extend (D1's ruling 3 on #776): the case captures that
+# dnp3_cases.py writes join the feed with their dnp3.sha256 pins, and a case
+# capture pinned in neither file is refused.
+
+def extend_run(tmp_path, dnp3_names):
+    src, d = tmp_path / "src", tmp_path / "d"
+    src.mkdir(parents=True)
+    d.mkdir()
+    for c in EXTRA_CASES:
+        (src / f"{c}.pcap").write_bytes(DNP3_BYTES + c.encode())
+    dnp3 = tmp_path / "dnp3.sha256"
+    dnp3.write_text("".join(f"{'1' * 64}  {c}.pcap\n" for c in dnp3_names))
+    out = tmp_path / "feed.sha256"
+    rc = hr23_feed.extend(SUMS, str(dnp3), CASES, str(src), str(d), str(out))
+    return rc, out, d
+
+
+def test_extend_adds_the_dnp3_case_captures(tmp_path, capsys):
+    assert EXTRA_CASES
+    rc, out, d = extend_run(tmp_path / "a", EXTRA_CASES + ["dnp3-not-a-case"])
+    pins = hr23_feed.pins(str(out))
+    assert rc == 0 and set(pins) == set(pinned()) | set(EXTRA_CASES)
+    assert all(pins[c] == "1" * 64 for c in EXTRA_CASES) and sorted(os.listdir(d)) == [c + ".pcap" for c in EXTRA_CASES]
+    # Control: one of them pinned in neither file is refused and named.
+    rc, out, _ = extend_run(tmp_path / "b", EXTRA_CASES[1:])
+    assert rc == 1 and not out.exists() and EXTRA_CASES[0] in capsys.readouterr().out
 
 
 def test_check_refuses_a_stray_flag(tmp_path):
@@ -294,9 +339,14 @@ def function(name="hr23_feed"):
 STUB = r'''
 mc_run() {
   case " $* " in *" /exp/ports.zeek "*)
-    # ports.zeek's run (cfg-ports): record image and arguments, and print
+    # ports.zeek's run (cfg-ports): record the mount check's folder, the
+    # captures' mount, image and arguments, write a line to the mount
+    # check's fd 9, mark the check failed when PORTS_FAIL is set, and print
     # the two lines ports.zeek would, beside MARK.
-    while [ "$1" != zeek ]; do last=$1; shift; done
+    echo "$mc" >> "$work/ports-mc"
+    echo "$FD9" >&9
+    [ -z "${PORTS_FAIL:-}" ] || { mkdir -p "$mc"; echo x > "$mc/FAILED"; }
+    while [ "$1" != zeek ]; do case $1 in *:/pcaps:ro) echo "${1%:/pcaps:ro}" >> "$work/ports-mount" ;; esac; last=$1; shift; done
     echo "$last|$*" >> "$work/ports"
     echo "$MARK"; echo "likely_server_ports at zeek_init, priority -1000: tcp [20000]; udp [20000]"
     echo "likely_server_ports at zeek_done: tcp [20000]; udp [20000]"
@@ -335,9 +385,16 @@ def make_root(tmp_path, bad_pin=None):
         text = "\n".join(lines)
     # The neutral held capture, which the feed's python3 below writes.
     (d / "hr23.sha256").write_text(text + f"{hashlib.sha256(b'syn').hexdigest()}  {HELD}.pcap\n", newline="\n")
-    # The judge's inputs: D6's malformed set and cases, and the builder's labels.
-    for f in ("hr23-malformed.tsv", "hr23-cases.tsv"):
-        shutil.copy(os.path.join(ROOT, "tests", "integration", "gt_pcap", f), root / "tests" / "integration" / "gt_pcap")
+    # The case captures of dnp3_cases.py, as run_feed writes them into
+    # WORK/dnp3, pinned in a dnp3.sha256 of their own.
+    (d.parent / "dnp3").mkdir()
+    (d.parent / "dnp3" / "dnp3.sha256").write_text(
+        "".join(f"{hashlib.sha256(DNP3_BYTES + c.encode()).hexdigest()}  {c}.pcap\n" for c in EXTRA_CASES), newline="\n")
+    # The judge's inputs: D6's malformed set and cases (with the held
+    # capture's row), and the builder's labels.
+    shutil.copy(os.path.join(ROOT, "tests", "integration", "gt_pcap", "hr23-malformed.tsv"),
+                root / "tests" / "integration" / "gt_pcap")
+    shutil.copy(cases_with_held(tmp_path / "cases"), root / "tests" / "integration" / "gt_pcap")
     for f in os.listdir(os.path.join(GT, "hr23")):
         if f.endswith(".tsv"):
             shutil.copy(os.path.join(GT, "hr23", f), d)
@@ -345,19 +402,24 @@ def make_root(tmp_path, bad_pin=None):
     return root
 
 
-SALT = "test-only-salt-" + "0" * 32
+DNP3_BYTES = b"syn-dnp3-"
+EXTRA_CASES = sorted(hr23_feed.case_captures(CASES) - set(pinned()))
+FD9 = "MOUNT-CHECK-FD9-MARKER"
 
 
-def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here=HERE, held=True):
+def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here=HERE, held=True, env_extra=None):
     """hr23_feed in TEXT with run.sh's zeek_run; EXTRA is a shell command
     run on the feed folder after hr23_cases.py writes it, before pin. The
     neutral held capture is written beside hr23_cases.py's, and HELD gives
-    the held list and the salt in the environment."""
+    the held list (HELD itself, or the string given) and the salt in the
+    environment. fd 9 is the job's stderr, as in run.sh."""
     work = tmp_path / "work"
-    work.mkdir(parents=True)
+    (work / "dnp3").mkdir(parents=True)
+    for c in EXTRA_CASES:
+        (work / "dnp3" / f"{c}.pcap").write_bytes(DNP3_BYTES + c.encode())
     root = make_root(tmp_path, bad_pin)
     script = work / "probe.sh"
-    script.write_text('set -eu\n'
+    script.write_text('set -eu\nexec 9>&2\nmc=$work/containers-dnp3\n'
                       'python3() {\n  "$PY" "$@" || return $?\n'
                       '  case $1 in */hr23_cases.py) printf syn > "$2/' + HELD + '.pcap"\n'
                       '    [ -z "${EXTRA:-}" ] || sh -c "$EXTRA" sh "$2" ;; esac\n}\n'
@@ -365,11 +427,12 @@ def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here
                       + 'rc=0\nhr23_feed > "$work/feed.md" || rc=$?\necho "feed rc $rc"\necho "$img" > "$work/img"\n',
                       newline="\n")
     env = dict(os.environ, PY=fwd(sys.executable), here=fwd(here), root=fwd(root), work=fwd(work), MARK=MARK,
-               ZEEK_IMAGE="stock", HR23_C1P_IMAGE="c1p", HR23_C2_IMAGE="c2", img="stock", locked="", pkgs="P")
+               ZEEK_IMAGE="stock", HR23_C1P_IMAGE="c1p", HR23_C2_IMAGE="c2", img="stock", locked="", pkgs="P", FD9=FD9,
+               **(env_extra or {}))
     for k in ("GITHUB_REF", hr23_feed.HELD_ENV, hr23_feed.SALT_ENV):
         env.pop(k, None)
     if held:
-        env.update({hr23_feed.HELD_ENV: HELD, hr23_feed.SALT_ENV: SALT})
+        env.update({hr23_feed.HELD_ENV: HELD if held is True else held, hr23_feed.SALT_ENV: SALT})
     if ref:
         env["GITHUB_REF"] = ref
     if skip:
@@ -383,7 +446,7 @@ def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here
         return p.read_text() if p.exists() else ""
     rc = int(r.stdout.rsplit("feed rc ", 1)[1].split()[0]) if "feed rc " in r.stdout else None
     return (rc, text_of("feed.md"), r.stdout + r.stderr, text_of("calls"), text_of("fed"), text_of("img").strip(),
-            text_of("ports"))
+            text_of("ports"), text_of("ports-mc"), text_of("ports-mount"))
 
 
 ONE = "dnp3-udp-relay-write"
@@ -404,6 +467,9 @@ FEEDS = [
 ]
 PARTIAL = "no counted HR-23 result is taken from a run in which a capture did not run"
 FP_SUMS = os.path.join(GT, "fp", "fp.sha256")
+# The fp capture cfg-ports reads: the first that pin keeps, in file-name order.
+FP_FIRST = sorted(p + ".pcap" for p in hr23_feed.pins(FP_SUMS))[0][: -len(".pcap")]
+N_FED = len(pinned()) + len(EXTRA_CASES)
 PORTS_WIRING = {"stock|zeek -C -r /pcaps/{0}.pcap " + ARGS + " OtsecProbe::log_dir=F /exp/ports.zeek",
                 "stock|zeek -C -r /pcaps/{0}.pcap " + ARGS + " /exp/ports.zeek",
                 "c1p|zeek -C -r /pcaps/{0}.pcap " + ARGS + " /exp/ports.zeek",
@@ -413,7 +479,8 @@ PORTS_WIRING = {"stock|zeek -C -r /pcaps/{0}.pcap " + ARGS + " OtsecProbe::log_d
 def feed_failures(tmp_path, text, first=False, here=HERE):
     bad = []
     for i, (ref, skip, bad_pin, extra, partial) in enumerate(FEEDS):
-        rc, md, log, calls, fed, img, ports = run_feed(tmp_path / str(i), text, ref, skip, bad_pin, extra, here)
+        rc, md, log, calls, fed, img, ports, ports_mc, ports_mount = run_feed(tmp_path / str(i), text, ref, skip,
+                                                                               bad_pin, extra, here)
         case = f"case {i}: ref={ref} skip={skip} bad_pin={bad_pin} extra={extra}"
         want = 3 if ref == "refs/heads/main" and partial else 0
         if rc != want:
@@ -429,13 +496,20 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
             bad.append(f"{case}: an engine's own output reached the table or the log")
         if "10 of 10 captures ran under all four" not in md:
             bad.append(f"{case}: the false-positive set was not fed and checked")
-        first_kept = sorted(set(pinned()) - ({bad_pin} if bad_pin else set()))[0]
-        if set(ports.split("\n")) - {""} != {w.format(first_kept) for w in PORTS_WIRING}:
+        if set(ports.split("\n")) - {""} != {w.format(FP_FIRST) for w in PORTS_WIRING}:
             bad.append(f"{case}: ports.zeek did not run under each configuration's image and scripts: {ports!r}")
+        # D3's N1 on #776: a capture of the false-positive set, the mount
+        # check's lines and record off the job log and dnp3.md.
+        if set(ports_mount.split("\n")) - {""} != {fwd(tmp_path / str(i) / "work" / "fp")}:
+            bad.append(f"{case}: cfg-ports read a capture outside the false-positive set: {ports_mount!r}")
+        if set(ports_mc.split("\n")) - {""} != {fwd(tmp_path / str(i) / "work" / "containers-ports")}:
+            bad.append(f"{case}: cfg-ports' containers recorded with the mode's: {ports_mc!r}")
+        if FD9 in log or FD9 in md:
+            bad.append(f"{case}: the mount check's lines for cfg-ports reached the job log or the table")
         if sum(1 for ln in md.splitlines() if ln.startswith("- c") and "tcp 20000; udp 20000" in ln) != 4:
             bad.append(f"{case}: likely_server_ports not printed under every configuration")
-        if sum(1 for ln in hr23_md.splitlines() if ln.startswith("| dnp3-")) != 81:
-            bad.append(f"{case}: the table does not list the 81 pinned captures")
+        if sum(1 for ln in hr23_md.splitlines() if ln.startswith("| dnp3-")) != N_FED:
+            bad.append(f"{case}: the table does not list the {N_FED} pinned captures")
         if set(calls.split("\n")) - {""} != WIRING:
             bad.append(f"{case}: images or arguments differ from C0, C1, C1p and C2's: "
                        f"{sorted(set(calls.split()) - set(' '.join(WIRING).split()))}")
@@ -446,7 +520,7 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
         if sorted({ln.split("|")[0] for ln in fp_fed}) != sorted(p + ".pcap" for p in hr23_feed.pins(FP_SUMS)) \
                 or len(fp_fed) != 40:
             bad.append(f"{case}: the false-positive set's classes not each fed once to each configuration")
-        want_fed = {p + ".pcap" for p in pinned() + [HELD]} - ({bad_pin + ".pcap"} if bad_pin else set())
+        want_fed = {p + ".pcap" for p in pinned() + [HELD] + EXTRA_CASES} - ({bad_pin + ".pcap"} if bad_pin else set())
         if extra and ".pcapng" in extra:
             want_fed.discard(ONE + ".pcap")
         if fed_names != want_fed:
@@ -456,7 +530,7 @@ def feed_failures(tmp_path, text, first=False, here=HERE):
         if bad_pin and (f"{bad_pin}.pcap (differs from its pin)" not in md
                         or f"| {bad_pin} | not run | not run | not run | not run |" not in md):
             bad.append(f"{case}: the capture off its pin was fed, or not reported")
-        if not partial and ref == "refs/heads/main" and "81 of 81 captures ran" not in md:
+        if not partial and ref == "refs/heads/main" and f"{N_FED} of {N_FED} captures ran" not in md:
             bad.append(f"{case}: not every capture ran")
         if first and bad:
             break
@@ -479,10 +553,12 @@ def test_feed_without_the_held_list_prints_no_capture_row_and_fails_a_counted_ru
         assert "| dnp3-" not in hr23_md and HELD not in md and "No per-capture row is printed" in hr23_md
         cases_md = rest.split("### hr23-cases.tsv's rows")[1]
         assert "Not judged or printed" in cases_md and "| dnp3-" not in cases_md and "SHA-256" not in cases_md
+        # D1's ruling 2 on #776: nor does the malformed set print a row.
+        assert "| dnp3-" not in rest
 
 
 FEED_MUTANTS = {
-    "counted-dropped": ('"$work/hr23-kept.txt" $hr23_counted', '"$work/hr23-kept.txt"'),
+    "counted-dropped": ('hr23-cases.tsv" $hr23_counted', 'hr23-cases.tsv"'),
     "ref-is-main": ("!= refs/heads/main ]", "!= main ]"),
     "engine-output-printed": ('} > "$work/hr23-engines.txt" 2>&1\n', "}\n"),
     "pin-dropped": ('  python3 -I -B "$here/hr23_feed.py" pin "$h"', '  : python3 -I -B "$here/hr23_feed.py" pin "$h"'),
@@ -500,6 +576,13 @@ FEED_MUTANTS = {
     "ports-c2-on-stock": ('"zeek-probe-c2=$HR23_C2_IMAGE="', '"zeek-probe-c2=$ZEEK_IMAGE="'),
     "ports-c0-without-log-dir": ('"zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F"', '"zeek-probe-c0=$ZEEK_IMAGE="'),
     "judge-dropped": ('  python3 -I -B "$here/table.py" hr23judge', '  : python3 -I -B "$here/table.py" hr23judge'),
+    # D1's ruling 3 on #776: the case captures of dnp3_cases.py fed.
+    "extend-dropped": ('  python3 -I -B "$here/hr23_feed.py" extend', '  : python3 -I -B "$here/hr23_feed.py" extend'),
+    # D3's N1 on #776: cfg-ports on the false-positive set, off the job log.
+    "ports-on-hr23-set": ('-v "$work/fp:/pcaps:ro"', '-v "$h:/pcaps:ro"'),
+    "ports-first-hr23": ('first=$(head -n 1 "$work/fp-kept.txt")', 'first=$(head -n 1 "$work/hr23-kept.txt")'),
+    "ports-fd9-on-job-log": (' 9>> "$work/ports-hr23/mountcheck.txt"', ""),
+    "ports-in-modes-record": ("  mc=$work/containers-ports\n", ""),
 }
 
 
@@ -507,6 +590,53 @@ FEED_MUTANTS = {
 @pytest.mark.parametrize("old,new", FEED_MUTANTS.values(), ids=FEED_MUTANTS.keys())
 def test_feed_mutant_is_killed(tmp_path, old, new):
     assert feed_failures(tmp_path, mutate(function(), old, new), first=True) != []
+
+
+# D1's ruling 1 on #776: a held list that is not the committed one, here a
+# valid case capture, stops the feed at the check, before any other table.
+
+def refused_failures(tmp_path, text):
+    rc, md, log = run_feed(tmp_path, text, "refs/heads/main", held=ONE)[:3]
+    bad = []
+    if rc != 1:
+        bad.append(f"exit {rc}, not 1")
+    if "| dnp3-" in md or "false-positive set" in md or "HR-23's judge" in md or ONE in md + log:
+        bad.append("a table was printed after the refusal, or the list was echoed")
+    return bad
+
+
+@needs_sh
+def test_feed_stops_on_a_refused_held_list(tmp_path):
+    assert refused_failures(tmp_path, function()) == []
+
+
+@needs_sh
+def test_control_feed_going_on_after_a_refused_list_is_killed(tmp_path):
+    text = mutate(function(), '  [ "$rc" != 1 ] || return 1\n', "")
+    assert refused_failures(tmp_path, text) != []
+
+
+# D3's N1 on #776: a rule of the mount check that failed on a cfg-ports
+# container, whose record is kept apart, still stops the run.
+
+def ports_fail_failures(tmp_path, text):
+    rc, md, log = run_feed(tmp_path, text, "refs/heads/agent/x", env_extra={"PORTS_FAIL": "1"})[:3]
+    if rc is None and "failed on the cfg-ports step; the run stops" in log:
+        return []
+    return [f"the feed went on (exit {rc})"]
+
+
+@needs_sh
+def test_a_failed_mount_check_on_cfg_ports_stops_the_run(tmp_path):
+    assert ports_fail_failures(tmp_path, function()) == []
+
+
+@needs_sh
+@pytest.mark.parametrize("old,new", [('  if [ -e "$work/containers-ports/FAILED" ]; then', "  if false; then"),
+                                     ("  mc=$work/containers-ports\n", "")],
+                         ids=["not-checked", "mode-folder"])
+def test_control_a_failed_mount_check_on_cfg_ports_ignored_is_killed(tmp_path, old, new):
+    assert ports_fail_failures(tmp_path, mutate(function(), old, new)) != []
 
 
 # The pin mutant through the whole feed: hr23_feed.py's pin looks at .pcap
@@ -544,7 +674,7 @@ def test_feed_leaves_the_mounted_folder_unchanged(tmp_path):
 @needs_sh
 def test_control_feed_without_dont_write_bytecode_changes_the_folder(tmp_path):
     text = function()
-    assert text.count('python3 -I -B "$here/hr23_feed.py"') == 4
+    assert text.count('python3 -I -B "$here/hr23_feed.py"') == 5
     assert here_hash_changed(tmp_path, text.replace('python3 -I -B "$here/hr23_feed.py"', 'python3 -I "$here/hr23_feed.py"'))
 
 
