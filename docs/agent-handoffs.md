@@ -2781,7 +2781,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: 2e; INT-D5b's alert-key legs; any wiring (F-027).
 - Uncertainty or safety risks: size; the stall stays fail-closed.
 - Scratch files: `d5-2d-*`
-- Result: running at D4-120.
+- Result: #770, merged as `d2c3545e`.
 
 ### P4-4-C4-06-DRAFT (D4; D3, D5, D6 and D7 review; records-auditor first): the C4 0.6 proposal
 - Objective and rationale: one C4 minor for D4-120 items 2.2, 2.5 and 2.6.
@@ -2794,4 +2794,71 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: no code.
 - Uncertainty or safety risks: compatibility with 0.4 and 0.5 readers.
 - Scratch files: none
-- Result: running at D4-120.
+- Result: #768, merged as `5e7f0487`; C4 0.6 approved (D4-121).
+
+## After D4-120: C4 0.6's code, the gap model and HR-23's judge (issued 2026-11-21, D4-121)
+
+### P4-4-C4-06-S1 (D4; D6, D5 and D3 review; D1 the C4 row): C4 0.6 step 1
+- Objective and rationale: the 0.6 types, stamp and `netobs.SelfIdentifier()`, with no refusal (proposal §6, "Order", step 1).
+- Required inputs: `docs/phase4/D4-c4-0.6-proposal.md` §2, §6 and §8.
+- Files: `contracts/event/`, `contracts/netobs/` (`SelfIdentifier` only), the three Syslog goldens, the C4 row of `contracts/README.md`; by D1's authorization, D5's three tests and D6's two pins that §6 marks **Changes**.
+- Expected interfaces: C4 0.6 as approved.
+- Deliverable: one PR, with no `ErrLaterMinor`, `CheckEventMinor` or change to `validateStored`, `ObservationFromEvent` or `runSessionOf`.
+- Acceptance tests: E6-1, E6-2, E6-3 and E6-5's contract part, each with its controls.
+- Owed: E6-4 (a), merged first as #771 (D6); D6's independent rows; steps 2 and 3.
+- Exclusions: any refusal, node code or wiring.
+- Uncertainty or safety risks: closed sets at `self`, open only above it.
+- Scratch files: `d4-c406s1-*`
+- Result: #772.
+
+### P4-4-C4-06-E64A (D6; D4 and D3 review): E6-4 (a) in the 0.5 code
+- Objective and rationale: earlier readers read 0.6 with nothing dropped, proved before the 0.6 code lands.
+- Required inputs: the proposal's E6-4.
+- Files: `tests/contract/`.
+- Expected interfaces: C4 0.5 (the reader under test) and C4 0.6 (the fixtures).
+- Deliverable: one PR, merged before step 1.
+- Acceptance tests: (a), the strict leg and the pinned key paths, each with its control; (b)'s `desk` runs in the header.
+- Owed: (c), the head leg, after step 1.
+- Exclusions: code outside `tests/contract`.
+- Uncertainty or safety risks: the fixtures are written from the text, not from code.
+- Scratch files: `d6-e64a-*`
+- Result: #771, merged as `e6152113`.
+
+### P4-NODE-ALERTSAFTER (D5; D6 and D3 review): D4-120 item 3.6
+- Objective and rationale: a failed `alertsAfter` read must not be taken as a failed restore (D6's F4 on #766; P5).
+- Required inputs: D6's F4; the detector's restore path.
+- Files: `platform/node/` and its tests.
+- Expected interfaces: unchanged.
+- Deliverable: one PR, before C4 0.6 step 2.
+- Acceptance tests: a read that fails once, and one that keeps failing, each with its control.
+- Owed: none.
+- Exclusions: C4 0.6, wiring.
+- Uncertainty or safety risks: no silent hold-off.
+- Scratch files: `d5-alertsafter-*`
+- Result: #773, merged as `adad8632`.
+
+### P4-4-INT-D5P2E (D5; D6, D3 and D4 review): INT-D5 part 2e, the gap model
+- Objective and rationale: D1's 6992578863 item 3.
+- Required inputs: `docs/phase4/D4-c13-0.2-proposal.md` §13 and §15; `docs/phase4/D5-sensor-node.md` §1.4 to §1.6, §1.10 and §1.14; `docs/phase4/D5-p44int-split.md` §2.3; D6's N2 on #770.
+- Files: `platform/sensorlink/`, `platform/node/` and their tests; the note's §1.14.
+- Expected interfaces: the node's design (D4-92); C13 0.3.
+- Deliverable: three PRs, 2e-1, 2e-2 and 2e-3 (D1's 7056051455).
+- Acceptance tests: V-1 to V-10, V-13, V-14, V-16, V-17 and K-1 across a restart, by name in both `go` jobs, with controls; D6's N2 controls.
+- Owed: V-9's re-arm and `enrolled_at` legs, V-11, V-12 and V-15 (P4-4-DE); the blindness alarms (P4-4-INT-D5-BLIND).
+- Exclusions: wiring (F-027); C4 0.6 step 2.
+- Uncertainty or safety risks: a gap never starts late or closes early.
+- Scratch files: `d5-2e-*`
+- Result: 2e-1 is #774.
+
+### P4-4-HR23-JUDGE (D4; D6, D3 and D2 review; under the held-rows rule): HR-23's judge
+- Objective and rationale: `table.py` judges `out-hr23/` with the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2), before HR-23's counted run.
+- Required inputs: `hr23-conditions.tsv`; #769's feed; the held-rows files D1 names privately.
+- Files: `modules/telemetry/experiments/engine-linux/`; `docs/phase4/D4-hr23-design.md` (harness text).
+- Expected interfaces: none changed.
+- Deliverable: one PR. The judge's handling of held rows is settled by options first (D4-99).
+- Acceptance tests: each rule with its control; no row passes unrun; an unfed `fp` class is never read as zero; `likely_server_ports` printed under every configuration.
+- Owed: the counted run, and items held under D4-112 item 1.3, named to D4 privately.
+- Exclusions: no engine run, dispatch or image change.
+- Uncertainty or safety risks: disclosure. Reviewers post verdicts only.
+- Scratch files: `d4-hr23judge-*`
+- Result: running.
