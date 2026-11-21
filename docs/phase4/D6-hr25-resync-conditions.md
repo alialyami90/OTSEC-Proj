@@ -3,9 +3,9 @@
 D6, 2026-11-15. Brief P4-4-HR25 (`docs/agent-handoffs.md`), deliverable 2: the `dnp3-resync-*` cases, each naming its transport, and their pass conditions, pinned before any counted run. D4 wrote the design, `docs/phase4/D4-hr25-design.md` on #690 at `a5fe07616775096e3910a5e5d9882856206e75e9`. No D6 instance wrote any of it, and this instance did not write any of the comments it answers.
 
 - **The conditions are two files, and they decide; this note explains them.**
-  - `tests/integration/gt_pcap/resync-cases.tsv`: 112 cases, one row each, with the configuration each expectation holds under, and 189 twins (section 3.3).
+  - `tests/integration/gt_pcap/resync-cases.tsv`: 166 cases, one row each, with the configuration each expectation holds under, and 189 twins (section 3.3). The 54 from `dnp3-resync-udp-insert-valid-middle` on are brief P4-4-HR2325S's deliverable 3 (section 3.5).
   - `tests/integration/gt_pcap/resync-conditions.tsv`: the judge, the values, the false-positive set, the changed expectations, the reruns, the reporting, the fuzz pins, the coverage condition, S5 and the static checks.
-  - `test_resync_conditions.py` pins both by SHA-256 (LF line endings, as Git stores them), and checks the rules in section 10 against them. The cases file's SHA-256 is `05b52c6a27e308b6ffe95df97ec919d8c0027760ad6f4fc894ddd39c0babb809`, and the conditions file's is `d5bc7bee4959dc7a65b0cece8fdff82ff145b18e176aed158ccd2f67a4a3beb1`.
+  - `test_resync_conditions.py` pins both by SHA-256 (LF line endings, as Git stores them), and checks the rules in section 10 against them. The cases file's SHA-256 is `e559ceb146750ca9ea34e83f9c471a4959edf7cf8f314538ebd2f3a528f068b0`, and the conditions file's is `334d26c11624e96f0174407d961032a440436685ea859c4eadf7d4ce60ea5219`.
 - **Where they are pinned for the run** (row `pin-files`): D4 adds `RESYNC_CASES_SHA256` and `RESYNC_CONDITIONS_SHA256` to `modules/telemetry/experiments/engine-linux/pins.env` in deliverable 3, with the values the test holds. D6 does not edit D4's files. A run with other files is a rehearsal (row `judge-counted`).
 - **Evidence class: `desk`.** Nothing was built, captured or run against any engine. No device or network was contacted, and no session content was read.
 - **Zeek's code** is read from GitHub at the tag `v9.0.1`, by file, with these SHA-256s. The first six match the HR-23 note's table, and `FuzzBuffer.h` matches the HR-25 note's.
@@ -33,7 +33,7 @@ D6, 2026-11-15. Brief P4-4-HR25 (`docs/agent-handoffs.md`), deliverable 2: the `
 - **Labels come from how a case was built** (T1). tshark is reported beside them, never used as the label.
 - **Rule 6 of the engine run's conditions does not hold here.** A function row on a case's flows that the labels lack fails the case. Rule 9 holds with an exact count: a misparse after a drop shows as one more row than the labels hold.
 - **Defaults under C2A.** Unless a case's cell names it: every cause is 0 on both ends, no `dnp3_` weird is in `weird.log`, no violation, no `budget` row, no reporter error, no crash. A cell's `rows=` lists every `resync` row of the flow.
-- **Each end is read from its own rows** (D4's B1 on #698). An end's counts come from that end's last `resync` row. An end that writes no row, such as an end that never confirmed and holds only causes outside the five, is judged only by having none.
+- **Each end is read from its own rows** (D4's B1 on #698). An end's counts come from that end's last `resync` row. An end that writes no row, such as an end that never confirmed and holds only causes outside the six of design 2.7 (`transport_seq` joined the five under option (a)), is judged only by having none.
 - **The controls validate the case.** A route case is valid only when C0, C1p and C2 each show its `ctl` cell, which for the route cases is `W=absent`. If a control sees W, the case did not reach the failure, and it reads `unknown` for the fix, never `pass` (the HR-23 note's rule in section 4.2).
 - **Route closure** (row `judge-route`). The run reports, per route, n of m cases that pass and are valid. HR-25 closes only if all do. A route with a failing or `unknown` case stays open in HR-25's row.
 
@@ -45,7 +45,7 @@ D6, 2026-11-15. Brief P4-4-HR25 (`docs/agent-handoffs.md`), deliverable 2: the `
 | O, octets before confirmation | 2,048 | The benign maximum is 582: a scan of at most 291 octets per end at a TCP sensor start. Runs of `first_chunk_missing` do not count against O. |
 | K, rows per interval across the host | 100 | The design's value. |
 | `DNP3::resync_report_interval` | 60 s | The design's value. |
-| The fragment limit | 102,400 | Zeek's value, kept by the shipped script until D2 answers S9. If it changes, the three fragment-limit cases are rebuilt from the new value by the same rules, in a new commit of both files. |
+| The fragment limit | 102,400 | Zeek's value, kept by the shipped script until D2 answers S9. If it changes, the five fragment-limit cases are rebuilt from the new value by the same rules, in a new commit of both files. |
 | S5's ratio | at most 5 | Section 8. |
 | R, replacements per delivery per end | 16 | Only if S5's ratio is exceeded and the bound is added. |
 
@@ -88,8 +88,10 @@ The values are D6's choice, `desk`. Both of F and O are reachable by the fuzz ha
 | Reporting | 4 | | The interval rows over three intervals; the host cap with K + 1 flows and a `budget` row in one interval and K in the next; `resync_cause` on the next `fc` row only, after a drop and after a scan; D3's BM, the pending mark. |
 | S5's bound | 2 | 2 | R − 1 and R throws before W in one delivery. Judged only if the bound is added. |
 | A `gap` row on a flow that is not DNP3 | | 1 | 6893732701: exactly one `end` row, on the end with the hole. |
+| `seq` (section 3.5) | 22 | 2 | Design 2.3's transport rule (option (a)): F1 after confirmation and before it, in sequence, and from the master's own TCP stream; the wrap; D2's FCB-repeat and wrong-destination middle segments; D3's per-end case; C3's substitution, pinned missed; the whole-segment compare inside a fragment and after FIN; the retries after FIN; a FIR of any number; a middle segment lost; the repeats that are no link-layer retry. |
+| `surface` (section 3.5) | 23 | 7 | D3's N1 to N4 (o's drop while m's write is open, the scan into a planted frame, the embedded check's two edges, the fragment limit across a link-only frame and a failed header); the stock truncated-READ first datagram; D3's M3 to M6. |
 
-That is 49 cases on R1, 6 on R2, 3 on R3 and 7 on R4, and 47 others.
+That is 49 cases on R1, 6 on R2, 3 on R3 and 7 on R4, and 47 others. Section 3.5 adds 54: 24 on `seq`, design 2.3's transport rule, and 30 on `surface`, D3's parse-surface cases.
 
 ### 3.3 The twins
 
@@ -104,13 +106,45 @@ Every route case has `nofail` and `nowrite`. It has `otherend` unless its failur
 
 - **D2's unknown object** (6893379733's N2 on the note; D2's B1 on #698). The object is g0v254 in a read, in two forms: qualifier 06h, a generic master's, and qualifier 00h with start 0 and stop 0, the only form SEL-751 Table D.9 lists for it. `dnp3-protocol.pac` at the tag takes `default -> objects: empty` in `Request_Objects` for a type it does not list. A qualifier of 6 reads no range, and a qualifier of 0 reads `Range_Field_0`, two one-octet indices. A read's object carries no data, so nothing is left to misread, and both forms parse (row `arm-g0`). D4 read the same arm on #698, and noted that g60 is not listed either, so P takes it too. The four cases pin that branch: if a form throws, its cases fail and the reading is wrong. That `Request_Objects`'s array ends at the end of its record is generated code, not read.
 - **UDP attaches by content.** `main.zeek` registers port 20000 for `DNP3_TCP` only, and `dpd.sig` enables `dnp3_udp` on a payload that starts `05 64`. So every fresh UDP 5-tuple in these cases starts with a datagram that starts `05 64`. The budget cases on UDP use `badhdr`, not garbage, for that reason.
-- **Rows before and after confirmation.** A failure before confirmation raises no weird and writes no row of its own. Its count reaches the `first` row at confirmation, stamped with the confirming fragment's time (R2's cases), or the `end` row under the five-cause rule, or the `budget` row.
+- **Rows before and after confirmation.** A failure before confirmation raises no weird and writes no row of its own. Its count reaches the `first` row at confirmation, stamped with the confirming fragment's time (R2's cases), or the `end` row under the six-cause rule of design 2.7 (`transport_seq` joined the five under option (a)), or the `budget` row.
 - **The device answers.** In the insertion case on a fresh 5-tuple, the design's section 3 expects the flow never named. That holds only if no response follows. A device that acted on W answers, its response is a whole fragment, and the flow confirms there. All are pinned: the case without a response, as the design states it, which stands for a capture that misses the response (a one-sided SPAN, or the response lost at the sensor); the same with a direct operate without reply (code 6), where no response is the protocol's; and `dnp3-resync-udp-insert-truncated-answered`. D4 confirmed on #698 that the design means the unanswered form. Either way the write is counted, never quiet.
-- **S8's third cause** (D3's B1 on #698). D1's ruling 6893581874 leaves `fir_restart` out of the five causes because an inserted FIR either confirms the flow (a `first` row) or throws (`app_parse`). Two cases test that reading on a fresh 5-tuple: `dnp3-resync-udp-insert-fir-restart-confirms`, where the inserted frame is a read that parses, and `-throws`, where it is `throw`. If the reading were wrong, the flow would be quiet, and a quiet flow fails either case.
+- **S8's third cause** (D3's B1 on #698). D1's ruling 6893581874 leaves `fir_restart` out of the five causes (six under option (a), with `transport_seq`) because an inserted FIR either confirms the flow (a `first` row) or throws (`app_parse`). Two cases test that reading on a fresh 5-tuple: `dnp3-resync-udp-insert-fir-restart-confirms`, where the inserted frame is a read that parses, and `-throws`, where it is `throw`. If the reading were wrong, the flow would be quiet, and a quiet flow fails either case.
   - **The device answers I** (D2's B1 on #698, D1's option (a)). I is a read, so its response R(I) follows it in both cases. The device drops W1 at I's FIR and discards W2 too (`inference`), so W is lost at both ends and draws no response. A code-6 form would test nothing more, so there is none.
   - Under C2A, the inserted frame drops W1's fragment under `fir_restart`. It then confirms the flow, which writes the `first` row at it, or it throws, is counted under `app_parse`, and R(I) confirms the flow, which writes the `first` row at R(I) with both counts. W2 then counts `first_chunk_missing`, after confirmation.
   - Under the controls, the inserted frame is appended to W1's fragment (the design's section 1 item 3). W1 holds only the transport octet and W's application control octet (row `builder-msgs`), so the fragment's function code is the inserted frame's own application control octet, C0h to CFh. The request parser's default arm takes it (row `arm-3bdata`), so W is absent and the flow is named, whatever the inserted frame holds.
 - **What the builder fixes** (D2's N1 to N4 on #698; row `builder-msgs`). Every response echoes its request's application sequence number, and the response to W echoes W's g12v1 with status 0, so the response parser's g12v1 path runs under C2A. The transport sequence wraps mod 64. A message of more than one frame goes one frame per datagram or segment. Confirmed user data follows Reset Link States and its ACK.
+
+### 3.5 Deliverable 3: the cases of design 3.2 (P4-4-HR2325S)
+
+D6, 2026-11-21. Brief P4-4-HR2325S, deliverable 3 (D4-112 item 3.5, D4-122 item 2.8, D1's 7060193584 and 7060542437 on #782). D4 wrote the design, `docs/phase4/D4-hr25-design.md` on `main` at `c3edfd8a`; no D6 instance wrote it. Every cell is written from its section 3.2 (sections 2 and 7 for the rules), cites its item, and takes nothing from a run. Evidence class `desk`.
+
+| Design 3.2 item | Cases (`dnp3-resync-`) |
+| --- | --- |
+| 1, and its (+) twin before confirmation | `udp-insert-valid-middle`, `udp-insert-valid-middle-fresh` |
+| 2 (+), 3 | `udp-insert-valid-middle-in-sequence`; `tcp-valid-middle-own-stream` |
+| 4 to 6 | `udp-seq-wrap`; `udp-fcb-repeat-middle`; `udp-other-dest-middle` |
+| 7, 8 | `{udp,tcp}-per-end-seq`; `udp-substitution-missed` (pinned missed) |
+| 9 and 9a to 9c (+) | `udp-retry-compare-{fin,octet,shorter,longer}` |
+| 10, 10a, 10b (+) | `udp-link-retry-last`, `-after-drop`, `-divergent` |
+| 11, 12a, 12b (+) | `udp-fir-any-number`; `udp-middle-lost`, `udp-middle-lost-fresh` |
+| 13 (D3's N1) | `{udp,tcp}-other-end-chunk-crc-open`, `{udp,tcp}-other-end-app-parse-open` |
+| 14 (D3's N2 to N4) | `{udp,tcp}-scan-into-planted-frame`; `{udp,tcp}-embedded-offset-3`, `{udp,tcp}-embedded-last-octet`; `{udp,tcp}-fragment-limit-interrupted` |
+| 15 | `udp-short-read-first` |
+| 16 (D3's M3 to M7) | `udp-edge-fc{129,130,131}-4-{orig,resp}`; `udp-edge-fc129-split-{orig,resp}`; `udp-edge-fc{100,200,32,33}-{2,4}-resp`; `tcp-continued-link-only`; row `judge-viol` (M7) |
+| 17 (+), 18a to 18c (+) | `udp-retry-compare-after-fin`; `udp-repeat-{unconfirmed,fcb-toggled,after-reset}` |
+| 3.3, the narrowed cell | `udp-link-retry-middle`: `P=seen; W=seen; Q=seen; rows=none`; its controls stay `report` |
+
+- **How they are built.** Row `builder-seq` names the new tokens: a middle segment numbered by the cell (`seg`, `sub`), copies of a frame as built (`fin`, `octet`, `fewer`, `more`, `same`, `fcb`, `read`), the three-frame unconfirmed W, `badobj`, `fc` and `fc2`, `lostmiddle`, `embedhead`, `embedlast`, overlimit split at its frame 1, `R(T)`, `m numbered from n` and `no handshake`. The captures are appended after the 112, so no earlier capture's clock, port or hash moves.
+- **Where a cell departs from the item's text** (each for D4 to confirm on the PR):
+  - item 7's controls: the item writes W absent, but by design 1 items 3 and 5 Zeek 9.0.1 checks no transport number and keeps each end's state apart, so nothing fails and W is seen. The cell pins `W=seen`;
+  - item 13's throw twin: judge-twins' throw from o (C0h 81h 00h) is a 3-octet 129, which rule (A) sends to the request parser's default arm (HR-23 design 2.3), so it does not throw under C2 or C2A. The twin uses `badobj`, a 129 of 5 octets that the response parser rejects (HR-23 design 4.7);
+  - item 14's N3: offset 2 of a failed frame is its own link length, at least 6 for a frame with a chunk, so it cannot hold a candidate. The low edge is offset 3, built from o so that its CTRL octet, 05h, has DIR clear;
+  - item 6 and item 8 place the device's response to W (R, R(W)) in the capture, as items 5 and 8 state the device's behaviour (`inference`);
+  - where an item names only W, `P=seen` and `Q=seen` are added where design 2.3 (a FIR frame is unchanged) and 2.6 (a drop after confirmation keeps the flow) give them;
+  - item 16's inputs whose result rests on code not read (a 130 or 131 with no object, the split 129, a 32 or 33 with no object octet) are `report` cells, as HR-23's `mal-unknown` reads such inputs, with W and Q seen and no violation stated for both branches. The others are judged.
+- **The audit of the 112 pinned rows** (design 3.3; D4-112 item 3.5). `test_resync_builder.py`'s `audit` applies design 2.3's rule to every whole frame with valid CRCs of every capture, per flow and end, with a link-only frame and a failed header leaving the state, and a chunk failure, a frame cut short, a lost TCP segment, a throw at FIN and the fragment limit dropping it. Over the 302 captures of the 112 rows, the only frame it does not accept, append or count as before is `dnp3-resync-udp-link-retry-middle`'s retry, which it discards; no frame meets the `transport_seq` rule. This agrees with design 3.3's unreproduced reading, and it is committed, so it reruns in CI. It models the rule, not A's code, and runs no engine. The same function checks each new cell's `transport_seq` and `first_chunk_missing` per end against its capture.
+- **tshark.** The pinned reader's list gains 20 rows (`tshark-beside.tsv`), sorted from tshark 4.2.3's reading on the owner's PC (`desk`) under four new causes: `seq-rebuild`, `retry-last`, `merged` and `no-wrap`, with five more `throw-code` rows and two more `no-limit` rows. The `resync` job's pinned 4.2.2 checks the list.
+- **Not here:** the harness rows of design 3.3 (`report-no-new-field`, `cfg-c2a`, `fp-3a`, `cov-causes`, `cov-not`, the fuzz row and the new `cov-` row) are HR-25's build (D4). `test_resync_conditions.py`'s closed set takes `transport_seq` here, because the new cells name it. S5 input (8) is deliverable 2's.
 
 ## 4. The false-positive set
 
@@ -151,7 +185,7 @@ HR-23's stage-2 pins, which D6 has not yet written, set the floors of the same U
   - So a burst on one flow shows one `weird.log` row, whatever the sampling (`dnp3-resync-udp-weird-burst`: 2,000 weirds, 26 events, 1 row).
   - The global bound shows only across connections (`report-cap`: 201 connections, 25 rows).
   - The test computes both numbers from the sampling rule.
-- **No new field** (row `report-no-new-field`): C2A against C2 gains exactly the design's two events, eight weirds, `resync` rows with their five fields, and `resync_cause`.
+- **No new field** (row `report-no-new-field`): C2A against C2 gains exactly the design's two events, nine weirds (design 2.8; the row names eight until HR-25's build adds `dnp3_transport_sequence`, design 3.3), `resync` rows with their five fields, and `resync_cause`.
 - **D3's BM** (`dnp3-resync-udp-report-mark-state`). It runs 1,000 flows, each with a drop and then a throwing fragment, so no `fc` row ever takes the mark.
   - **Pass:** at `zeek_done`, every global container that the shipped script declares has the size it has on the one-flow control.
   - **Control:** a mutant of the shipped script that keeps the mark in a global table reports at least 1,000.
@@ -229,6 +263,7 @@ Each check is run once on a copy of the patch with its defect planted, and must 
 - the builder's arithmetic, W1's split among it, and that an inserted frame's application control octet, as a function code, falls in the request parser's default arm;
 - S5 input (7)'s frame: every chunk CRC fails, `05 64` at every even offset from 10 to 288 and nowhere else, and one candidate, at offset 282, whether a datagram's end or the next frame follows;
 - the two weird counts, from the sampling rule.
+- that every item of design 3.2 has its cases, each citing its item, with a named control (deliverable 3).
 
 Seven planted mutants were each killed: a route moved, a transport mismatched, a cause misnamed, a solved header changed, a twin dropped, a weird misnamed, and `-max_len` lowered. After D3's review six more were each killed: input (7)'s CRC octets changed, input (7) put back to `05 64` alone, a new case's cause dropped, its transport mismatched, its weird misnamed, and the `builder-s5-7` row renamed. Each ran on a copy of the files with the hash test deselected, on the owner's PC, `desk`.
 
@@ -272,3 +307,4 @@ Seven planted mutants were each killed: a route moved, a transport mismatched, a
 | D2 (6894443879) and D4 (6894466378) on #698 | D2's B1, N1 to N4 and code 6; D4's B1, B2, N1, N2 and the three readings | `arm-g0` and `dnp3-resync-udp-unknown-object-range*`; `builder-msgs`, `builder-limit`, `builder-join`, the link-retry cases; the `-no-reply` insertion cases; `judge-defaults`, `budget-split-ends`, `gap-non-dnp3`; the `fir-restart` rows; `udp-weird-burst`; section 10 |
 | D3 (6895101173) on #698 | B1, S8's third cause; N1, S5's input for the embedded-header check; N2, the count | `dnp3-resync-udp-insert-fir-restart-*` and W1's split in `builder-msgs` (section 3.4); `s5-inputs` (7) and `builder-s5-7` (section 8); this note's head and section 3.2 |
 | D2 (6895823733) on #698, D1's option (a) (6895864530) | B1: the inserted read draws a response | R(I) in both `dnp3-resync-udp-insert-fir-restart-*` cases and in `builder-msgs`; the `-no-reply` pair dropped (section 3.4) |
+| The design's 3.2 and 3.3 at `c3edfd8a` (D4-112 item 3.5, D4-122 item 2.8) | items 1 to 18, the audit, the narrowed `link-retry-middle` | section 3.5; `builder-seq`, `judge-viol`; `test_resync_builder.py`'s `audit` |

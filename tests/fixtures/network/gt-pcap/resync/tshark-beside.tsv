@@ -1,10 +1,14 @@
 # The pinned tshark's DNP3 reading of the dnp3-resync-* captures, where it differs from the builder's label (D6, brief P4-4-HR25, deliverable 3; D4's N1 on #714). resync_tshark.py writes the same list without the cause column, and the resync job of a6-gt-pcap.yml fails when the two differ.
 # A row is reported, never used as a label (row judge-labels). Its columns are resync_tshark.py's: the message's last packet, the label's function code, the codes tshark reads in that packet from the message's end, and the builder's state.
-# cause: why tshark reads it otherwise, as D4 sorted the 56 on #714.
+# cause: why tshark reads it otherwise, as D4 sorted the 56 on #714, and for the 20 of P4-4-HR2325S deliverable 3 as D6 sorted them from tshark 4.2.3's reading (desk), which the resync job's pinned 4.2.2 checks.
 #   no-resync: tshark does not resynchronise after a failed header (crc-magic, holds, false-magic, the midstream tail), so it does not read a message the builder labels seen.
-#   throw-code: tshark reads the function code of a read that throws (app-parse, throw-alone, r-bound, report-mark-state, and the I of insert-fir-restart-throws), which the builder labels absent.
-#   no-limit: tshark has no fragment limit, so it reads a fragment over the limit, which the builder labels absent.
+#   throw-code: tshark reads the function code of a fragment that throws (app-parse, throw-alone, r-bound, report-mark-state, the I of insert-fir-restart-throws, short-read-first's T, other-end-app-parse-open's badobj, and the 4-octet 32 and 33 of edge-fc32-4-resp and edge-fc33-4-resp), which the builder labels absent.
+#   no-limit: tshark has no fragment limit, so it reads a fragment over the limit (the fragment-limit cases), which the builder labels absent.
 #   insert-rebuild: tshark rebuilds W (or W6) across an inserted datagram that it discards, as a device would, where the builder labels it absent.
+#   seq-rebuild: tshark rebuilds W from W's own frames and passes over a frame of builder-seq that repeats or skips a number (I, D, W2', W2c', the retry after a Reset Link States), where the builder labels W absent.
+#   retry-last: W's last labelled packet is a link-layer retry after W's FIN, a frame without FIR, in which tshark reads no function code; it reads W at W2c (link-retry-last and its twin after a drop).
+#   merged: the label is on s, a middle segment, and tshark reads the fragment s joins at that fragment's last frame, W3 (substitution-missed).
+#   no-wrap: tshark does not reassemble seq-wrap's W, numbered 62, 63 and 0, though it reassembles the same fragment numbered 61 to 63 or 0 to 2 (a scratch probe with tshark 4.2.3, desk), so it does not read W, which the builder labels seen.
 capture	message	end	packet	label_code	tshark_codes	note	cause
 dnp3-resync-tcp-app-parse-same-segment	X	m	8	1	1,5	the builder labels it absent	throw-code
 dnp3-resync-tcp-app-parse-same-segment--nowrite	X	m	8	1	1	the builder labels it absent	throw-code
@@ -24,15 +28,18 @@ dnp3-resync-tcp-crc-magic-4--nowrite	Q	m	10	1	-	the builder labels it seen	no-re
 dnp3-resync-tcp-failed-header-holds-frame	W	m	8	5	-	the builder labels it seen	no-resync
 dnp3-resync-tcp-false-magic-straddle	W	m	10	5	-	the builder labels it seen	no-resync
 dnp3-resync-tcp-false-magic-straddle--nowrite	Q	m	10	1	-	the builder labels it seen	no-resync
+dnp3-resync-tcp-fragment-limit-interrupted	X	m	836	1	1	the builder labels it absent	no-limit
 dnp3-resync-tcp-fragment-limit	X	m	832	1	1	the builder labels it absent	no-limit
 dnp3-resync-tcp-fragment-limit--nowrite	X	m	832	1	1	the builder labels it absent	no-limit
 dnp3-resync-tcp-fragment-limit--otherend	X	o	832	129	129	the builder labels it absent	no-limit
+dnp3-resync-tcp-other-end-app-parse-open	Xo	o	10	129	129	the builder labels it absent	throw-code
 dnp3-resync-tcp-r-bound-at	T1..T16	m	8	1	1,5	the builder labels it absent	throw-code
 dnp3-resync-tcp-r-bound-below	T1..T15	m	8	1	1,5	the builder labels it absent	throw-code
 dnp3-resync-tcp-r2-midstream	P	m	1	1	-	the builder labels it seen	no-resync
 dnp3-resync-tcp-r2-midstream--nowrite	P	m	1	1	-	the builder labels it seen	no-resync
 dnp3-resync-tcp-r2-midstream--otherend	R(P)	o	3	129	-	the builder labels it seen	no-resync
 dnp3-resync-tcp-throw-alone	T	m	4	1	1	the builder labels it absent	throw-code
+dnp3-resync-tcp-valid-middle-own-stream	W	m	12	5	5	the builder labels it absent	seq-rebuild
 dnp3-resync-udp-app-parse-same-datagram	X	m	3	1	1,5	the builder labels it absent	throw-code
 dnp3-resync-udp-app-parse-same-datagram--nowrite	X	m	3	1	1	the builder labels it absent	throw-code
 dnp3-resync-udp-app-parse	X	m	3	1	1	the builder labels it absent	throw-code
@@ -43,7 +50,10 @@ dnp3-resync-udp-crc-magic-1	W	m	3	5	-	the builder labels it seen	no-resync
 dnp3-resync-udp-crc-magic-2	W	m	3	5	-	the builder labels it seen	no-resync
 dnp3-resync-udp-crc-magic-3	W	m	3	5	-	the builder labels it seen	no-resync
 dnp3-resync-udp-crc-magic-4	W	m	3	5	-	the builder labels it seen	no-resync
+dnp3-resync-udp-edge-fc32-4-resp	Xo	o	3	32	32	the builder labels it absent	throw-code
+dnp3-resync-udp-edge-fc33-4-resp	Xo	o	3	33	33	the builder labels it absent	throw-code
 dnp3-resync-udp-failed-header-holds-frame	W	m	3	5	-	the builder labels it seen	no-resync
+dnp3-resync-udp-fragment-limit-interrupted	X	m	417	1	1	the builder labels it absent	no-limit
 dnp3-resync-udp-fragment-limit-over	B401	m	414	1	1	the builder labels it absent	no-limit
 dnp3-resync-udp-fragment-limit	X	m	415	1	1	the builder labels it absent	no-limit
 dnp3-resync-udp-fragment-limit--nowrite	X	m	415	1	1	the builder labels it absent	no-limit
@@ -57,8 +67,22 @@ dnp3-resync-udp-insert-mid-write	W	m	5	5	5	the builder labels it absent	insert-r
 dnp3-resync-udp-insert-truncated-answered	W	m	3	5	5	the builder labels it absent	insert-rebuild
 dnp3-resync-udp-insert-truncated-no-reply	W6	m	3	6	6	the builder labels it absent	insert-rebuild
 dnp3-resync-udp-insert-truncated	W	m	3	5	5	the builder labels it absent	insert-rebuild
+dnp3-resync-udp-insert-valid-middle-fresh	W	m	3	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-insert-valid-middle	W	m	5	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-link-retry-last-after-drop	W	m	9	5	-	the builder labels it seen	retry-last
+dnp3-resync-udp-link-retry-last	W	m	10	5	-	the builder labels it seen	retry-last
+dnp3-resync-udp-other-end-app-parse-open	Xo	o	4	129	129	the builder labels it absent	throw-code
 dnp3-resync-udp-r-bound-at	T1..T16	m	3	1	1,5	the builder labels it absent	throw-code
 dnp3-resync-udp-r-bound-below	T1..T15	m	3	1	1,5	the builder labels it absent	throw-code
+dnp3-resync-udp-repeat-after-reset	W	m	13	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-repeat-fcb-toggled	W	m	11	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-repeat-unconfirmed	W	m	6	5	5	the builder labels it absent	seq-rebuild
 dnp3-resync-udp-report-mark-state	T	m	2000	1	1	the builder labels it absent	throw-code
 dnp3-resync-udp-report-mark-state--control	T	m	2	1	1	the builder labels it absent	throw-code
+dnp3-resync-udp-retry-compare-longer	W	m	11	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-retry-compare-octet	W	m	11	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-retry-compare-shorter	W	m	11	5	5	the builder labels it absent	seq-rebuild
+dnp3-resync-udp-seq-wrap	W	m	5	5	-	the builder labels it seen	no-wrap
+dnp3-resync-udp-short-read-first	T	m	1	1	1	the builder labels it absent	throw-code
+dnp3-resync-udp-substitution-missed	s	m	4	34	-	the builder labels it seen	merged
 dnp3-resync-udp-throw-alone	T	m	1	1	1	the builder labels it absent	throw-code

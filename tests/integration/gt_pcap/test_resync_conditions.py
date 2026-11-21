@@ -20,8 +20,8 @@ import dnp3
 HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "resync-cases.tsv")
 CONDITIONS = os.path.join(HERE, "resync-conditions.tsv")
-CASES_SHA256 = "05b52c6a27e308b6ffe95df97ec919d8c0027760ad6f4fc894ddd39c0babb809"
-CONDITIONS_SHA256 = "d5bc7bee4959dc7a65b0cece8fdff82ff145b18e176aed158ccd2f67a4a3beb1"
+CASES_SHA256 = "e559ceb146750ca9ea34e83f9c471a4959edf7cf8f314538ebd2f3a528f068b0"
+CONDITIONS_SHA256 = "334d26c11624e96f0174407d961032a440436685ea859c4eadf7d4ce60ea5219"
 
 # The closed set of causes and their weirds (design section 2.8).
 WEIRDS = {
@@ -32,6 +32,7 @@ WEIRDS = {
     "embedded_header": "dnp3_embedded_header",
     "first_chunk_missing": "dnp3_first_application_layer_chunk_missing",
     "fir_restart": "dnp3_fragment_restarted",
+    "transport_seq": "dnp3_transport_sequence",   # option (a), design 2.3 and 2.8 (P4-4-HR2325S deliverable 3)
     "fragment_limit": "dnp3_max_application_layer_fragment_size_exceeded",
     "app_parse": "dnp3_app_parse_failed",
     "gap": "dnp3_content_gap",
@@ -40,7 +41,8 @@ WEIRDS = {
     "invariant": "dnp3_invariant",
 }
 ROUTES = {"R1", "R2", "R3", "R4"}
-KINDS = ROUTES | {"trace", "insert", "budget", "benign", "invariant", "changed", "report", "bound", "fp"}
+# seq: design 2.3's transport rule; surface: D3's parse-surface cases (design 3.2, P4-4-HR2325S deliverable 3).
+KINDS = ROUTES | {"trace", "insert", "budget", "benign", "invariant", "changed", "report", "bound", "fp", "seq", "surface"}
 TWINS = {"nofail", "nowrite", "otherend"}
 
 
@@ -149,7 +151,7 @@ def test_the_conditions_are_whole_and_hold_the_values():
     assert int(v["val-F"]) <= 64
     for need in ("cov-causes", "cov-drop", "cov-delete", "cov-paths", "cov-udp", "cov-tcp", "cov-not", "cov-left",
                  "pin-files", "pin-builder", "judge-ctl", "judge-route", "judge-r3", "fp-counts", "rerun-ed403",
-                 "report-no-new-field", "s5-inputs", "builder-s5-7", "static-control"):
+                 "report-no-new-field", "s5-inputs", "builder-s5-7", "static-control", "builder-seq", "judge-viol"):
         assert need in v, need
 
 
@@ -250,3 +252,33 @@ def test_the_weird_counts_follow_the_sampling_rule():
     a = {r["case"]: r["a"] for r in rows(CASES)}
     assert sampled(2000) == 26 and "passes as 26 events" in a["dnp3-resync-udp-weird-burst"]
     assert sampled(201) == 25 and "dnp3_corrupt_app_chunk_checksum=25" in a["dnp3-resync-udp-report-cap"]
+
+
+# P4-4-HR2325S deliverable 3: the cases of design 3.2 (D4-112 item 3.5, D4-122 item 2.8), each citing its item.
+# Items 12 and 18 are pinned as their variants only (12a, 12b; 18a to 18c).
+ITEMS = {str(i) for i in range(1, 19)} - {"12", "18"} | {"9a", "9b", "9c", "10a", "10b", "12a", "12b", "18a", "18b", "18c"}
+FIRST_D3 = "dnp3-resync-udp-insert-valid-middle"
+
+
+def check_items(rs):
+    names = [r["case"] for r in rs]
+    new = rs[names.index(FIRST_D3):]
+    assert all(r["route"] in ("seq", "surface") and "design 3.2 item" in r["a"] for r in new)
+    assert {m.group(1) for r in new for m in re.finditer(r"design 3\.2 item (\d+[abc]?)\b", r["a"])} == ITEMS
+    # Design 3.3: link-retry-middle's a cell narrows from report.
+    lrm = next(r for r in rs if r["case"] == "dnp3-resync-udp-link-retry-middle")
+    assert lrm["a"].startswith("P=seen; W=seen; Q=seen; rows=none;") and lrm["ctl"] == "report"
+
+
+def test_every_design_3_2_item_has_its_cases():
+    check_items(rows(CASES))
+
+
+def test_the_item_check_fails_its_control():
+    # Control: the wrap case (item 4) left out.
+    rs = [r for r in rows(CASES) if r["case"] != "dnp3-resync-udp-seq-wrap"]
+    try:
+        check_items(rs)
+    except AssertionError:
+        return
+    raise AssertionError("the item check passed with item 4 left out")

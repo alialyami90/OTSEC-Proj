@@ -31,9 +31,10 @@ from gtlabel import TSHARK
 FIELDS = ["frame.number", "ip.checksum.status", "udp.checksum.status", "tcp.checksum.status", "dnp3.ctl.dir",
           "dnp3.al.func", "_ws.malformed"]
 COLUMNS = ["capture", "message", "end", "packet", "label_code", "tshark_codes", "note"]
-# The causes a committed row may name (D4's sort on #714); the committed
-# list's header lines say what each means.
-CAUSES = {"no-resync", "throw-code", "no-limit", "insert-rebuild"}
+# The causes a committed row may name (D4's sort on #714, and D6's for
+# P4-4-HR2325S deliverable 3's cases); the committed list's header lines
+# say what each means.
+CAUSES = {"no-resync", "throw-code", "no-limit", "insert-rebuild", "seq-rebuild", "retry-last", "merged", "no-wrap"}
 
 
 def tshark(path):

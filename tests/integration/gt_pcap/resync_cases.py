@@ -73,6 +73,15 @@ FIR, FIN = 0x40, 0x80
 DIRECT_OPERATE_NR = 6
 APP_PER_FRAME = 249                  # application octets in a full frame (250 user octets less the transport octet)
 
+# builder-seq (P4-4-HR2325S deliverable 3, design 3.2). seg's one
+# application octet: function code 34 in the fragment it joins, which the
+# request parser's default arm takes (arm-3bdata). OTHER_DEST: a link
+# destination other than O1's 10 (a choice: no endpoint here uses 11).
+SEG_OCTET = 0x22
+OTHER_DEST = 11
+# The request codes whose arm parses objects (arm-3bdata).
+OBJECT_ARM = set(range(1, 13)) | {16, 17, 18, 20, 21, 22} | set(range(25, 34))
+
 
 def pinned(row_id):
     return bytes.fromhex(CONDITIONS[row_id]["value"])
@@ -116,6 +125,16 @@ def candidates(buf):
     return out
 
 
+def user_data(frame):
+    """A frame's user data without its CRCs."""
+    out, i = b"", 10
+    while i < len(frame):
+        n = min(16, len(frame) - i - 2)
+        out += frame[i:i + n]
+        i += n + 2
+    return out
+
+
 def chunk_crc_offsets(frame):
     """Offsets of each chunk CRC's first octet in a frame."""
     out, i = [], 10
@@ -147,6 +166,8 @@ def sizes(n, how):
         return [1, h, n - 1 - h]
     if how == "overlimit":
         return [APP_PER_FRAME] * 411 + [61, APP_PER_FRAME]
+    if how == "fc2":
+        return [2, n - 2]   # builder-seq: the first frame with 2 application octets
     raise ValueError(how)
 
 
@@ -481,7 +502,160 @@ class Flow:
                 self.stash[name] = after
                 return [[u]]
             return [[u, after]]
-        raise ValueError(f"no builder for the failure {spec!r}")
+        out = self.seq_failure(spec, end, name, dest, src, master, hdr)
+        if out is None:
+            raise ValueError(f"no builder for the failure {spec!r}")
+        return out
+
+    def ref(self, token):
+        """The frame a frame token of the cell names, as built (W2c is W's frame 2)."""
+        base, k, _ = FRAME_TOKENS[token]
+        return self.msgs[base].frames[k]
+
+    def own(self, name, end, code, objects, apdu, why, frames, units, spec):
+        """A message of its own for a unit of builder-seq. It is never owed a
+        response: none of these is a request the device answers."""
+        msg = Msg(name, end, code, objects, None, apdu, why, self)
+        msg.frames, msg.units, msg.done = frames, units, True
+        for u in units:
+            u.msg, u.fail = msg, spec
+        self.msgs[name] = msg
+        return msg
+
+    def seq_failure(self, spec, end, name, dest, src, master, hdr):
+        """The tokens of builder-seq (design 3.2), each as that row says."""
+        m = re.fullmatch(r"(seg|sub)\((\d+)((?:,\w+=\w+)*)\)", spec)
+        if m:
+            # seg(n) and sub(n): FIR and FIN clear, number n, one octet 22h.
+            n = int(m.group(2))
+            opts = dict(kv.split("=") for kv in m.group(3).split(",")[1:])
+            to = int(opts.get("dest", dest))
+            user = bytes([n & 0x3F, SEG_OCTET])
+            if "ctl" in opts:
+                data = link_frame(self.ref(opts["ctl"])[3], to, src, user)
+            else:
+                data = dnp3.link(to, src, master, user)
+            u = Unit(name, end, data)
+            # sub is built to take the place of a frame left out of the
+            # capture, in sequence, so the fragment it joins is whole: seen.
+            why = None if m.group(1) == "sub" else "a middle segment: the fragment it joins is not whole and in sequence"
+            self.own(name, end, SEG_OCTET, "-", user[1:], why, [data], [u], spec)
+            return [[u]]
+        m = re.fullmatch(r"firopen\((\d+)\)", spec)
+        if m:
+            self.tseq[end] = int(m.group(1)) & 0x3F
+            groups = self.failure("firopen", end, name)
+            for g in groups:
+                for u in g:
+                    u.fail = spec
+            return groups
+        m = re.fullmatch(r"(fin|octet|fewer|more|same|fcb|read)\((\w+)\)", spec)
+        if m:
+            how, of = m.groups()
+            f = self.ref(of)
+            ctrl, to, frm = f[3], struct.unpack("<H", f[4:6])[0], struct.unpack("<H", f[6:8])[0]
+            user = user_data(f)
+            if how == "fin":
+                user = bytes([user[0] | FIN]) + user[1:]
+            elif how == "octet":
+                user = user[:1] + bytes([user[1] ^ 0xFF]) + user[2:]
+            elif how == "fewer":
+                user = user[:-1]
+            elif how == "more":
+                user = user + b"\x00"
+            elif how == "fcb":
+                ctrl ^= 0x20
+            elif how == "read":
+                user, to = user[:1] + bytes([dnp3.READ]) + dnp3.all_objects(60, 1), OTHER_DEST
+            data = link_frame(ctrl, to, frm, user)
+            u = Unit(name, end, data)
+            if how == "read":
+                # After W1c's application control octet, a whole read of g60v1.
+                self.own(name, end, dnp3.READ, "g60v1", user[1:], None, [data], [u], spec)
+            else:
+                self.own(name, end, "-", "-", user[1:], f"{how}({of}): it repeats {of}'s number", [data], [u], spec)
+            return [[u]]
+        if spec == "badobj":
+            # A 129 of 5 application octets: IIN 0 and one object octet.
+            seq = self.last_seq() if end == "o" else self._next_app()
+            apdu = dnp3.response(seq, objects=b"\x3c")
+            (data,) = self._frames(end, apdu)
+            u = Unit(name, end, data)
+            self.own(name, end, dnp3.RESPONSE, "-", apdu, "throws", [data], [u], spec)
+            return [[u]]
+        m = re.fullmatch(r"(fc|fc2)\((\d+),(\d+)\)", spec)
+        if m:
+            c, n = int(m.group(2)), int(m.group(3))
+            seq = self.last_seq() if end == "o" else self._next_app()
+            apdu = bytes([0xC0 | seq, c]) + bytes(n - 2)
+            frames = self._frames(end, apdu, "fc2" if m.group(1) == "fc2" else "one")
+            us = [Unit(name if len(frames) == 1 else f"{name}/{k}", end, fr) for k, fr in enumerate(frames, 1)]
+            # Read by rule (A), C2A's parser choice: the response parser for
+            # 4 or more octets with code 129 to 131, else the request
+            # parser, whose object arms throw on 1 or 2 object octets
+            # (HR-23 design 2.3 and 4.7; arm-3bdata).
+            response = 129 <= c <= 131 and n >= 4
+            why = "throws" if not response and c in OBJECT_ARM and 1 <= n - 2 <= 2 else None
+            self.own(name, end, c, "-", apdu, why, frames, us, spec)
+            return [[u] for u in us]
+        if spec == "lostmiddle":
+            assert end == "o"
+            seq = self.last_seq()
+            apdu = dnp3.response(seq)
+            frames = self._frames("o", apdu, "three")
+            us = [Unit(f"{name}/{k}", "o", frames[k - 1]) for k in (1, 3)]
+            self.own(name, "o", dnp3.RESPONSE, "-", apdu, "partial: its frame 2 is not in the capture", frames, us, spec)
+            return [[u] for u in us]
+        if spec == "embedhead":
+            # A frame of link length 53 whose header holds a candidate at its
+            # offset 3: its CTRL and DEST octets are 05 64, the candidate's
+            # DEST high and SRC low are its own header CRC, and the
+            # candidate's SRC high and CRC are its first 3 data octets. Its
+            # first chunk CRC fails; its other chunks are 00 with valid CRCs.
+            inner_len, inner_ctl, inner_dest_lo = 0x0B, 0x44 if end == "o" else 0xC4, 0x05
+            h = b"\x05\x64" + bytes([53, 0x05, 0x64, inner_len, inner_ctl, inner_dest_lo])
+            h += dnp3.crc(h)
+            inner = h[3:10] + b"\x00"
+            user = b"\x00" + dnp3.crc(inner) + bytes(45)
+            z = bytes(16)
+            frame = h + user[:16] + bytes([dnp3.crc(user[:16])[0] ^ 0xFF]) + dnp3.crc(user[:16])[1:]
+            frame += user[16:32] + dnp3.crc(z) + user[32:] + dnp3.crc(z)
+            return [[Unit(name, end, frame, label=spec, fail=spec, kind="raw", named=(0, 3))]]
+        m = re.fullmatch(r"embedlast\(W5\)(?:\[(frame|after)\])?", spec)
+        if m and m.group(1) == "after":
+            return [[self.stash.pop(name)]]
+        if m:
+            # As embedtail, with W5's first octet as the frame's last, the
+            # second octet of its third chunk CRC, which fails.
+            assert end == "m"
+            inner = self.request("W5")
+            inner.why, inner.done = f"inside {name}", True
+            w5 = inner.frames[0]
+            h = hdr(53)
+            z = bytes(16)
+            frame = (h + dnp3.crc(h) + z + dnp3.crc(z) + z + dnp3.crc(z) + z
+                     + bytes([dnp3.crc(z)[0] ^ 0xFF]) + w5[:1])
+            label = "embedlast(W5)"
+            u = Unit(f"{name}[frame]" if m.group(1) else name, end, frame, label=label, fail=label, msg=inner,
+                     named=(0, 63))
+            after = Unit(f"{name}[after]", end, w5[1:], label="after", fail=label, msg=inner, kind="raw", named=())
+            inner.units += [u, after]
+            if m.group(1) == "frame":
+                self.stash[name] = after
+                return [[u]]
+            return [[u, after]]
+        m = re.fullmatch(r"overlimit\[(first|rest)\]", spec)
+        if m and m.group(1) == "rest":
+            return self.stash.pop(name)
+        if m:
+            groups = self.failure("overlimit", end, name)
+            self.stash[name] = groups[1:]
+            return groups[:1]
+        return None
+
+    def _next_app(self):
+        seq, self.app = self.app, (self.app + 1) & 0x0F
+        return seq
 
     def send(self, pieces, lost=False, at=None):
         """One datagram or segment holding pieces: Units, or (Unit, a, b)
@@ -528,12 +702,13 @@ class Flow:
 
 # --- the regular notation (section 3.1) ------------------------------------
 
-TOKEN = re.compile(r"(?P<name>(?:[A-Z][a-z]?:)?[A-Za-z0-9+]+(?:\([^)]*\))?(?:\[[^\]]*\])?)"
+TOKEN = re.compile(r"(?P<name>(?:[A-Za-z][A-Za-z0-9']*:)?[A-Za-z0-9+']+(?:\([^)]*\))?(?:\[[^\]]*\])?)"
                    r"(?P<retry> \(retry, same FCB\))?(?P<rep> x\d+)?(?P<frm> from [mo])?"
                    r"(?P<lost> lost, ACKed past)?(?P<segs> in \d+ segments)?")
 SUFFIXES = (", one datagram", ", one segment", ", all within 30 s", " (handshake first, FIN exchange last)")
-MARKERS = {"handshake", "fresh 5-tuple", "fresh 5-tuple, capture start", "(no response)"}
-FRAME_TOKENS = {"W1": ("W", 0, "two"), "W2": ("W", 1, "two"), "W6a": ("W6", 0, "two"), "W6b": ("W6", 1, "two"),
+MARKERS = {"handshake", "fresh 5-tuple", "fresh 5-tuple, capture start", "(no response)", "no handshake"}
+FRAME_TOKENS = {"W1": ("W", 0, "u"), "W2": ("W", 1, "u"), "W3": ("W", 2, "u"), "W6a": ("W6", 0, "two"),
+                "W6b": ("W6", 1, "two"),
                 "Qa": ("Q", 0, "two"), "Qb": ("Q", 1, "two"), "W1c": ("W", 0, "c"), "W2c": ("W", 1, "c"),
                 "W3c": ("W", 2, "c"), "G3a": ("G", 0, "three"), "G3b": ("G", 1, "three"), "G3c": ("G", 2, "three")}
 LINKS = {"L", "Lo", "Lm", "Ls", "Rst", "A"}
@@ -573,13 +748,21 @@ def parse(build):
     out = []
     for part in build.split(" | "):
         m = re.fullmatch(r"~(\d+)s", part)
+        n = re.fullmatch(r"([mo]) numbered from (\d+)", part)
         if part in MARKERS:
             out.append(("marker", part))
         elif m:
             out.append(("wait", int(m.group(1))))
+        elif n:
+            out.append(("number", (n.group(1), int(n.group(2)))))
         else:
             out.append(("items", parse_part(part)))
     return out
+
+
+def three_w(build):
+    """Whether W1 and W2 are two of W's three frames of unconfirmed user data (builder-seq)."""
+    return re.search(r"\bW3\b", build) is not None
 
 
 def w_family(name):
@@ -588,7 +771,8 @@ def w_family(name):
 
 def completes(name, build):
     """Whether the token sends the last octets of its message."""
-    return (name in ("W", "W2", "W6b", "W3c") or (name == "W2c" and "W3c" not in build)
+    return (name in ("W", "W6b", "W3c", "W3") or (name == "W2" and not three_w(build))
+            or (name == "W2c" and "W3c" not in build)
             or re.fullmatch(r"W\[\d+:\]", name) is not None)
 
 
@@ -596,13 +780,17 @@ def interpret(cap, build):
     """A regular cell: TCP opens with the handshake and ends with the FIN
     exchange (builder-msgs; Flow and close do both), markers change nothing,
     ~Ns waits N seconds, and each token is sent as section 3.1 says."""
-    f = Flow(cap)
+    parts = parse(build)
+    f = Flow(cap, handshake=("marker", "no handshake") not in parts)
     last_frame = {}
-    for kind, part in parse(build):
+    for kind, part in parts:
         if kind == "marker":
             continue
         if kind == "wait":
             cap.clock.ns += part * 1_000_000_000
+            continue
+        if kind == "number":
+            f.tseq[part[0]] = part[1]   # builder-seq: that end's next frame takes this number
             continue
         held = None   # a group held for the next token's " + "
         for t, joined in part:
@@ -633,7 +821,7 @@ def token_groups(f, t, twin, build, last_frame):
     rep = int(t.group("rep")[2:]) if t.group("rep") else None
     end = t.group("frm")[-1] if t.group("frm") else None
     segs = int(t.group("segs").split()[1]) if t.group("segs") else None
-    m = re.fullmatch(r"([A-Z][a-z]?):(.+)", name)
+    m = re.fullmatch(r"([A-Za-z][A-Za-z0-9']*):(.+)", name)
     if m:
         prefix, spec = m.groups()
         if twin == "nofail" and prefix in ("X", "I"):
@@ -649,12 +837,17 @@ def token_groups(f, t, twin, build, last_frame):
             out = [[(u, a, min(a + MSS, len(u.data)))] for a in range(0, len(u.data), MSS)]
             assert len(out) == segs, (name, len(out), segs)
         return out
-    if name == "R(I)":
-        if "I" not in f.msgs:
+    r = re.fullmatch(r"R\(([A-Za-z0-9]+)\)", name)
+    if r:
+        # R(T): the response to message T, whether or not T was whole on the
+        # wire (builder-seq; R(I) as builder-msgs), and no longer owed one.
+        if r.group(1) not in f.msgs:
             return []
         # R(I) to I:throw, a malformed read, carries IIN 0004h (builder-msgs).
-        i = f.msgs["I"]
-        return [f.frame_units(f.response(i, name="R(I)", iin=0x0004 if i.why == "throws" else 0))]
+        i = f.msgs[r.group(1)]
+        if i in f.pending:
+            f.pending.remove(i)
+        return [f.frame_units(f.response(i, name=name, iin=0x0004 if i.why == "throws" else 0))]
     if name == "R":
         to = f.answer()
         assert to is not None, "R with no request owed a response"
@@ -679,6 +872,8 @@ def token_groups(f, t, twin, build, last_frame):
         base, k, how = FRAME_TOKENS[name]
         if how == "c":
             how = "three" if "W3c" in build else "two"
+        elif how == "u":
+            how = "three" if three_w(build) else "two"
         msg = f.msgs.get(base) if k else None
         if msg is None:
             msg = f.request(base, how=how, confirmed=name.endswith("c"))
@@ -995,8 +1190,17 @@ def message_state(msg, cap):
         return "absent", f"{split[0].name} is split across datagrams"
     stream = msg.flow.units[msg.end]
     first, last = stream.index(units[0]), stream.index(units[-1])
+    primary = False   # a primary link-only frame (PRM set) since the message's last frame
     for v in stream[first:last + 1]:
-        if v.msg is not msg and v.kind not in ("link", "retry"):
+        if v.kind == "link":
+            primary = primary or bool(v.data[3] & 0x40)
+        elif v.kind == "retry" and primary:
+            # It clears the sender's FCB state, so a repeat after it is no
+            # link-layer retry (design 2.3; D1's ruling 1 on #782).
+            return "absent", f"{v.name} follows a primary link-only frame"
+        elif v.msg is msg and v.kind == "frame":
+            primary = False
+        elif v.msg is not msg and v.kind != "retry":
             return "absent", f"interrupted by {v.name}"
     return "seen", "-"
 

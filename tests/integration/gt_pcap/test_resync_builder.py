@@ -149,7 +149,7 @@ def test_every_case_and_twin_is_built_and_nothing_else():
         if r["twins"] != "-":
             want |= {f"{r['case']}--{t}" for t in r["twins"].split(",")}
     want.add("dnp3-resync-udp-report-mark-state--control")
-    assert set(caps()) == want and len(want) == 112 + 189 + 1
+    assert set(caps()) == want and len(want) == 166 + 189 + 1
     # The prose cells are exactly these, and every other cell is read token by token.
     assert set(rc.IRREGULAR) == IRREGULAR
     for r in rc.CASES:
@@ -390,7 +390,106 @@ def check_failure(c, u):
     elif re.fullmatch(r"tail\((\d+)\)", spec):
         assert len(data) == int(spec[5:-1])
     else:
-        raise AssertionError(f"no check for {spec!r}")
+        check_seq_failure(c, u)
+
+
+# --- builder-seq (P4-4-HR2325S deliverable 3) --------------------------------
+
+def check_seq_failure(c, u):
+    """One unit of builder-seq against that row, from its own bytes and dnp3.py."""
+    l4, end, data, spec = c.l4, u.end, u.data, u.fail
+    m = end == "m"
+    dest, src = (10, M_LINK[l4]) if m else (M_LINK[l4], 10)
+    g = re.fullmatch(r"(seg|sub)\((\d+)((?:,\w+=\w+)*)\)", spec)
+    if g:
+        n, opts = int(g.group(2)), dict(kv.split("=") for kv in g.group(3).split(",")[1:])
+        user = bytes([n, 0x22])
+        to = int(opts.get("dest", dest))
+        if "ctl" in opts:
+            base, k, _ = rc.FRAME_TOKENS[opts["ctl"]]
+            want = rc.link_frame(u.pieces[0][0].flow.msgs[base].frames[k][3], to, src, user)
+        else:
+            want = dnp3.link(to, src, m, user)
+        assert data == want, (c.name, spec)
+        return
+    g = re.fullmatch(r"firopen\((\d+)\)", spec)
+    if g:
+        # firopen as builder-failures says (an empty response's frame 1 from o), numbered n.
+        s = c_last_request_seq(c, u)
+        assert not m and data == frame_from(end, l4, bytes([0x40 | int(g.group(1))]) + dnp3.response(s)[:1])
+        return
+    g = SET_BY_CELL.fullmatch(spec)
+    if g and g.group("copy"):
+        f = source(u)
+        ctrl, user = f[3], app_of(f)
+        to, frm = struct.unpack("<HH", f[4:8])
+        how = g.group("copy")
+        if how == "fin":
+            assert not user[0] & 0x80
+            user = bytes([user[0] | 0x80]) + user[1:]
+        elif how == "octet":
+            user = user[:1] + bytes([user[1] ^ 0xFF]) + user[2:]
+        elif how == "fewer":
+            user = user[:-1]
+        elif how == "more":
+            user += b"\x00"
+        elif how == "fcb":
+            ctrl ^= 0x20
+        elif how == "read":
+            user, to = user[:1] + b"\x01\x3c\x01\x06", 11
+        assert data == rc.link_frame(ctrl, to, frm, user), (c.name, spec)
+        # The control octet a copy of W1c to W3c keeps: confirmed user data, PRM and FCV set (builder-msgs).
+        assert (ctrl & 0x5F == 0x53) == g.group("of").endswith("c") and (how == "same" or data != f), (c.name, spec)
+        return
+    if spec == "badobj":
+        s = c_last_request_seq(c, u) if not m else app_of(data)[1] & 0x0F
+        assert data == frame_from(end, l4, bytes([0xC0 | (app_of(data)[0] & 0x3F)]) + dnp3.response(s) + b"\x3c")
+        assert len(app_of(data)) - 1 == 5
+        return
+    g = re.fullmatch(r"(fc|fc2)\((\d+),(\d+)\)", spec)
+    if g:
+        mine = units(c, lambda x: x.msg is u.msg)
+        if u is not mine[0]:
+            return
+        frames = [x.data for x in mine]
+        code, n = int(g.group(2)), int(g.group(3))
+        apps = [app_of(f) for f in frames]
+        body = b"".join(a[1:] for a in apps)
+        s = c_last_request_seq(c, u) if not m else body[0] & 0x0F
+        assert body == bytes([0xC0 | s, code]) + bytes(n - 2), (c.name, spec)
+        assert [len(a) - 1 for a in apps] == ([2, n - 2] if g.group(1) == "fc2" else [n]), (c.name, spec)
+        assert [a[0] & 0xC0 for a in apps] == ([0x40, 0x80] if g.group(1) == "fc2" else [0xC0]), (c.name, spec)
+        return
+    if spec == "lostmiddle":
+        frames = u.msg.frames
+        assert not m and len(frames) == 3 and u.data in (frames[0], frames[2])
+        s = c_last_request_seq(c, u)
+        assert b"".join(app_of(f)[1:] for f in frames) == dnp3.response(s)
+        assert [len(app_of(f)) - 1 for f in frames] == [1, 2, 1]
+        t = app_of(frames[0])[0] & 0x3F
+        assert [app_of(f)[0] for f in frames] == [0x40 | t, (t + 1) & 0x3F, 0x80 | ((t + 2) & 0x3F)]
+        # Frame 2 is not in the capture.
+        assert not any(x.data == frames[1] for x in units(c)), c.name
+        return
+    if spec == "embedhead":
+        assert len(data) == 64 and data[:3] == b"\x05\x64\x35" and data[3:5] == b"\x05\x64"
+        assert crcs_ok(data) == (True, [False, True, True]), c.name
+        assert rc.candidate(data, 3) and [i for i in range(1, 64) if rc.candidate(data, i)] == [3], c.name
+        assert data[13:26] == bytes(13) and data[28:44] == bytes(16) and data[46:62] == bytes(16)
+        return
+    if spec == "embedlast(W5)":
+        if u.label == "after":
+            return
+        after = next(x for x in units(c) if x.msg is u.msg and x.label == "after")
+        w5 = data[63:] + after.data
+        t, s = app_of(w5)[0] & 0x3F, app_of(w5)[1] & 0x0F
+        assert m and w5 == frame_from(end, l4, bytes([0xC0 | t]) + dnp3.request(s, dnp3.DIRECT_OPERATE, dnp3.crob(5)))
+        h = b"\x05\x64" + struct.pack("<BBHH", 53, 0xC4, dest, src)
+        assert len(data) == 64 and data[:8] == h and crcs_ok(data) == (True, [True, True, False])
+        assert data[10:26] == bytes(16) and data[28:44] == bytes(16) and data[46:62] == bytes(16)
+        assert [i for i in range(1, 64) if rc.candidate(data + after.data, i)] == [63], c.name
+        return
+    raise AssertionError(f"no check for {spec!r}")
 
 
 def c_last_request_seq(c, u):
@@ -441,6 +540,19 @@ def check_sequences(c):
     for u in units(c, lambda x: x.kind == "frame"):
         if u.msg is not None and id(u.msg) in counted:
             continue
+        set_by = SET_BY_CELL.fullmatch(u.fail)
+        if set_by and set_by.group("copy"):
+            # builder-seq: a copy repeats its source frame's number, and the end's count goes on unchanged.
+            counted.add(id(u.msg))
+            assert app_of(u.data)[0] & 0x3F == app_of(source(u))[0] & 0x3F, (c.name, u.name)
+            continue
+        if set_by and set_by.group("n") is not None:
+            # builder-seq: the number the cell gives; seg and sub leave the end's count, firopen restarts it.
+            counted.add(id(u.msg))
+            assert app_of(u.data)[0] & 0x3F == int(set_by.group("n")), (c.name, u.name)
+            if set_by.group("kind") == "firopen":
+                tseq[u.end] = int(set_by.group("n"))
+            continue
         # A message's frames as built (an embedded W5's too), else the unit's own.
         frames = u.msg.frames if u.msg is not None else [u.data]
         if u.msg is not None:
@@ -465,11 +577,22 @@ def check_sequences(c):
 
 NUMBERED_BEFORE = {"dnp3-resync-tcp-r2-midstream-both", "dnp3-resync-udp-join-response",
                    "dnp3-resync-tcp-join-response", "dnp3-resync-udp-report-cap", "dnp3-resync-udp-report-mark-state"}
+# builder-seq: a cell that sets m's next number with "m numbered from n" (check_numbered_from).
+NUMBERED_FROM = {r["case"] for r in rc.CASES if "numbered from" in r["build"]}
+SET_BY_CELL = re.compile(r"(?P<kind>seg|sub|firopen)\((?P<n>\d+)(?:,[^)]*)?\)"
+                         r"|(?P<copy>fin|octet|fewer|more|same|fcb|read)\((?P<of>\w+)\)")
+
+
+def source(u):
+    """The frame a builder-seq copy names (fin(W2c) names W's frame 2), as its flow built it."""
+    tok = SET_BY_CELL.fullmatch(u.fail).group("of")
+    base, k, _ = rc.FRAME_TOKENS[tok]
+    return u.pieces[0][0].flow.msgs[base].frames[k]
 
 
 def test_application_and_transport_sequences_follow_builder_msgs():
     for name, (case, c) in caps().items():
-        if case not in NUMBERED_BEFORE:
+        if case not in NUMBERED_BEFORE | NUMBERED_FROM:
             check_sequences(c)
 
 
@@ -666,12 +789,13 @@ def check_tshark_list(produced, rows):
     assert rt.compare(produced, rows) == []
 
 
-def test_the_expected_tshark_list_names_one_of_four_causes_for_each_row():
+def test_the_expected_tshark_list_names_one_of_its_causes_for_each_row():
     rows = rt.expected_rows(EXPECTED)
     check_tshark_list(listed(rows), rows)
     assert rows[0] == rt.COLUMNS + ["cause"]
-    assert collections.Counter(r[-1] for r in rows[1:]) == {"no-resync": 22, "throw-code": 19, "no-limit": 7,
-                                                            "insert-rebuild": 8}
+    assert collections.Counter(r[-1] for r in rows[1:]) == {"no-resync": 22, "throw-code": 24, "no-limit": 9,
+                                                            "insert-rebuild": 8, "seq-rebuild": 9, "retry-last": 2,
+                                                            "merged": 1, "no-wrap": 1}
 
 
 # --- the controls: named mutants that each check must fail -----------------
@@ -882,6 +1006,352 @@ def control_w1_two_octets(mp):
     return lambda: check_w1_w2(c)
 
 
+# --- the audit of the pinned rows (design 3.3), and deliverable 3's cells ----
+#
+# Design 3.3's audit was a scratch reading, so this one is the one that counts
+# (P4-4-HR2325S deliverable 3). It applies design 2.3's transport rule to every
+# whole frame with valid CRCs, per flow and end, in the order sent. A link-only
+# frame and a failed header leave the state (2.1, 2.3); a frame whose header
+# passes and that then fails or is cut short, a frame cut by a datagram's end, a
+# lost TCP segment, a throw at FIN and the fragment limit drop it (2.2 to 2.6).
+# It models the rule, not A's code, and runs no engine.
+
+PINNED = {r["case"] for r in rc.CASES[:112]}
+NEW = [r for r in rc.CASES[112:]]
+LIMIT = int(COND["val-limit"]["value"])
+DROPPED = re.compile(r"badchunk|cut|embed")
+
+
+class End:
+    """One end's state under design 2.3."""
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.frag, self.tseq, self.last, self.after_fin, self.fcb, self.octets = False, None, None, False, None, 0
+
+
+def confirmed(ctrl):
+    """A primary frame of confirmed user data with FCV set (link function 3)."""
+    return ctrl & 0x5F == 0x53
+
+
+def rule(st, u):
+    """Design 2.3 for one whole frame with valid CRCs; its verdict."""
+    ctrl, user = u.data[3], app_of(u.data)
+    t, n = user[0], user[0] & 0x3F
+    if t & 0x40:
+        verdict = "fir_restart" if st.frag else "accept"
+        st.octets = 0
+    elif st.frag and n == (st.tseq + 1) & 0x3F:
+        verdict = "accept"
+    elif (st.frag or st.after_fin) and confirmed(ctrl) and st.fcb == (ctrl >> 5) & 1 and n == st.tseq \
+            and user == st.last:
+        return "discard"   # a link-layer retry, the whole segment identical: no state changes
+    elif st.frag:
+        st.clear()
+        return "transport_seq"
+    else:
+        st.clear()
+        return "first_chunk_missing"
+    st.tseq, st.last, st.after_fin, st.frag = n, user, bool(t & 0x80), not t & 0x80
+    st.fcb = (ctrl >> 5) & 1 if confirmed(ctrl) else None
+    st.octets += len(user) - 1
+    if st.octets > LIMIT:
+        st.clear()
+        return "fragment_limit"
+    if t & 0x80 and u.msg is not None and u.msg.why == "throws":
+        st.clear()
+        return "app_parse"
+    return verdict
+
+
+def audit(c):
+    """Every verdict other than accept, as (flow port, end, unit, verdict), in the order sent."""
+    out, state = [], collections.defaultdict(End)
+    for d in c.deliveries:
+        st = state[(d.flow.port, d.end)]
+        if d.lost:
+            st.clear()   # gap (2.5)
+            continue
+        for u, a, b in d.pieces:
+            if any(p[0].lost for p in u.pieces):
+                continue   # octets after a hole are scanned: nothing of the unit is a frame
+            if c.l4 == "udp" and len({id(p[0]) for p in u.pieces}) > 1:
+                if a == 0 and u.kind in ("frame", "retry"):
+                    st.clear()   # truncated at the first datagram's end (2.4); the rest is scanned
+                continue
+            if b < len(u.data):
+                continue   # the rest follows in a later segment
+            if u.kind == "link":
+                st.fcb = None if u.data[3] & 0x40 else st.fcb   # a primary link-only frame clears fcb
+            elif u.kind in ("frame", "retry") and u.label == "valid":
+                v = rule(st, u)
+                if v != "accept":
+                    out.append((d.flow.port, d.end, u.name, v))
+            elif DROPPED.match(u.label) or (u.label.startswith("zeros") and c.l4 == "udp"):
+                st.clear()   # chunk_crc or truncated
+    return out
+
+
+def check_pinned_audit(get):
+    found = [(name, v) for name, (case, c) in get().items() if case in PINNED for v in audit(c)
+             if v[3] in ("transport_seq", "discard")]
+    assert found == [("dnp3-resync-udp-link-retry-middle", (20000, "m", "retry", "discard"))], found
+
+
+def test_the_audit_of_the_pinned_rows():
+    """Design 3.3: of the 112 pinned cases, their twins and control, the rule changes only
+    dnp3-resync-udp-link-retry-middle, whose retry it discards; no other frame meets the drop rule or
+    either discard."""
+    check_pinned_audit(caps)
+
+
+def cell_counts(a):
+    return {(m.group(1), m.group(2)): int(m.group(3)) for m in re.finditer(r"cnt\.([mo])\.([a-z_]+)=(\d+)", a)}
+
+
+def check_new_cells(rows):
+    """Each deliverable 3 cell's transport_seq and first_chunk_missing, per end, are what the rule gives
+    on the case's capture (0 where the cell names none, a report cell's included)."""
+    for r in rows:
+        got = collections.Counter((e, v) for _, e, _, v in audit(cap(r["case"])))
+        want = cell_counts(r["a"])
+        for e in "mo":
+            for cause in ("transport_seq", "first_chunk_missing"):
+                assert got[(e, cause)] == want.get((e, cause), 0), (r["case"], e, cause)
+
+
+def test_the_new_cells_count_what_the_rule_gives():
+    check_new_cells(NEW)
+    assert sum(cell_counts(r["a"]).get(("m", "transport_seq"), 0) + cell_counts(r["a"]).get(("o", "transport_seq"), 0)
+               for r in NEW) == 17
+
+
+def check_numbered_from(c):
+    """m numbered from n: m's next frame after the marker carries n, and W's frames step on, mod 64."""
+    build = ROWS[c.case]["build"]
+    n = int(re.search(r"m numbered from (\d+)", build).group(1))
+    ms = [u for u in units(c, lambda x: x.end == "m" and x.kind == "frame")]
+    first = ms[0] if build.startswith("m numbered") else next(u for u in ms if u.msg.name == "W")
+    assert app_of(first.data)[0] & 0x3F == n, c.name
+    if c.case == "dnp3-resync-udp-seq-wrap":
+        assert [app_of(u.data)[0] & 0x3F for u in ms if u.msg.name == "W"] == [62, 63, 0]
+
+
+def test_the_cells_that_number_m_do_so():
+    assert NUMBERED_FROM == {"dnp3-resync-udp-seq-wrap", "dnp3-resync-udp-fir-any-number"}
+    for case in NUMBERED_FROM:
+        check_numbered_from(cap(case))
+
+
+def check_three_w(c):
+    """W1, W2 and W3 in one cell: W in three frames of unconfirmed user data, split as W1c to W3c are."""
+    ws = units(c, lambda x: x.name in ("W1", "W2", "W3"))
+    assert [len(u.data) for u in ws] == [14, 23, 22] and all(u.data[3] == 0xC4 for u in ws), c.name
+    assert b"".join(app_of(u.data)[1:] for u in ws) == dnp3.request(app_of(ws[0].data)[1] & 0x0F, dnp3.DIRECT_OPERATE,
+                                                                     dnp3.crob(0))
+
+
+def test_three_frame_w_is_split_as_w1c_to_w3c():
+    for case in ("dnp3-resync-udp-seq-wrap", "dnp3-resync-udp-substitution-missed", "dnp3-resync-udp-repeat-unconfirmed"):
+        c = cap(case)
+        if case == "dnp3-resync-udp-substitution-missed":
+            # W2 is left out of the capture: its frame as built.
+            w = c.flows[0].msgs["W"]
+            assert [len(f) for f in w.frames] == [14, 23, 22] and w.frames[1] not in [u.data for u in units(c)]
+        else:
+            check_three_w(c)
+
+
+def check_labels(c):
+    """builder-seq's labels: a retry after a primary link-only frame is no retry, and fc is labelled by rule (A)."""
+    state = {u.msg.name: rc.message_state(u.msg, c)[0] for u in units(c) if u.msg is not None}
+    want = {"dnp3-resync-udp-repeat-after-reset": ("W", "absent"), "dnp3-resync-udp-link-retry-middle": ("W", "seen"),
+            "dnp3-resync-udp-edge-fc32-4-resp": ("Xo", "absent"), "dnp3-resync-udp-edge-fc32-2-resp": ("Xo", "seen"),
+            "dnp3-resync-udp-edge-fc100-2-resp": ("Xo", "seen"), "dnp3-resync-udp-edge-fc129-4-orig": ("X", "seen")}
+    name, st = want[c.case]
+    assert state[name] == st, (c.case, state[name])
+
+
+LABELLED = ["dnp3-resync-udp-repeat-after-reset", "dnp3-resync-udp-link-retry-middle",
+            "dnp3-resync-udp-edge-fc32-4-resp", "dnp3-resync-udp-edge-fc32-2-resp",
+            "dnp3-resync-udp-edge-fc100-2-resp", "dnp3-resync-udp-edge-fc129-4-orig"]
+
+
+def test_builder_seq_labels():
+    for case in LABELLED:
+        check_labels(cap(case))
+
+
+def seq_unit(case, name):
+    c = fresh(case)
+    return c, next(x for x in units(c) if x.name == name)
+
+
+def control_audit_skips_a_number(mp):
+    """A builder that numbers a multi-frame message's frame 2 one past its frame 1's next number."""
+    caps()
+    orig = rc.Flow._frames
+
+    def skipping(self, end, apdu, how="one", take=None, confirmed=False):
+        out = orig(self, end, apdu, how, take, confirmed)
+        if len(out) > 1 and not confirmed:
+            user = rc.user_data(out[1])
+            out[1] = rc.link_frame(out[1][3], out[1][4] | out[1][5] << 8, out[1][6] | out[1][7] << 8,
+                                   bytes([(user[0] & 0xC0) | ((user[0] + 1) & 0x3F)]) + user[1:])
+        return out
+    mp.setattr(rc.Flow, "_frames", skipping)
+    c = fresh("dnp3-resync-udp-link-only-mid-fragment")
+    return lambda: check_pinned_audit(lambda: dict(caps(), **{c.name: (c.case, c)}))
+
+
+def control_audit_retry_toggles_fcb(mp):
+    """link-retry-middle's retry with its FCB toggled: no longer a link-layer retry."""
+    c, u = mutate(fresh("dnp3-resync-udp-link-retry-middle"), "retry", lambda b: b)
+    u.data = rc.link_frame(u.data[3] ^ 0x20, 10, 5, rc.user_data(u.data))
+    return lambda: check_pinned_audit(lambda: dict(caps(), **{c.name: (c.case, c)}))
+
+
+def control_new_cell_counts_nothing(mp):
+    """Item 1's cell with transport_seq dropped, as if the rule did not run."""
+    r = dict(ROWS["dnp3-resync-udp-insert-valid-middle"])
+    r["a"] = r["a"].replace("cnt.m.transport_seq=1", "cnt.m.transport_seq=0")
+    return lambda: check_new_cells([r])
+
+
+def control_seg_octet(mp):
+    """seg's application octet 23h, not 22h."""
+    c, u = mutate(fresh("dnp3-resync-udp-insert-valid-middle"), "I", lambda b: b[:11] + b"\x23" + b[12:])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_seg_ctl_unconfirmed(mp):
+    """seg(2,ctl=W1c) with the unconfirmed control octet."""
+    c, u = mutate(fresh("dnp3-resync-udp-fcb-repeat-middle"), "I", lambda b: b[:3] + b"\xc4" + b[4:])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_firopen_number(mp):
+    """firopen(5) numbered 6."""
+    c, u = seq_unit("dnp3-resync-udp-per-end-seq", "Ro/1")
+    u.data = frame_from("o", "udp", bytes([0x40 | 6]) + app_of(u.data)[1:])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_copy_octet_last(mp):
+    """octet(W2c) inverting the last application octet, not the first."""
+    c, u = seq_unit("dnp3-resync-udp-retry-compare-octet", "D")
+    user = rc.user_data(source(u))
+    u.data = rc.link_frame(u.data[3], 10, 5, user[:-1] + bytes([user[-1] ^ 0xFF]))
+    return lambda: check_seq_failure(c, u)
+
+
+def control_copy_fewer_first(mp):
+    """fewer(W2c) without the first application octet, not the last."""
+    c, u = seq_unit("dnp3-resync-udp-retry-compare-shorter", "D")
+    user = rc.user_data(source(u))
+    u.data = rc.link_frame(u.data[3], 10, 5, user[:1] + user[2:])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_copy_more_first(mp):
+    """more(W2c) with 00h before the application octets, not after."""
+    c, u = seq_unit("dnp3-resync-udp-retry-compare-longer", "D")
+    user = rc.user_data(source(u))
+    u.data = rc.link_frame(u.data[3], 10, 5, user[:1] + b"\x00" + user[1:])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_copy_fin_clear(mp):
+    """fin(W2c) with FIN left clear: W2c itself."""
+    c, u = seq_unit("dnp3-resync-udp-retry-compare-fin", "D")
+    u.data = source(u)
+    return lambda: check_seq_failure(c, u)
+
+
+def control_copy_fcb_kept(mp):
+    """fcb(W2c) with the FCB not toggled."""
+    c, u = seq_unit("dnp3-resync-udp-repeat-fcb-toggled", "W2c'")
+    u.data = source(u)
+    return lambda: check_seq_failure(c, u)
+
+
+def control_read_to_o1(mp):
+    """read(W2c) addressed to O1's link 10, not 11."""
+    c, u = seq_unit("dnp3-resync-udp-retry-compare-after-fin", "s")
+    u.data = rc.link_frame(u.data[3], 10, 5, rc.user_data(u.data))
+    return lambda: check_seq_failure(c, u)
+
+
+def control_badobj_four_octets(mp):
+    """badobj without its object octet: a whole 4-octet response."""
+    c, u = seq_unit("dnp3-resync-udp-other-end-app-parse-open", "Xo")
+    u.data = frame_from("o", "udp", rc.user_data(u.data)[:-1])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_fc2_split_one_three(mp):
+    """fc2(129,4) split 1 + 3, not 2 + 2."""
+    orig = rc.sizes
+    mp.setattr(rc, "sizes", lambda n, how: [1, n - 1] if how == "fc2" else orig(n, how))
+    c, u = seq_unit("dnp3-resync-udp-edge-fc129-split-orig", "X/1")
+    return lambda: check_seq_failure(c, u)
+
+
+def control_lostmiddle_sent(mp):
+    """lostmiddle with its frame 2 on the wire."""
+    c, u = seq_unit("dnp3-resync-udp-middle-lost", "Ro/1")
+    c.flows[0].send([rc.Unit("Ro/2", "o", u.msg.frames[1], msg=u.msg)])
+    return lambda: check_seq_failure(c, u)
+
+
+def control_embedhead_chunk_valid(mp):
+    """embedhead whose first chunk CRC passes."""
+    c, u = seq_unit("dnp3-resync-udp-embedded-offset-3", "Xo")
+    u.data = u.data[:26] + dnp3.crc(u.data[10:26]) + u.data[28:]
+    return lambda: check_seq_failure(c, u)
+
+
+def control_embedlast_not_last(mp):
+    """embedlast whose last octet is 00h, so W5 does not start there."""
+    c, u = seq_unit("dnp3-resync-udp-embedded-last-octet", "X")
+    u.data = u.data[:63] + b"\x00"
+    return lambda: check_seq_failure(c, u)
+
+
+def control_three_w_two_octets(mp):
+    """W1 of a three-frame W holding two application octets."""
+    orig = rc.sizes
+    mp.setattr(rc, "sizes", lambda n, how: [2, 9, n - 11] if how == "three" else orig(n, how))
+    c = fresh("dnp3-resync-udp-seq-wrap")
+    return lambda: check_three_w(c)
+
+
+def control_numbered_from_ignored(mp):
+    """A builder that ignores m numbered from n."""
+    orig = rc.parse
+    mp.setattr(rc, "parse", lambda build: [p for p in orig(build) if p[0] != "number"])
+    c = fresh("dnp3-resync-udp-seq-wrap")
+    return lambda: check_numbered_from(c)
+
+
+def control_reset_reads_secondary(mp):
+    """18c with its second Reset Link States read as a secondary frame: the retry after it then reads as one."""
+    c = fresh("dnp3-resync-udp-repeat-after-reset")
+    rsts = units(c, lambda x: x.name == "Rst")
+    rsts[1].data = rsts[1].data[:3] + bytes([rsts[1].data[3] & ~0x40 & 0xFF]) + rsts[1].data[4:]
+    return lambda: check_labels(c)
+
+
+def control_fc_label_without_32(mp):
+    """fc's label rule with 32 left out of the object arms."""
+    mp.setattr(rc, "OBJECT_ARM", rc.OBJECT_ARM - {32})
+    c = fresh("dnp3-resync-udp-edge-fc32-4-resp")
+    return lambda: check_labels(c)
+
+
 CONTROLS = {name[len("control_"):].replace("_", "-"): f for name, f in globals().items() if name.startswith("control_")}
 
 
@@ -902,6 +1372,18 @@ def test_the_controls_pass_unmutated():
     check_w1_w2(fresh("dnp3-resync-udp-insert-truncated"))
     rows = rt.expected_rows(EXPECTED)
     check_tshark_list(listed(rows), rows)
+    check_pinned_audit(caps)
+    check_new_cells(NEW)
+    for case, name in (("insert-valid-middle", "I"), ("fcb-repeat-middle", "I"), ("per-end-seq", "Ro/1"),
+                       ("retry-compare-fin", "D"), ("retry-compare-octet", "D"), ("retry-compare-shorter", "D"),
+                       ("retry-compare-longer", "D"), ("repeat-fcb-toggled", "W2c'"), ("retry-compare-after-fin", "s"),
+                       ("other-end-app-parse-open", "Xo"), ("edge-fc129-split-orig", "X/1"), ("middle-lost", "Ro/1"),
+                       ("embedded-offset-3", "Xo"), ("embedded-last-octet", "X")):
+        check_seq_failure(*seq_unit(f"dnp3-resync-udp-{case}", name))
+    check_three_w(fresh("dnp3-resync-udp-seq-wrap"))
+    check_numbered_from(fresh("dnp3-resync-udp-seq-wrap"))
+    for case in LABELLED:
+        check_labels(fresh(case))
 
 
 @pytest.mark.parametrize("control", sorted(CONTROLS))
