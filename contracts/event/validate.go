@@ -73,7 +73,7 @@ var (
 	runsFoldedForm = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 )
 
-var self = version.ID{Name: "event", Major: 0, Minor: 5}
+var self = version.ID{Name: "event", Major: 0, Minor: 6}
 
 // Validate checks every rule of the contract that can be checked on one
 // event. It returns nil or a join of *Error values.
@@ -113,6 +113,8 @@ func (e *Event) validate(pending bool) error {
 	checkNetobs(c, e)
 	checkObservedAddress(c, e)
 	checkSensorCounters(c, e)
+	checkObservationRefused(c, e)
+	checkBaselineRefused(c, e)
 	switch e.Origin {
 	case OriginDevice:
 		checkDeviceEvent(c, e)

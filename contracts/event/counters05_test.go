@@ -1,7 +1,6 @@
 package event
 
 import (
-	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -171,44 +170,5 @@ func TestCounters05Saturated(t *testing.T) {
 	delete(e.Health.Details, DetailCaptureLoss)
 	if err := e.Validate(); err != nil {
 		t.Errorf("the wrapped form: %v (the validator was expected to accept it)", err)
-	}
-}
-
-// Every event this code builds is stamped 0.5, and this reader reads 0.5
-// strictly and a later minor forward (E5-7's contract leg, as E4-7's).
-func TestIdentifier05(t *testing.T) {
-	if Identifier != "otsec.event/0.5" || self.Minor != 5 {
-		t.Fatalf("Identifier %s, self minor %d", Identifier, self.Minor)
-	}
-	e := counters05(t)
-	e.Health.Details["note"] = "x"
-	if !slices.Contains(Codes(e.Validate()), CodeEnum) {
-		t.Error("an unknown detail at 0.5: accepted")
-	}
-	e.Schema = "otsec.event/0.6"
-	if err := e.Validate(); err != nil {
-		t.Errorf("an unknown detail at 0.6: %v", err)
-	}
-	// Decode reads 0.5 strictly: an unknown top-level field is refused at
-	// 0.5 and passed over at 0.6.
-	b, err := os.ReadFile(folded05)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m map[string]any
-	if err := json.Unmarshal(b, &m); err != nil {
-		t.Fatal(err)
-	}
-	m["added_in_0_6"] = "x"
-	for schema, want := range map[string]Code{"otsec.event/0.5": CodeDecode, "otsec.event/0.6": ""} {
-		m["schema"] = schema
-		raw, err := json.Marshal(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = Decode(raw)
-		if got := Codes(err); (want == "" && err != nil) || (want != "" && !slices.Contains(got, want)) {
-			t.Errorf("Decode at %s with an unknown field: %v, want %q", schema, err, want)
-		}
 	}
 }

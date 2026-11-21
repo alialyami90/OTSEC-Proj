@@ -10,6 +10,7 @@ import (
 
 	"otsec.local/otsec/contracts/event"
 	c5 "otsec.local/otsec/contracts/store"
+	"otsec.local/otsec/contracts/version"
 )
 
 // E4-7's store leg (C4 0.4 section 3 and section 5; P4-4-CC deliverable 2).
@@ -56,17 +57,24 @@ func e47Pending(t *testing.T, file string) (c5.StreamID, []byte) {
 }
 
 // TestEvent04Commits: with this code, whose event.Identifier is
-// otsec.event/0.5, a pending event of each type stamped 0.4, an earlier
+// otsec.event/0.6, a pending event of each type stamped 0.4, an earlier
 // minor, commits and is stored at 0.4, one restamped event.Identifier
-// commits and is stored at 0.5, and a pending event stamped
-// otsec.event/0.6 is refused as invalid, with nothing written (E5-7's
-// store leg). The controls: a store whose eventVersion stays at 0.3
-// refuses every 0.4 event; one whose eventVersion stays at 0.4 refuses the
-// 0.5 event; a store that accepts any minor commits the 0.6 event.
+// commits and is stored at 0.6, and a pending event stamped one minor
+// above event.Identifier is refused as invalid, with nothing written
+// (E5-7's store leg, and E6-5's for C4 0.6). The controls: a store whose
+// eventVersion stays at 0.3 refuses every 0.4 event; one whose
+// eventVersion stays at 0.5 refuses the 0.6 event; a store that accepts
+// any minor commits the later event.
 func TestEvent04Commits(t *testing.T) {
-	if event.Identifier != "otsec.event/0.5" {
+	if event.Identifier != "otsec.event/0.6" {
 		t.Fatalf("event.Identifier is %s", event.Identifier)
 	}
+	laterV, err := version.Parse(event.Identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	laterV.Minor++
+	laterSchema := laterV.String()
 	// The network classes have a database of their own (C5 0.9).
 	network := []c5.StreamClass{c5.ClassNetworkObservation, c5.ClassNetworkAlert}
 	n := 0
@@ -116,8 +124,9 @@ func TestEvent04Commits(t *testing.T) {
 		t.Fatalf("%d committed, want %d", n, len(e47Fixtures))
 	}
 
-	// E5-7's store leg: an event stamped event.Identifier (0.5) commits and
-	// reads back at 0.5. A store whose eventVersion stays at 0.4 refuses it.
+	// E5-7's and E6-5's store leg: an event stamped event.Identifier (0.6)
+	// commits and reads back at 0.6. A store whose eventVersion stays at 0.5
+	// refuses it.
 	s := c5.StreamID("platform/health")
 	current := bytes.Replace(pending04, []byte(`"otsec.event/0.4"`), []byte(`"`+event.Identifier+`"`), 1)
 	if bytes.Equal(current, pending04) {
@@ -131,7 +140,7 @@ func TestEvent04Commits(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("%s stored: %d, %v", event.Identifier, len(got), err)
 	}
-	if e, err := event.Decode(got[0].Event); err != nil || e.Schema != "otsec.event/0.5" {
+	if e, err := event.Decode(got[0].Event); err != nil || e.Schema != "otsec.event/0.6" {
 		t.Fatalf("%s read back: %v", event.Identifier, err)
 	}
 
@@ -139,12 +148,12 @@ func TestEvent04Commits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	later := bytes.Replace(pending04, []byte(`"otsec.event/0.4"`), []byte(`"otsec.event/0.6"`), 1)
+	later := bytes.Replace(pending04, []byte(`"otsec.event/0.4"`), []byte(`"`+laterSchema+`"`), 1)
 	if bytes.Equal(later, pending04) {
 		t.Fatal("no schema to restamp")
 	}
 	if _, err := healthLog.Append(bg, c5.Record{Stream: s, Class: c5.ClassPlatform, Event: later}); !isCode(err, c5.CodeInvalid) {
-		t.Fatalf("a pending 0.6 event: %v, want %s", err, c5.CodeInvalid)
+		t.Fatalf("a pending %s event: %v, want %s", laterSchema, err, c5.CodeInvalid)
 	}
 	if after, err := health.LastCommitted(bg, s); err != nil || after != before {
 		t.Fatalf("after the refusal: last %d, was %d: %v", after, before, err)

@@ -12,7 +12,7 @@ import (
 )
 
 // Identifier is the contract identifier carried in every event's schema field.
-const Identifier = "otsec.event/0.5"
+const Identifier = "otsec.event/0.6"
 
 // NodeID names a platform node: a lowercase DNS label, defined in
 // contracts/node (A1 decision D1-1) so that C1 and C4 share one definition.
@@ -458,19 +458,21 @@ type Health struct {
 
 // Platform event types. Open: later minors may add types.
 const (
-	HealthSERGap              = "ser.gap"                 // alignment found no overlap: records may be missing
-	HealthAlignmentAmbiguous  = "ser.alignment-ambiguous" // overlap ambiguous: possible duplicates flagged
-	HealthNativeLossIndicated = "native.loss-indicated"   // the device says it lost records (overflow, autoremoval)
-	HealthTimeUnsynchronized  = "time.unsynchronized"     // a source's clock is reported unsynchronized
-	HealthTimeNodeStepped     = "time.node-stepped"       // the node's own clock was stepped; received.utc jumps (D1-16, pairs with C8 clock.change)
-	HealthParseFailed         = "parse.failed"            // a record kept as bytes only
-	HealthSourceSilent        = "source.silent"           // a sender that normally talks has gone quiet
-	HealthDropCounted         = "intake.drop-counted"     // datagrams dropped and counted (storage full, rate limit)
-	HealthForwardUnconfirmed  = "forward.unconfirmed"     // events sent to a best-effort target without confirmation
-	HealthForwardUnreachable  = "forward.unreachable"     // a required target unreachable beyond its period
-	HealthNetobsAlert         = "netobs.alert"            // a C13 network alert (since 0.3); contracts/netobs.HealthAlert
-	HealthSensorCounters      = "sensor.counters"         // a network sensor's own counter differences since its last report (since 0.3, D4-72)
-	HealthForwardTextOmitted  = "forward.text-omitted"    // device text replaced by a reference to fit the size limit
+	HealthSERGap              = "ser.gap"                      // alignment found no overlap: records may be missing
+	HealthAlignmentAmbiguous  = "ser.alignment-ambiguous"      // overlap ambiguous: possible duplicates flagged
+	HealthNativeLossIndicated = "native.loss-indicated"        // the device says it lost records (overflow, autoremoval)
+	HealthTimeUnsynchronized  = "time.unsynchronized"          // a source's clock is reported unsynchronized
+	HealthTimeNodeStepped     = "time.node-stepped"            // the node's own clock was stepped; received.utc jumps (D1-16, pairs with C8 clock.change)
+	HealthParseFailed         = "parse.failed"                 // a record kept as bytes only
+	HealthSourceSilent        = "source.silent"                // a sender that normally talks has gone quiet
+	HealthDropCounted         = "intake.drop-counted"          // datagrams dropped and counted (storage full, rate limit)
+	HealthForwardUnconfirmed  = "forward.unconfirmed"          // events sent to a best-effort target without confirmation
+	HealthForwardUnreachable  = "forward.unreachable"          // a required target unreachable beyond its period
+	HealthNetobsAlert         = "netobs.alert"                 // a C13 network alert (since 0.3); contracts/netobs.HealthAlert
+	HealthSensorCounters      = "sensor.counters"              // a network sensor's own counter differences since its last report (since 0.3, D4-72)
+	HealthForwardTextOmitted  = "forward.text-omitted"         // device text replaced by a reference to fit the size limit
+	HealthObservationRefused  = "detector.observation-refused" // counts of stored observations the network detector refused to judge (since 0.6, C4-0.6-1)
+	HealthBaselineRefused     = "detector.baseline-refused"    // the approved network baseline was refused and the detector is off (since 0.6, C4-0.6-2)
 )
 
 // SensorCounters are the counters a sensor.counters health event carries,

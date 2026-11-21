@@ -40,6 +40,12 @@ var channelIdentifiers = []string{Identifier02, Identifier03}
 
 var self = version.ID{Name: "netobs", Major: 0, Minor: 3}
 
+// SelfIdentifier returns this code's own C13 identifier, the minor its
+// stored readers read strictly (self). It is the netobs detail of a C4
+// detector.observation-refused event (C4-0.6-1). Identifier is the 0.1
+// channel's identifier and does not track self, so it cannot serve.
+func SelfIdentifier() string { return self.String() }
+
 // Bounds (C13 §10).
 const (
 	// MaxChannelFrame bounds one framed record on the channel. A length

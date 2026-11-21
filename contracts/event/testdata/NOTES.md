@@ -18,6 +18,8 @@ Generated from the documented-example fixtures named below, then frozen. None of
 | `constructed-network-observation-unresolved.json` | The same with no destination asset, so it carries `asset-unresolved`. |
 | `health-netobs-alert.json` | **Constructed (C4 0.3, D4-71).** A `netobs.alert` health event on stream `network-alert/<sensor>`, its asset bound `observed-address` / `inferred`. The `details` are illustrative: C4 does not read an alert's body; `contracts/netobs` does, with its own goldens. |
 | `constructed-leap-second.json` | **Constructed, not from the manual.** Row 8 at `12/31/2016 23:59:60.602`. Second 60 is accepted at 23:59. No UTC is stated, so a consumer that has the leap-second table may convert it. |
+| `health-observation-refused.json` | **Constructed (C4 0.6, C4-0.6-1).** A `detector.observation-refused` event at its 15-detail limit: all three reasons with their seq pairs, `count` their sum, `netobs` the writer's C13 identifier, and `unsure` inside `through`. The sensor ID, seqs, counts and times are illustrative. |
+| `health-baseline-refused.json` | **Constructed (C4 0.6, C4-0.6-2).** A `detector.baseline-refused` event: an illustrative hash, a baseline stamp and cause `later-minor`. C4 checks the forms only; whether the stamp is later than the reader's is the node's classification. |
 
 ## Invalid
 

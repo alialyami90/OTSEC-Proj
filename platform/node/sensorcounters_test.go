@@ -9,6 +9,7 @@ import (
 
 	"otsec.local/otsec/contracts/event"
 	"otsec.local/otsec/contracts/syslog"
+	"otsec.local/otsec/contracts/version"
 	"otsec.local/otsec/platform/sensorlink"
 )
 
@@ -68,8 +69,15 @@ func TestSensorCountersEventFits(t *testing.T) {
 	t.Logf("worst 0.4 sensor.counters: %d octets of %d, %d details", len(msg), syslog.DefaultMaxOctets, len(e.Health.Details))
 
 	// The control: the agent's counts (C13 0.2 CH-43), which C4 0.4 leaves
-	// out of sensor.counters.
-	e.Schema = "otsec.event/0.6"
+	// out of sensor.counters, under one minor above event.Identifier, so
+	// that C4 lets them pass (C4 0.6 §6: at 0.6 itself they fail
+	// validation, not the size).
+	later, err := version.Parse(event.Identifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later.Minor++
+	e.Schema = later.String()
 	max := strconv.FormatUint(math.MaxUint64, 10)
 	for _, n := range []string{"closes.handshake", "closes.node-hello", "closes.node-hello-timeout", "closes.binding", "closes.ack",
 		"closes.type", "closes.idle", "closes.frame-too-large", "closes.superseded", "closes.run-complete", "closes.shutdown",
