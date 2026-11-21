@@ -2917,3 +2917,21 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Uncertainty or safety risks: none.
 - Scratch files: `d7-c406-*`
 - Result: #784, merged as `3bf5397a`.
+
+## After D4-124: the blindness alarms (issued 2026-11-21, D4-125)
+
+### P4-4-INT-D5-BLIND (D5; D6, D3 and D4 review): `sensor-blind`, `sensor-no-heartbeat` and `sensor.past-blind`
+- Objective and rationale: the node's alarms for a sensor that heartbeats but does not capture (R6.1 and R6.6, SL-20; ADR-0009, "A sensor that heartbeats but is blind"), held out of 2e by D4-121 item 2.5. Starts after #788 (2e-3) merges, and before P4-4-DE.
+- Required inputs: `docs/phase4/D4-c13-0.2-proposal.md` CH-31, CH-44 and CH-45 (the pool), and its K-1 to K-4 rows; `docs/phase4/D5-sensor-node.md` §1.8, and §1.9's pool list; `platform/sensorlink/watch.go` (the capture check 2e-1 built) and `pool.go`; `TestGapFlatCountsCarrierUp`'s comment in `platform/sensorlink/gap_test.go`.
+- Files: `platform/sensorlink/`, `platform/node/` and their tests; `docs/phase4/D5-sensor-node.md` §1.8.
+- Expected interfaces: the node's design (D4-92); C13 0.3; C4 0.6. No contract minor. If an event's detail needs a field that C4 or C13 does not define, D5 stops and proposes the options on the PR before coding it (CLAUDE.md, "A finding that needs a new mechanism").
+- Deliverable: one PR, unwired (F-027's gate holds):
+  1. `sensor-blind` per interface under CH-31's rule, from current heartbeats only, raised once a stretch naming each blind interface, through the pool; its comparison starts again at a new run. A gap opens only when every interface is blind, as 2e already does; this PR adds no gap rule.
+  2. `sensor-no-heartbeat` and `coverage: unknown` under CH-44: 60 s of accepted ticks with no current heartbeat, once a stretch; while it stands, neither `sensor-unreachable` nor `sensor-blind` is raised or cleared on stale data.
+  3. `sensor.past-blind` under CH-44: a flat stretch seen only in late or backlog heartbeats, written once the backlog drains, one event a stretch, under CH-45's pool and its waiting order.
+  4. D5 confirms by test that CH-44's reset rule for `sensor-unreachable` is on `main` (only an accepted frame resets it), or adds it.
+- Acceptance tests, each by name in both `go` jobs, with a named control shown failing: the node halves of K-2 (one of two interfaces flat: `sensor-blind` naming it after `blind_after_s`, no gap; both: the gap 2e opens), K-3 (carrier `down`: blind at once) and K-4 (refused records, failed hellos and early ticks reset nothing; the 60 s `sensor-no-heartbeat`; `sensor.past-blind` from late heartbeats); `TestGapFlatCountsCarrierUp`'s `sensor.past-blind` half; off-by-one controls on `blind_after_s` and the 60 s; a late heartbeat neither raises nor clears `sensor-blind`; each alarm raised once a stretch, not once a heartbeat (self-check item 6); and the pool's cap and waiting order for the three names.
+- Owed: K-2, K-3 and K-4 on the rig (`sensor_rig`), with the sensor's build; V-11, V-12, V-15 and V-9's legs stay with P4-4-DE.
+- Exclusions: wiring (F-027); any gap rule; the sensor side.
+- Uncertainty or safety risks: an alarm cleared on a late heartbeat would hide a blind sensor; every ambiguity fails towards raising the alarm.
+- Scratch files: `d5-blind-*`
