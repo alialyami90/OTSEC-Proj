@@ -356,38 +356,74 @@ fifos() {
 # D6's hr23_cases.py writes, left in only when it equals its pin in
 # hr23.sha256 (hr23_feed.py pin, which removes every other file zeek_run
 # would feed, by mountcheck.py's CAPTURE), under C0, C1, C1p and C2 with
-# viol.zeek, whose otsec_viol.log hr23-conditions.tsv's mal-states reads.
-# check judges the captures pin kept (WORK/hr23-kept.txt). They have their
+# viol.zeek (its otsec_viol.log counts violations as raised; the judge reads
+# analyzer.log, as hr23-conditions.tsv's mal-states says). The false-positive
+# set (fp_set.py, fp.sha256) is fed the same way into its own folders.
+# check judges the captures pin kept (WORK/hr23-kept.txt, WORK/fp-kept.txt). They have their
 # own folders, so that no other table of this mode reads them. Some HR-23 rows
 # are held from per-row publication (D4-112 item 1.3): each container's own
 # output, in which in-container.sh prints the engine's warnings, goes to a
 # file that is neither printed nor uploaded, and hr23_feed.py check prints only
-# whether each configuration ran and its exit code. Its exit code is returned:
-# 3 when, on refs/heads/main, a capture did not run cleanly under all four.
+# whether each configuration ran and its exit code. table.py hr23judge then
+# judges what the brief P4-4-HR23-JUDGE allows to be printed. The first
+# non-zero exit code is returned: 3 when, on refs/heads/main, a capture did
+# not run cleanly under all four, or the cases' rows are not yet judged.
 # -B: hr23_feed.py imports mountcheck.py, and without it python3 writes
 # __pycache__ into $here, the folder mounted at /exp and hashed (D6's N1).
 hr23_feed() {
   h=$work/hr23
-  rm -rf "$h" "$work/out-hr23"
+  rm -rf "$h" "$work/out-hr23" "$work/fp" "$work/out-fp" "$work/ports-hr23"
   # The caller's `||` turns off set -e in here, so each step that can fail
   # returns on its own.
   python3 "$root/tests/integration/gt_pcap/hr23_cases.py" "$h" > /dev/null || return 1
   python3 -I -B "$here/hr23_feed.py" pin "$h" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" || return 1
-  pcaps=$h
-  out=$work/out-hr23
-  mkdir -p "$out"
+  # The false-positive set (D2's N2 = D6's G1 on #769), fed and pin-checked
+  # the same way, into its own folders.
+  python3 "$root/tests/integration/gt_pcap/fp_set.py" "$work/fp" > /dev/null || return 1
+  python3 -I -B "$here/hr23_feed.py" pin "$work/fp" "$root/tests/fixtures/network/gt-pcap/fp/fp.sha256" "$work/fp-kept.txt" || return 1
   {
-    zeek_run zeek zeek-probe-c0 /exp/probe.zeek /exp/zeek-patch/viol.zeek OtsecProbe::log_dir=F
-    zeek_run zeek zeek-probe /exp/probe.zeek /exp/zeek-patch/viol.zeek
-    img=$HR23_C1P_IMAGE
-    zeek_run zeek zeek-probe-c1p /exp/probe.zeek /exp/zeek-patch/viol.zeek
-    img=$HR23_C2_IMAGE
-    zeek_run zeek zeek-probe-c2 /exp/probe.zeek /exp/zeek-patch/viol.zeek
-    img=$ZEEK_IMAGE
+    for set in "$h=$work/out-hr23" "$work/fp=$work/out-fp"; do
+      pcaps=${set%%=*}
+      out=${set#*=}
+      mkdir -p "$out"
+      zeek_run zeek zeek-probe-c0 /exp/probe.zeek /exp/zeek-patch/viol.zeek OtsecProbe::log_dir=F
+      zeek_run zeek zeek-probe /exp/probe.zeek /exp/zeek-patch/viol.zeek
+      img=$HR23_C1P_IMAGE
+      zeek_run zeek zeek-probe-c1p /exp/probe.zeek /exp/zeek-patch/viol.zeek
+      img=$HR23_C2_IMAGE
+      zeek_run zeek zeek-probe-c2 /exp/probe.zeek /exp/zeek-patch/viol.zeek
+      img=$ZEEK_IMAGE
+    done
   } > "$work/hr23-engines.txt" 2>&1
+  # cfg-ports (D2's N1 on #769): likely_server_ports under each of the four
+  # configurations, with its own scripts and image, from ports.zeek over one
+  # kept capture. Only ports.zeek's two lines are kept; the judge prints them.
+  mkdir -p "$work/ports-hr23"
+  first=$(head -n 1 "$work/hr23-kept.txt")
+  for c in "zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F" "zeek-probe=$ZEEK_IMAGE=" \
+    "zeek-probe-c1p=$HR23_C1P_IMAGE=" "zeek-probe-c2=$HR23_C2_IMAGE="; do
+    cfg=${c%%=*}
+    rest=${c#*=}
+    im=${rest%%=*}
+    extra=${rest#*=}
+    if [ -n "$first" ]; then
+      # $extra is word-split on purpose: it is one Zeek argument or none.
+      mc_run --network none -v "$h:/pcaps:ro" -v "$here:/exp:ro" "$im" zeek -C -r "/pcaps/$first.pcap" \
+        /exp/probe.zeek /exp/zeek-patch/viol.zeek $extra /exp/ports.zeek 2>&1 \
+        | grep '^likely_server_ports at ' > "$work/ports-hr23/$cfg.txt" || true
+    fi
+  done
   hr23_counted=
   [ "${GITHUB_REF:-local}" != refs/heads/main ] || hr23_counted=--counted
-  python3 -I -B "$here/hr23_feed.py" check "$out" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" $hr23_counted
+  rc=0
+  python3 -I -B "$here/hr23_feed.py" check "$work/out-hr23" "$root/tests/fixtures/network/gt-pcap/hr23/hr23.sha256" "$work/hr23-kept.txt" $hr23_counted || rc=$?
+  python3 -I -B "$here/hr23_feed.py" check "$work/out-fp" "$root/tests/fixtures/network/gt-pcap/fp/fp.sha256" "$work/fp-kept.txt" $hr23_counted || { r=$?; [ "$rc" != 0 ] || rc=$r; }
+  # HR-23's judge (brief P4-4-HR23-JUDGE): the malformed set and the
+  # false-positive set against D6's conditions. hr23-cases.tsv's rows wait on
+  # D1's ruling on the judge's handling of held rows (D4-112 item 1.3), so a
+  # counted run fails here until it is in place.
+  python3 -I -B "$here/table.py" hr23judge "$work/out-hr23" "$work/out-fp" "$work/fp-kept.txt" "$root" "$work/ports-hr23" $hr23_counted || { r=$?; [ "$rc" != 0 ] || rc=$r; }
+  return "$rc"
 }
 
 # CH-53's and CH-57's requirements on the script (D4-102 item 6; D1's

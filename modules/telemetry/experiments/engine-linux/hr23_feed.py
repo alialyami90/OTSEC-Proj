@@ -15,6 +15,9 @@ engine reads it. It writes the kept captures' names to KEPT, prints how
 many are kept, and names each one removed or missing. Capture names are
 public (SUMS is committed); no reading is.
 
+The false-positive set (fp_set.py, pinned in fp.sha256) is fed the same
+way, by the same two commands with its own SUMS and KEPT (D2's N2 on #769).
+
 `check OUT SUMS KEPT [--counted]` reads OUT/<capture>/<config>/exit-code,
 as in-container.sh writes it, for every capture SUMS names and each of the
 four configurations, and prints the table. A capture that `pin` did not
@@ -109,8 +112,11 @@ def check(out, sums, kept_file, counted):
     if caps is None or kept is None:
         return 1
     kept = set(kept)
-    print("\n## HR-23's captures under C0, C1, C1p and C2 (D4-120 item 3.7): ran or not\n")
-    print("Every capture `hr23_cases.py` writes, equal to its pin in `hr23.sha256`, fed to `zeek-probe-c0` (C0), "
+    fp = os.path.basename(sums) == "fp.sha256"
+    print(f"\n## HR-23's {'false-positive set' if fp else 'captures'} under C0, C1, C1p and C2 (D4-120 item 3.7): "
+          "ran or not\n")
+    print(f"Every capture `{'fp_set' if fp else 'hr23_cases'}.py` writes, equal to its pin in "
+          f"`{os.path.basename(sums)}`, fed to `zeek-probe-c0` (C0), "
           "`zeek-probe` (C1), `zeek-probe-c1p` (C1p) and `zeek-probe-c2` (C2), each with `zeek-patch/viol.zeek`. "
           "Some HR-23 rows are held from per-row publication (D4-112 item 1.3), so this table holds only whether "
           "each configuration ran and its exit code; no log is read here and no row is judged here. The engines' "

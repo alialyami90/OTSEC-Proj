@@ -420,9 +420,16 @@ For each case and configuration, the harness reports:
 - both "named" readings (section 4.1);
 - the SHA-256 of the `zeek` binary inside the image (section 4.5).
 
-The judge does not read these. They show which parser ran.
+They show which parser ran. The readings table (`table.py hr23`) judges none of them; the judge below reads them only as `judge-both` and the `mal-` and `fp-` rows say (`report-harness`).
 
-For the captures of `hr23_cases.py`, these readings are not printed, since some HR-23 rows are held from per-row publication (D4-112 item 1.3). `run.sh dnp3`, given the two builds, feeds every one of them, each equal to its pin in `hr23.sha256`, to C0, C1, C1p and C2 in folders of their own, with `zeek-patch/viol.zeek` loaded under each, since `mal-states` reads its `otsec_viol.log`. Every other file that `zeek_run` would feed, under any extension in `mountcheck.py`'s `CAPTURE`, is removed first, and the check judges only the captures the pin kept. Its table says only whether each configuration ran and its exit code. On `refs/heads/main` the job fails when any did not run with exit code 0, or when a capture the pin did not keep was fed (D4-120 item 3.7; `hr23_feed.py`). No judge reads `out-hr23/` yet: these are rehearsal outputs, and no HR-23 row is judged from them.
+For the captures of `hr23_cases.py`, these readings are not printed, since some HR-23 rows are held from per-row publication (D4-112 item 1.3). `run.sh dnp3`, given the two builds, feeds every one of them, each equal to its pin in `hr23.sha256`, to C0, C1, C1p and C2 in folders of their own, with `zeek-patch/viol.zeek` loaded under each, whose `otsec_viol.log` counts violations as raised (the judge reads `analyzer.log`, as `mal-states` says). Every other file that `zeek_run` would feed, under any extension in `mountcheck.py`'s `CAPTURE`, is removed first, and the check judges only the captures the pin kept. Its table says only whether each configuration ran and its exit code. On `refs/heads/main` the job fails when any did not run with exit code 0, or when a capture the pin did not keep was fed (D4-120 item 3.7; `hr23_feed.py`). The false-positive set (`fp_set.py`, each class equal to its pin in `fp/fp.sha256`) is fed and checked the same way, in folders of its own (D2's N2 and D6's G1 on #769).
+
+`ports.zeek` runs once under each of C0, C1, C1p and C2, with that configuration's image and scripts, and `likely_server_ports` is printed for each (`cfg-ports`; D2's N1 on #769). `table.py hr23judge` then judges, against `hr23-conditions.tsv` (brief P4-4-HR23-JUDGE):
+- the malformed set, each input on every token of its cells (`mal-` rows), `reqhdr`, `svc` and `<msg>=code` among them; an input that did not run reads `unknown`, and a non-zero exit fails it (`mal-errors`);
+- the false-positive set, per class and configuration (`fp-` rows); a class that was not fed or did not run reads `not run` for every bound that needs it, never zero;
+- under any configuration whose `likely_server_ports` was not printed, or puts a flow's port on the other side of the pinned set, that flow reads `unknown` (`cfg-ports`).
+
+`hr23-cases.tsv`'s rows are judged by the same code's `judge-` rules, tested on synthetic logs, but are not judged or printed in a run until D1 rules on the judge's handling of held rows (D4-112 item 1.3). Until then a run on `refs/heads/main` fails at that step, so no counted HR-23 result is taken without them.
 
 ### 4.5 The build and the pin of option (i)
 

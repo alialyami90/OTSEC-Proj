@@ -40,6 +40,7 @@ labels modbus_label.py writes in the run (`sig` below).
 
 Usage: python -I table.py dnp3 OUT GT_PCAP_DIR WORK ROOT   (pipe runs in OUT-pipe)
        python -I table.py hr23 OUT   (HR-23's readings, section 4.4 of its design)
+       python -I -B table.py hr23judge OUT OUT_FP FP_KEPT ROOT PORTS [--counted]   (HR-23's judge)
        python -I table.py fifo OUT OUT-pipe
        python -I table.py public OUT PCAPS MANIFEST EXTRA [--counted]
        python -I table.py sig SIG_DIR ROOT WORK
@@ -1516,10 +1517,581 @@ def hr23(out):
         print()
 
 
+# HR-23's judge (brief P4-4-HR23-JUDGE; D4-113 item 3.2): out-hr23/ and
+# out-fp/, written by run.sh's hr23_feed, judged against D6's
+# hr23-conditions.tsv, hr23-cases.tsv and hr23-malformed.tsv. Each rule is
+# named by its id in hr23-conditions.tsv. A configuration that did not run,
+# or did not exit 0, is never read as a pass or as zero.
+JUDGED = ("zeek-probe-c0", "zeek-probe", "zeek-probe-c1p", "zeek-probe-c2")
+CELL_OF = dict(zip(JUDGED, ("c0", "c1", "c1p", "c2")))
+GP = "tests/integration/gt_pcap"
+GT = "tests/fixtures/network/gt-pcap"
+NO_TABLES = {"zeek_fc": {}, "zeek_modbus_fc": {}}
+DNP3_ANALYZERS = ("DNP3_UDP", "DNP3_TCP")
+# err=target: AddToBuffer's invalid-target-length reporter error (design 4.3).
+TARGET_ERROR = "invalid target length"
+# mal-link: inputs whose link rows are reported, not judged, under C1, C1p and C2.
+MAL_LINK = tuple(f"dnp3-mal-udp-{x}" for x in ("len-0", "len-1", "len-2", "len-3", "len-4-nofir", "len-4-firfin",
+                                                 "len-4-fir", "chunk-crc", "nofir", "nofin-fir", "limit")) + \
+    tuple(f"dnp3-mal-tcp-eof-{x}" for x in ("firopen-fin", "firopen-open", "badchunk-fin", "len4-fin"))
+# judge-objects: the case that is each object's own control under C0.
+OBJ_CONTROL = {"g34v1": "dnp3-udp-swap-control", "g12v1": "dnp3-udp-dir-spoof",
+               **{g: "dnp3-udp-master-short" for g in ("g60v1", "g60v2", "g60v3", "g60v4", "g80v1", "g50v1")}}
+SWAP, PREMISE = "dnp3-udp-swap-control", "dnp3-udp-master-short"
+BOTH_EXPECTED = ("dnp3-udp-dir-spoof", "dnp3-tcp-dir-spoof")  # judge-both
+PORTS_LINE = re.compile(r"likely_server_ports at zeek_done: tcp \[([0-9, ]*)\]; udp \[([0-9, ]*)\]")
+
+
+def read_ports(path):
+    """cfg-ports: {"tcp": set, "udp": set} from ports.zeek's zeek_done line in
+    PATH, or None when the file or the line is missing."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for ln in fh:
+            m = PORTS_LINE.search(ln)
+            if m:
+                return {l4: {int(x) for x in g.split(",") if x.strip()} for l4, g in zip(("tcp", "udp"), m.groups())}
+    return None
+
+
+def sides_moved(ports, want, l4, flow_ports):
+    """cfg-ports: None when every port of the flow falls on the same side of
+    the configuration's likely_server_ports as of the pinned set (WANT), else
+    why the flow reads unknown under that configuration."""
+    if ports is None:
+        return "unknown (likely_server_ports not printed under this configuration)"
+    moved = sorted({int(p) for p in flow_ports if (int(p) in ports[l4]) != (int(p) in want[l4])})
+    return f"unknown (likely_server_ports differs from the pinned set at {l4}/{','.join(map(str, moved))})" \
+        if moved else None
+
+
+def flow_uids(d, l4, e):
+    """The uids of conn.log's records of the flow with transport L4 and ends E."""
+    return {r["uid"] for _, r in lines(os.path.join(d, "conn.log"))
+            if r.get("proto") == l4 and ends(r["id.orig_h"], r["id.orig_p"], r["id.resp_h"], r["id.resp_p"]) == e}
+
+
+def svc_names(r):
+    """conn.log's service, split; a DNP3 name counts only exactly (mal-states)."""
+    return {x.strip().lower() for x in str(r.get("service") or "").split(",") if x.strip()}
+
+
+def packet_time_us(pcap, n):
+    """The time of the capture's Nth packet (1-based), in microseconds, from
+    its record header alone; None when it has fewer."""
+    sys.path.insert(0, os.path.join(ROOT_DIR[0], GP))
+    import pcapfile  # noqa: E402 (D6's reader; no payload is read here)
+    frames = pcapfile.read(pcap)
+    return round(frames[n - 1].ns / 1000) if len(frames) >= n else None
+
+
+ROOT_DIR = ["."]
+
+
+def link_present(d, row, pcap):
+    """judge-link: a link row of the script's on the row's flow with is_orig
+    as the row's `show` names, stamped with the time of the packet it names."""
+    m = re.search(r"is_orig (true|false) stamped with packet (\d+)'s time", row["show"])
+    if not m:
+        return "unknown (the row's show names no packet)", ""
+    t = packet_time_us(pcap, int(m.group(2))) if os.path.isfile(pcap) else None
+    if t is None:
+        return "unknown (the capture's packet time is not read)", ""
+    uids = flow_uids(d, row["l4"], ends(row["src"], row["sport"], row["dst"], row["dport"]))
+    for i, r in lines(os.path.join(d, "otsec_probe.log")):
+        if (r.get("kind") == "link" and r.get("uid") in uids and r.get("is_orig") == (m.group(1) == "true")
+                and round(float(r["ts"]) * 1e6) == t):
+            return "present", f"otsec_probe.log:{i}"
+    return "absent", ""
+
+
+def case_results(rows, d, cfg, pcap, ports, want):
+    """judge-rows, judge-link and cfg-ports: {index: (result, citation)} for
+    one capture's hr23-cases.tsv rows under one configuration. An objects
+    row is the Objects reading of the function row with the same columns,
+    which rule 9 matches once (so the two never compete for one message)."""
+    why = ran(d)
+    if why:
+        return {n: (f"unknown ({why})", "") for n, _ in rows}
+    s = zeek(d, cfg, NO_TABLES)
+    plain = [(n, r) for n, r in rows if r["condition"] not in ("objects", "link")]
+    res = judge_capture(plain, s)
+    key = lambda r: tuple(r[k] for k in ("l4", "src", "sport", "dst", "dport", "code", "objects"))
+    fn_of = {key(r): n for n, r in plain if r["condition"] == "function"}
+    out = {}
+    for n, r in rows:
+        moved = sides_moved(ports, want, r["l4"], (r["sport"], r["dport"]))
+        if moved:
+            out[n] = (moved, "")
+        elif r["condition"] == "link":
+            out[n] = link_present(d, r, pcap)
+        elif r["condition"] == "objects":
+            f = fn_of.get(key(r))
+            if f is None:
+                out[n] = ("unknown (no function row with the same columns)", "")
+                continue
+            fr, cite = res[f]
+            m = re.search(r"objects pass (\S+)", fr)
+            out[n] = ("pass", m.group(1)) if m else (fr if fr.startswith("unknown") else "fail", cite if m else "")
+        else:
+            out[n] = res[n]
+    return out
+
+
+def outcome(expected, result):
+    """judge-cells: `as pinned`, `not as pinned`, `unknown` (a result that
+    did not run, or cfg-ports) or `reported` (a ? cell)."""
+    if result.startswith("unknown"):
+        return "unknown"
+    if expected.strip() == "?":
+        return "reported"
+    word = lambda x: x.split(" ", 1)[0].rstrip(";")
+    return "as pinned" if word(result) == word(expected) else "not as pinned"
+
+
+def relay_started(root, cap):
+    """A UDP case whose first sender is the outstation (judge-swap), from the
+    builder's labels only: hr23/ (the role of the first packet's unit) or
+    dnp3/ (the flow's src is the service row's dst)."""
+    p = os.path.join(root, GT, HR23_DIR, cap + ".tsv")
+    if os.path.isfile(p):
+        units = [r for r in tsv(p) if r.get("packets", "").split(",")[0].isdigit()]
+        first = min(units, key=lambda r: int(r["packets"].split(",")[0]), default=None)
+        return bool(first) and first["flow"].startswith("udp ") and first["role"] == "outstation"
+    p = os.path.join(root, GT, "dnp3", cap + ".tsv")
+    if os.path.isfile(p):
+        lab = tsv(p)
+        flows = [r for r in lab if r["kind"] == "flow" and r["l4"] == "udp"]
+        servers = {r["dst"] for r in lab if r["kind"] == "service"}
+        return bool(flows) and flows[0]["src"] in servers
+    return False
+
+
+def judge_cases(conds, res, root):
+    """judge-fix, judge-control, judge-objects, judge-swap, judge-link,
+    judge-regression and the premise, over every row's results under the
+    four configurations (RES: {cfg: {index: (result, citation)}}). Returns
+    ({index: {cfg: outcome}}, {index: fix reading}, [findings])."""
+    oc = {n: {cfg: outcome(r[CELL_OF[cfg]], res[cfg][n][0]) for cfg in JUDGED} for n, r in enumerate(conds)}
+    findings = []
+    # judge-link: without the replayed link row under C1, C1's pass on the
+    # case's Service row reads unknown.
+    for n, r in enumerate(conds):
+        if r["condition"] == "link" and not res["zeek-probe"][n][0].startswith("present"):
+            for k, x in enumerate(conds):
+                if x["capture"] == r["capture"] and x["condition"] == "service" \
+                        and res["zeek-probe"][k][0].startswith("pass"):
+                    oc[k]["zeek-probe"] = "unknown"
+    c0 = lambda n: res["zeek-probe-c0"][n][0]
+    swap_failed = any(c0(n).startswith("fail") for n, r in enumerate(conds) if r["capture"] == SWAP)
+    swap_unrun = any(c0(n).startswith("unknown") for n, r in enumerate(conds) if r["capture"] == SWAP)
+    premise = [n for n, r in enumerate(conds) if r["capture"] == PREMISE]
+    if any(c0(n).startswith("fail") for n in premise):
+        findings.append(f"premise: a row of {PREMISE} fails under C0, so option (i)'s premise does not hold")
+    obj_failed = {}
+    for g, cap in OBJ_CONTROL.items():
+        ctl = [n for n, r in enumerate(conds) if r["capture"] == cap and r["condition"] == "objects"
+               and g in r["objects"].split(",")]
+        obj_failed[g] = "unknown" if not ctl or any(c0(n).startswith("unknown") for n in ctl) else \
+            any(c0(n).startswith("fail") for n in ctl)
+    fix = {}
+    for n, r in enumerate(conds):
+        o, f = oc[n], r["fix"]
+        ctl_off = [CELL_OF[c] for c in ("zeek-probe-c0", "zeek-probe", "zeek-probe-c1p") if o[c] == "not as pinned"]
+        if ctl_off and f not in ("unknown", "r1"):
+            findings.append(f"judge-control: {r['capture']} {r['condition']} {r['code']} {r['objects']}: "
+                            f"{', '.join(ctl_off)} not as pinned")
+        if f == "unknown":
+            fix[n] = "unknown (C0 passes the row)"
+        elif f == "r1":
+            fix[n] = "r1: reported against its pin, never a pass"
+        elif f in ("control", "premise"):
+            fix[n] = f
+        elif any(o[c] == "unknown" for c in JUDGED if not (f == "a" and c == "zeek-probe-c2")):
+            fix[n] = "unknown (a configuration did not run, or cfg-ports)"
+        elif ctl_off:
+            fix[n] = f"unknown (judge-control: {', '.join(ctl_off)} not as pinned)"
+        elif relay_started(root, r["capture"]) and (swap_failed or swap_unrun):
+            fix[n] = "unknown (judge-swap: the swap's control " + ("fails under C0)" if swap_failed else "did not run)")
+        elif f == "b" and r["condition"] == "objects" and any(
+                obj_failed.get(g, "unknown") is not False for g in r["objects"].split(",")):
+            fix[n] = "unknown (judge-objects: an object's own control does not pass under C0)"
+        elif f == "a":
+            fix[n] = "a shows"
+        elif f == "b":
+            fix[n] = "b shows" if o["zeek-probe-c2"] == "as pinned" else "b does not show"
+        else:
+            fix[n] = f"unknown (fix column {f} is not a judge-fix value)"
+    # judge-regression.
+    for n, r in enumerate(conds):
+        if r["c2"] == "pass" and res["zeek-probe-c2"][n][0].startswith("fail"):
+            by = "the patch" if res["zeek-probe-c1p"][n][0].startswith("pass") else "the build"
+            findings.append(f"judge-regression: {r['capture']} {r['condition']} {r['code']}: C2 fails, of {by}")
+        if r["c1"] == "pass" and res["zeek-probe"][n][0].startswith("fail"):
+            findings.append(f"judge-regression: {r['capture']} {r['condition']} {r['code']}: C1 fails, of part (a)")
+    return oc, fix, findings
+
+
+def both_findings(out, caps):
+    """judge-both: flows whose link rows name both ends, under C1, C1p and
+    C2, anywhere but the two cases that expect them."""
+    found = []
+    for c in caps:
+        for cfg in ("zeek-probe", "zeek-probe-c1p", "zeek-probe-c2"):
+            d = os.path.join(out, c, cfg)
+            if not ran(d) and hr23_readings(d, cfg)["both"] and c not in BOTH_EXPECTED:
+                found.append(f"judge-both: {c} under {cfg}")
+    return found
+
+
+# The malformed set (mal- rows).
+def mal_tokens(cell):
+    """[(name, value)] of a hr23-malformed.tsv cell; `=c1p` reads as [("=", "c1p")]."""
+    cell = cell.strip()
+    if cell == "=c1p":
+        return [("=", "c1p")]
+    return [tuple(t.strip().split("=", 1)) for t in cell.split(";") if t.strip()]
+
+
+def mal_labels(root, inp):
+    """{message: (sender address, code, objects)} and the flow (l4, ends,
+    ports) from the builder's labels. The flow's first address is the
+    sender of the earliest unit."""
+    rows = tsv(os.path.join(root, GT, HR23_DIR, inp + ".tsv"))
+    l4, pair = rows[0]["flow"].split(" ", 1)
+    a, b = pair.split(">")
+    (ah, ap), (bh, bp) = a.rsplit(":", 1), b.rsplit(":", 1)
+    units = [r for r in rows if r["message"] not in ("-", "")]
+    first = min(units, key=lambda r: int(r["packets"].split(",")[0]))["end"]
+    addr = {first: ah, ("o" if first == "m" else "m"): bh}
+    msgs = {}
+    for r in units:
+        # A message's code and objects come from its first unit that names a
+        # code; a unit whose octets carry none names `-`.
+        if msgs.get(r["message"], (None, None))[1] is None:
+            objs = frozenset() if r["objects"] in ("-", "") else frozenset(r["objects"].split(","))
+            msgs[r["message"]] = (addr[r["end"]], int(r["code"]) if r["code"].isdigit() else None, objs)
+    return msgs, l4, ends(ah, ap, bh, bp), (ap, bp)
+
+
+def mal_reading(d, l4, e):
+    """What the judge reads on the input's flow: violations by analyzer,
+    weirds by name, reporter rows, the probe's function rows (sender, code,
+    objects) and link rows, reqhdr, and conn.log's service. No payload."""
+    uids = flow_uids(d, l4, e)
+    rd = {"viol": collections.Counter(), "weirds": collections.Counter(), "reporter": collections.Counter(),
+          "fn": [], "link": [], "reqhdr": 0, "svc": set()}
+    for _, r in lines(os.path.join(d, "conn.log")):
+        if r["uid"] in uids:
+            rd["svc"] |= svc_names(r)
+    for _, r in lines(os.path.join(d, "analyzer.log")):
+        if r.get("uid") in uids:
+            rd["viol"][r.get("analyzer_name") or "?"] += 1
+    for _, r in lines(os.path.join(d, "weird.log")):
+        if r.get("uid") in uids:
+            rd["weirds"][r.get("name") or "?"] += 1
+    for _, r in lines(os.path.join(d, "reporter.log")):
+        rd["reporter"][(str(r.get("level") or "?"), str(r.get("message") or "?"))] += 1
+    cur = None
+    for _, r in lines(os.path.join(d, "otsec_probe.log")):
+        if r.get("uid") not in uids:
+            continue
+        if r["kind"] == "fc":
+            cur = [r["is_orig"], r["fc"], []]
+            rd["fn"].append(cur)
+            if r["fc"] in RESPONSE_CODES and str(r.get("ev", "")).endswith("request_header"):
+                rd["reqhdr"] += 1
+        elif r["kind"] == "obj" and cur is not None and cur[0] == r["is_orig"]:
+            cur[2].append(f"g{r['group']}v{r['variation']}")
+        elif r["kind"] == "link":
+            rd["link"].append((r["is_orig"], r.get("link_dir")))
+    conn = {u: r for _, r in lines(os.path.join(d, "conn.log")) for u in [r["uid"]] if u in uids}
+    orig = next((r["id.orig_h"] for r in conn.values()), None)
+    resp = next((r["id.resp_h"] for r in conn.values()), None)
+    rd["fn"] = sorted(((orig if o else resp), fc, frozenset(objs)) for o, fc, objs in rd["fn"])
+    rd["link"] = sorted(rd["link"], key=str)
+    return rd
+
+
+def msg_states(msgs, tokens, fn):
+    """mal-seen: {message: result} for every message the cell names =seen,
+    =code or =absent, matched one to one with the flow's function rows
+    (rule 9). A row fits a message of its sender and code when: =seen, it
+    carries every object the label names; =code, none of them; otherwise
+    (=absent, ?, or not named), it carries no object the label does not
+    name. A message is absent when adding it to the others does not grow the
+    matching."""
+    named = {k: v for k, v in tokens if k in msgs}
+
+    def fits(m, row):
+        sender, code, objs = msgs[m]
+        if row[0] != sender or row[1] != code:
+            return False
+        st = named.get(m)
+        return objs <= row[2] if st == "seen" else not (objs & row[2]) if st == "code" else row[2] <= objs
+
+    def size(ms):
+        return len(assign(ms, fn, fits))
+
+    out = {}
+    pos = [m for m in msgs if named.get(m) in ("seen", "code")]
+    got = assign(pos, fn, fits)
+    for i, m in enumerate(pos):
+        out[m] = "holds" if i in got else "does not hold"
+    for m, st in named.items():
+        if st == "absent":
+            others = [x for x in msgs if x != m]
+            out[m] = "holds" if size(others + [m]) == size(others) else "does not hold"
+    return out
+
+
+def judge_mal_cell(cell, rd, msgs):
+    """[(token, holds?)] for one cell under one configuration, and the
+    failures of mal-states' fourth state and mal-errors."""
+    toks = mal_tokens(cell)
+    res, fails = [], []
+    states = msg_states(msgs, toks, rd["fn"])
+    dnp3_viol = sum(n for a, n in rd["viol"].items() if a in DNP3_ANALYZERS)
+    for k, v in toks:
+        if v == "?":
+            res.append((f"{k}=?", "reported"))
+            continue
+        if k == "viol":
+            ok = dnp3_viol == int(v)
+        elif k == "svc":
+            has = bool(rd["svc"] & {"dnp3_udp", "dnp3_tcp"})
+            ok = has if v == "dnp3" else not has
+        elif k == "reqhdr":
+            ok = rd["reqhdr"] == int(v)
+        elif k == "weird":
+            ok = rd["weirds"][v] > 0
+        elif k == "err":
+            ok = any(TARGET_ERROR in m for (lv, m) in rd["reporter"] if "ERROR" in lv.upper())
+        elif k in msgs:
+            ok = states.get(k) == "holds"
+        else:
+            res.append((f"{k}={v}", "not a token the judge knows"))
+            fails.append(f"{k}={v}: not a token the judge knows")
+            continue
+        res.append((f"{k}={v}", "holds" if ok else "does not hold"))
+        if not ok:
+            fails.append(f"{k}={v}")
+    other = sorted(a for a in rd["viol"] if a not in DNP3_ANALYZERS)
+    if other:
+        fails.append(f"analyzer.log row under {', '.join(other)} (mal-states' fourth state)")
+    allowed = any(k == "err" and v == "target" for k, v in toks)
+    errs = [m for (lv, m) in rd["reporter"] if "ERROR" in lv.upper() and not (allowed and TARGET_ERROR in m)]
+    if errs:
+        fails.append(f"{len(errs)} reporter error(s) the cell does not name (mal-errors)")
+    return res, fails
+
+
+def same_as(a, b, link):
+    """mal-same: what differs between two readings (C2 against C1p)."""
+    keys = ["viol", "weirds", "reporter", "fn", "reqhdr"] + (["link"] if link else [])
+    return [k for k in keys if a[k] != b[k]]
+
+
+def judge_malformed(out, root, mal, ports_of, want):
+    """{input: {cfg: (verdict, detail)}} for every hr23-malformed.tsv input.
+    Verdicts: pass, fail, unknown (did not run, or cfg-ports) or reported
+    (mal-unknown's C2, a ? cell)."""
+    res = {}
+    for row in mal:
+        inp = row["input"]
+        msgs, l4, e, fports = mal_labels(root, inp)
+        rds, res[inp] = {}, {}
+        for cfg in JUDGED:
+            d = os.path.join(out, inp, cfg)
+            if not os.path.isfile(os.path.join(d, "exit-code")):
+                res[inp][cfg] = ("unknown", "not run")
+                continue
+            why = ran(d)
+            if why:
+                res[inp][cfg] = ("fail", f"{why}: a crash is a finding (mal-errors)")
+                continue
+            moved = sides_moved(ports_of.get(cfg), want, l4, fports)
+            if moved:
+                res[inp][cfg] = ("unknown", moved[len("unknown ("):-1])
+                continue
+            rds[cfg] = mal_reading(d, l4, e)
+        # mal-errors under C2 where its cell is not judged token by token: the
+        # one reporter error the input's c0 cell names is allowed there too.
+        errs_only = "; ".join(f"{k}={v}" for k, v in mal_tokens(row["c0"]) if k == "err")
+        for cfg, rd in rds.items():
+            c2 = cfg == "zeek-probe-c2"
+            cell = row["c2"] if c2 else row["c0"]
+            if c2 and row["judge"] == "unknown":
+                _, fails = judge_mal_cell(errs_only, rd, msgs)
+                ref = rds.get("zeek-probe-c1p")
+                diff = "C1p not read" if ref is None else (", ".join(same_as(rd, ref, False)) or "none")
+                res[inp][cfg] = ("fail", "; ".join(fails)) if fails else \
+                    ("reported", f"mal-unknown: measured, not judged; differs from C1p in: {diff}")
+                continue
+            if c2 and cell.strip() == "=c1p":
+                ref = rds.get("zeek-probe-c1p")
+                if ref is None:
+                    res[inp][cfg] = ("unknown", "C1p's reading is not there to compare")
+                    continue
+                diff = same_as(rd, ref, inp not in MAL_LINK)
+                _, fails = judge_mal_cell(errs_only, rd, msgs)
+                fails = ([f"differs from C1p in: {', '.join(diff)} (mal-same)"] if diff else []) + fails
+                res[inp][cfg] = ("fail", "; ".join(fails)) if fails else ("pass", "equals C1p")
+                continue
+            toks, fails = judge_mal_cell(cell, rd, msgs)
+            shown = "; ".join(f"{t} {h}" for t, h in toks)
+            res[inp][cfg] = ("fail", "; ".join(fails)) if fails else ("pass", shown)
+    return res
+
+
+# The false-positive set (fp- rows).
+FP_ZERO = ("1", "2", "4", "5", "6", "6-hole")  # fp-1245 and fp-6: = 0 under both readings
+
+
+def fp_reading(d, cfg):
+    """One class under one configuration: the flows named by conn.log, by a
+    link row (C1, C1p, C2 only), the DNP3 violations and dnp3_ weirds."""
+    s = zeek(d, cfg, NO_TABLES)
+    key = lambda f: (f["l4"], ends(*f["orig"], *f["resp"]))
+    by_conn = {key(f) for f in s.flows if {"dnp3_udp", "dnp3_tcp"} & {x.lower() for x in f["names"]}}
+    by_link = {key(f) for f in s.flows if f.get("dnp3_servers")} if cfg in LINKED else None
+    viol = sum(1 for _, r in lines(os.path.join(d, "analyzer.log")) if r.get("analyzer_name") in DNP3_ANALYZERS)
+    weirds = collections.Counter(r["name"] for _, r in lines(os.path.join(d, "weird.log"))
+                                 if str(r.get("name", "")).startswith("dnp3_"))
+    return {"conn": by_conn, "link": by_link, "viol": viol, "weirds": weirds}
+
+
+def judge_fp(out_fp, root, kept):
+    """{class: {"items": n, "read": {cfg: reading or why not}, "rules": [(rule, verdict)]}}.
+    A class that was not fed, not kept or did not run under a configuration
+    reads `not run` for every rule that needs that configuration: an
+    unfed class is never read as zero."""
+    res = {}
+    with open(os.path.join(root, GT, "fp", "fp.sha256"), encoding="utf-8") as fh:
+        caps = sorted(f[1][: -len(".pcap")] for f in (ln.split() for ln in fh) if len(f) == 2 and f[1].endswith(".pcap"))
+    for cap in caps:
+        lab = tsv(os.path.join(root, GT, "fp", cap + ".tsv"))
+        cls = lab[0]["class"] if lab else cap
+        read = {}
+        for cfg in JUDGED:
+            d = os.path.join(out_fp, cap, cfg)
+            why = "not fed" if cap not in kept else ran(d)
+            read[cfg] = why if why else fp_reading(d, cfg)
+        rules = []
+        ok = lambda cfg: not isinstance(read[cfg], str)
+
+        def bound(rule, cfgs, readings, want):
+            for cfg in cfgs:
+                for rdg in readings:
+                    if not ok(cfg):
+                        rules.append((f"{rule} {CELL_OF[cfg]} {rdg}", f"not run ({read[cfg]})"))
+                        continue
+                    v = read[cfg][rdg] if rdg != "viol" else read[cfg]["viol"]
+                    if v is None:
+                        continue
+                    n = v if isinstance(v, int) else len(v)
+                    w = want if isinstance(want, int) else want(len(lab))
+                    rules.append((f"{rule} {CELL_OF[cfg]} {rdg}", f"{'pass' if n == w else 'fail'} ({n}, bound {w})"))
+        if cls in FP_ZERO:
+            bound("fp-1245" if cls in ("1", "2", "4", "5") else "fp-6", JUDGED, ("conn", "link"), 0)
+        if cls == "3b-link":
+            bound("fp-3blink", JUDGED[1:], ("link",), 0)
+        if cls == "3c":
+            bound("fp-3c", JUDGED[:3], ("viol",), lambda n: n)
+        if cls in ("3b-data", "3c"):
+            a, b = "zeek-probe-c2", "zeek-probe-c1p"
+            if ok(a) and ok(b):
+                diff = [k for k in ("conn", "link", "viol", "weirds") if read[a][k] != read[b][k]]
+                rules.append((f"fp-{cls.replace('-', '')} C2 equals C1p",
+                               "pass" if not diff else f"fail (differs in {', '.join(diff)})"))
+            else:
+                rules.append((f"fp-{cls.replace('-', '')} C2 equals C1p", "not run"))
+        a, b = "zeek-probe-c2", "zeek-probe-c1p"
+        for rdg in ("conn", "link"):
+            if ok(a) and ok(b):
+                extra = read[a][rdg] - read[b][rdg]
+                rules.append((f"fp-b {rdg}", "pass" if not extra else f"fail ({len(extra)} flow(s) named by C2 alone)"))
+            else:
+                rules.append((f"fp-b {rdg}", "not run"))
+        res[cls] = {"capture": cap, "items": len(lab), "read": read, "rules": rules}
+    return res
+
+
+def kept_names(path):
+    if not os.path.isfile(path):
+        return set()
+    with open(path, encoding="utf-8") as fh:
+        return {ln.strip() for ln in fh if ln.strip()}
+
+
+def hr23judge(out, out_fp, fp_kept, root, ports_dir, counted):
+    """HR-23's judge: likely_server_ports under each configuration, the
+    malformed set and the false-positive set judged, and hr23-cases.tsv's
+    rows withheld until D1 rules on the judge's handling of held rows
+    (D4-112 item 1.3). Returns the exit code: 3 on a counted run, since the
+    cases' rows are not yet judged."""
+    ROOT_DIR[0] = root
+    sys.path.insert(0, os.path.join(root, GP))
+    import hr23_cases  # noqa: E402 (LIKELY: the pinned set, cfg-ports)
+    want = hr23_cases.LIKELY
+    ports_of = {cfg: read_ports(os.path.join(ports_dir, cfg + ".txt")) for cfg in JUDGED}
+    print("\n## HR-23's judge (hr23-conditions.tsv)\n")
+    print("### likely_server_ports under each configuration (cfg-ports)\n")
+    for cfg in JUDGED:
+        p = ports_of[cfg]
+        shown = "not printed" if p is None else \
+            "; ".join(f"{l4} {', '.join(map(str, sorted(p[l4])))}" for l4 in ("tcp", "udp"))
+        same = "" if p is None else (" (the pinned set)" if p == {k: set(v) for k, v in want.items()} else
+                                     " (differs from the pinned set: flows on a moved port read unknown)")
+        print(f"- {CELL_OF[cfg]} ({cfg}): {shown}{same}")
+    mal = tsv(os.path.join(root, GP, "hr23-malformed.tsv"))
+    mres = judge_malformed(out, root, mal, ports_of, want)
+    print("\n### The malformed set (mal- rows)\n")
+    print("Each input under C0, C1 and C1p on its c0 cell and under C2 on its c2 cell. An input that did not run "
+          "reads unknown, never pass; a non-zero exit is a crash and fails (mal-errors).\n")
+    print("| input | " + " | ".join(CELL_OF[c] for c in JUDGED) + " |")
+    print("| --- |" + " --- |" * len(JUDGED))
+    tally = collections.Counter()
+    for row in mal:
+        cells = []
+        for cfg in JUDGED:
+            v, detail = mres[row["input"]][cfg]
+            tally[v] += 1
+            cells.append(f"{v}: {detail}".replace("|", "/"))
+        print(f"| {row['input']} | " + " | ".join(cells) + " |")
+    print("\nMalformed cells: " + ", ".join(f"{tally[k]} {k}" for k in ("pass", "fail", "unknown", "reported")) + ".")
+    fres = judge_fp(out_fp, root, kept_names(fp_kept))
+    print("\n### The false-positive set (fp- rows)\n")
+    print("Per class and configuration: flows named by conn.log, by a link row (C1, C1p, C2), DNP3 violations and "
+          "dnp3_ weirds. A class not fed, or not run under a configuration, reads `not run`, never zero.\n")
+    print("| class | items | " + " | ".join(CELL_OF[c] for c in JUDGED) + " | rules |")
+    print("| --- | --- |" + " --- |" * len(JUDGED) + " --- |")
+    for cls, r in fres.items():
+        cells = []
+        for cfg in JUDGED:
+            x = r["read"][cfg]
+            cells.append(f"not run ({x})" if isinstance(x, str) else
+                         f"conn {len(x['conn'])}; link {'-' if x['link'] is None else len(x['link'])}; "
+                         f"viol {x['viol']}; " + (", ".join(f"{k}={n}" for k, n in sorted(x["weirds"].items())) or "no weird"))
+        rules = "; ".join(f"{k}: {v}" for k, v in r["rules"]) or "reported only"
+        print(f"| {cls} | {r['items']} | " + " | ".join(cells) + f" | {rules} |")
+    print("\n### hr23-cases.tsv's rows\n")
+    print("Not judged in this run: the judge's handling of held rows (D4-112 item 1.3) waits on D1's ruling, and no "
+          "row of this file is judged, printed or counted until it is in place." +
+          (" **This run is on refs/heads/main, so it fails: no counted HR-23 result is taken without the cases' rows.**"
+           if counted else ""))
+    return 3 if counted else 0
+
 if __name__ == "__main__":
     if sys.argv[1] == "hr23":
         hr23(sys.argv[2])
         sys.exit(0)
+    if sys.argv[1] == "hr23judge":
+        if len(sys.argv) < 7 or sys.argv[7:] not in ([], ["--counted"]):
+            print("usage: table.py hr23judge OUT OUT_FP FP_KEPT ROOT PORTS [--counted]", file=sys.stderr)
+            sys.exit(2)
+        sys.exit(hr23judge(*sys.argv[2:7], sys.argv[7:] == ["--counted"]))
     if sys.argv[1] == "dnp3":
         dnp3(*sys.argv[2:6])
     elif sys.argv[1] == "fifo":

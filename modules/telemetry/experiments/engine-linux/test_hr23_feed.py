@@ -277,6 +277,15 @@ def function(name="hr23_feed"):
 # except for the pair named by SKIP_CAP and SKIP_CFG.
 STUB = r'''
 mc_run() {
+  case " $* " in *" /exp/ports.zeek "*)
+    # ports.zeek's run (cfg-ports): record image and arguments, and print
+    # the two lines ports.zeek would, beside MARK.
+    while [ "$1" != zeek ]; do last=$1; shift; done
+    echo "$last|$*" >> "$work/ports"
+    echo "$MARK"; echo "likely_server_ports at zeek_init, priority -1000: tcp [20000]; udp [20000]"
+    echo "likely_server_ports at zeek_done: tcp [20000]; udp [20000]"
+    return 0 ;;
+  esac
   while [ "$#" -gt 3 ] && ! { [ "$2" = sh ] && [ "$3" = /exp/in-container.sh ]; }; do shift; done
   i=$1; shift 3
   c=$2; p=${3##*/}; shift 3
@@ -309,6 +318,13 @@ def make_root(tmp_path, bad_pin=None):
         lines[i] = "0" * 64 + lines[i][64:]
         text = "\n".join(lines)
     (d / "hr23.sha256").write_text(text, newline="\n")
+    # The judge's inputs: D6's malformed set and the builder's labels.
+    shutil.copy(os.path.join(ROOT, "tests", "integration", "gt_pcap", "hr23-malformed.tsv"),
+                root / "tests" / "integration" / "gt_pcap")
+    for f in os.listdir(os.path.join(GT, "hr23")):
+        if f.endswith(".tsv"):
+            shutil.copy(os.path.join(GT, "hr23", f), d)
+    shutil.copytree(os.path.join(GT, "fp"), d.parent / "fp")
     return root
 
 
@@ -340,53 +356,80 @@ def run_feed(tmp_path, text, ref=None, skip=None, bad_pin=None, extra=None, here
         p = work / name
         return p.read_text() if p.exists() else ""
     rc = int(r.stdout.rsplit("feed rc ", 1)[1].split()[0]) if "feed rc " in r.stdout else None
-    return rc, text_of("feed.md"), r.stdout + r.stderr, text_of("calls"), text_of("fed"), text_of("img").strip()
+    return (rc, text_of("feed.md"), r.stdout + r.stderr, text_of("calls"), text_of("fed"), text_of("img").strip(),
+            text_of("ports"))
 
 
 ONE = "dnp3-udp-relay-write"
-FEEDS = [  # (ref, a pair not run, a capture off its pin, extra files, the expected exit code)
-    ("refs/heads/main", None, None, None, 0),
-    ("refs/heads/main", (ONE, "zeek-probe-c2"), None, None, 3),
-    ("refs/heads/agent/x", (ONE, "zeek-probe-c2"), None, None, 0),
-    (None, (ONE, "zeek-probe-c0"), None, None, 0),
-    ("refs/heads/main", None, ONE, None, 3),
+# (ref, a pair not run, a capture off its pin, extra files, whether the
+# hr23 check fails it as partial). Every run on main now exits 3: the judge
+# withholds hr23-cases.tsv's rows until D1 rules on the judge's handling of
+# held rows (brief P4-4-HR23-JUDGE), so the check's own verdict is read from
+# its text.
+FEEDS = [
+    ("refs/heads/main", None, None, None, False),
+    ("refs/heads/main", (ONE, "zeek-probe-c2"), None, None, True),
+    ("refs/heads/agent/x", (ONE, "zeek-probe-c2"), None, None, False),
+    (None, (ONE, "zeek-probe-c0"), None, None, False),
+    ("refs/heads/main", None, ONE, None, True),
     # An unnamed .cap.
-    ("refs/heads/main", None, None, 'printf x > "$1/stray.cap"', 0),
+    ("refs/heads/main", None, None, 'printf x > "$1/stray.cap"', False),
     # A pinned capture rewritten under another extension, with different bytes.
-    ("refs/heads/main", None, None, f'mv "$1/{ONE}.pcap" "$1/{ONE}.pcapng"; printf x >> "$1/{ONE}.pcapng"', 3),
+    ("refs/heads/main", None, None, f'mv "$1/{ONE}.pcap" "$1/{ONE}.pcapng"; printf x >> "$1/{ONE}.pcapng"', True),
     # A pinned capture copied under another extension, with different bytes.
-    ("refs/heads/main", None, None, f'cp "$1/{ONE}.pcap" "$1/{ONE}.cap"; printf x >> "$1/{ONE}.cap"', 0),
+    ("refs/heads/main", None, None, f'cp "$1/{ONE}.pcap" "$1/{ONE}.cap"; printf x >> "$1/{ONE}.cap"', False),
 ]
+PARTIAL = "no counted HR-23 result is taken from a run in which a capture did not run"
+FP_SUMS = os.path.join(GT, "fp", "fp.sha256")
+PORTS_WIRING = {"stock|zeek -C -r /pcaps/{0}.pcap " + ARGS + " OtsecProbe::log_dir=F /exp/ports.zeek",
+                "stock|zeek -C -r /pcaps/{0}.pcap " + ARGS + " /exp/ports.zeek",
+                "c1p|zeek -C -r /pcaps/{0}.pcap " + ARGS + " /exp/ports.zeek",
+                "c2|zeek -C -r /pcaps/{0}.pcap " + ARGS + " /exp/ports.zeek"}
 
 
 def feed_failures(tmp_path, text, first=False, here=HERE):
     bad = []
-    for i, (ref, skip, bad_pin, extra, want) in enumerate(FEEDS):
-        rc, md, log, calls, fed, img = run_feed(tmp_path / str(i), text, ref, skip, bad_pin, extra, here)
+    for i, (ref, skip, bad_pin, extra, partial) in enumerate(FEEDS):
+        rc, md, log, calls, fed, img, ports = run_feed(tmp_path / str(i), text, ref, skip, bad_pin, extra, here)
         case = f"case {i}: ref={ref} skip={skip} bad_pin={bad_pin} extra={extra}"
+        want = 3 if ref == "refs/heads/main" else 0
         if rc != want:
             bad.append(f"{case}: exit {rc}, want {want}")
+        hr23_md = md.split("## HR-23's false-positive set")[0]
+        if (PARTIAL in hr23_md) != (partial and want == 3):
+            bad.append(f"{case}: the check's counted failure is {'missing' if partial else 'wrongly there'}")
         if MARK in md or MARK in log:
             bad.append(f"{case}: an engine's own output reached the table or the log")
-        if sum(1 for ln in md.splitlines() if ln.startswith("| dnp3-")) != 81:
+        if "10 of 10 captures ran under all four" not in md:
+            bad.append(f"{case}: the false-positive set was not fed and checked: {md[-300:]}")
+        first_kept = sorted(set(pinned()) - ({bad_pin} if bad_pin else set()))[0]
+        if set(ports.split("\n")) - {""} != {w.format(first_kept) for w in PORTS_WIRING}:
+            bad.append(f"{case}: ports.zeek did not run under each configuration's image and scripts: {ports!r}")
+        if sum(1 for ln in md.splitlines() if ln.startswith("- c") and "tcp 20000; udp 20000" in ln) != 4:
+            bad.append(f"{case}: likely_server_ports not printed under every configuration")
+        if sum(1 for ln in hr23_md.splitlines() if ln.startswith("| dnp3-")) != 81:
             bad.append(f"{case}: the table does not list the 81 pinned captures")
         if set(calls.split("\n")) - {""} != WIRING:
             bad.append(f"{case}: images or arguments differ from C0, C1, C1p and C2's: "
                        f"{sorted(set(calls.split()) - set(' '.join(WIRING).split()))}")
         if img != "stock":
             bad.append(f"{case}: img after the feed is {img!r}, not the stock image")
-        fed_names = {ln.split("|")[0] for ln in fed.split("\n") if ln}
+        fed_names = {ln.split("|")[0] for ln in fed.split("\n") if ln and not ln.startswith("fp-")}
+        fp_fed = [ln for ln in fed.split("\n") if ln.startswith("fp-")]
+        if sorted({ln.split("|")[0] for ln in fp_fed}) != sorted(p + ".pcap" for p in hr23_feed.pins(FP_SUMS)) \
+                or len(fp_fed) != 40:
+            bad.append(f"{case}: the false-positive set's classes not each fed once to each configuration")
         want_fed = {p + ".pcap" for p in pinned()} - ({bad_pin + ".pcap"} if bad_pin else set())
         if extra and ".pcapng" in extra:
             want_fed.discard(ONE + ".pcap")
         if fed_names != want_fed:
             bad.append(f"{case}: fed other than the kept captures: {sorted(fed_names ^ want_fed)}")
-        if len([ln for ln in fed.split("\n") if ln]) != 4 * len(want_fed):
+        if len([ln for ln in fed.split("\n") if ln and not ln.startswith("fp-")]) != 4 * len(want_fed):
             bad.append(f"{case}: not each kept capture fed once to each configuration")
         if bad_pin and (f"{bad_pin}.pcap (differs from its pin)" not in md
                         or f"| {bad_pin} | not run | not run | not run | not run |" not in md):
             bad.append(f"{case}: the capture off its pin was fed, or not reported")
-        if want == 0 and ref == "refs/heads/main" and "81 of 81 captures ran" not in md:
+        if not partial and ref == "refs/heads/main" and "81 of 81 captures ran" not in md:
             bad.append(f"{case}: not every capture ran: {md[-400:]}")
         if first and bad:
             break
@@ -399,7 +442,7 @@ def test_feed_runs_every_pinned_capture_and_fails_only_a_counted_partial_run(tmp
 
 
 FEED_MUTANTS = {
-    "counted-dropped": (" $hr23_counted\n", "\n"),
+    "counted-dropped": ('"$work/hr23-kept.txt" $hr23_counted', '"$work/hr23-kept.txt"'),
     "ref-is-main": ("!= refs/heads/main ]", "!= main ]"),
     "engine-output-printed": ('} > "$work/hr23-engines.txt" 2>&1\n', "}\n"),
     "pin-dropped": ('  python3 -I -B "$here/hr23_feed.py" pin', '  : python3 -I -B "$here/hr23_feed.py" pin'),
@@ -409,6 +452,14 @@ FEED_MUTANTS = {
     "c2-without-viol": ("zeek-probe-c2 /exp/probe.zeek /exp/zeek-patch/viol.zeek", "zeek-probe-c2 /exp/probe.zeek"),
     "c0-without-log-dir": (" OtsecProbe::log_dir=F\n", "\n"),
     "img-not-restored": ("    img=$ZEEK_IMAGE\n", ""),
+    # D2's N2 = D6's G1 on #769: the false-positive set fed and pin-checked.
+    "fp-pin-dropped": ('  python3 -I -B "$here/hr23_feed.py" pin "$work/fp"', '  : python3 -I -B "$here/hr23_feed.py" pin "$work/fp"'),
+    "fp-not-fed": ('"$work/fp=$work/out-fp"', ""),
+    "fp-not-checked": ('  python3 -I -B "$here/hr23_feed.py" check "$work/out-fp"', '  : python3 -I -B "$here/hr23_feed.py" check "$work/out-fp"'),
+    # D2's N1 on #769: likely_server_ports under every configuration.
+    "ports-c2-on-stock": ('"zeek-probe-c2=$HR23_C2_IMAGE="', '"zeek-probe-c2=$ZEEK_IMAGE="'),
+    "ports-c0-without-log-dir": ('"zeek-probe-c0=$ZEEK_IMAGE=OtsecProbe::log_dir=F"', '"zeek-probe-c0=$ZEEK_IMAGE="'),
+    "judge-dropped": ('  python3 -I -B "$here/table.py" hr23judge', '  : python3 -I -B "$here/table.py" hr23judge'),
 }
 
 
@@ -453,7 +504,7 @@ def test_feed_leaves_the_mounted_folder_unchanged(tmp_path):
 @needs_sh
 def test_control_feed_without_dont_write_bytecode_changes_the_folder(tmp_path):
     text = function()
-    assert text.count('python3 -I -B "$here/hr23_feed.py"') == 2
+    assert text.count('python3 -I -B "$here/hr23_feed.py"') == 4
     assert here_hash_changed(tmp_path, text.replace('python3 -I -B "$here/hr23_feed.py"', 'python3 -I "$here/hr23_feed.py"'))
 
 
