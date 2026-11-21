@@ -1,0 +1,28 @@
+{
+  "schema": "otsec.event/0.6",
+  "id": {"node_id": "d6-node", "stream": "platform/health", "seq": 52},
+  "origin": "platform",
+  "kind": "telemetry-health",
+  "source": {"origin_auth": "platform"},
+  "received": {"utc": "2026-11-21T09:00:00.000250Z", "resolution_ns": 1000, "clock": {"sync": "synchronized", "source": "chrony"}},
+  "health": {
+    "type": "detector.observation-refused",
+    "details": {
+      "stream": "network-observation/5a3c2e10-7b4d-4c8e-9f1a-2b3c4d5e6f70",
+      "since": "2026-11-21T08:00:00.000125Z",
+      "through": "940",
+      "netobs": "otsec.netobs/0.3",
+      "unsure": "901-912",
+      "count": "9",
+      "reason.later-minor": "4",
+      "first_seq.later-minor": "903",
+      "last_seq.later-minor": "931",
+      "reason.malformed": "3",
+      "first_seq.malformed": "915",
+      "last_seq.malformed": "938",
+      "reason.detector-refused": "2",
+      "first_seq.detector-refused": "920",
+      "last_seq.detector-refused": "940"
+    }
+  }
+}
