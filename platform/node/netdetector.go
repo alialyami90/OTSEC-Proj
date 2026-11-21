@@ -18,6 +18,7 @@ import (
 	"otsec.local/otsec/contracts/version"
 	"otsec.local/otsec/modules/detection/netdetect"
 	"otsec.local/otsec/platform/sensorlink"
+	"otsec.local/otsec/platform/store"
 )
 
 // The detector consumer (P4-4-B5 deliverable 3, D4-72 to D4-74,
@@ -274,9 +275,16 @@ func (r *Runtime) startDetector(ctx context.Context) error {
 		// Every stored checkpoint goes once a newer one is stored, the
 		// one that didn't restore too.
 		nd.ckpts = seqs
-		var committed []netdetect.Committed
-		committed, skipped, err = r.alertsAfter(ctx, doc)
+		k, err := netobs.DecodeDetectorCheckpoint(doc)
 		if err == nil {
+			// A failed store read is not a failed restore: it fails the
+			// start, under network-detector-not-started, and the next tick
+			// tries again, so a good checkpoint is kept and the alerts
+			// committed after it are held back (D6's F4 on #766).
+			var committed []netdetect.Committed
+			if committed, skipped, err = r.alertsAfter(ctx, c5.Seq(k.LastAlertSeq)); err != nil {
+				return err
+			}
 			nd.d, err = netdetect.RestoreDetector(nd.cfg, doc, committed, head)
 		}
 		if err != nil {
@@ -383,12 +391,8 @@ func (r *Runtime) detectorCheckpoints(ctx context.Context) ([]c5.Seq, []byte, er
 // event.Decode or AlertFromEvent cannot read, such as one of a later minor
 // written before a rollback, is skipped and counted, and the restore goes
 // on with those it read (C13 0.3 section 1.2). A failed read of the store
-// or of the checkpoint fails the restore, with none counted.
-func (r *Runtime) alertsAfter(ctx context.Context, doc []byte) ([]netdetect.Committed, int64, error) {
-	k, err := netobs.DecodeDetectorCheckpoint(doc)
-	if err != nil {
-		return nil, 0, err
-	}
+// returns its error, with none counted, and startDetector fails the start.
+func (r *Runtime) alertsAfter(ctx context.Context, lastAlert c5.Seq) ([]netdetect.Committed, int64, error) {
 	stream := NetAlertStream(r.cfg.NetworkSensor.SensorID)
 	db := r.Store(stream)
 	if db == nil {
@@ -398,8 +402,8 @@ func (r *Runtime) alertsAfter(ctx context.Context, doc []byte) ([]netdetect.Comm
 		out     []netdetect.Committed
 		skipped int64
 	)
-	for after := c5.Seq(k.LastAlertSeq); ; {
-		got, err := db.Read(ctx, stream, after, detectorReadPage)
+	for after := lastAlert; ; {
+		got, err := readAlertPage(db, ctx, stream, after, detectorReadPage)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -422,6 +426,10 @@ func (r *Runtime) alertsAfter(ctx context.Context, doc []byte) ([]netdetect.Comm
 		}
 	}
 }
+
+// readAlertPage is alertsAfter's read of a page of the alert stream. A
+// test swaps it to fail the read (D6's F4 on #766).
+var readAlertPage = (*store.DB).Read
 
 // rebuildFrameIndex indexes the frames of the retained first sights at or
 // below the detector's Through, newest first, until the index is full.
