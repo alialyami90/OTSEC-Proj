@@ -2031,13 +2031,18 @@ def judge_fp(out_fp, root, kept):
     return res
 
 
+DEP_CONTROL = "held (depends on a control)"
+
+
 def cases(out, pcaps, root, ports_of, want, counted, env=None):
     """hr23-cases.tsv's rows, under D1's ruling 7056743490 on #776 (D4-122).
     The held list and the salt come from the environment (hr23_feed.py's
     HELD_ENV and SALT_ENV), never from a committed file; without either, no
     row is judged or printed, and a counted run exits 3. Every row of a held
-    capture reads HELD, and a fix reading that rests on a held capture reads
-    `held (depends on a held row)`; no result, citation or finding of a held
+    capture reads HELD, and every fix reading that reads a capture of the
+    cross-capture control sets (SWAP, PREMISE, OBJ_CONTROL's values) reads
+    DEP_CONTROL, whether or not that control is held, so that the text does
+    not show which control is held (D1's 7057113098 on #776); no result, citation or finding of a held
     capture is printed, and held captures are left out of the counts. One
     SHA-256 is printed, over the salt and the held captures' verdict lines:
     each held row's line as this table would print it, then each finding
@@ -2074,8 +2079,9 @@ def cases(out, pcaps, root, ports_of, want, counted, env=None):
         return 1
     print("Each row under C0, C1, C1p and C2: `as pinned`, `not as pinned`, `unknown` or `reported`, with the result "
           f"and the log line it rests on; then the fix reading (judge-fix). Every row of a held capture reads "
-          f"`{hr23_feed.HELD}`, and a fix reading that rests on a held capture reads `held (depends on a held row)` "
-          "(D1's ruling 7056743490 on #776).\n")
+          f"`{hr23_feed.HELD}`, and every fix reading that reads a control capture of another case reads "
+          f"`{DEP_CONTROL}`, whether or not that control is held (D1's 7056743490 and 7057113098 on #776).\n")
+    controls = {SWAP, PREMISE, *OBJ_CONTROL.values()}
     print("| capture | condition | code | objects | " + " | ".join(CELL_OF[c] for c in JUDGED) + " | fix |")
     print("| --- | --- | --- | --- |" + " --- |" * len(JUDGED) + " --- |")
     secret, tally, fixes = [], collections.Counter(), collections.Counter()
@@ -2086,9 +2092,9 @@ def cases(out, pcaps, root, ports_of, want, counted, env=None):
             secret.append(head + " | ".join(cells) + f" | {fix[n]} |")
             print(head + " | ".join([hr23_feed.HELD] * (len(JUDGED) + 1)) + " |")
             continue
-        f = "held (depends on a held row)" if deps[n] & held else fix[n]
+        f = DEP_CONTROL if (deps[n] - {r["capture"]}) & controls else fix[n]
         tally.update(oc[n][cfg] for cfg in JUDGED)
-        fixes[f.split(" (")[0]] += 1
+        fixes[f if f == DEP_CONTROL else f.split(" (")[0]] += 1
         print(head + " | ".join(cells) + f" | {f} |")
     shown = [t for caps, t in findings if not caps & held]
     secret += [t for caps, t in findings if caps & held]

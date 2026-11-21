@@ -119,38 +119,48 @@ def test_control_held_capture_mutant_is_caught(monkeypatch, capsys, tmp_path, ol
     assert held_capture_problems(m, monkeypatch, capsys, tmp_path) != []
 
 
-# Rule 2: a fix reading of another capture that rests on a held capture
-# reads `held (depends on a held row)`. Both rules that read another
+# Rule 2 (with D1's 7057113098 on #776): every fix reading that reads a
+# control capture of another case reads `held (depends on a control)`,
+# whether or not that control is held. Both rules that read another
 # capture's rows are tried, each with a neutral capture in the place of
-# the one it reads.
+# the one it reads: held (CTL = HOLD), and not held (CTL = syn-ctl, with
+# HOLD held and unrelated).
 
-DEP = "held (depends on a held row)"
+DEP = table.DEP_CONTROL
 
 
-def objects_case(m, monkeypatch):
-    monkeypatch.setattr(m, "OBJ_CONTROL", {"g99v1": HOLD})
+def objects_case(m, monkeypatch, ctl=HOLD):
+    monkeypatch.setattr(m, "OBJ_CONTROL", {"g99v1": ctl})
     rows = [case("syn-dep", "objects", objects="g99v1", fix="b", c0="fail", c1="fail", c1p="fail"),
-            case(HOLD, "objects", objects="g99v1")]
-    results = {"syn-dep": {C0: "fail", C1: "fail", C1P: "fail", C2: "pass"}, HOLD: ALL(f"fail ({MARK})")}
+            case(ctl, "objects", objects="g99v1")] + ([] if ctl == HOLD else [case(HOLD)])
+    results = {"syn-dep": {C0: "fail", C1: "fail", C1P: "fail", C2: "pass"}, ctl: ALL(f"fail ({MARK})"),
+               HOLD: ALL(f"fail ({MARK})")}
     return rows, results, ()
 
 
-def relay_case(m, monkeypatch):
-    monkeypatch.setattr(m, "SWAP", HOLD)
-    rows = [case("syn-dep"), case(HOLD, "protocol")]
-    return rows, {"syn-dep": RESULTS["syn-a"], HOLD: ALL(f"fail ({MARK})")}, ("syn-dep",)
+def relay_case(m, monkeypatch, ctl=HOLD):
+    monkeypatch.setattr(m, "SWAP", ctl)
+    rows = [case("syn-dep"), case(ctl, "protocol")] + ([] if ctl == HOLD else [case(HOLD)])
+    return rows, {"syn-dep": RESULTS["syn-a"], ctl: ALL(f"fail ({MARK})"), HOLD: ALL(f"fail ({MARK})")}, ("syn-dep",)
 
 
-def dependent_fix(m, monkeypatch, capsys, tmp_path, which):
-    rows, results, relay = which(m, monkeypatch)
+def dependent_fix(m, monkeypatch, capsys, tmp_path, which, ctl=HOLD):
+    rows, results, relay = which(m, monkeypatch, ctl)
     rc, out = run(m, monkeypatch, capsys, tmp_path, rows, results, relay=relay)
     line = next(ln for ln in out.splitlines() if ln.startswith("| syn-dep |"))
     return rc, line.rsplit(" | ", 1)[1].rstrip(" |")
 
 
+@pytest.mark.parametrize("ctl", [HOLD, "syn-ctl"], ids=["control-held", "control-not-held"])
 @pytest.mark.parametrize("which", [objects_case, relay_case], ids=["objects", "relay"])
-def test_a_fix_reading_that_rests_on_a_held_capture_reads_held(monkeypatch, capsys, tmp_path, which):
-    assert dependent_fix(table, monkeypatch, capsys, tmp_path, which) == (0, DEP)
+def test_a_fix_reading_that_reads_a_control_reads_held(monkeypatch, capsys, tmp_path, which, ctl):
+    assert dependent_fix(table, monkeypatch, capsys, tmp_path, which, ctl) == (0, DEP)
+
+
+@pytest.mark.parametrize("which", [objects_case, relay_case], ids=["objects", "relay"])
+def test_control_marking_only_the_dependents_of_held_controls_is_caught(monkeypatch, capsys, tmp_path, which):
+    m = load(table, '(deps[n] - {r["capture"]}) & controls', '(deps[n] - {r["capture"]}) & held', "mutant_table")
+    assert dependent_fix(m, monkeypatch, capsys, tmp_path, which, "syn-ctl")[1].startswith("unknown (judge-")
 
 
 DEP_MUTANTS = {
