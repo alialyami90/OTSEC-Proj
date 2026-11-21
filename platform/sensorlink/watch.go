@@ -86,6 +86,10 @@ type IfaceMark struct {
 var k1ProcessOnly, placeAtReceipt, stepNoSamples, stepCapsCaptureFloor, stepFoundOnly, stepAnyBack, stepTickOnly bool
 var stepClocksBeforeLock, watchSetResets, stepCopyUnmoved, k1KeptAnySeq, sampleClocksBeforeLock bool
 
+// stepMinuteOnly acts only on a step back of a minute or more: V-9's
+// eleventh case's second control (D6's N3 on #781).
+var stepMinuteOnly bool
+
 // ifLive is an interface's CH-31 state in this process.
 type ifLive struct {
 	packets  uint64
@@ -121,6 +125,28 @@ type watch struct {
 	owedStep time.Duration // found, its event not yet written
 	owedSave bool          // found, the cursor and the run file not yet saved
 	copyBack time.Duration // found, not yet applied to the run file's copy
+	// liveTotal is the run's counters.packets at its heartbeat before, for
+	// the rule that a rise counts only when it rose (D1's ruling on D3's
+	// N-b, #781).
+	liveTotal uint64
+	// The gap model (gap.go, 2e-2): the gap open, the closing record that
+	// waits, the gap floor; frozen: W and R were taken from the cursor
+	// at the start and are not moved until a gap closes unwatched (2e-3
+	// builds the node-start gap); heldSave: an unwatched close's raise is
+	// not yet saved; gapDue: a record may be due; current: a connection
+	// whose hello is current is live; wRecv and wMono: the receipt of W's
+	// heartbeat and W itself on the monotonic clock; ch: the chain.
+	open     *openGap
+	wait     *waitRec
+	floor    time.Time
+	frozen   bool
+	heldSave bool
+	gapDue   bool
+	current  bool
+	wRecv    time.Duration
+	wMono    time.Duration
+	ch       chain
+	obsSeen  bool // gapNeedsObservation's control only
 }
 
 // blindAfter is blind_after_s.
@@ -132,7 +158,7 @@ func (l *Link) blindAfter() time.Duration {
 }
 
 // takeWatch takes the saved W, R and the kept interfaces at the first read
-// of the cursor in this process.
+// of the cursor in this process, c nil when there is none.
 func (l *Link) takeWatch(c *Cursor) {
 	s := &l.skew
 	s.mu.Lock()
@@ -142,7 +168,19 @@ func (l *Link) takeWatch(c *Cursor) {
 		return
 	}
 	wt.taken = true
+	if c == nil {
+		return // no cursor at the first read: nothing to take
+	}
 	wt.w, wt.wSeq, wt.wAt, wt.r = c.W, c.WSeq, c.WAtUTC, c.R
+	// Until 2e-3's node-start gap, W and R saved before the stop are not
+	// moved by a placement, so a gap after the start reaches back across
+	// the stop (D1's 7056051455 on #770).
+	wt.frozen = !c.W.IsZero() || !c.R.IsZero()
+	if c.Held != nil {
+		// A gap held for the floor at the stop is written first (CH-45).
+		wt.wait = &waitRec{HeldGap: *c.Held}
+		wt.floor = c.Held.To
+	}
 	if len(c.Ifaces) > 0 {
 		wt.run, wt.kept = c.RunID, slices.Clone(c.Ifaces)
 	}
@@ -156,6 +194,14 @@ func (l *Link) watchInto(c *Cursor) {
 	defer s.mu.Unlock()
 	wt := &s.wt
 	c.W, c.WSeq, c.WAtUTC, c.R, c.Ifaces = wt.w, wt.wSeq, wt.wAt, wt.r, nil
+	c.Causes, c.Held = 0, nil
+	if wt.open != nil {
+		c.Causes = wt.open.causes
+	}
+	if w := wt.wait; w != nil && !w.covered {
+		g := w.HeldGap
+		c.Held = &g
+	}
 	if wt.w.IsZero() {
 		c.WSeq, c.WAtUTC = 0, time.Time{}
 	}
@@ -239,19 +285,33 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 		wall, mono = l.now(), l.opt.Monotonic()
 	}
 	wt := &s.wt
+	epoch := time.Unix(0, 0).UTC()
 	if wt.liveRun != h.RunID {
 		// The run's first heartbeat read in this process.
 		wt.liveRun, wt.live, wt.beganOK = h.RunID, map[string]*ifLive{}, false
 		kept := wt.run == h.RunID && len(wt.kept) == len(names)
+		newHere := wt.newRun == h.RunID
+		wt.liveTotal = h.Counters.Packets
+		if kept {
+			wt.liveTotal = 0
+		}
 		for i, n := range names {
 			if kept {
 				wt.live[n] = &ifLive{packets: wt.kept[i].Packets, riseAt: wt.kept[i].RiseUTC, fromBegin: true}
-			} else {
-				// CH-31 starts again at the run's first heartbeat read.
-				wt.live[n] = &ifLive{packets: byName[n].Packets, riseAt: at, fromBegin: true}
+				wt.liveTotal += wt.kept[i].Packets
+				continue
 			}
+			// CH-31 starts again at the run's first heartbeat read. Its
+			// at_utc is the run's first heartbeat's only when the run was
+			// accepted as new here; otherwise no rise is held (D1's ruling
+			// on D6's N4, #781).
+			rise := at
+			if !newHere && !gapRiseFirstSeen {
+				rise = epoch
+			}
+			wt.live[n] = &ifLive{packets: byName[n].Packets, riseAt: rise, fromBegin: true}
 		}
-		if !kept && wt.newRun == h.RunID {
+		if !kept && newHere {
 			wt.began, wt.beganOK = mono, true
 		}
 	}
@@ -264,8 +324,13 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	for _, n := range names {
 		if wt.live[n] == nil {
 			// First seen within the run: no rise and no grace of the run's
-			// start until its own packets rise (D3's B1 on #774).
-			wt.live[n], changed = &ifLive{packets: byName[n].Packets, riseAt: at}, true
+			// start until its own packets rise (D3's B1 on #774), and no
+			// rise held for the chain (D6's N4, #781).
+			rise := epoch
+			if gapRiseFirstSeen {
+				rise = at
+			}
+			wt.live[n], changed = &ifLive{packets: byName[n].Packets, riseAt: rise}, true
 		}
 	}
 	if watchSetResets && changed && wt.newRun == h.RunID {
@@ -274,17 +339,26 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 			lv.fromBegin = true
 		}
 	}
+	// A rise counts only when the run's counters.packets rose too (D1's
+	// ruling on D3's N-b, #781).
+	totalRose := h.Counters.Packets > wt.liveTotal || gapRiseNoTotal
+	wt.liveTotal = h.Counters.Packets
 	capture, rose := false, false
 	for _, n := range names {
 		ic, lv := byName[n], wt.live[n]
-		if ic.Packets > lv.packets {
+		if ic.Packets > lv.packets && totalRose {
 			lv.riseAt, lv.riseMono, lv.rose = at, mono, true
-			rose = rose || ic.Carrier != "down"
+			rose = rose || ic.Carrier != "down" || gapBlindFromAnyRise
 		}
 		lv.packets = ic.Packets
 		if ic.Carrier != "down" && (lv.rose && mono-lv.riseMono <= blind || lv.fromBegin && wt.beganOK && mono-wt.began <= blind) {
 			capture = true
 		}
+	}
+	s.extendChainLocked(h, at, blind)
+	if g := wt.open; g != nil && gapCloseAtReconnect && cn.hello != nil {
+		// The control: closed at the reconnect, before the backlog is through.
+		s.closeLocked(true, wall)
 	}
 	if !current || late || s.bl.on {
 		return
@@ -296,16 +370,61 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	if unix0 := time.Unix(0, 0); p.Before(unix0) {
 		p = unix0
 	}
+	if !gapNoFloor && p.Before(wt.floor) {
+		p = wt.floor // never below the floor
+	}
+	// A silent gap that fell due before this heartbeat opens first.
+	s.silentDueLocked(wall, mono)
+	if g := wt.open; g != nil {
+		if !capture {
+			g.causes |= gapCauseBit(CauseBlind)
+		}
+		lateness := wall.Sub(at.Add(s.movedELocked()))
+		switch {
+		case g.causes&gapCauseBit(CauseSensorFailed) != 0:
+			return // nothing closes it in this process
+		case g.causes&gapCauseBit(CauseSilent) != 0 && lateness >= HeartbeatGapMax && !gapSilentEndsAtCurrent:
+			return // the silence's cause has not ended
+		case g.causes&gapCauseBit(CauseBlind) != 0:
+			if !rose {
+				return
+			}
+			s.closeLocked(false, wall)
+		case (!gapSilentNeverCovered || g.causes&gapCauseBit(CauseSilent) == 0) && s.chainCoversLocked(cn, wall, mono):
+			s.closeLocked(true, wall)
+		case capture:
+			s.closeLocked(false, wall)
+		default:
+			return
+		}
+		if !gapNoFloor && p.Before(wt.floor) {
+			p = wt.floor
+		}
+	}
+	if wt.frozen {
+		return
+	}
 	if rose {
 		wt.r = p
+		if gapRAtReceipt {
+			wt.r = wall
+		}
 	}
 	if capture {
+		if gapWAtReceipt {
+			p = wall
+		}
 		wt.w, wt.wSeq, wt.wAt, wt.placed = p, num(h.Seq), at, true
+		wt.wRecv, wt.wMono = mono, mono-wall.Sub(p)
 		wt.run, wt.kept = h.RunID, make([]IfaceMark, len(names))
 		for i, n := range names {
 			wt.kept[i] = IfaceMark{Packets: wt.live[n].packets, RiseUTC: wt.live[n].riseAt}
 		}
+		s.startChainLocked(cn, h, at, wt.wMono, blind)
+		return
 	}
+	// Every interface blind: W stays, and a blind gap opens (CH-45).
+	s.openLocked(CauseBlind, wall, mono)
 }
 
 // movedELocked is E with each sample moved back by the steps found since it
@@ -360,7 +479,7 @@ func (l *Link) measureStep() bool {
 	wt := &s.wt
 	if wt.checked {
 		diff := wall.Sub(wt.chkWall) - (mono - wt.chkMono)
-		if back := -diff; back > MaxSkew || stepAnyBack && back > 0 {
+		if back := -diff; back > MaxSkew && (!stepMinuteOnly || back >= time.Minute) || stepAnyBack && back > 0 {
 			s.moveBackLocked(back)
 		} else {
 			wt.unfound += diff
@@ -371,7 +490,7 @@ func (l *Link) measureStep() bool {
 		// A value still later than the wall clock is a step the check
 		// could not measure: it takes the wall-clock time.
 		capped := time.Duration(0)
-		for _, t := range []*time.Time{&wt.w, &wt.r} {
+		for _, t := range []*time.Time{&wt.w, &wt.r, &wt.floor} {
 			if t.After(wall) {
 				capped = max(capped, t.Sub(wall))
 				*t = wall
@@ -379,6 +498,7 @@ func (l *Link) measureStep() bool {
 		}
 		if capped > 0 {
 			wt.owedStep, wt.owedSave = wt.owedStep+capped, true
+			s.markStepLocked()
 		}
 	}
 	if stepCapsCaptureFloor {
@@ -396,11 +516,12 @@ func (l *Link) measureStep() bool {
 // W or R is held (D3's B3 on #774). The caller holds s.mu.
 func (s *skew) moveBackLocked(d time.Duration) {
 	wt := &s.wt
-	for _, t := range []*time.Time{&wt.w, &wt.r} {
+	for _, t := range []*time.Time{&wt.w, &wt.r, &wt.floor} {
 		if !t.IsZero() {
 			*t = t.Add(-d)
 		}
 	}
+	s.markStepLocked()
 	if !stepCopyUnmoved {
 		wt.copyBack += d
 	}
@@ -443,6 +564,9 @@ func (l *Link) stepAtReceipt(ctx context.Context) error {
 func (l *Link) CheckStep(ctx context.Context) {
 	if err := l.stepAt(ctx); err != nil {
 		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: W and R moved by a step of the node's clock were not saved: %v", l.cfg.SensorID, err))
+	}
+	if l.skewOn() {
+		l.gapTick(ctx) // a silent gap due, and the gap records due (2e-2)
 	}
 }
 
@@ -508,7 +632,9 @@ func (l *Link) saveMoved(ctx context.Context) error {
 // back if it finds a step; its event and the cursor's save wait for the
 // next check that can act, since the run file is being written.
 func (l *Link) watchedCopy() (c time.Time, back time.Duration) {
-	l.measureStep()
+	if !stepTickOnly {
+		l.measureStep()
+	}
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()

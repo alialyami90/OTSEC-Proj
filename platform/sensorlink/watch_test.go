@@ -74,6 +74,7 @@ func wantW(t *testing.T, r *healthRig, w, rr time.Time, what string) {
 // (V-16's fifth case's placement half): a node that places W and R at
 // their receipts, which places a heartbeat delayed 120 s at its receipt.
 func TestWPlacedAtCurrentHeartbeat(t *testing.T) {
+	withSeam(t, &gapsOff) // W and R alone: no gap opens (2e-2's legs are gap_test.go's)
 	// Each heartbeat is made 120 s before its receipt, a second after the
 	// frame before is acted on.
 	run := func(t *testing.T, check bool) *healthRig {
@@ -385,6 +386,7 @@ func TestStepCapsWAtWallClock(t *testing.T) {
 // read exactly blind_after_s after the last rise still shows capture, one
 // read a nanosecond later does not.
 func TestWatchBoundaries(t *testing.T) {
+	withSeam(t, &gapsOff) // W and R alone: no gap opens (2e-2's legs are gap_test.go's)
 	r := newHealthRig(t)
 	p := r.accepted(live02())
 	r.beatAt(p, hbWith(1, at(r.now().Add(time.Second)), pk(100, "up")))
@@ -584,6 +586,7 @@ func ifs(names []string, packets []uint64) func(*netobs.Heartbeat) {
 // {eth0: 0, eth1: 100}). Control: a change of the interface set starts the
 // run's began again, under which W moves through the flat stretch.
 func TestCaptureStateByName(t *testing.T) {
+	withSeam(t, &gapsOff) // W and R alone: no gap opens (2e-2's legs are gap_test.go's)
 	for _, c := range []struct {
 		what string
 		set  func(i int) func(*netobs.Heartbeat)
@@ -721,6 +724,7 @@ func TestPlaceReadsClocksUnderLock(t *testing.T) {
 // held and the tick's sample, taken on the old clock, is stored unmoved:
 // W is placed 5 s after the making time.
 func TestSampleReadsClocksUnderLock(t *testing.T) {
+	withSeam(t, &gapsOff) // W and R alone: no gap opens (2e-2's legs are gap_test.go's)
 	run := func(t *testing.T) (*healthRig, time.Duration) {
 		r, p, _ := placed2(t)
 		p.taken()

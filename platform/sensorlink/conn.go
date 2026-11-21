@@ -187,6 +187,11 @@ type Cursor struct {
 	WAtUTC time.Time   `json:"w_at,omitzero"`
 	R      time.Time   `json:"r,omitzero"`
 	Ifaces []IfaceMark `json:"ifaces,omitempty"`
+	// Causes are the causes of the gap open now, held in W, as bits of
+	// gapCauses; Held is the gap held for the floor (CH-18; gap.go). Both
+	// written by Link.encode at each write, as W is.
+	Causes uint16   `json:"causes,omitempty"`
+	Held   *HeldGap `json:"held,omitempty"`
 }
 
 func checkCursorBytes(b []byte) error {
@@ -301,7 +306,11 @@ func (l *Link) ServeConn(ctx context.Context, c Conn, en Enrolment) string {
 		l.conn.Connected = 0
 		l.mu.Unlock()
 	}()
-	reason := l.serveConn(ctx, &conn{c: c, en: en})
+	cn := &conn{c: c, en: en}
+	reason := l.serveConn(ctx, cn)
+	// The connection's end: a link gap opens when its hello was accepted
+	// (CH-45).
+	l.connEnded(ctx, cn.hello != nil)
 	if reason != "" {
 		l.countClose(reason)
 	}
@@ -521,6 +530,7 @@ func (l *Link) loadCursor(ctx context.Context) (*Cursor, error) {
 	if err != nil || b == nil {
 		if err == nil {
 			l.takeM(time.Time{}) // no cursor: no M, and the start's first break begins
+			l.takeWatch(nil)
 		}
 		return nil, err
 	}
@@ -923,6 +933,7 @@ func (l *Link) acceptHello(ctx context.Context, cn *conn, cur *Cursor, b []byte)
 		l.runBegan(h.RunID)
 	}
 	l.resetRun(ctx, h.RunID, v.Accept == netobs.HelloNewRun)
+	l.gapNewRun(v.Accept == netobs.HelloNewRun, h.Current != nil && *h.Current)
 	l.breakEnd(h, cn.en.Generation, next.Taken) // the break ends, before the hello is the last frame
 	l.frameAccepted()
 	if opened > 0 {
@@ -1277,7 +1288,13 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 	l.stats.HeartbeatMono = l.opt.Monotonic()
 	l.mu.Unlock()
 	cn.cur.Taken, cn.pending = max(cn.cur.Taken, n), true
-	l.place(cn, h, late)
+	// An unwatched close's raise is saved before its record is written; a
+	// save that fails closes store, and the raise is saved with the next
+	// save (CH-18).
+	if err := l.placeAndAct(ctx, cn, h, late); err != nil {
+		l.raise(AlarmPositionNotSaved, fmt.Sprintf("sensor %s: a gap's raise was not saved: %v", l.cfg.SensorID, err))
+		return netobs.CloseStore
+	}
 	if degraded(h.Coverage) {
 		l.cmu.Lock()
 		l.giveWay(ctx, false)
@@ -1409,6 +1426,9 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	if o.Coverage.ConfigDigest != cn.cur.Digest {
 		l.takeRefused(cn, n, string(netobs.CodeConflict)) // CH-32
 		return ""
+	}
+	if gapNeedsObservation {
+		l.sawObservation()
 	}
 	// The flush runs before the record's cursor is built, so what a
 	// release moved is either in cn.cur now or in l.moved after the encode,

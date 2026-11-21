@@ -34,6 +34,8 @@ type memSink struct {
 	mu     sync.Mutex
 	events []sinkEvent
 	fail   map[string]error
+	// refuse, when set, refuses the events it names, as the ceiling does.
+	refuse func(typ string, d map[string]string) bool
 }
 
 func (s *memSink) WriteHealth(_ context.Context, typ string, d map[string]string) error {
@@ -41,6 +43,9 @@ func (s *memSink) WriteHealth(_ context.Context, typ string, d map[string]string
 	defer s.mu.Unlock()
 	if err := s.fail[typ]; err != nil {
 		return err
+	}
+	if s.refuse != nil && s.refuse(typ, d) {
+		return errDown
 	}
 	s.events = append(s.events, sinkEvent{typ, maps.Clone(d)})
 	return nil
