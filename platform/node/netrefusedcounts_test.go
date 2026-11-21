@@ -16,6 +16,7 @@ import (
 	"otsec.local/otsec/contracts/netobs"
 	c5 "otsec.local/otsec/contracts/store"
 	"otsec.local/otsec/contracts/syslog"
+	"otsec.local/otsec/contracts/version"
 	"otsec.local/otsec/platform/store"
 )
 
@@ -331,7 +332,9 @@ func TestRefusedCountsCrashAfterEvent(t *testing.T) {
 // The cause the start names: "a build change" when the newest event's
 // envelope schema or netobs detail is not this build's own, at U > T
 // (proposal section 4). Each is rewritten in the store, as another build
-// would have written it. Control: U = T with netobs changed is not marked.
+// would have written it. Controls (section 4): U = T and U < T, each with
+// the schema or netobs changed, are not marked (D6's N1 (f) on #779).
+// Mutant: a schema change marked at U <= T.
 func TestRefusedCountsCauseBuildChange(t *testing.T) {
 	other := "otsec.netobs/0.1"
 	if netobs.SelfIdentifier() == other {
@@ -351,17 +354,33 @@ func TestRefusedCountsCauseBuildChange(t *testing.T) {
 			}
 		})
 	}
-	g := newCountsRig(t)
-	r, _ := g.first()
-	g.store(r, 1, true)
-	tick(t, r)
-	seqs, _ := countsEventsAt(t, r)
-	r.Close()
-	corruptEvent(t, g.c, HealthStream, seqs[0], `"netobs":"`+netobs.SelfIdentifier()+`"`, `"netobs":"`+other+`"`)
-	r, st := g.start()
-	defer r.Close()
-	if d := detectorStatus(t, st); !d.RefusedExact || d.RefusedUnsure != "" || refusedOf(d) != 1 {
-		t.Fatalf("control, U = T: %+v", d)
+	for _, below := range []int{0, 1} { // U = T, then U < T
+		for name, edit := range map[string][2]string{
+			"netobs": {`"netobs":"` + netobs.SelfIdentifier() + `"`, `"netobs":"` + other + `"`},
+			"schema": {`"schema":"` + event.Identifier + `"`, `"schema":"otsec.event/0.5"`},
+		} {
+			t.Run(fmt.Sprintf("control-below-%d-%s", below, name), func(t *testing.T) {
+				g := newCountsRig(t)
+				r, st := g.first()
+				g.store(r, 1, true)
+				tick(t, r)
+				if below > 0 {
+					g.store(r, below, false)
+					tick(t, r)
+				}
+				seqs, evs := countsEventsAt(t, r)
+				if d := detectorStatus(t, st); len(evs) != 1 || evs[0]["through"] != "2" || d.Checkpointed != uint64(2+below) {
+					t.Fatalf("before the restart: U %v, T %d", evs, d.Checkpointed)
+				}
+				r.Close()
+				corruptEvent(t, g.c, HealthStream, seqs[0], edit[0], edit[1])
+				r, st = g.start()
+				defer r.Close()
+				if d := detectorStatus(t, st); !d.RefusedExact || d.RefusedUnsure != "" || refusedOf(d) != 1 {
+					t.Fatalf("%+v", d)
+				}
+			})
+		}
 	}
 }
 
@@ -415,6 +434,8 @@ func TestRefusedCountsMarkWidened(t *testing.T) {
 	r, _ := g.start() // carried 2-3, written at 3, checkpoint 3
 	g.store(r, 2, false)
 	tick(t, r) // checkpoint 5
+	// The budget's spacing after the write at 3.
+	g.advance(time.Hour / RefusedCountsPerHour)
 	g.store(r, 2, true)
 	undo := failCheckpoint(t)
 	tick(t, r) // the event at 7, its checkpoint not stored
@@ -533,6 +554,38 @@ func TestRefusedCountsBeginAgain(t *testing.T) {
 			}
 		})
 	}
+	// The newest counts event stamped one C4 minor above this build's and
+	// holding a reason this build does not know, as after a rollback: the
+	// counts begin again, shown exact only under the new since, and the
+	// next counts event commits (choice 3; D3's B2, D6's N1 (d) on #779).
+	// Mutant: the unknown reason skipped, a partial restore under the old
+	// since, whose next event C4's closed reason set refuses.
+	t.Run("later-minor-reason", func(t *testing.T) {
+		g := newCountsRig(t)
+		r, _ := g.first()
+		g.store(r, 1, true)
+		tick(t, r)
+		seqs, _ := countsEventsAt(t, r)
+		r.Close()
+		self, err := version.Parse(event.Identifier)
+		if err != nil {
+			t.Fatal(err)
+		}
+		later := version.ID{Name: self.Name, Major: self.Major, Minor: self.Minor + 1}.String()
+		corruptEvent(t, g.c, HealthStream, seqs[0], `"schema":"`+event.Identifier+`"`, `"schema":"`+later+`"`)
+		corruptEvent(t, g.c, HealthStream, seqs[0], `"count":"1"`, `"count":"2","reason.zz-later":"1","first_seq.zz-later":"2","last_seq.zz-later":"2"`)
+		g.advance(time.Hour)
+		r, st := g.start()
+		defer r.Close()
+		if d := detectorStatus(t, st); d.Refused != 0 || !d.RefusedExact || d.RefusedUnsure != "" || !d.RefusedSince.Equal(g.now()) {
+			t.Fatalf("begun again: %+v", d)
+		}
+		g.store(r, 1, true)
+		tick(t, r)
+		if ev := newest(t, r); ev["count"] != "1" || ev["through"] != "3" || ev["since"] != g.now().Format(time.RFC3339Nano) {
+			t.Fatalf("the next counts event: %v", ev)
+		}
+	})
 }
 
 // T5 (d): a counts write held past RefusedCountsWait (the seam clock): the
@@ -598,27 +651,38 @@ func TestRefusedCountsForcedCheckpoint(t *testing.T) {
 	}
 }
 
-// The budget: at most RefusedCountsPerHour counts events an hour; a fifth
-// change in the hour holds its checkpoint until the oldest write is an
-// hour old (section 5). Mutants: no budget, or one more, which writes a
-// fifth; a write that leaves the hour only past an hour, which holds it
-// at exactly an hour.
+// The budget: a counts event is written no sooner than
+// time.Hour/RefusedCountsPerHour after the last, so the budget alone holds
+// a checkpoint at most that long (section 5; D3's B1 on #779). Steady
+// refusals, one a minute for 3 hours, write 4 events an hour, each hold of
+// the checkpoint ends 14 minutes after it began (the refusal a minute after
+// a write waits for the next write at 15), and no alarm is raised.
+// Controls: the sliding-hour budget (4 writes in any hour), which holds the
+// checkpoint 56 minutes each hour with no alarm; no budget, which writes an
+// event a minute; a write only past the spacing, which holds 15 minutes.
 func TestRefusedCountsBudget(t *testing.T) {
 	g := newCountsRig(t)
 	r, st := g.first()
 	defer r.Close()
-	for range RefusedCountsPerHour + 1 {
+	var from, longest time.Duration // from: when the current hold began, 0 if none
+	for range 180 {
 		g.store(r, 1, true)
 		tick(t, r)
+		now, d := g.monoNow(), detectorStatus(t, st)
+		switch {
+		case d.Checkpointed < d.Through && from == 0:
+			from = now
+		case d.Checkpointed == d.Through && from != 0:
+			longest, from = max(longest, now-from), 0
+		}
 		g.advance(time.Minute)
 	}
-	if n, d := len(countsEvents(t, r)), detectorStatus(t, st); n != RefusedCountsPerHour || d.Checkpointed != 5 || d.Through != 6 {
-		t.Fatalf("%d counts events, status %+v", n, d)
+	if from != 0 {
+		longest = max(longest, g.monoNow()-from)
 	}
-	g.advance(55 * time.Minute) // the oldest write is now exactly an hour old
-	tick(t, r)
-	if n, d := len(countsEvents(t, r)), detectorStatus(t, st); n != RefusedCountsPerHour+1 || d.Checkpointed != 6 || !d.RefusedExact {
-		t.Fatalf("an hour later: %d counts events, status %+v", n, d)
+	n := len(countsEvents(t, r))
+	if want := time.Hour/RefusedCountsPerHour - time.Minute; longest != want || n != 3*RefusedCountsPerHour || countAlarms(st, AlarmRefusedCountsUnwritten) != 0 {
+		t.Fatalf("over 3 hours: longest hold %s (want %s), %d counts events, %d unwritten alarms", longest, want, n, countAlarms(st, AlarmRefusedCountsUnwritten))
 	}
 }
 
@@ -794,5 +858,110 @@ func TestRefusedCountsScanReadFails(t *testing.T) {
 	tick(t, r)
 	if d := detectorStatus(t, st); refusedOf(d) != 2 || d.RefusedSince.Equal(g.now()) || !d.RefusedExact {
 		t.Fatalf("the next start: %+v", d)
+	}
+}
+
+// A second episode after a forced checkpoint and a successful write: the
+// next owed event holds the checkpoint again, store-commit-failed is raised
+// again for it, and its forced alarm names only its own seqs (D6's N1 (a)
+// on #779). Mutants: forced, failRaised or pending not reset at the write.
+func TestRefusedCountsSecondEpisode(t *testing.T) {
+	g := newCountsRig(t)
+	r, st := g.first()
+	defer r.Close()
+	undo := failCounts(t)
+	g.store(r, 2, true)
+	tick(t, r)
+	g.advance(RefusedCountsWait)
+	g.store(r, 1, false)
+	tick(t, r) // forced at 4
+	undo()
+	g.advance(time.Minute)
+	tick(t, r) // written at 4
+	if n := len(countsEvents(t, r)); n != 1 || countAlarms(st, string(c5.AlarmCommitFailed)) != 1 {
+		t.Fatalf("the first episode: %d counts events, %d commit-failed", n, countAlarms(st, string(c5.AlarmCommitFailed)))
+	}
+	failCounts(t)
+	// The budget's spacing after the write.
+	g.advance(time.Hour / RefusedCountsPerHour)
+	g.store(r, 1, true)
+	tick(t, r)
+	if d := detectorStatus(t, st); d.Through != 5 || d.Checkpointed != 4 || countAlarms(st, string(c5.AlarmCommitFailed)) != 2 {
+		t.Fatalf("the second episode: not held, or no second commit-failed: %+v, %d", d, countAlarms(st, string(c5.AlarmCommitFailed)))
+	}
+	g.advance(RefusedCountsWait)
+	g.store(r, 1, false)
+	tick(t, r)
+	var last string
+	for _, a := range st.Snapshot("x").Alarms {
+		if a.Code == AlarmRefusedCountsUnwritten {
+			last = a.Detail
+		}
+	}
+	if n := countAlarms(st, AlarmRefusedCountsUnwritten); n != 2 || !strings.Contains(last, "at seqs 5-5 ") {
+		t.Fatalf("the second forced alarm: %d alarms, %q", n, last)
+	}
+}
+
+// A clean stop inside RefusedCountsWait, the checkpoint held and not
+// forced, raises no network-refused-counts-unwritten: its text would say
+// the checkpoint was stored without the event (choice 2; D6's N1 (b) on
+// #779). Mutant: the stop raises while owed, forced or not.
+func TestRefusedCountsStopInsideWait(t *testing.T) {
+	g := newCountsRig(t)
+	r, st := g.first()
+	failCounts(t)
+	g.store(r, 2, true)
+	tick(t, r)
+	g.advance(time.Minute)
+	r.Close()
+	if n := countAlarms(st, AlarmRefusedCountsUnwritten); n != 0 {
+		t.Fatalf("%d unwritten alarms at a stop inside the wait", n)
+	}
+}
+
+// The start's scan reads only this stream's counts events: a newer one of
+// another stream is passed over (the stream pin; D3's N1, D6's N1 (c) on
+// #779). Mutant: the stream pin removed, which restores the other
+// stream's counts.
+func TestRefusedCountsStreamPinned(t *testing.T) {
+	g := newCountsRig(t)
+	r, _ := g.first()
+	g.store(r, 2, true)
+	tick(t, r)
+	if _, err := r.sensorHealth(bg, event.Health{Type: event.HealthObservationRefused, Details: map[string]string{
+		"stream": string(NetObservationStream(otherSensor)), "since": g.now().Format(time.RFC3339Nano), "through": "9", "netobs": netobs.SelfIdentifier(),
+		"count": "5", "reason.malformed": "5", "first_seq.malformed": "1", "last_seq.malformed": "9"}}); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	r, st := g.start()
+	defer r.Close()
+	if d := detectorStatus(t, st); d.Refused != 2 || d.RefusedBy[RefusedMalformed] != 0 || !d.RefusedExact {
+		t.Fatalf("%+v", d)
+	}
+}
+
+// A counts write held by the platform class's ceiling holds the checkpoint
+// to RefusedCountsWait, then forces it with the ceiling as the cause, and
+// raises no store-commit-failed (D6's N1 (e) on #779). Mutant: the
+// ceiling taken as a failed write.
+func TestRefusedCountsCeilingHold(t *testing.T) {
+	g := newCountsRig(t)
+	r, st := g.first()
+	defer r.Close()
+	refusedWrite = func(*Runtime, context.Context, event.Health) (c5.Key, error) { return c5.Key{}, errPastCeiling }
+	t.Cleanup(func() { refusedWrite = (*Runtime).sensorHealth })
+	g.store(r, 2, true)
+	tick(t, r)
+	if d := detectorStatus(t, st); d.Checkpointed != 1 {
+		t.Fatalf("not held: %+v", d)
+	}
+	g.advance(RefusedCountsWait)
+	g.store(r, 1, false)
+	tick(t, r)
+	d, alarm := detectorStatus(t, st), adminAlarm(st, AlarmRefusedCountsUnwritten)
+	if d.Checkpointed != 4 || !strings.Contains(alarm, "(the platform class's ceiling)") || countAlarms(st, string(c5.AlarmCommitFailed)) != 0 {
+		t.Fatalf("forced: %+v, %q, %d commit-failed", d, alarm, countAlarms(st, string(c5.AlarmCommitFailed)))
 	}
 }
