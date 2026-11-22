@@ -3087,4 +3087,5 @@ Evidence class: `desk`. D1 read the settings in items 1.1 to 1.3 through GitHub'
 - **5. Open items.**
   1. **Owner:** renew item 1.1's limit by 2027-05-22 (`HANDOFF.md`, "Waiting on the owner" item 22).
   2. **Owner:** the setting that requires pinned actions, after P4-CI-PIN merges (item 23 there).
+  3. **Owner, then D1 with D3:** `SECURITY.md`, "Reporting a vulnerability", names two channels, and neither is open to an outside reporter today (`records-auditor` on #792). Private vulnerability reporting is off (item 16 there), and under item 1.1's limit only a collaborator can open the issue that the section gives as the fallback. The owner turns on private vulnerability reporting, which is a GitHub setting. D1 then restates the fallback bullet, with D3's review. D1 did not establish whether the limit also closes private advisories to outside accounts; that is read once the setting is on.
 - **Next decision number:** D4-127.

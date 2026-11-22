@@ -218,7 +218,7 @@ What D4-98 leaves with the owner:
 13. **Nothing: D1 merges its own reviewed PRs** (D4-85, which supersedes D4-82).
 14. **Nothing: the owner chose option (b)** (D4-85).
 15. **Nothing: D1 decided that mutants are committed as patch files with a dispatch-only workflow,** and no scratch branch is pushed (D4-85). D6's mutants for the closing legs are brief P4-D6-MUT (D4-88, D4-90).
-16. **Switching on GitHub's private vulnerability reporting,** which `SECURITY.md` relies on (D4-85). `LICENSE.md` and `SECURITY.md` are added.
+16. **Switching on GitHub's private vulnerability reporting,** which `SECURITY.md` relies on (D4-85). `LICENSE.md` and `SECURITY.md` are added. Under item 22's limit an outside reporter has no other channel (D4-126 item 5.3).
 17. **Nothing: the owner leaves the fourteen firewall rules** that the approved prompts left for temporary test programs (D4-85).
 18. **Finding 1 (D4-112 item 1):** the disclosure steps D1 described to the owner directly (item 1.2), and whether to report finding 1 to the Zeek project (item 1.4), on which its per-row publication waits (item 1.3).
 19. **The measured sensor image's offline copies** (D4-114 item 4.2; `docs/release.md` §8.4 item 4): after HR-23's counted run, two copies of the saved image and its source bundle on the owner's offline storage, outside the checkout, before the job's artifact expires.
