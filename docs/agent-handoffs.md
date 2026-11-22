@@ -2938,9 +2938,9 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 
 ## After D4-125: the workflows' actions pinned to commits (issued 2026-11-22, D4-126)
 
-### P4-CI-PIN (D5; D7 and D6 review): every action in the workflows pinned to a full commit
+### P4-CI-PIN (D5; D6, D3 and D7 review): every action in the workflows pinned to a full commit
 - Objective and rationale: the owner's brief of 2026-11-22 (D4-126 item 4). 53 of the 60 `uses:` lines under `.github/workflows/` name a tag (`actions/checkout@v4`, `actions/setup-go@v5`, `actions/setup-python@v5`, `actions/upload-artifact@v4`), and a tag can be moved to other code. Each takes the commit its tag names on the day, so that the owner can then require pinned actions. `docs/release.md` §5 lists the tag pins as a gap.
-- Owner, and the reviewers: D5, on D1's authorization for every workflow file (`README.md`'s ownership row). D7 reviews the supply-chain side at the owner's word, and with it the trust boundary that CLAUDE.md §5.6 gives D3 for D5's work. D6 reviews independently.
+- Owner, and the reviewers: D5. D1 authorizes the change in every workflow file, whoever owns it (CLAUDE.md §5.3). D6 and D3 review under CLAUDE.md §5.6, and D7 reviews the supply-chain side (the owner's brief of 2026-11-22).
 - Required inputs and dependencies: the thirteen workflow files that carry a tag; the seven pinned lines in `d4-engine-linux-eval.yml` and `d4-zeek-dnp3-fuzz.yml`, for the form; `docs/release.md` §5's "GitHub Actions" sentence.
 - Files: the `uses:` lines of `.github/workflows/*.yml`; that one sentence of `docs/release.md` §5 (D7's file, which D7 reviews here).
 - Expected interfaces: none changed.
