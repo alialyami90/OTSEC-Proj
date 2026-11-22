@@ -4,10 +4,10 @@ OTSEC is a cybersecurity platform for operational technology: electrical substat
 
 ## Reporting a vulnerability
 
-**Report it privately, through GitHub.** On this repository's **Security** tab, choose **Report a vulnerability**. That opens a private advisory which only the maintainers can read.
+**Report it privately, through GitHub.** On this repository's **Security** tab, choose **Report a vulnerability**. That opens a private advisory which only you and the maintainers can read.
 
 - Do not open a public issue or pull request that describes a vulnerability.
-- If the **Report a vulnerability** button is missing, open an issue that says only that you have a security report, with no details, and ask for a private channel.
+- If the **Report a vulnerability** button is missing, sign in to GitHub and look again. If it is still missing, private reporting may be switched off or not open to your account, and this project has no other private channel. Keep the details unpublished. Issues here are public, and they may be limited to collaborators: if you can open one, say only that you have a security report, with no details, and ask for a private channel. Otherwise, try the button again later.
 - Say what you found, the file and the commit it is in, how to reproduce it, and what an attacker could do with it.
 - Please do not publish the details before a fix is available.
 
