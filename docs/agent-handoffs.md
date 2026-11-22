@@ -2954,3 +2954,37 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Explicit exclusions: any upgrade (the major versions stay); any other change to a workflow, its triggers and timeouts included; test content, the workflow text inside `test_hr23_fuzz.py` included; the records of past runs, which stay as written; any GitHub setting. The owner turns on the setting that requires pinned actions after the merge, and no agent does.
 - Uncertainty or safety risks: a tag can move between D5's reading and D7's, and then D7 reports both readings and D1 rules. If no release tag sits at a major tag's commit, D5 stops and reports to D1. A commit that exists only in a fork also resolves under the parent repository's name, so each commit is read from the tag in the action's own repository and never taken from another source.
 - Scratch files: `d5-cipin-*`
+
+## After D4-126: the diagnostic's limit and `platform/node`'s time (issued 2026-11-22, D4-127)
+
+### P4-CI-RM-LIMIT (D6; D5 reviews): `a6-windows-restart-marker`'s limit
+- Objective and rationale: the owner's decision of 2026-11-22 on D4-126 item 5.5 (D4-127 item 1). The diagnostic runs `go test -timeout 45m -count 3 ./...` on two hosted Windows runners. On today's tree five of its seven jobs timed out in `platform/node` at 2,700 s, one of them on `main` without #793, and the two that finished took 2,413.6 s and 2,654.1 s. Its limit is raised in a PR of its own, so that it passes on today's tree. #793 then takes `main` and runs again.
+- Owner, and the reviewer: D6, whose workflow it is (`README.md`'s ownership table). D5 reviews, for `platform/node`'s time.
+- Required inputs and dependencies: `.github/workflows/a6-windows-restart-marker.yml`; runs 45016307037, 45017152933 (both attempts) and 45021330048, and the workflow's earlier green runs, for the measured times; D4-126 item 5.5; D5's comment under P4-NODE-TIME below, once posted.
+- Files: `.github/workflows/a6-windows-restart-marker.yml` only: the package limit (`-timeout`), the job's `timeout-minutes` if the arithmetic needs it, and the comment that states the arithmetic.
+- Expected interfaces: none changed.
+- Deliverable: one PR from `main`. The new limit is sized from the measured times, with room. The PR body states every measurement used: the run, the job, the attempt and `platform/node`'s time, and says of each job that timed out that its time is only a lower bound. It gives the arithmetic from the measurements to the new number, and the job's `timeout-minutes` against it.
+- Acceptance tests:
+  1. Both `full-suite` jobs finish inside the new limit on the PR's own run, and the PR body gives each job's `platform/node` time from that run. Its control is run 45021330048 on `main` at `43c0aa8e`, where job (1) timed out at 2,700 s.
+  2. The diff changes only the limit and the comment on it. The command still runs `./...` at the same count on the same two runners, and the triggers are unchanged.
+  3. The head passes D1's merge check (CLAUDE.md, "Testing and merging") with the twenty `integration-long` legs under `full-ci`.
+- Owed: none.
+- Explicit exclusions: test content; the triggers, the count and the matrix; `ci.yml`'s limits and the 720 s budget (D4-44); any other workflow; any `uses:` line, which #793 changes; any GitHub setting. A slower `platform/node` is a finding under P4-NODE-TIME, not a reason for the limit (the owner, 2026-11-22).
+- Uncertainty or safety risks: five of the seven times are lower bounds, so the new limit rests on two finished jobs and the PR's own two. If a job of the PR's run ends near the new limit, D6 reports it to D1 and does not raise the number a second time. The job's `timeout-minutes` stays above the package limit plus the rest of the job, or a hang is killed before `go test` prints its stacks (D4-44).
+- Scratch files: `d6-rmlimit-*`
+
+### P4-NODE-TIME (D5; no file changed): why `platform/node` alone went from 374 to 390 s to 447 s on Windows
+- Objective and rationale: the owner's decision of 2026-11-22 (D4-127 item 1): "Record why platform/node alone went from 374-390 s (D4-112 item 2) to 447 s: new tests, or slower tests. If slower, it is a finding, not a reason for the limit."
+- Owner, and the reviewers: D5, for `platform/` and the `CI-Windows` finding. D1 records the answer in the decision log, and that record is checked with the records PR (`records-auditor`, then D6). D5 also reviews P4-CI-RM-LIMIT's PR.
+- Required inputs and dependencies: the job logs of `ci`'s `go (windows-latest)`, whose step "go test, platform/node alone" prints each test's time: #717's runs (373.5 to 389.8 s, D4-112 item 2.1), the three runs at `f65b64d7` (440.6, 404.3 and 437.0 s, D4-112 item 2.2), #781's run 44888358298 (758.7 s, D4-122) and #793's head `2496d953` (447.2 s); the history of `platform/node` between those commits.
+- Files: none.
+- Expected interfaces: none changed.
+- Deliverable: one comment of at most 40 lines on P4-CI-RM-LIMIT's PR, or on #793 while that PR is not open. For each pair of runs compared it gives the number of tests in each, the time of the tests that are in both, and the time of the tests that are only in the later one. It then answers: new tests, slower tests, both, or the spread between runs of one commit. A test that became slower is named with both times, and is a finding.
+- Acceptance tests:
+  1. Each number names its run and job.
+  2. For each run, the tests' times and the stated remainder add up to the package's time.
+  3. Where a commit has more than one run, the spread between them is given beside the difference between commits, and a difference inside that spread is not attributed to the code.
+- Owed: none.
+- Explicit exclusions: any change to a test, a bound, the budget or a workflow; any fix. A finding is reported, and D1 briefs its fix.
+- Uncertainty or safety risks: a hosted runner's speed varies from run to run, so one run of a commit shows little. A log that has expired is reported as missing and is not guessed.
+- Scratch files: `d5-nodetime-*`
