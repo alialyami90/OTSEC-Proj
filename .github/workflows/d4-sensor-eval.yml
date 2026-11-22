@@ -32,7 +32,7 @@ jobs:
       - name: Probe the image (OS, Npcap, pktmon)
         shell: pwsh
         run: ./modules/telemetry/experiments/sensor-windows/probe.ps1 -Out "$env:RUNNER_TEMP\e-d4-01" -Python (Get-Command python).Source
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: d4-sensor-eval-builtin
@@ -71,7 +71,7 @@ jobs:
         if: always()
         shell: pwsh
         run: ./modules/telemetry/experiments/sensor-windows/pipeline.ps1 -Out "$env:RUNNER_TEMP\e-d4-01-pipeline" -Python (Get-Command python).Source -Manifest tests/fixtures/network/public-ot-captures/MANIFEST.tsv -SuricataJson "$env:RUNNER_TEMP\e-d4-01-suricata\suricata.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: d4-sensor-eval-suricata
@@ -93,7 +93,7 @@ jobs:
         run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps"
       - name: Run both engines on the PRP pairs and compare
         run: sh modules/telemetry/experiments/prp-engines/run.sh "$RUNNER_TEMP/caps" "$RUNNER_TEMP/e-d4-02"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: d4-sensor-eval-prp-engines
