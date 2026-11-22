@@ -2954,6 +2954,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Explicit exclusions: any upgrade (the major versions stay); any other change to a workflow, its triggers and timeouts included; test content, the workflow text inside `test_hr23_fuzz.py` included; the records of past runs, which stay as written; any GitHub setting. The owner turns on the setting that requires pinned actions after the merge, and no agent does.
 - Uncertainty or safety risks: a tag can move between D5's reading and D7's, and then D7 reports both readings and D1 rules. If no release tag sits at a major tag's commit, D5 stops and reports to D1. A commit that exists only in a fork also resolves under the parent repository's name, so each commit is read from the tag in the action's own repository and never taken from another source.
 - Scratch files: `d5-cipin-*`
+- Result: #793, merged as `a4f39b48`.
 
 ## After D4-126: the diagnostic's limit and `platform/node`'s time (issued 2026-11-22, D4-127)
 
@@ -2972,6 +2973,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Explicit exclusions: test content; the triggers, the count and the matrix; `ci.yml`'s limits and the 720 s budget (D4-44); any other workflow; any `uses:` line, which #793 changes; any GitHub setting. A slower `platform/node` is a finding under P4-NODE-TIME, not a reason for the limit (the owner, 2026-11-22).
 - Uncertainty or safety risks: five of the seven times are lower bounds, so the new limit rests on two finished jobs and the PR's own two. If a job of the PR's run ends near the new limit, D6 reports it to D1 and does not raise the number a second time. The job's `timeout-minutes` stays above the package limit plus the rest of the job, or a hang is killed before `go test` prints its stacks (D4-44).
 - Scratch files: `d6-rmlimit-*`
+- Result: #794, merged as `56288468`.
 
 ### P4-NODE-TIME (D5; no file changed): why `platform/node` alone went from 374 to 390 s to 447 s on Windows
 - Objective and rationale: the owner's decision of 2026-11-22 (D4-127 item 1): "Record why platform/node alone went from 374-390 s (D4-112 item 2) to 447 s: new tests, or slower tests. If slower, it is a finding, not a reason for the limit."
@@ -2988,3 +2990,4 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Explicit exclusions: any change to a test, a bound, the budget or a workflow; any fix. A finding is reported, and D1 briefs its fix.
 - Uncertainty or safety risks: a hosted runner's speed varies from run to run, so one run of a commit shows little. A log that has expired is reported as missing and is not guessed.
 - Scratch files: `d5-nodetime-*`
+- Result: D5's comments 7084401392 and 7084489101 on #793 (D4-127 item 3).
