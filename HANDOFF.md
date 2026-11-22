@@ -228,7 +228,7 @@ What D4-98 leaves with the owner:
 23. **The setting that requires pinned actions** (D4-126 item 4): yours to turn on now. P4-CI-PIN has merged (#793, D4-127 item 4). No agent changes it. Tell D1 when it is on, and D1 reads it back and checks the next run on `main` (D4-127 item 8.1).
 24. **Nothing: you chose the first path for #793's merge.** #794 raised the diagnostic's limit and #793 is merged (D4-127 items 1, 2 and 4).
 25. **Nothing: you gave the word to upgrade the four pinned actions** (D4-128 item 1.1; brief P4-CI-UPGRADE).
-26. **Whether two diagnostic workflows are dispatched on the upgrade's head** (D4-128 items 2.3 and 5.1): `d4-zeek-dnp3-fuzz.yml` and `d4-engine-linux-eval.yml`, each a run you have put conditions on (items 18, 20 and 21). D1 recommends leaving both out. Neither is dispatched until you say.
+26. **Whether two diagnostic workflows are dispatched on the upgrade's head** (D4-128 items 2.3, 2.4 and 5.1): `d4-zeek-dnp3-fuzz.yml` and `d4-engine-linux-eval.yml`. D1 and D3 recommend leaving both out, which leaves your third and fourth terms unmet for them. Neither is dispatched, and the upgrade does not merge, until you say.
 
 ## Test policy
 
