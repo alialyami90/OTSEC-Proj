@@ -24,7 +24,7 @@ Read [CLAUDE.md](CLAUDE.md) first, then this file, then your role's file in [.cl
 
 **The owner chose option (b) for the passive sensor on 2026-11-11** (D4-85): a separate Linux machine at each site that feeds the node. It supersedes their choice of option (a) on 2026-11-10 (D4-78), after D4's evidence in PR #618 showed that under (a) Suricata's Windows build needs Npcap even to start, Zeek has no Windows binary, Npcap needs a paid licence, and its safe install mode is unknown (D4-84). The link's contracts, the engine run and the test rig are briefed (D4-86), and no sensor is built. [ADR-0009](docs/decisions/ADR-0009-passive-sensor.md) is accepted for option (b) on `main` (#618). D3's trust design for the link is merged (#624): `docs/phase4/D3-sensor-link.md`. The options are (a) Zeek or Suricata on the Windows site node with a capture driver, (b) a separate Linux sensor at each site that feeds the node, and (c) the project's own Go decoders in a separate process on the node. D1 recommended (b). The ADR's table gives the evidence for each.
 
-**Beside the pause (D1), 2026-11-22 (D4-126).** The owner hardened the public repository and gave a rule on text from other accounts (CLAUDE.md, "Safety and the public repository"). Brief P4-CI-PIN (D5) pins the workflows' actions to commits (#793, open). The checkpoint below still gives what is open and the order to resume in.
+**Beside the pause (D1), 2026-11-22 (D4-126).** The owner hardened the public repository and gave a rule on text from other accounts (CLAUDE.md, "Safety and the public repository"). Brief P4-CI-PIN (D5) pins the workflows' actions to commits: #793 is open, every reviewer accepts `2496d953`, and its merge waits on the owner (D4-126 item 5.5). The checkpoint below still gives what is open and the order to resume in.
 
 **CHECKPOINT (D1), 2026-11-22 (D4-125), PAUSED at the owner's word (D4-125 item 6).** No agent is running. Nothing merged in this session. Open: #789 (HR25-B1, every reviewer accepts `e5d12a75`; waits on `build_only` run 44952438265 and D1's merge check) and #788 (2e-3, rulings 1 to 8 built at `254fe318`, whose `go` jobs fail `TestLostGapEventAfterRestart` in CI run 44952584353; re-review not started). `build_only` run 44952438265 at `e5d12a75` is green. Brief P4-4-INT-D5-BLIND is issued. **Resume with D4-125 item 7, in order.** New open items: D4-125 items 3.1 to 3.6. Owner items 1 and 21 stand.
 
@@ -226,6 +226,7 @@ What D4-98 leaves with the owner:
 21. **HR-23's counted run** (D4-122 item 4): decisions D1 described to you directly (see also item 18), and the run-time secret's holder. The counted run does not start before you decide.
 22. **The interaction limit** (D4-126 item 1.1) ends on 2027-05-22. Renew it before then.
 23. **The setting that requires pinned actions** (D4-126 item 4): yours to turn on after P4-CI-PIN merges. No agent changes it.
+24. **#793's merge** (D4-126 item 5.5): the `a6-windows-restart-marker` diagnostic times out on today's tree, on `main` too, and D1's merge check does not pass while a run has failed. Your choice: its limit raised in a PR of its own first, or #793 merged on your word.
 
 ## Test policy
 
