@@ -2935,3 +2935,22 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: wiring (F-027); any gap rule; the sensor side.
 - Uncertainty or safety risks: an alarm cleared on a late heartbeat would hide a blind sensor; every ambiguity fails towards raising the alarm.
 - Scratch files: `d5-blind-*`
+
+## After D4-125: the workflows' actions pinned to commits (issued 2026-11-22, D4-126)
+
+### P4-CI-PIN (D5; D6, D3 and D7 review): every action in the workflows pinned to a full commit
+- Objective and rationale: the owner's brief of 2026-11-22 (D4-126 item 4). 53 of the 60 `uses:` lines under `.github/workflows/` name a tag (`actions/checkout@v4`, `actions/setup-go@v5`, `actions/setup-python@v5`, `actions/upload-artifact@v4`), and a tag can be moved to other code. Each takes the commit its tag names on the day, so that the owner can then require pinned actions. `docs/release.md` §5 lists the tag pins as a gap.
+- Owner, and the reviewers: D5. D1 authorizes the change in every workflow file, whoever owns it (CLAUDE.md §5.3). D6 and D3 review under CLAUDE.md §5.6, and D7 reviews the supply-chain side (the owner's brief of 2026-11-22).
+- Required inputs and dependencies: the thirteen workflow files that carry a tag; the seven pinned lines in `d4-engine-linux-eval.yml` and `d4-zeek-dnp3-fuzz.yml`, for the form; `docs/release.md` §5's "GitHub Actions" sentence.
+- Files: the `uses:` lines of `.github/workflows/*.yml`; that one sentence of `docs/release.md` §5 (D7's file, which D7 reviews here).
+- Expected interfaces: none changed.
+- Deliverable: one PR. Each of the 53 lines becomes `uses: <owner>/<action>@<the 40-character commit> # v<major>.<minor>.<patch>`. The commit is the one the line's tag resolves to in the action's own repository on the day, with an annotated tag followed to its commit, and the comment names the release tag at that same commit. The PR body gives the command and its output for each of the four actions. `docs/release.md` §5's sentence is restated to match. The seven lines already pinned are not touched.
+- Acceptance tests:
+  1. `git grep -E "uses: .*@v[0-9]" -- .github/workflows` prints nothing. Its control is `main` at `43c0aa8e`, where it prints 53 lines.
+  2. All 60 `uses:` lines under `.github/workflows/` have the pinned form, and the diff of the workflows is 53 lines, each changed only after its `@`.
+  3. D7 resolves each tag itself from the action's own repository, and compares.
+  4. The head passes D1's merge check (CLAUDE.md, "Testing and merging") with the twenty `integration-long` legs under `full-ci`, and with every workflow the PR's own paths start. Each distinct pin is run by at least one job on the head.
+- Owed: none. `a5-windows-experiments.yml`, `a6-windows-h14.yml` and `d4-sensor-eval.yml` start only by dispatch and are not dispatched for this PR: their lines carry the same pins as the workflows that run.
+- Explicit exclusions: any upgrade (the major versions stay); any other change to a workflow, its triggers and timeouts included; test content, the workflow text inside `test_hr23_fuzz.py` included; the records of past runs, which stay as written; any GitHub setting. The owner turns on the setting that requires pinned actions after the merge, and no agent does.
+- Uncertainty or safety risks: a tag can move between D5's reading and D7's, and then D7 reports both readings and D1 rules. If no release tag sits at a major tag's commit, D5 stops and reports to D1. A commit that exists only in a fork also resolves under the parent repository's name, so each commit is read from the tag in the action's own repository and never taken from another source.
+- Scratch files: `d5-cipin-*`
