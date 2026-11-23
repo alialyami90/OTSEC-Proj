@@ -161,6 +161,11 @@ type watch struct {
 	// still hold it; the cursor is saved without it before any later gap
 	// record (D3's B2 on #788).
 	clearSave bool
+	// startStepped: this process's start capped its copy with W held and
+	// wrote the step's record, which the cap at the node-start gap's close
+	// does not write again (D1's ruling 11 on #788). In memory only: after
+	// a kill the close in the next process writes it a second time.
+	startStepped bool
 }
 
 // blindAfter is blind_after_s.
@@ -568,10 +573,18 @@ func (s *skew) capLocked(wall time.Time) {
 // closeStartCapped is the step check's cap at the node-start gap's close,
 // before its to_utc is taken (CH-45: the cap waits for that close). A gap
 // from a start that W and R were moved past by an unwatched close is
-// capped too. The caller holds s.mu.
+// capped too. Where the start capped its copy it wrote the step's record
+// then, so this cap writes none (D1's ruling 11 on #788: once per step).
+// The caller holds s.mu.
 func (s *skew) closeStartCapped(g *openGap, wall time.Time) {
 	if g.cause == CauseNodeStart && !startCapsAtOnce {
+		wt := &s.wt
+		owed := wt.owedStep
 		s.capLocked(wall)
+		if wt.startStepped && !startStepTwice {
+			wt.owedStep = owed
+		}
+		wt.startStepped = false
 	}
 }
 
@@ -700,10 +713,11 @@ func (l *Link) saveMoved(ctx context.Context) error {
 // watchedCopy is the run file's copy: the earliest of W, R and the start
 // of the gap held for the floor, zero when none is held; back, the steps
 // found since the last call, by which the file's own copy moves; and held,
-// whether a gap is held for the floor, while which the copy never rises
-// (CH-45; Health.entry). The step check runs first, and moves them back if
-// it finds a step; its event and the cursor's save wait for the next
-// check that can act, since the run file is being written.
+// whether a gap is held for the floor or the node-start gap stands, while
+// which the copy never rises (CH-45; Health.entry). The step check runs
+// first, and moves them back if it finds a step; its event and the
+// cursor's save wait for the next check that can act, since the run file
+// is being written.
 func (l *Link) watchedCopy() (c time.Time, back time.Duration, held bool) {
 	if !stepTickOnly {
 		l.measureStep()
@@ -711,8 +725,17 @@ func (l *Link) watchedCopy() (c time.Time, back time.Duration, held bool) {
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	back, s.wt.copyBack = s.wt.copyBack, 0
+	c, held = s.copyLocked()
+	return c, back, held
+}
+
+// copyLocked is the link's copy and whether it may not rise (watchedCopy).
+// While the node-start gap stands the copy does not rise either, so the
+// copy a start wrote capped is not raised back to a frozen W by a later
+// write (D6's B3 on #788, D1's ruling 11). The caller holds s.mu.
+func (s *skew) copyLocked() (c time.Time, held bool) {
 	wt := &s.wt
-	back, wt.copyBack = wt.copyBack, 0
 	c = wt.earlierWR()
 	if w := wt.wait; w != nil && !w.covered && !copyHeldIgnored && !(copyHeldFromSave && wt.heldSave) {
 		// The gap held from the raise itself (CH-45).
@@ -721,7 +744,10 @@ func (l *Link) watchedCopy() (c time.Time, back time.Duration, held bool) {
 		}
 		held = !copyNoHold
 	}
-	return c, back, held
+	if g := wt.open; g != nil && g.cause == CauseNodeStart && !startCopyRises {
+		held = true
+	}
+	return c, held
 }
 
 // watchNow is W and R as the link holds them.

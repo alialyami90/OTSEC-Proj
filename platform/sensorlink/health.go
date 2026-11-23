@@ -505,7 +505,8 @@ func (h *Health) entry() runFileSensor {
 	// While a gap is held for the floor the copy never rises: each write
 	// takes the earlier of the new value and the copy it replaces, since a
 	// step back moves W, R and the copy but not the held gap's start
-	// (CH-45).
+	// (CH-45). Nor while the node-start gap stands, so the copy its start
+	// capped is not raised back to a frozen W (ruling 11 on #788).
 	c := h.copyFile
 	if !w.IsZero() && (!held || c.IsZero() || w.Before(c)) {
 		c = w

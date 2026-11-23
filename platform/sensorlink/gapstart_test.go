@@ -1,7 +1,9 @@
 package sensorlink
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1009,6 +1011,10 @@ func TestGapStartBoundaries(t *testing.T) {
 // the Unix epoch, from_bound, and is written open at the start, its 60 s
 // counted from the bound. The control (the start's own time, the code at
 // f596b82e) opens it from the start and writes nothing at the start.
+// Then a second start, and heartbeats that show capture: two open records
+// from the epoch with from_bound, and one closed record, unwatched, from
+// the epoch, that pairs both (D6's N7 and D4's N1 on #788; ruling 10).
+// Control: startNoBoundNow, whose records do not pair so.
 func TestGapStartNeverWatched(t *testing.T) {
 	epoch := time.Unix(0, 0).UTC()
 	run := func(t *testing.T) (*gsrc, time.Time) {
@@ -1041,6 +1047,47 @@ func TestGapStartNeverWatched(t *testing.T) {
 		g, start := run(t)
 		if st := g.r.l.GapStatus(); !st.From.Equal(start) || len(g.startGaps()) != 0 {
 			t.Fatalf("gap %+v, records %v: the control did not open from the start %s", st, g.gaps(), start)
+		}
+	})
+	// A second start, then heartbeats that show capture.
+	again := func(g *gsrc) {
+		g.away(6, false, false)
+		g.up()
+		g.restartSensor()
+		g.reconnect(true)
+		g.live(2, true)
+	}
+	// pairsBoth is "" when the node-start records are two open records and
+	// one closed record, unwatched, all from the epoch with from_bound, and
+	// none is left unpaired.
+	pairsBoth := func(g *gsrc) string {
+		r := g.startGaps()
+		if len(r) != 3 {
+			return "want three node-start records"
+		}
+		for i, s := range []string{"open", "open", "closed"} {
+			if r[i]["state"] != s || r[i]["from_utc"] != "1970-01-01T00:00:00Z" || r[i]["from_bound"] != "true" {
+				return "want open, open, closed, each from the Unix epoch, from_bound"
+			}
+		}
+		if r[2]["covered"] != "false" {
+			return "want the closed record unwatched"
+		}
+		if n := len(unpaired(g.gaps(), false)); n != 0 {
+			return fmt.Sprintf("%d open records unpaired", n)
+		}
+		return ""
+	}
+	again(g)
+	if why := pairsBoth(g); why != "" {
+		t.Fatalf("two starts: records %v: %s", g.gaps(), why)
+	}
+	t.Run("control: two starts from the start", func(t *testing.T) {
+		withSeam(t, &startNoBoundNow)
+		g, _ := run(t)
+		again(g)
+		if pairsBoth(g) == "" {
+			t.Fatalf("records %v: the control paired two open records from the epoch", g.gaps())
 		}
 	})
 }
@@ -1256,6 +1303,155 @@ func TestGapCopyCapSurvivesKill(t *testing.T) {
 		g, first := run(t)
 		if st := g.r.l.GapStatus(); !st.From.After(first) || g.r.sink.count(event.HealthTimeNodeStepped) != 0 {
 			t.Fatalf("gap %+v and %d steps: the control started no later than %s or wrote the step", st, g.r.sink.count(event.HealthTimeNodeStepped), first)
+		}
+	})
+}
+
+// TestGapCopyCapWHeld (D6's B3 on #788; D1's ruling 11, option (a)): the
+// database kept and the node's clock stepped back ten minutes during a
+// 60 s stop, so W is later than the wall clock at the first start: the
+// gap opens from W, clock_stepped, and the copy the start writes is capped
+// at the first start, and a write of the run file 10 s later does not
+// raise it. The node is killed 20 s after the start, before the gap is
+// written open, and started again with the database lost, or with its
+// first cursor read failing once: in each leg the gap starts no later than
+// the first start, and time.node-stepped is in the stream once, from the
+// first start. Controls: the code at 4847722f (startCopyCapNoW with
+// startCopyRises), and each of the two alone, each of which starts the gap
+// at the second start.
+func TestGapCopyCapWHeld(t *testing.T) {
+	run := func(t *testing.T, readFails bool) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.live(6, true)
+		w := g.w()
+		g.writeFile()
+		g.down()
+		g.away(6, false, false)
+		g.stepNode(-10 * time.Minute)
+		first := g.r.now()
+		g.up()
+		if st := g.r.l.GapStatus(); !st.Open || !st.From.Equal(w) || !w.After(first) {
+			t.Fatalf("gap %+v at the first start, want open from W %s, later than the wall clock %s", st, w, first)
+		}
+		g.r.pass(10 * time.Second)
+		g.writeFile() // a later write while the node-start gap stands
+		g.r.pass(10 * time.Second)
+		if g.openRecord() != nil {
+			t.Fatalf("records %v: written open before the kill", g.gaps())
+		}
+		g.r.gen.dead.Store(true) // the kill
+		if readFails {
+			g.r.restartNoStart()
+			g.r.gen.failReads.Store(1)
+			_ = g.r.file.Start(bg, g.r.l) // the first read fails
+		} else {
+			g.r.loseDatabase()
+			g.up()
+		}
+		return g, first
+	}
+	legs := []struct {
+		name      string
+		readFails bool
+	}{{"the database lost", false}, {"the first cursor read failing once", true}}
+	for _, leg := range legs {
+		t.Run(leg.name, func(t *testing.T) {
+			g, first := run(t, leg.readFails)
+			if st := g.r.l.GapStatus(); !st.Open || st.Cause != CauseNodeStart || st.From.After(first) {
+				t.Fatalf("gap %+v, want node-start open from no later than the first start %s", st, first)
+			}
+			if n := g.r.sink.count(event.HealthTimeNodeStepped); n != 1 {
+				t.Fatalf("time.node-stepped %d, want 1", n)
+			}
+			for _, c := range []struct {
+				name  string
+				seams []*bool
+			}{
+				{"control: the code at 4847722f", []*bool{&startCopyCapNoW, &startCopyRises}},
+				{"control: capped only with no W", []*bool{&startCopyCapNoW}},
+				{"control: raised while the gap stands", []*bool{&startCopyRises}},
+			} {
+				t.Run(c.name, func(t *testing.T) {
+					withSeams(t, c.seams...)
+					if g, first := run(t, leg.readFails); !g.r.l.GapStatus().From.After(first) {
+						t.Fatalf("gap %+v: the control started no later than the first start %s", g.r.l.GapStatus(), first)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestGapStartStepOnce (D1's ruling 11 on #788: the step's record once per
+// step). The clock stepped back ten minutes during a 60 s stop, the
+// database kept: the start caps its copy and writes time.node-stepped,
+// and the cap of W, R and the floor at the node-start gap's close writes
+// none, so the stream holds one, its step_back_ms W's distance past the
+// wall clock with R earlier than W. Control: the record written at the
+// close too (two). Across a kill after the first start, the database kept, the
+// second process's close writes the step again: the start's record is
+// marked in memory only, and the copy the file holds does not tell a
+// capped copy from an earlier one, so the stream holds two (section 1.14).
+func TestGapStartStepOnce(t *testing.T) {
+	var stepMS int64 // W less the first start's wall clock, R earlier than W
+	run := func(t *testing.T, kill bool) *gsrc {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.live(2, false) // flat: W moves on, R stays
+		if w, r := g.r.l.watchNow(); !r.Before(w) {
+			t.Fatalf("R %s, W %s: want R earlier", r, w)
+		}
+		g.down()
+		g.away(6, false, false)
+		g.stepNode(-10 * time.Minute)
+		stepMS = g.w().Sub(g.r.now()).Milliseconds()
+		g.up()
+		if kill {
+			g.r.pass(20 * time.Second)
+			g.kill()
+		}
+		g.restartSensor()
+		g.reconnect(true)
+		g.live(2, true)
+		if d := g.startClosed(); d == nil || d["clock_stepped"] != "true" {
+			t.Fatalf("records %v: the node-start gap not closed, clock_stepped", g.gaps())
+		}
+		return g
+	}
+	steps := func(g *gsrc) int { return g.r.sink.count(event.HealthTimeNodeStepped) }
+	g := run(t, false)
+	if n := steps(g); n != 1 {
+		t.Fatalf("time.node-stepped %d, want 1", n)
+	}
+	// The one record carries the largest value past the wall clock, W, not
+	// the copy's cap from R.
+	if ms := g.r.sink.of(event.HealthTimeNodeStepped)[0]["step_back_ms"]; ms != strconv.FormatInt(stepMS, 10) {
+		t.Fatalf("step_back_ms %s, want %d", ms, stepMS)
+	}
+	t.Run("control: written at the close too", func(t *testing.T) {
+		withSeam(t, &startStepTwice)
+		if n := steps(run(t, false)); n != 2 {
+			t.Fatalf("time.node-stepped %d: the control wrote it %d times, want 2", n, n)
+		}
+	})
+	t.Run("a kill after the start: written twice", func(t *testing.T) {
+		if n := steps(run(t, true)); n != 2 {
+			t.Fatalf("time.node-stepped %d, want 2: the start's and the second process's close", n)
+		}
+	})
+	// The boundary: killed at once, the second start's wall clock equals the
+	// copy the first wrote, which is then not later than it, so the second
+	// start caps nothing and writes no record.
+	t.Run("a kill at once: the copy equal to the wall clock", func(t *testing.T) {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.down()
+		g.away(6, false, false)
+		g.stepNode(-10 * time.Minute)
+		g.up()
+		g.kill()
+		if n := steps(g); n != 1 {
+			t.Fatalf("time.node-stepped %d after the second start, want 1", n)
 		}
 	})
 }

@@ -25,7 +25,8 @@ import (
 //   - It is marked clock_stepped at once where W, R, the floor or the copy
 //     it starts from is later than the wall clock. The mark moves nothing:
 //     the cap of W, R and the floor waits for the gap's close (CH-45). The
-//     copy capped is the copy the start writes, its step written first.
+//     copy the start writes is capped, W held or not, its step written
+//     first, and does not rise while the gap stands (ruling 11).
 //   - While it is open nothing places W or R and no other gap opens: a
 //     cause found joins it (link, restart, blind, sensor-failed).
 //   - It closes as any gap does: as covered by a chain that runs from the
@@ -86,6 +87,13 @@ var startChainZeroGD, startChainNoPart1, startChainFromStart bool
 // time; startChainCursorGD starts the chain across a start from the
 // cursor's G and D at the start, not at W's heartbeat.
 var startLateTakesAll, startNoBoundNow, startChainCursorGD bool
+
+// The controls of D1's ruling 11 on #788 (comment 7112875190), together
+// the code at 4847722f: startCopyCapNoW caps the copy a start writes only
+// where no W is held; startCopyRises lets a write of the run file raise
+// the copy while the node-start gap stands. startStepTwice writes the
+// step's record at the gap's close too, where the start wrote it.
+var startCopyCapNoW, startCopyRises, startStepTwice bool
 
 // nodeStart opens the node-start gap for the link at the node's start
 // (CH-45, "At a start"): copyAt is the run file's copy, zero when the file
@@ -152,6 +160,25 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 			if startNoBoundNow {
 				from = wall
 			}
+		}
+	} else if !startCopyCapNoW {
+		// W held: the copy the start writes, the earlier of the file's and
+		// the link's (Health.entry, while this gap stands), capped at the
+		// wall clock too, so a start that next serves it never starts late
+		// (D6's B3 on #788, D1's ruling 11). Its one record carries the
+		// largest value the step put past the wall clock, and the cap at
+		// the gap's close writes none (closeStartCapped).
+		c, _ := s.copyLocked()
+		if !copyAt.IsZero() && (c.IsZero() || copyAt.Before(c)) {
+			c = copyAt
+		}
+		if c.After(wall) {
+			step := c.Sub(wall)
+			for _, t := range []time.Time{wt.w, wt.r, wt.floor} {
+				step = max(step, t.Sub(wall))
+			}
+			wt.owedStep += step
+			wt.startStepped, capped = true, wall // W is later too: marked below
 		}
 	}
 	if startFromNow {

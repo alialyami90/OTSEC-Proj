@@ -1993,6 +1993,23 @@ func secondOn(t *testing.T, g *gsrc, sharedHealth bool) *gsrc {
 	return &gsrc{t: t, r: r2, p: r2.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
 }
 
+// TestHealthRigIdleDeadline (D6's N6 on #788): a link made by newHealthRig,
+// and one made by secondOn, runs with the rig's idle deadline, rigIdle,
+// not the base rig's 10 s (D1's ruling 9), and rigIdle is longer than it.
+func TestHealthRigIdleDeadline(t *testing.T) {
+	if base := newRig(t, nil).l.timeouts().Idle; rigIdle <= base {
+		t.Fatalf("rigIdle %s, want longer than the base rig's %s", rigIdle, base)
+	}
+	r := newHealthRig(t)
+	if d := r.l.timeouts().Idle; d != rigIdle {
+		t.Fatalf("newHealthRig's link: idle %s, want %s", d, rigIdle)
+	}
+	g := &gsrc{t: t, r: r, p: r.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
+	if d := secondOn(t, g, false).r.l.timeouts().Idle; d != rigIdle {
+		t.Fatalf("secondOn's link: idle %s, want %s", d, rigIdle)
+	}
+}
+
 // TestLostGapNotBehindOtherGaps (V-6's third case). The lost budget spent
 // within the hour, so a fifth lost record waits; then a link gap of the
 // same sensor stands 90 s: its open record is in the health stream within
