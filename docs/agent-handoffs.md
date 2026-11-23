@@ -2118,7 +2118,7 @@ The common rules are those of "The third part of item 4: implementation", F-027'
 - Explicit exclusions: no device contact (the TCP-after-bad-CRC H-row needs the owner's authorization); no reading of session content.
 - Uncertainty or safety risks: new hand-written C++ in `DNP3.cc`'s buffer code (D3), and a scan that an attacker could use to smuggle frames (D2, D3).
 - Scratch files: `d4-hr25-*`, `d6-hr25-*`
-- Result: the design is #782 (`c3edfd8a`); deliverable 2 is #698 (`5f88510f`); deliverable 3 was split in D4-111 item 5 into #714 (`8c5e3a92`), brief P4-4-HR2325S (option (a)'s cases are its deliverable 3, #787, `1ac35c4b`) and D4's build, which D4-124 item 2.2 splits into HR25-B1 (#789), B2 and B3.
+- Result: the design is #782 (`c3edfd8a`); deliverable 2 is #698 (`5f88510f`); deliverable 3 was split in D4-111 item 5 into #714 (`8c5e3a92`), brief P4-4-HR2325S (option (a)'s cases are its deliverable 3, #787, `1ac35c4b`) and D4's build, which D4-124 item 2.2 splits into HR25-B1 (#789, merged as `45d199f9`), B2 (brief HR25-B2, "After D4-130") and B3.
 
 ## After D4-102: the approved contracts in code (issued 2026-11-14, D4-103)
 
@@ -2849,7 +2849,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Exclusions: wiring (F-027); C4 0.6 step 2.
 - Uncertainty or safety risks: a gap never starts late or closes early.
 - Scratch files: `d5-2e-*`
-- Result: 2e-1 is #774, merged as `554f9d12`; 2e-2 is #781, merged as `e2a23806`; 2e-3 is #788.
+- Result: 2e-1 is #774, merged as `554f9d12`; 2e-2 is #781, merged as `e2a23806`; 2e-3 is #788, merged as `70389fe6` (D4-131 item 2.3).
 
 ### P4-4-HR23-JUDGE (D4; D6, D3 and D2 review; under the held-rows rule): HR-23's judge
 - Objective and rationale: `table.py` judges `out-hr23/` with the tokens `reqhdr`, `svc` and `X=code` (D4-113 item 3.2), before HR-23's counted run; with `likely_server_ports` printed under every configuration and the `fp/` set fed and pin-checked (D4-121 item 3.8).
@@ -3042,6 +3042,7 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Explicit exclusions: any change to a pin (the MSI's address, hash or signer; an action), a timeout, a runner, a trigger or a capture; installing Npcap; pinning the `apt-get` packages of `prp-engines`, which is a finding for D1 if D4 judges it needed and not a change here; any other workflow; any GitHub setting; a dispatch of `d4-engine-linux-eval.yml` or `d4-zeek-dnp3-fuzz.yml`.
 - Uncertainty or safety risks: a comparison that is too loose turns a real change green, and one that is too tight fails on a field that only varies. Test 2 and D6's review are the check on both. `prp-engines` installs Suricata and tshark from the runner's package source without a pinned version, so its rows can change when the distribution's package does. That is then a real difference and the job fails, which is what the owner asked. The recorded results are rows on public captures, already published in ADR-0009 and in both runs' artifacts. D1 read the held-rows file: no item held under D4-112 item 1.3 is among them, and D4 confirms that before committing a row.
 - Scratch files: `d4-sevalgreen-*`
+- Result: #800, merged as `3f2bc7ac` (D4-131 item 2.2).
 
 ### HR25-B2 (D4; D2, D3, D6 and D7 review, under the held-rows rule): HR-25's confirmation, budget and reporting
 - Objective and rationale: HR-25, brief P4-4-HR25 deliverable 3, as D4-124 item 2.2 splits it. HR25-B1 (#789, merged as `45d199f9`) built option A's C++ core. Its image is not one that ships: confirmation is still at the first passing header, nothing bounds the cost of a garbage flow, `skip` is never set, no violation is raised, weirds are not gated, and only `end` rows are written (#789's body, "Limits and risks"; D3's N3 there). B2 builds the design's §2.7 and the rest of §2.8, so that the image and its script are what `cfg-c2a` names.
@@ -3065,3 +3066,4 @@ Each brief below was issued in the agent's prompt in this form; the full text, a
 - Explicit exclusions: any dispatch other than D1's `build_only`; any run of an engine over a capture, a case of D6's or a unit input; any change to D6's cases or to a row of the conditions file outside the five; the fuzz harness; the S5 bound; a C13 change; any GitHub setting; a re-run of a run that started before #793 (D4-130 item 6.3).
 - Uncertainty or safety risks: more hand-written C++ in `DNP3.cc`, still not run by an engine, and now with state that decides when a flow goes quiet: a budget that can be spent by an attacker makes a flow loud, never silent, and a control shows `skip` is set by the analyzer and not left to `dpd.zeek`'s bound. Script state keyed by connection would let a sender grow it, so the mark lives on the connection record only. Disclosure: the held-rows rule binds every text and every row, and no held item is named in the PR, a comment or a commit.
 - Scratch files: `d4-hr25b2-*`
+- Result: none yet. Issued and not started (D4-131 items 4.2 and 6).
