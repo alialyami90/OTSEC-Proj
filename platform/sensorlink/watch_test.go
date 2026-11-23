@@ -937,13 +937,18 @@ func TestK1AtWSeqNotJudged(t *testing.T) {
 // TestStepNoCapBeforePlacement (D6's P3 on #774; kills M1, the cap with
 // no placement guard): W saved, the wall clock stepped back 10 minutes
 // across the stop, and two checks after the start: W, R and the cursor
-// are unchanged, and no time.node-stepped is written, since before W's
-// first placement since the start a check only measures.
+// are unchanged, and the checks write no time.node-stepped, since before
+// W's first placement since the start a check only measures. The one
+// record is the start's, for the run file's copy it capped (D1's ruling
+// 11 on #788), written before the checks.
 func TestStepNoCapBeforePlacement(t *testing.T) {
 	r, p, w := placed2(t)
 	p.end()
 	r.addWall(-10 * time.Minute)
 	r.restart()
+	if n := r.sink.count(event.HealthTimeNodeStepped); n != 1 {
+		t.Fatalf("time.node-stepped %d at the start, want 1 (the copy's cap)", n)
+	}
 	r.l.CheckStep(bg)
 	r.pass(time.Second)
 	r.l.CheckStep(bg)
@@ -951,8 +956,8 @@ func TestStepNoCapBeforePlacement(t *testing.T) {
 	if c := cursorNow(t, r.cs); !c.W.Equal(w) || !c.R.Equal(w) {
 		t.Fatalf("the cursor holds W %s and R %s, want %s", c.W, c.R, w)
 	}
-	if n := r.sink.count(event.HealthTimeNodeStepped); n != 0 {
-		t.Fatalf("time.node-stepped %d", n)
+	if n := r.sink.count(event.HealthTimeNodeStepped); n != 1 {
+		t.Fatalf("time.node-stepped %d after the checks, want 1", n)
 	}
 }
 

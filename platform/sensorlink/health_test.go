@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,6 +94,23 @@ type healthRig struct {
 	sink *memSink
 	file *RunFile
 	h    *Health
+	gen  *linkGen
+	// idle is the links' idle deadline, zero for rigIdle. The deadline is
+	// real time (conn.go's read), while these tests run on the test
+	// clocks: at the base rig's 10 s, a connection left idle while other
+	// steps run was closed on a slow runner (D1's ruling 9 on #788).
+	idle time.Duration
+}
+
+// rigIdle is the health rig's idle deadline: far past any test's run, so
+// no connection is closed for the runner's speed.
+const rigIdle = time.Hour
+
+func (r *healthRig) idleDeadline() time.Duration {
+	if r.idle > 0 {
+		return r.idle
+	}
+	return rigIdle
 }
 
 // newHealthRig makes the rig for a sensor that has just been enrolled: no
@@ -105,11 +123,66 @@ func newHealthRig(t *testing.T) *healthRig {
 
 func (r *healthRig) restartNoStart() {
 	r.file = OpenRunFile(r.path)
+	// Each link's own view of the stores and the stream, so a kill can end
+	// an old link's writes while its connection is still open (gapstart_test.go).
+	gen := &linkGen{}
+	r.gen = gen
 	r.rig.opt = func(o *Options) {
-		r.h = NewHealth(HealthConfig{SensorID: testSensor, Sink: r.sink, Monotonic: r.clk.mono, Now: r.now, Raise: o.Raise, File: r.file})
-		o.Health, o.Owed = r.h, nil
+		r.h = NewHealth(HealthConfig{SensorID: testSensor, Sink: genSink{gen, r.sink}, Monotonic: r.clk.mono, Now: r.now, Raise: o.Raise, File: r.file})
+		o.Health, o.Owed, o.Cursor = r.h, nil, genCursor{gen, o.Cursor}
+		o.Timeouts.Idle = r.idleDeadline()
 	}
 	r.rig.restart()
+}
+
+// linkGen is one link's life: once dead, its stores and stream refuse it.
+type linkGen struct {
+	dead atomic.Bool
+	// beforeSave, when set, runs before each cursor save that is let
+	// through.
+	beforeSave func()
+	// failReads is the number of cursor reads still to fail, as a
+	// transient store error does (gapstart_test.go).
+	failReads atomic.Int32
+}
+
+var errKilled = errors.New("test: the link was killed")
+
+type genCursor struct {
+	g  *linkGen
+	cs CursorStore
+}
+
+func (c genCursor) SourceCursor(ctx context.Context) ([]byte, error) {
+	if c.g.dead.Load() {
+		return nil, errKilled
+	}
+	if n := c.g.failReads.Load(); n > 0 && c.g.failReads.CompareAndSwap(n, n-1) {
+		return nil, errors.New("test: a cursor read failed")
+	}
+	return c.cs.SourceCursor(ctx)
+}
+
+func (c genCursor) SaveSourceCursor(ctx context.Context, b []byte) error {
+	if c.g.dead.Load() {
+		return errKilled
+	}
+	if c.g.beforeSave != nil {
+		c.g.beforeSave()
+	}
+	return c.cs.SaveSourceCursor(ctx, b)
+}
+
+type genSink struct {
+	g *linkGen
+	s HealthSink
+}
+
+func (s genSink) WriteHealth(ctx context.Context, typ string, d map[string]string) error {
+	if s.g.dead.Load() {
+		return errKilled
+	}
+	return s.s.WriteHealth(ctx, typ, d)
 }
 
 // restart is a node restart: a new link and Health over the same stores

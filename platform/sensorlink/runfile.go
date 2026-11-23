@@ -16,7 +16,7 @@ import (
 // sensor database's cursor. This build keeps sensor-transmitted's standing
 // state and latest raise, the held pool events (as counts and facts, never
 // as event bytes), and the run and capture totals the held capture loss
-// counts up to, and the copy of the earlier of W and R (2e-1). SL-30's
+// counts up to, and the copy of W and R (2e-1; 2e-3 adds the held gap). SL-30's
 // dial counts and proofs, the re-arm's spent set, the run's second copy,
 // the poison record and the cap's record times are P4-4-DE's.
 //
@@ -41,8 +41,9 @@ type runFileSensor struct {
 	Transmitted *transmitState `json:"transmitted,omitempty"`
 	Held        []HeldEvent    `json:"held,omitempty"`
 	Capture     *captureState  `json:"capture,omitempty"`
-	// Copy is the earlier of W and R (section 1.9 item 5; watch.go), for
-	// a start whose sensor database is lost (2e-3).
+	// Copy is the earliest of W, R and the held gap's start (section 1.9
+	// item 5; watch.go), the bound of a start whose cursor holds no W
+	// (gapstart.go).
 	Copy string `json:"w_r_copy,omitempty"`
 }
 
@@ -225,7 +226,18 @@ func (f *RunFile) Start(ctx context.Context, links ...*Link) error {
 		if next != nil {
 			errs = append(errs, d.l.saveStart(ctx, next))
 		}
+		// Any gap held for the floor first, then the node-start gap
+		// (CH-45, "At a start"; gapstart.go).
 		h.mu.Lock()
+		copyAt := h.copyFile
+		h.mu.Unlock()
+		capped := d.l.nodeStart(ctx, copyAt)
+		h.mu.Lock()
+		if !capped.IsZero() {
+			// The copy as capped, so a kill after the cap loses nothing
+			// (D6's B2 on #788, option (a)).
+			h.copyFile = capped
+		}
 		_ = h.pool.Write(ctx, h.cfg.Monotonic(), h.emit) // what the start counted, at the start's time
 		f.put(d.l.cfg.SensorID, h.entry())
 		h.mu.Unlock()

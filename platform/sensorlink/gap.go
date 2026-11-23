@@ -18,8 +18,9 @@ import (
 // the cursor.
 var gapCauses = []string{"node-start", "link", "restart", "held", "revoked", "sensor-failed", "silent", "lost", "blind"}
 
-// The causes 2e-2 opens or adds.
+// The causes 2e-2 and 2e-3 open or add.
 const (
+	CauseNodeStart    = "node-start"
 	CauseLink         = "link"
 	CauseRestart      = "restart"
 	CauseSensorFailed = "sensor-failed"
@@ -61,6 +62,10 @@ type HeldGap struct {
 	Gaps    uint64    `json:"gaps"`
 	Stepped bool      `json:"stepped,omitempty"`
 	Bound   bool      `json:"bound,omitempty"`
+	// Covered: a gap written open that closed as covered and waits for
+	// its budget or the ceiling, held in the same fields (D1's ruling on
+	// #788, option (a)); it raises nothing.
+	Covered bool `json:"covered,omitempty"`
 }
 
 // gapOpenAfter is how long a link, silent or node-start gap stands before
@@ -127,6 +132,7 @@ type openGap struct {
 	wMono   time.Duration
 	stepped bool
 	written bool // its open record is committed
+	bound   bool // it starts at a bound, not at W (from_bound)
 }
 
 // waitRec is a closing record that waits: the gap held for the floor when
@@ -157,6 +163,12 @@ type chain struct {
 	wMono  time.Duration
 	reason string    // why it failed, for the tests
 	shown  time.Time // gapChainStretch's control only: the last heartbeat that showed capture
+	// kept: across a start, the values kept with W, matched to the names
+	// of the first heartbeat read after it (gapstart.go); fromFirst is
+	// gapChainFromFirst's control.
+	kept      []IfaceMark
+	fromFirst bool
+	noPart1   bool // startChainNoPart1's control only
 }
 
 // chainShows is CH-39's part 2 for one heartbeat, by at_utc: some
@@ -212,6 +224,10 @@ func (s *skew) extendChainLocked(h *netobs.Heartbeat, at time.Time, blind time.D
 		ch.ok, ch.reason = false, "another run"
 		return
 	case n <= ch.seq:
+		return
+	}
+	if ch.kept != nil && !ch.keptIfs(ifaceNames(h), at) {
+		ch.ok, ch.reason = false, "names"
 		return
 	}
 	// The names must be the names kept with W, one for one (CH-39 part 2;
@@ -280,7 +296,7 @@ func (s *skew) chainCoversLocked(cn *conn, wall time.Time, mono time.Duration) b
 	if gapNeedsObservation && !wt.obsSeen {
 		return false
 	}
-	if !gapChainAnyRun && (cn.cur.G != ch.g || cn.cur.D != ch.d) {
+	if !gapChainAnyRun && !ch.noPart1 && (cn.cur.G != ch.g || cn.cur.D != ch.d) {
 		return false // part 1
 	}
 	if gapChainSeqOnly || gapChainNoCount {
@@ -305,8 +321,9 @@ func (wt *watch) earlierWR() time.Time {
 }
 
 // openLocked opens a gap of cause from the earlier of W and R, or adds
-// cause to the gap open now. With neither held it opens nothing: a gap
-// from a bound is 2e-3's and P4-4-DE's. The caller holds s.mu.
+// cause to the gap open now. With neither held it opens nothing: the gap
+// from a bound at a start is gapstart.go's, and while the node runs
+// P4-4-DE's. The caller holds s.mu.
 func (s *skew) openLocked(cause string, wall time.Time, mono time.Duration) {
 	wt := &s.wt
 	if gapsOff {
@@ -329,6 +346,9 @@ func (s *skew) openLocked(cause string, wall time.Time, mono time.Duration) {
 	if gapAtOpen {
 		from = wall
 	}
+	if gapWMovesAtOpen && !wt.w.IsZero() {
+		wt.w, wt.r = wall, wall
+	}
 	wMono := mono
 	if wt.placed {
 		wMono = min(wt.wMono, mono)
@@ -347,10 +367,19 @@ func (s *skew) closeLocked(covered bool, to time.Time) {
 	g := wt.open
 	wt.open = nil
 	wt.gapDue = true
+	if !frozenUnwatchedOnly {
+		// However the gap closes, the node-start gap's included, W and R
+		// move again (D6's N6, D4's N2 on #781; D1's ruling 4).
+		wt.frozen = false
+	}
 	if covered {
 		if g.written {
 			if wt.wait == nil {
-				wt.wait = &waitRec{HeldGap: HeldGap{From: g.from, To: to, Cause: g.cause, Causes: g.causes, Gaps: 1, Stepped: g.stepped}, covered: true}
+				wt.wait = &waitRec{HeldGap: HeldGap{From: g.from, To: to, Cause: g.cause, Causes: g.causes, Gaps: 1, Stepped: g.stepped, Bound: g.bound}, covered: true}
+				// Saved in the cursor before its record, so a crash
+				// leaves its open record paired at the start (D4-123
+				// item 3.1; D1's ruling on #788).
+				wt.heldSave = !heldCoveredMemOnly && !coveredNoSave
 			} else {
 				// Behind a waiting record: merged, and unwatched from the
 				// first's start, which fails closed.
@@ -360,7 +389,7 @@ func (s *skew) closeLocked(covered bool, to time.Time) {
 		return
 	}
 	if wt.wait == nil {
-		wt.wait = &waitRec{HeldGap: HeldGap{From: g.from, To: to, Cause: g.cause, Causes: g.causes, Gaps: 1, Stepped: g.stepped}}
+		wt.wait = &waitRec{HeldGap: HeldGap{From: g.from, To: to, Cause: g.cause, Causes: g.causes, Gaps: 1, Stepped: g.stepped, Bound: g.bound}}
 	} else {
 		s.mergeLocked(g, to)
 	}
@@ -370,7 +399,9 @@ func (s *skew) closeLocked(covered bool, to time.Time) {
 				*t = to
 			}
 		}
-		wt.floor = to
+		if !floorNoCap || !wt.floor.After(to) {
+			wt.floor = to
+		}
 	}
 	wt.frozen = false
 	wt.heldSave = true
@@ -442,7 +473,7 @@ func gapRecord(g HeldGap, state string, covered bool) map[string]string {
 // at its open for blind and sensor-failed and once it has stood
 // gapOpenAfter from W otherwise, and never while a closing record waits
 // (CH-45's order). The caller holds s.mu.
-func (s *skew) nextRecordLocked(mono time.Duration, skipWait bool) (d map[string]string, wait bool) {
+func (s *skew) nextRecordLocked(wall time.Time, mono time.Duration, skipWait bool) (d map[string]string, wait bool) {
 	wt := &s.wt
 	if w := wt.wait; w != nil && !wt.heldSave && !skipWait {
 		return gapRecord(w.HeldGap, "closed", w.covered), true
@@ -455,22 +486,42 @@ func (s *skew) nextRecordLocked(mono time.Duration, skipWait bool) (d map[string
 		return nil, false
 	}
 	switch g.cause {
-	case CauseLink, CauseSilent, "node-start":
+	case CauseLink, CauseSilent, CauseNodeStart:
+		if gapOpenWallW && g.cause == CauseNodeStart {
+			if wall.Sub(g.from) < gapOpenAfter {
+				return nil, false // the control: 60 s from W on the wall clock alone
+			}
+			break
+		}
 		if mono-g.wMono < gapOpenAfter && mono-g.openMono < gapOpenAfter {
 			return nil, false
 		}
 	}
-	return gapRecord(HeldGap{From: g.from, Cause: g.cause, Causes: g.causes, Stepped: g.stepped}, "open", false), false
+	return gapRecord(HeldGap{From: g.from, Cause: g.cause, Causes: g.causes, Stepped: g.stepped, Bound: g.bound}, "open", false), false
 }
 
 // gapAct saves the raise of an unwatched close, then writes the gap records
-// due, in order. cn is the live connection, nil at a tick or a close. The
-// caller holds gmu, which orders every change of the gap open and the
-// record that waits with these writes. An error is a save that failed.
+// due, in order. Once a covered close's record commits, the cursor is
+// saved without it before any later record, so a start never writes it
+// again (D3's B2 on #788). cn is the live connection, nil at a tick or a
+// close. The caller holds gmu, which orders every change of the gap open
+// and the record that waits with these writes. An error is a save that
+// failed, which holds the later records back.
 func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 	if !l.skewOn() {
 		return nil
 	}
+	for {
+		again, err := l.gapActOnce(ctx, cn)
+		if err != nil || !again {
+			return err
+		}
+	}
+}
+
+// gapActOnce is one pass of gapAct: again, a covered close's record
+// committed and the cursor is to be saved before the next record.
+func (l *Link) gapActOnce(ctx context.Context, cn *conn) (again bool, err error) {
 	s := &l.skew
 	if gapRecordFirst {
 		s.mu.Lock()
@@ -478,7 +529,7 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 		s.mu.Unlock()
 	}
 	s.mu.Lock()
-	save := s.wt.heldSave
+	save := s.wt.heldSave || s.wt.clearSave
 	s.mu.Unlock()
 	if save {
 		// The raise and the gap held for the floor are saved before the
@@ -492,34 +543,41 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 			err = l.saveMoved(ctx)
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
 		s.mu.Lock()
-		s.wt.heldSave = false
+		s.wt.heldSave, s.wt.clearSave = false, false
 		s.mu.Unlock()
 	}
 	h := l.opt.Health
 	if h == nil {
-		return nil
+		return false, nil
 	}
 	skip := false
 	for {
 		s.mu.Lock()
-		d, wait := s.nextRecordLocked(l.opt.Monotonic(), skip)
+		d, wait := s.nextRecordLocked(l.now(), l.opt.Monotonic(), skip)
 		var snap waitRec
 		if wait {
 			snap = *s.wt.wait
 		}
 		s.mu.Unlock()
 		if d == nil {
-			return nil
+			return false, nil
+		}
+		if gapDropReversed && wait && snap.To.Before(snap.From) {
+			// The control: a record whose end is before its start dropped.
+			s.mu.Lock()
+			s.wt.wait = nil
+			s.mu.Unlock()
+			continue
 		}
 		if h.writeGap(ctx, d) != nil {
 			if wait && gapWriteBehind {
 				skip = true // the control: on to the later records
 				continue
 			}
-			return nil // it waits for its budget or the ceiling, and is tried again
+			return false, nil // it waits for its budget or the ceiling, and is tried again
 		}
 		s.mu.Lock()
 		if wait {
@@ -528,6 +586,11 @@ func (l *Link) gapAct(ctx context.Context, cn *conn) error {
 			// with the mark: twice, never without it.
 			if w := s.wt.wait; w != nil && *w == snap {
 				s.wt.wait = nil
+			}
+			if snap.covered && !heldCoveredMemOnly && !coveredNoClear {
+				s.wt.clearSave = true
+				s.mu.Unlock()
+				return true, nil
 			}
 		} else if s.wt.open != nil {
 			s.wt.open.written = true
@@ -587,7 +650,9 @@ func (l *Link) connEnded(ctx context.Context, accepted bool) {
 	}
 	l.gmu.Lock()
 	defer l.gmu.Unlock()
-	l.measureStep()
+	if !stepTickOnly {
+		l.measureStep()
+	}
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()
@@ -610,7 +675,9 @@ func (l *Link) SensorFailed(ctx context.Context) {
 	}
 	l.gmu.Lock()
 	defer l.gmu.Unlock()
-	l.measureStep()
+	if !stepTickOnly {
+		l.measureStep()
+	}
 	wall, mono := l.now(), l.opt.Monotonic()
 	s := &l.skew
 	s.mu.Lock()

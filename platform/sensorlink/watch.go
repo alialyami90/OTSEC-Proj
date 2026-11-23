@@ -48,15 +48,15 @@ import (
 //     step, the cursor and the run file are saved at once, and
 //     time.node-stepped is written once. Then W or R still later than the
 //     wall clock takes the wall-clock time, acted on the same way; before
-//     W's first placement since the start a check only measures (the
-//     node-start gap's close is 2e-3's). It never moves the capture floor,
-//     M or the start bound (section 1.5).
-//   - The run file's copy is the earlier of W and R as the link holds them
-//     when the file is written; with none held, the copy the file had.
+//     W's first placement since the start a check only measures, and the
+//     node-start gap's close caps (gapstart.go). It never moves the capture
+//     floor, M or the start bound (section 1.5).
+//   - The run file's copy is the earliest of W, R and the start of the gap
+//     held for the floor as the link holds them when the file is written,
+//     never rising while a gap is held; with none held, the copy last
+//     written.
 //
-// Not here (2e-2 and 2e-3): the gaps, their causes and the chain, the gap
-// floor and the gap held for the floor, the budgets, the node-start gap
-// and its cap, and the reach-back to the copy.
+// The gaps are gap.go's (2e-2) and gapstart.go's (2e-3).
 
 // DefaultBlindAfter is blind_after_s's default (CH-31).
 const DefaultBlindAfter = 300 * time.Second
@@ -131,8 +131,8 @@ type watch struct {
 	liveTotal uint64
 	// The gap model (gap.go, 2e-2): the gap open, the closing record that
 	// waits, the gap floor; frozen: W and R were taken from the cursor
-	// at the start and are not moved until a gap closes unwatched (2e-3
-	// builds the node-start gap); heldSave: an unwatched close's raise is
+	// at the start and are not moved until a gap closes, the node-start
+	// gap's close included (gapstart.go); heldSave: an unwatched close's raise is
 	// not yet saved; gapDue: a record may be due; current: a connection
 	// whose hello is current is live; wRecv and wMono: the receipt of W's
 	// heartbeat and W itself on the monotonic clock; ch: the chain.
@@ -147,6 +147,25 @@ type watch struct {
 	wMono    time.Duration
 	ch       chain
 	obsSeen  bool // gapNeedsObservation's control only
+	// wG and wD are G and D at W's heartbeat, kept with W in the cursor
+	// for a chain across a start (D1's ruling 8 on #788, option (b));
+	// startG and startD are the cursor's G and D at the start, read only
+	// by startChainCursorGD's control (gapstart.go).
+	wG, wD         uint64
+	startG, startD uint64
+	// startPassed: the node-start gap opened with no cursor read in this
+	// process, so a later read takes only M and the kept interfaces (D1's
+	// ruling 6 on #788, option (a)).
+	startPassed bool
+	// clearSave: a covered close's record committed while the cursor may
+	// still hold it; the cursor is saved without it before any later gap
+	// record (D3's B2 on #788).
+	clearSave bool
+	// startStepped: this process's start capped its copy with W held and
+	// wrote the step's record, which the cap at the node-start gap's close
+	// does not write again (D1's ruling 11 on #788). In memory only: after
+	// a kill the close in the next process writes it a second time.
+	startStepped bool
 }
 
 // blindAfter is blind_after_s.
@@ -171,15 +190,33 @@ func (l *Link) takeWatch(c *Cursor) {
 	if c == nil {
 		return // no cursor at the first read: nothing to take
 	}
+	if wt.startPassed && !startLateTakesAll {
+		// Read after the start's read failed: W, R, G, D, the floor and the
+		// held gap belong to the start, whose node-start gap stands from
+		// the copy; only the kept interfaces, with their heartbeat's seq
+		// for K-1's resend rule, are K-1's baseline (D6's B1 on #788).
+		if len(c.Ifaces) > 0 {
+			wt.run, wt.kept, wt.wSeq = c.RunID, slices.Clone(c.Ifaces), c.WSeq
+		}
+		return
+	}
 	wt.w, wt.wSeq, wt.wAt, wt.r = c.W, c.WSeq, c.WAtUTC, c.R
-	// Until 2e-3's node-start gap, W and R saved before the stop are not
-	// moved by a placement, so a gap after the start reaches back across
-	// the stop (D1's 7056051455 on #770).
+	wt.wG, wt.wD = c.WG, c.WD
+	wt.startG, wt.startD = c.G, c.D
+	// W and R saved before the stop are not moved by a placement until a
+	// gap closes, so a gap after the start reaches back across the stop
+	// (D1's 7056051455 on #770); the node-start gap is that gap.
 	wt.frozen = !c.W.IsZero() || !c.R.IsZero()
 	if c.Held != nil {
-		// A gap held for the floor at the stop is written first (CH-45).
-		wt.wait = &waitRec{HeldGap: *c.Held}
-		wt.floor = c.Held.To
+		// A gap held for the floor at the stop is written first (CH-45),
+		// and so is a covered close that waited for its budget, which
+		// raises nothing (D1's ruling on #788).
+		g := *c.Held
+		g.Covered = false
+		wt.wait = &waitRec{HeldGap: g, covered: c.Held.Covered}
+		if !c.Held.Covered || coveredRaisesFloor {
+			wt.floor = c.Held.To
+		}
 	}
 	if len(c.Ifaces) > 0 {
 		wt.run, wt.kept = c.RunID, slices.Clone(c.Ifaces)
@@ -194,16 +231,18 @@ func (l *Link) watchInto(c *Cursor) {
 	defer s.mu.Unlock()
 	wt := &s.wt
 	c.W, c.WSeq, c.WAtUTC, c.R, c.Ifaces = wt.w, wt.wSeq, wt.wAt, wt.r, nil
+	c.WG, c.WD = wt.wG, wt.wD
 	c.Causes, c.Held = 0, nil
 	if wt.open != nil {
 		c.Causes = wt.open.causes
 	}
-	if w := wt.wait; w != nil && !w.covered {
+	if w := wt.wait; w != nil && !(w.covered && heldCoveredMemOnly) && !(raiseNoHeld && !w.covered) {
 		g := w.HeldGap
+		g.Covered = w.covered
 		c.Held = &g
 	}
 	if wt.w.IsZero() {
-		c.WSeq, c.WAtUTC = 0, time.Time{}
+		c.WSeq, c.WAtUTC, c.WG, c.WD = 0, time.Time{}, 0, 0
 	}
 	if wt.run == c.RunID && len(wt.kept) > 0 {
 		c.Ifaces = slices.Clone(wt.kept)
@@ -363,16 +402,6 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 	if !current || late || s.bl.on {
 		return
 	}
-	p := wall
-	if q := at.Add(s.movedELocked()); !placeAtReceipt && len(s.samples) > 0 && q.Before(p) {
-		p = q
-	}
-	if unix0 := time.Unix(0, 0); p.Before(unix0) {
-		p = unix0
-	}
-	if !gapNoFloor && p.Before(wt.floor) {
-		p = wt.floor // never below the floor
-	}
 	// A silent gap that fell due before this heartbeat opens first.
 	s.silentDueLocked(wall, mono)
 	if g := wt.open; g != nil {
@@ -389,17 +418,32 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 			if !rose {
 				return
 			}
+			s.closeStartCapped(g, wall)
 			s.closeLocked(false, wall)
 		case (!gapSilentNeverCovered || g.causes&gapCauseBit(CauseSilent) == 0) && s.chainCoversLocked(cn, wall, mono):
+			s.closeStartCapped(g, wall)
 			s.closeLocked(true, wall)
 		case capture:
+			s.closeStartCapped(g, wall)
 			s.closeLocked(false, wall)
 		default:
 			return
 		}
-		if !gapNoFloor && p.Before(wt.floor) {
-			p = wt.floor
-		}
+	}
+	// W and R are placed after any close, so a cap at the node-start
+	// gap's close is in the placement (CH-45).
+	p := wall
+	if q := at.Add(s.movedELocked()); !placeAtReceipt && len(s.samples) > 0 && q.Before(p) {
+		p = q
+	}
+	if placeAtSensor {
+		p = at // the control: the heartbeat's at_utc kept as W
+	}
+	if unix0 := time.Unix(0, 0); p.Before(unix0) {
+		p = unix0
+	}
+	if !gapNoFloor && p.Before(wt.floor) {
+		p = wt.floor // never below the floor
 	}
 	if wt.frozen {
 		return
@@ -421,6 +465,7 @@ func (l *Link) place(cn *conn, h *netobs.Heartbeat, late bool) {
 			wt.kept[i] = IfaceMark{Packets: wt.live[n].packets, RiseUTC: wt.live[n].riseAt}
 		}
 		s.startChainLocked(cn, h, at, wt.wMono, blind)
+		wt.wG, wt.wD = wt.ch.g, wt.ch.d
 		return
 	}
 	// Every interface blind: W stays, and a blind gap opens (CH-45).
@@ -487,19 +532,7 @@ func (l *Link) measureStep() bool {
 	}
 	wt.chkWall, wt.chkMono, wt.checked = wall, mono, true
 	if wt.placed {
-		// A value still later than the wall clock is a step the check
-		// could not measure: it takes the wall-clock time.
-		capped := time.Duration(0)
-		for _, t := range []*time.Time{&wt.w, &wt.r, &wt.floor} {
-			if t.After(wall) {
-				capped = max(capped, t.Sub(wall))
-				*t = wall
-			}
-		}
-		if capped > 0 {
-			wt.owedStep, wt.owedSave = wt.owedStep+capped, true
-			s.markStepLocked()
-		}
+		s.capLocked(wall)
 	}
 	if stepCapsCaptureFloor {
 		for _, t := range []*time.Time{&s.floor, &s.startBound} {
@@ -511,18 +544,69 @@ func (l *Link) measureStep() bool {
 	return wt.owedSave || wt.owedStep > 0
 }
 
+// capLocked caps W, R and the floor at wall: a value still later than the
+// wall clock is a step the check could not measure, which takes the
+// wall-clock time and is marked and written as a step is (CH-45). The
+// caller holds s.mu.
+func (s *skew) capLocked(wall time.Time) {
+	wt := &s.wt
+	ts := []*time.Time{&wt.w, &wt.r, &wt.floor}
+	switch {
+	case stepKeepsOld:
+		return
+	case floorNoCap || stepFloorUnmoved:
+		ts = ts[:2]
+	}
+	capped := time.Duration(0)
+	for _, t := range ts {
+		if t.After(wall) {
+			capped = max(capped, t.Sub(wall))
+			*t = wall
+		}
+	}
+	if capped > 0 {
+		wt.owedStep, wt.owedSave = wt.owedStep+capped, true
+		s.markStepLocked()
+	}
+}
+
+// closeStartCapped is the step check's cap at the node-start gap's close,
+// before its to_utc is taken (CH-45: the cap waits for that close). A gap
+// from a start that W and R were moved past by an unwatched close is
+// capped too. Where the start capped its copy it wrote the step's record
+// then, so this cap writes none (D1's ruling 11 on #788: once per step).
+// The caller holds s.mu.
+func (s *skew) closeStartCapped(g *openGap, wall time.Time) {
+	if g.cause == CauseNodeStart && !startCapsAtOnce {
+		wt := &s.wt
+		owed := wt.owedStep
+		s.capLocked(wall)
+		if wt.startStepped && !startStepTwice {
+			wt.owedStep = owed
+		}
+		wt.startStepped = false
+	}
+}
+
 // moveBackLocked moves W, R, the run file's copy and E's held samples back
 // by d; the copy is moved when the run file next takes it, whether or not
 // W or R is held (D3's B3 on #774). The caller holds s.mu.
 func (s *skew) moveBackLocked(d time.Duration) {
 	wt := &s.wt
-	for _, t := range []*time.Time{&wt.w, &wt.r, &wt.floor} {
+	ts := []*time.Time{&wt.w, &wt.r, &wt.floor}
+	switch {
+	case stepKeepsOld:
+		ts = nil
+	case stepFloorUnmoved:
+		ts = ts[:2]
+	}
+	for _, t := range ts {
 		if !t.IsZero() {
 			*t = t.Add(-d)
 		}
 	}
 	s.markStepLocked()
-	if !stepCopyUnmoved {
+	if !stepCopyUnmoved && !stepKeepsOld {
 		wt.copyBack += d
 	}
 	if !stepNoSamples {
@@ -626,27 +710,44 @@ func (l *Link) saveMoved(ctx context.Context) error {
 	return nil
 }
 
-// watchedCopy is the run file's copy: the earlier of W and R, zero when
-// neither is held; and back, the steps found since the last call, by which
-// the file's own copy moves. The step check runs first, and moves them
-// back if it finds a step; its event and the cursor's save wait for the
-// next check that can act, since the run file is being written.
-func (l *Link) watchedCopy() (c time.Time, back time.Duration) {
+// watchedCopy is the run file's copy: the earliest of W, R and the start
+// of the gap held for the floor, zero when none is held; back, the steps
+// found since the last call, by which the file's own copy moves; and held,
+// whether a gap is held for the floor or the node-start gap stands, while
+// which the copy never rises (CH-45; Health.entry). The step check runs
+// first, and moves them back if it finds a step; its event and the
+// cursor's save wait for the next check that can act, since the run file
+// is being written.
+func (l *Link) watchedCopy() (c time.Time, back time.Duration, held bool) {
 	if !stepTickOnly {
 		l.measureStep()
 	}
 	s := &l.skew
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	w, r := s.wt.w, s.wt.r
 	back, s.wt.copyBack = s.wt.copyBack, 0
-	switch {
-	case w.IsZero():
-		return r, back
-	case r.IsZero() || w.Before(r):
-		return w, back
+	c, held = s.copyLocked()
+	return c, back, held
+}
+
+// copyLocked is the link's copy and whether it may not rise (watchedCopy).
+// While the node-start gap stands the copy does not rise either, so the
+// copy a start wrote capped is not raised back to a frozen W by a later
+// write (D6's B3 on #788, D1's ruling 11). The caller holds s.mu.
+func (s *skew) copyLocked() (c time.Time, held bool) {
+	wt := &s.wt
+	c = wt.earlierWR()
+	if w := wt.wait; w != nil && !w.covered && !copyHeldIgnored && !(copyHeldFromSave && wt.heldSave) {
+		// The gap held from the raise itself (CH-45).
+		if c.IsZero() || w.From.Before(c) {
+			c = w.From
+		}
+		held = !copyNoHold
 	}
-	return r, back
+	if g := wt.open; g != nil && g.cause == CauseNodeStart && !startCopyRises {
+		held = true
+	}
+	return c, held
 }
 
 // watchNow is W and R as the link holds them.

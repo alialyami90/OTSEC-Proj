@@ -331,7 +331,11 @@ func healthEvents(t *testing.T, r *node.Runtime, typ string) []*event.Event {
 // or twice, and sensor-records-lost stands. Control: a node that writes
 // the gap only when it admits the span, under which the health stream
 // holds none after the restart, before the start writes what the cursor
-// owes.
+// owes. The sensor sent no heartbeat, so it was never watched: the start
+// also writes the node-start gap, open from the Unix epoch with
+// from_bound (D5-sensor-node.md section 1.9 item 5; D1's ruling 7 on
+// #788), which sensorlink's TestGapStartNeverWatched holds with its
+// control.
 func TestLostGapEventAfterRestart(t *testing.T) {
 	g := newRig(t)
 	r, _ := g.start(node.SensorSeams{})
@@ -351,12 +355,25 @@ func TestLostGapEventAfterRestart(t *testing.T) {
 		t.Fatalf("control: %d gap events", n)
 	}
 	k.restart()
-	ev := healthEvents(t, r, sensorlink.EventCoverageGap)
-	if n := len(ev); n < 1 || n > 2 {
-		t.Fatalf("%d gap events after the restart", n)
+	var lost, start []map[string]string
+	for _, e := range healthEvents(t, r, sensorlink.EventCoverageGap) {
+		switch d := e.Health.Details; d["cause"] {
+		case "lost":
+			lost = append(lost, d)
+		case sensorlink.CauseNodeStart:
+			start = append(start, d)
+		default:
+			t.Fatalf("gap event %v", d)
+		}
 	}
-	if d := ev[0].Health.Details; d["cause"] != "lost" || d["from_utc"] != "2026-11-13T09:00:00Z" || d["run_id"] != runID || d["covered"] != "false" {
-		t.Fatalf("gap event %v", d)
+	if n := len(lost); n < 1 || n > 2 {
+		t.Fatalf("%d lost gap events after the restart", n)
+	}
+	if d := lost[0]; d["from_utc"] != "2026-11-13T09:00:00Z" || d["run_id"] != runID || d["covered"] != "false" {
+		t.Fatalf("lost gap event %v", d)
+	}
+	if len(start) != 1 || start[0]["state"] != "open" || start[0]["from_bound"] != "true" || start[0]["from_utc"] != "1970-01-01T00:00:00Z" {
+		t.Fatalf("node-start gap events %v, want one, open from the Unix epoch, from_bound", start)
 	}
 	if k.count(sensorlink.AlarmRecordsLost) == 0 {
 		t.Fatalf("raises %v", k.raised)
