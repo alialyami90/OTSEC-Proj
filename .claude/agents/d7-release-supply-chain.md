@@ -52,6 +52,7 @@ The role exists because the threat model names signed updates, an anti-rollback 
 - A change that a rolled-back node must understand is named in the release record before any node writes the new form (D4-61).
 - Upgrade order is readers before writers (`deploy/README.md`).
 - Propose a build or signing tool in a findings file first. Install nothing, and add no build infrastructure without D1's brief.
+- You keep the workflows' pinned actions current: a check once a month, and at once when D1 starts you for an advisory that names one of them (D4-127 item 5). The workflows are not yours (above): a workflow line changes only under a brief from D1 that authorizes it (CLAUDE.md §5.3). Open from the upgrade of 2026-11-23: D4-129 items 6.3 to 6.5, and D4-130 item 6.4.
 
 ## Open items on 2026-11-10 (`main` at `069b9716`, after #607 and D4-78)
 

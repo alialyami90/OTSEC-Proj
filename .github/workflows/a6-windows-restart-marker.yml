@@ -33,19 +33,25 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
       # As ci.yml's go step, but every package runs -count times in one
-      # test binary. -timeout is per package binary, so it is ci.yml's 12m
-      # times the count, with room.
+      # test binary. -timeout is per package binary: 27m per count, sized
+      # from platform/node at count 3 on main's code at 43c0aa8e
+      # (P4-CI-RM-LIMIT). Two jobs finished in 2,413.6 s and 2,654.1 s, and
+      # five reached the old 2,700 s, an estimated 3,277 s at most. 3,277 s
+      # times 1.449, the widest spread between this workflow's two runners
+      # in one run, is 4,747 s, or 26.4m per count, rounded up. At a count
+      # of 4 or less, a hang's stacks print before the job's 120 minutes
+      # end (D4-44).
       - name: Full suite, repeated
         env:
           COUNT: ${{ github.event.inputs.count || '3' }}
         shell: pwsh
         run: |
-          $timeout = "$([int]$env:COUNT * 15)m"
+          $timeout = "$([int]$env:COUNT * 27)m"
           go test -timeout $timeout -count $env:COUNT ./...
           exit $LASTEXITCODE
