@@ -59,6 +59,7 @@ jobs:
             python tests/integration/gt_pcap/prp.py "$RUNNER_TEMP/captures/$f.pcap" "$RUNNER_TEMP/gt/prp" || echo "prp.py failed on $f"
           done
           python tests/integration/gt_pcap/dnp3_cases.py "$RUNNER_TEMP/gt/dnp3" || echo "dnp3_cases.py failed"
+      # P4-SENSOR-EVAL-GREEN: green when suricata.json equals suricata.recorded.json; a throw (download, hash, signer, script) still fails the step first.
       - name: Suricata's Windows build, with no Npcap, decoding offline
         shell: pwsh
         run: |
@@ -67,6 +68,8 @@ jobs:
             -CaptureDirs "$env:RUNNER_TEMP\captures", "$env:RUNNER_TEMP\gt\prp", "$env:RUNNER_TEMP\gt\dnp3" `
             -HashLists "$fx/public-ot-captures/MANIFEST.tsv", "$fx/gt-pcap/prp-derived.sha256", "$fx/gt-pcap/dnp3/dnp3.sha256" `
             -MsiUrl $env:MSI_URL -MsiSha256 $env:MSI_SHA256 -MsiSigner $env:MSI_SIGNER
+          python -I modules/telemetry/experiments/sensor-windows/suricata_recorded.py "$env:RUNNER_TEMP\e-d4-01-suricata\suricata.json"
+          exit $LASTEXITCODE
       - name: "The (a') pipeline: pktmon, etl2pcap, then the engine"
         if: always()
         shell: pwsh
@@ -91,8 +94,12 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends suricata tshark
       - name: Fetch the public captures (pinned SHA-256s)
         run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps"
+      # P4-SENSOR-EVAL-GREEN: green when the rows and run.sh's exit code equal prp-engines.recorded.md; a stage that fails before the table is written reads as missing.
       - name: Run both engines on the PRP pairs and compare
-        run: sh modules/telemetry/experiments/prp-engines/run.sh "$RUNNER_TEMP/caps" "$RUNNER_TEMP/e-d4-02"
+        run: |
+          rc=0
+          sh modules/telemetry/experiments/prp-engines/run.sh "$RUNNER_TEMP/caps" "$RUNNER_TEMP/e-d4-02" || rc=$?
+          python3 -I modules/telemetry/experiments/prp-engines/prp_recorded.py "$RUNNER_TEMP/e-d4-02/prp-engines.md" "$rc"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
