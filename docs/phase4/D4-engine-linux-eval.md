@@ -92,7 +92,7 @@ Every pin below is a **first-use pin**: D4 read the digest or hash on 2026-11-11
 | Two extra captures | SHA-256 per file in `extra-captures.tsv` | D4's own download from the Wireshark wiki | `sha256sum`; a mismatch removes the file, and its rows read `not run` | None |
 | The MANIFEST captures | Their committed SHA-256s (E-A4-01) | `MANIFEST.tsv` | `run.sh public` checks each file against `MANIFEST.tsv` itself, whatever `fetch_captures.sh` left in the cache, and drops one that fails, whose rows then read `not run` (D7 on #625). A `.gz` is checked before it is unpacked. | None |
 | tshark 4.2.2 (`prp` job only) | The version, not a hash: `prp_check.py` refuses any other | Ubuntu 24.04's archive | `apt` checks the archive's signature and each package's hash | Ubuntu's archive key |
-| `actions/checkout`, `actions/upload-artifact` | Commit SHAs of `v4.4.0` and `v4.6.2` | GitHub's API | GitHub resolves the action by SHA | — |
+| `actions/checkout`, `actions/upload-artifact` | Commit SHAs of `v7.0.1` and `v7.0.2` (P4-CI-UPGRADE; `v4.4.0` and `v4.6.2` before it) | GitHub's API | GitHub resolves the action by SHA | — |
 
 **Zeek 9.0.1, not 8.0.4.** E-A4-01 and E-D4-02 ran 8.0.4. 9.0.1 is the current LTS release (Docker Hub's `lts` tag on 2026-11-11), so it is the version a sensor would pin. That makes this run the first on 9.0.1: a difference from E-D4-02's PRP rows would be a version difference, and the `prp` table shows whether there is one.
 

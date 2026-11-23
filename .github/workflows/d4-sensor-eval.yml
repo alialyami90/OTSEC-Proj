@@ -25,14 +25,14 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Probe the image (OS, Npcap, pktmon)
         shell: pwsh
         run: ./modules/telemetry/experiments/sensor-windows/probe.ps1 -Out "$env:RUNNER_TEMP\e-d4-01" -Python (Get-Command python).Source
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: d4-sensor-eval-builtin
@@ -45,8 +45,8 @@ jobs:
       MSI_SHA256: 7c6b302e51a166c5b87b383ff2550406bc72faba9d690bd3a0532869a95dd084
       MSI_SIGNER: "CN=Open Information Security Foundation Inc., O=Open Information Security Foundation Inc., L=Boston, C=US"
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - name: Fetch the public captures (each SHA-256 is checked again before use)
@@ -71,7 +71,7 @@ jobs:
         if: always()
         shell: pwsh
         run: ./modules/telemetry/experiments/sensor-windows/pipeline.ps1 -Out "$env:RUNNER_TEMP\e-d4-01-pipeline" -Python (Get-Command python).Source -Manifest tests/fixtures/network/public-ot-captures/MANIFEST.tsv -SuricataJson "$env:RUNNER_TEMP\e-d4-01-suricata\suricata.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: d4-sensor-eval-suricata
@@ -84,7 +84,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Suricata and tshark
         run: |
           sudo apt-get update -q
@@ -93,7 +93,7 @@ jobs:
         run: sh modules/telemetry/experiments/ids-coverage/fetch_captures.sh "$RUNNER_TEMP/caps"
       - name: Run both engines on the PRP pairs and compare
         run: sh modules/telemetry/experiments/prp-engines/run.sh "$RUNNER_TEMP/caps" "$RUNNER_TEMP/e-d4-02"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: d4-sensor-eval-prp-engines

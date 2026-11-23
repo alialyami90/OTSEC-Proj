@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tshark
         run: |
           sudo apt-get update -q
@@ -49,7 +49,7 @@ jobs:
       # capture's flows, and its PRP pairs', by the side Zeek gives each end.
       - name: Sort the public DNP3 captures' flows by side, against the committed sort
         run: python3 tests/integration/gt_pcap/hr23_tshark.py sides "$RUNNER_TEMP/labels/sides-public.tsv" tests/fixtures/network/gt-pcap/hr23/sides.tsv "$RUNNER_TEMP"/caps/dnp3-*.pcap "$RUNNER_TEMP"/prp/dnp3-*.pcap
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gt-pcap-prp-labels
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tshark
         run: |
           sudo apt-get update -q
@@ -81,7 +81,7 @@ jobs:
           cd tests/fixtures/network/gt-pcap/dnp3
           for f in *.tsv dnp3-cases.json; do diff -u "$f" "$RUNNER_TEMP/dnp3/$f"; done
           ls "$RUNNER_TEMP"/dnp3/*.tsv | wc -l | grep -qx "$(ls *.tsv | wc -l)"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gt-pcap-dnp3
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tshark
         run: |
           sudo apt-get update -q
@@ -113,7 +113,7 @@ jobs:
         run: python3 tests/integration/gt_pcap/prp_pairs_label.py "$RUNNER_TEMP/pairs"
       - name: The label equals the committed one
         run: diff -u tests/fixtures/network/gt-pcap/prp-pairs/prp-pairs.tsv "$RUNNER_TEMP/pairs/prp-pairs.tsv"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gt-pcap-prp-pairs
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tshark
         run: |
           sudo apt-get update -q
@@ -147,7 +147,7 @@ jobs:
         run: python3 tests/integration/gt_pcap/modbus_label.py "$RUNNER_TEMP/caps/modbus.pcap" "$RUNNER_TEMP/modbus/modbus-moved-port.pcap" 15020 "$RUNNER_TEMP/modbus/modbus-moved-port.tsv"
       - name: The label equals the committed one
         run: diff -u tests/fixtures/network/gt-pcap/modbus/modbus-moved-port.tsv "$RUNNER_TEMP/modbus/modbus-moved-port.tsv"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gt-pcap-modbus-moved-port
@@ -167,7 +167,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tshark
         run: |
           sudo apt-get update -q
@@ -187,7 +187,7 @@ jobs:
           ls "$RUNNER_TEMP"/resync/*.tsv | wc -l | grep -qx "$(ls dnp3-resync-*.tsv | wc -l)"
       - name: The pinned tshark's checksums, and its reading against the expected differences
         run: python3 tests/integration/gt_pcap/resync_tshark.py "$RUNNER_TEMP/resync" tests/fixtures/network/gt-pcap/resync/tshark-beside.tsv
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gt-pcap-resync-tshark
@@ -208,7 +208,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install tshark
         run: |
           sudo apt-get update -q
@@ -243,7 +243,7 @@ jobs:
           python3 tests/integration/gt_pcap/dnp3_cases.py "$RUNNER_TEMP/dnp3"
           python3 tests/integration/gt_pcap/prp_pairs.py "$RUNNER_TEMP/pairs"
           python3 tests/integration/gt_pcap/hr23_tshark.py sides "$RUNNER_TEMP/sides-local.tsv" tests/fixtures/network/gt-pcap/hr23/sides.tsv "$RUNNER_TEMP"/dnp3/*.pcap "$RUNNER_TEMP"/pairs/*.pcap "$RUNNER_TEMP"/hr23/dnp3-udp-*.pcap "$RUNNER_TEMP"/hr23/dnp3-tcp-*.pcap
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gt-pcap-hr23-tshark
