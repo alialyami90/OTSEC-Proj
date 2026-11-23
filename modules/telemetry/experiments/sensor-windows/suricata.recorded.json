@@ -1,0 +1,307 @@
+{
+  "recorded_from": "suricata.json in artifact d4-sensor-eval-suricata of run 45081194524 (d4-sensor-eval, workflow_dispatch on main at 9242c214, job suricata 137389519642, 2026-11-22), after suricata_recorded.result()",
+  "result": {
+    "npcap_before": {
+      "npcap_dir": false,
+      "npcap_service": false,
+      "wpcap_dll": []
+    },
+    "installer": {
+      "url": "https://www.openinfosecfoundation.org/download/windows/Suricata-8.0.8-1-64bit.msi",
+      "sha256": "7c6b302e51a166c5b87b383ff2550406bc72faba9d690bd3a0532869a95dd084",
+      "signature": "Valid",
+      "signer": "CN=Open Information Security Foundation Inc., O=Open Information Security Foundation Inc., L=Boston, C=US",
+      "signer_thumbprint": "1CC0A04E667EB4C1C23AABD304F1F7D54A017D38"
+    },
+    "msiexec_exit": 0,
+    "msiexec_npcap_lines": [
+      "Note: 1: 2205 2:  3: LaunchCondition ",
+      "Note: 1: 2228 2:  3: LaunchCondition 4: SELECT `Condition` FROM `LaunchCondition` ",
+      "APPCOMPAT: [DetectVersionLaunchCondition] Failed to initialize pRecErr.",
+      "Property(S): WIXUI_EXITDIALOGOPTIONALTEXT = YOU MUST HAVE Npcap installed with winpcap compatability mode in order to run Suricata IDS/IPS. If you do not have it , you can get it from here - https://npcap.com/dist/"
+    ],
+    "npcap_after_install": {
+      "npcap_dir": false,
+      "npcap_service": false,
+      "wpcap_dll": []
+    },
+    "suricata_exe": "C:\\Program Files\\Suricata\\suricata.exe",
+    "imports": [
+      {
+        "dll": "api-ms-win-core-synch-l1-2-0.dll",
+        "resolves": true
+      },
+      {
+        "dll": "bcryptprimitives.dll",
+        "resolves": true
+      },
+      {
+        "dll": "ADVAPI32.dll",
+        "resolves": true
+      },
+      {
+        "dll": "IPHLPAPI.DLL",
+        "resolves": true
+      },
+      {
+        "dll": "libjansson-4.dll",
+        "resolves": true
+      },
+      {
+        "dll": "KERNEL32.dll",
+        "resolves": true
+      },
+      {
+        "dll": "liblz4.dll",
+        "resolves": true
+      },
+      {
+        "dll": "msvcrt.dll",
+        "resolves": true
+      },
+      {
+        "dll": "ntdll.dll",
+        "resolves": true
+      },
+      {
+        "dll": "ole32.dll",
+        "resolves": true
+      },
+      {
+        "dll": "OLEAUT32.dll",
+        "resolves": true
+      },
+      {
+        "dll": "libpcre2-8-0.dll",
+        "resolves": true
+      },
+      {
+        "dll": "libwinpthread-1.dll",
+        "resolves": true
+      },
+      {
+        "dll": "USERENV.dll",
+        "resolves": true
+      },
+      {
+        "dll": "WS2_32.dll",
+        "resolves": true
+      },
+      {
+        "dll": "wpcap.dll",
+        "resolves": false
+      },
+      {
+        "dll": "libyaml-0-2.dll",
+        "resolves": true
+      }
+    ],
+    "start": {
+      "command": "suricata.exe -V",
+      "exit": -1073741515,
+      "exit_hex": "0xC0000135",
+      "output": "",
+      "loader_events": []
+    },
+    "starts": false,
+    "captures": {
+      "dnp3-read.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-write.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-select-operate.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-malformed.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-digitalbond-part1.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-digitalbond-part2.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-digitalbond-part1.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-digitalbond-part2.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "iec104.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "iec104-sq.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "mms.pcap.gz": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-normal.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-ms-as1.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-ms-as2.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-ms-as3.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-ms-as4.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-composite.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-disturbance-busbar.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-disturbance-breaker-failure.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "goose-disturbance-underfrequency.pcapng": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-digitalbond-part1-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-digitalbond-part1-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-digitalbond-part2-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-digitalbond-part2-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-malformed-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-malformed-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-read-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-read-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-select-operate-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-select-operate-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-write-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-write-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-digitalbond-part1-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-digitalbond-part1-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-digitalbond-part2-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-digitalbond-part2-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-prp-a.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "modbus-prp-ab.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-authorized-operate.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-authorized-time-sync.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-heldout.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-known-master-new-port.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-moved-port.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-new-master.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-reader-disable-unsolicited.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-reader-time-sync.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-reconnect-learned.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-reconnect-unlearned.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-response-new-group.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-reused-seq.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-sa-failed-before-ack.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-sa-failed-master.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-sa-failed-outstation.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-sa-failed-unauthorized.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-sa.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-train.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-udp-moved-port.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-udp-req-port.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-udp-temp-port.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-udp-unsolicited.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-udp.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-unauthorized-operate-no-response.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      },
+      "dnp3-unauthorized-operate.pcap": {
+        "status": "unknown: suricata.exe does not start"
+      }
+    },
+    "npcap_at_end": {
+      "npcap_dir": false,
+      "npcap_service": false,
+      "wpcap_dll": []
+    }
+  }
+}
