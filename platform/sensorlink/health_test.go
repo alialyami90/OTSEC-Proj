@@ -95,6 +95,22 @@ type healthRig struct {
 	file *RunFile
 	h    *Health
 	gen  *linkGen
+	// idle is the links' idle deadline, zero for rigIdle. The deadline is
+	// real time (conn.go's read), while these tests run on the test
+	// clocks: at the base rig's 10 s, a connection left idle while other
+	// steps run was closed on a slow runner (D1's ruling 9 on #788).
+	idle time.Duration
+}
+
+// rigIdle is the health rig's idle deadline: far past any test's run, so
+// no connection is closed for the runner's speed.
+const rigIdle = time.Hour
+
+func (r *healthRig) idleDeadline() time.Duration {
+	if r.idle > 0 {
+		return r.idle
+	}
+	return rigIdle
 }
 
 // newHealthRig makes the rig for a sensor that has just been enrolled: no
@@ -114,6 +130,7 @@ func (r *healthRig) restartNoStart() {
 	r.rig.opt = func(o *Options) {
 		r.h = NewHealth(HealthConfig{SensorID: testSensor, Sink: genSink{gen, r.sink}, Monotonic: r.clk.mono, Now: r.now, Raise: o.Raise, File: r.file})
 		o.Health, o.Owed, o.Cursor = r.h, nil, genCursor{gen, o.Cursor}
+		o.Timeouts.Idle = r.idleDeadline()
 	}
 	r.rig.restart()
 }

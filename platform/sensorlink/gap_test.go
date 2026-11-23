@@ -3,6 +3,7 @@ package sensorlink
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"testing"
 	"time"
@@ -1986,6 +1987,7 @@ func secondOn(t *testing.T, g *gsrc, sharedHealth bool) *gsrc {
 			r2.h = g.r.h
 		}
 		o.Health, o.Owed = r2.h, nil
+		o.Timeouts.Idle = r2.idleDeadline()
 	}
 	r2.rig.restart()
 	return &gsrc{t: t, r: r2, p: r2.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
@@ -2044,6 +2046,32 @@ func TestLostGapNotBehindOtherGaps(t *testing.T) {
 				t.Fatalf("records %v: the control wrote the first sensor's link gap", g.r.sink.of(EventCoverageGap))
 			}
 		})
+	})
+	// The rig's control (D1's ruling 9 on #788): the first sensor's link
+	// with an idle deadline shorter than the second sensor's setup, as the
+	// base rig's 10 s were on a slow runner. The node closes it idle, and
+	// the send the test makes next fails as run 45243152327's did.
+	t.Run("control: sensor 1 idle past its deadline", func(t *testing.T) {
+		r := newHealthRig(t)
+		r.idle = 50 * time.Millisecond
+		r.restartNoStart()
+		g := &gsrc{t: t, r: r, p: r.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
+		g2 := secondOn(t, g, true)
+		g2.live(1, true)
+		for range GapOtherPerHour + 1 {
+			g2.restartGap()
+		}
+		select {
+		case why := <-g.p.done:
+			if why != netobs.CloseIdle {
+				t.Fatalf("sensor 1's connection closed %q, want %q", why, netobs.CloseIdle)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("sensor 1's connection was not closed idle")
+		}
+		if err := netobs.WriteFrame(g.p.c, []byte("{}")); !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("send: %v, want %v", err, io.ErrClosedPipe)
+		}
 	})
 }
 
