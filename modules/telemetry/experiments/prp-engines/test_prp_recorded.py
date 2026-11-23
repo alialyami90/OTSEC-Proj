@@ -37,6 +37,13 @@ def test_recorded_against_itself(tmp_path):
     (lambda t: t.replace(ROW + "\n", ""), "row dnp3-read / zeek: missing"),
     # a row added
     (lambda t: t.replace(ROW, ROW + "\n" + ROW.replace("zeek", "zeek-other")), "row dnp3-read / zeek-other: added"),
+    # a row repeated: a passing copy of a key before the real row (D6's N2 on #800)
+    (lambda t: t.replace(ROW, ROW.replace("| yes | no | yes | 1 of 1 | no |", "| yes | yes | yes | 1 of 1 | yes |") + "\n" + ROW),
+     "row dnp3-read / zeek: repeated"),
+    # the closing line alone (D6's N1 on #800)
+    (lambda t: t.replace("18 row(s) not run or failed.", "Every row passes."), "closing line:"),
+    # the header alone (D6's N1 on #800)
+    (lambda t: t.replace("| pass |\n", "| passed |\n", 1), "header:"),
 ])
 def test_control_differs(tmp_path, change, where):
     d = run(tmp_path, change(produced()))

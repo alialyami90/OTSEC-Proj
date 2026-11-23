@@ -50,6 +50,10 @@ def test_import_path_is_left_out(tmp_path):
      "suricata.json.imports["),
     (lambda r: r["msiexec_npcap_lines"].__setitem__(3, "Property(S): WIXUI_EXITDIALOGOPTIONALTEXT = other"),
      "suricata.json.msiexec_npcap_lines[3]"),
+    # D6's N1 on #800: a capture added, an import added, an import removed
+    (lambda r: r["captures"].update({"added.pcap": {"status": "ran"}}), "suricata.json.captures.added.pcap: added"),
+    (lambda r: r["imports"].append({"dll": "extra.dll", "resolves_to": None}), "suricata.json.imports: "),
+    (lambda r: r["imports"].pop(0), "suricata.json.imports: "),
 ])
 def test_control_differs(tmp_path, change, where):
     r = raw()

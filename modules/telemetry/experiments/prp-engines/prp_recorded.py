@@ -3,8 +3,8 @@
 The recorded result is prp-engines.recorded.md beside this script: the
 table, its closing line and run.sh's exit code from run 45081194524. Every
 cell of every row is compared, keyed by (capture, engine); no field is left
-out. run.sh exits 1 when a row is not run or fails, which is the recorded
-result; a stage before compare.py that fails (the tshark pin, a capture's
+out, and a (capture, engine) key that appears twice is a difference. run.sh
+exits 1 when a row is not run or fails, which is the recorded result; a stage before compare.py that fails (the tshark pin, a capture's
 hash, docker) also exits non-zero but writes no table, so it reads as missing.
 
 It prints "same as the recorded result" and exits 0 when equal. Otherwise
@@ -21,27 +21,30 @@ EXIT = re.compile(r"^run\.sh exit code: (\d+)$")
 
 
 def parse(text):
-    """The header, the rows by (capture, engine), the closing line and the exit line."""
+    """The header, the rows by (capture, engine), the repeated rows, the closing line and the exit line."""
     lines = text.splitlines()
     table = [l for l in lines if l.startswith("|")]
-    rows = {}
+    rows, repeated = {}, []
     for l in table[2:]:
         cells = [c.strip() for c in l.strip("|").split("|")]
-        rows[(cells[0], cells[1] if len(cells) > 1 else "")] = l
+        k = (cells[0], cells[1] if len(cells) > 1 else "")
+        if k in rows:
+            repeated.append((k, l))
+        rows[k] = l
     closing = [l for l in lines if CLOSING.match(l)]
     code = [EXIT.match(l).group(1) for l in lines if EXIT.match(l)]
-    return (table[0] if table else None), rows, closing, code
+    return (table[0] if table else None), rows, repeated, closing, code
 
 
 def check(path, code, recorded=RECORDED):
     with open(recorded, encoding="utf-8") as f:
-        w_head, w_rows, w_close, w_code = parse(f.read())
+        w_head, w_rows, _, w_close, w_code = parse(f.read())
     try:
         with open(path, encoding="utf-8") as f:
             text = f.read()
     except (OSError, ValueError) as e:
         return [f"{path}: missing or unreadable ({e.__class__.__name__}: {e})"]
-    g_head, g_rows, g_close, _ = parse(text)
+    g_head, g_rows, g_rep, g_close, _ = parse(text)
     if not text.strip() or g_head is None:
         return [f"{path}: empty or has no table"]
     out = [] if g_head == w_head else [f"header: {g_head} (recorded {w_head})"]
@@ -52,6 +55,7 @@ def check(path, code, recorded=RECORDED):
         elif g != w:
             out.append(f"row {k[0]} / {k[1]}: {g} (recorded {w})")
     out += [f"row {k[0]} / {k[1]}: added ({g})" for k, g in g_rows.items() if k not in w_rows]
+    out += [f"row {k[0]} / {k[1]}: repeated ({g})" for k, g in g_rep]
     if g_close != w_close:
         out.append(f"closing line: {g_close} (recorded {w_close})")
     if [str(code)] != w_code:
