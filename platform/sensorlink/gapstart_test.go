@@ -1002,6 +1002,49 @@ func TestGapStartBoundaries(t *testing.T) {
 	}
 }
 
+// TestGapStartNeverWatched (section 1.9 item 5, "A sensor never watched
+// holds a gap from its enrolment"; D1's ruling 7 on #788): a sensor whose
+// hello was accepted and which sent no heartbeat, the database and the run
+// file both kept: no W and no copy, so the node-start gap reaches back to
+// the Unix epoch, from_bound, and is written open at the start, its 60 s
+// counted from the bound. The control (the start's own time, the code at
+// f596b82e) opens it from the start and writes nothing at the start.
+func TestGapStartNeverWatched(t *testing.T) {
+	epoch := time.Unix(0, 0).UTC()
+	run := func(t *testing.T) (*gsrc, time.Time) {
+		g := newGsrc(t)
+		g.writeFile()
+		g.down()
+		g.away(6, false, false)
+		if c, err := g.r.cs.SourceCursor(bg); err != nil || len(c) == 0 {
+			t.Fatalf("the database holds no cursor (%v): the case is not a sensor never watched", err)
+		}
+		if cp := runFileCopy(t, g.r.path); cp != "" {
+			t.Fatalf("the run file holds a copy %s", cp)
+		}
+		start := g.r.now()
+		g.up()
+		if g.r.h.runFile != "" {
+			t.Fatalf("the run file read as %s at the start", g.r.h.runFile)
+		}
+		return g, start
+	}
+	g, _ := run(t)
+	if st := g.r.l.GapStatus(); !st.Open || st.Cause != CauseNodeStart || !st.From.Equal(epoch) {
+		t.Fatalf("gap %+v, want node-start open from the Unix epoch", st)
+	}
+	if r := g.startGaps(); len(r) != 1 || r[0]["state"] != "open" || r[0]["from_bound"] != "true" || r[0]["from_utc"] != "1970-01-01T00:00:00Z" {
+		t.Fatalf("records %v, want one node-start record, open from the Unix epoch, from_bound", g.gaps())
+	}
+	t.Run("control: from the start", func(t *testing.T) {
+		withSeam(t, &startNoBoundNow)
+		g, start := run(t)
+		if st := g.r.l.GapStatus(); !st.From.Equal(start) || len(g.startGaps()) != 0 {
+			t.Fatalf("gap %+v, records %v: the control did not open from the start %s", st, g.gaps(), start)
+		}
+	})
+}
+
 // TestGapCoveredWaitAcrossStart (D4-123 item 3.1; D1's ruling on #788,
 // option (a)): a gap written open closes as covered while its closed
 // record waits at the ceiling, and the node is killed before room

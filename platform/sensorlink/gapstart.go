@@ -14,7 +14,8 @@ import (
 //
 //   - At the start, after the run file is applied, any gap held for the
 //     floor in the cursor is written first (takeWatch put it in wait), and
-//     then the node-start gap opens from the earlier of W and R. With no W
+//     then the node-start gap opens from the earlier of W and R; the lost
+//     gaps the cursor owes come after, through WriteOwed (CH-40). With no W
 //     (the sensor database lost, or a sensor never watched) it opens from
 //     the bound, the run file's copy, with from_bound; with no copy either,
 //     from the Unix epoch, with from_bound, until P4-4-DE replaces it with
