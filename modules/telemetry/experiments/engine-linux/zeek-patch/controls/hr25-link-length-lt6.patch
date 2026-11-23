@@ -1,0 +1,15 @@
+HR-25 option A's control `link-length-lt6` (HR25-B1; docs/phase4/D4-hr25-design.md, section 2.1, 'a length of 5 to 255' (off by one): a length check of < 6, which refuses a link-only frame.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -301,7 +301,7 @@
+     if ( ! CRCMatches(PSEUDO_LINK_LAYER_LEN, hdr, hdr + PSEUDO_LINK_LAYER_LEN) )
+         return HEADER_CRC;
+ 
+-    if ( hdr[PSEUDO_LENGTH_INDEX] < 5 )
++    if ( hdr[PSEUDO_LENGTH_INDEX] < 6 )
+         return LINK_LENGTH;
+ 
+     return -1;

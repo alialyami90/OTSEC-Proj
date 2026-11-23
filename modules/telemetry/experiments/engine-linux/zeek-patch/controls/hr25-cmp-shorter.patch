@@ -1,0 +1,15 @@
+HR-25 option A's control `cmp-shorter` (HR25-B1; docs/phase4/D4-hr25-design.md, section 3.1, 'The whole segment compared': no equal-length check, a compare over the shorter side's length.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -385,7 +385,7 @@
+ // segment, its transport octet and every application octet, with equal
+ // lengths (design 2.3, D3's C1).
+ bool DNP3_Base::SameSegment(const Endpoint* endp, const u_char* seg, int seg_len) {
+-    return seg_len == endp->last_seg_len && memcmp(seg, endp->last_seg, seg_len) == 0;
++    return memcmp(seg, endp->last_seg, min(seg_len, endp->last_seg_len)) == 0;
+ }
+ 
+ // The transport rule and the fragment-size limit (design 2.2 steps 2 and 3,
