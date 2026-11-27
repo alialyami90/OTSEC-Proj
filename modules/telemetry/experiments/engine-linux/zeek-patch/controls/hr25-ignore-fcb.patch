@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -403,7 +403,7 @@
+@@ -440,7 +440,7 @@
      // retry (D1's ruling 1 on #782).
      bool confirmed = (ctrl & 0x40) && (ctrl & 0x10) && (ctrl & 0x0f) == 3;
      int fcb = (ctrl & 0x20) ? 1 : 0;
@@ -12,4 +12,4 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 +    bool link_retry = confirmed;
  
      if ( fir ) {
-         // A FIR frame accepts any number; one inside a fragment drops it.
+         // A FIR frame ends a run of first_chunk_missing (design 2.7).

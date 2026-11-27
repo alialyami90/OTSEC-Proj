@@ -79,6 +79,11 @@ export {
 		seq: count &log &optional;
 		req_ts: time &log &optional;
 	};
+
+	## Called with each "fc" row before it is written. HR-25's script part
+	## (zeek-patch/resync.zeek) handles it to put the cause of the last
+	## resync on the row; without that script no handler runs.
+	global fc_row: hook(c: connection, is_orig: bool, r: Info);
 }
 
 # CH-53 (C13 0.3; D4-102 item 6; D1's ruling 1 on #715). The timer cap:
@@ -124,8 +129,10 @@ event dnp3_header_block(c: connection, is_orig: bool, len: count, ctrl: count, d
 
 event dnp3_application_request_header(c: connection, is_orig: bool, application: count, fc: count)
 	{
-	Log::write(LOG, Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="fc",
-	                     $ev="dnp3_application_request_header", $fc=fc));
+	local r = Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="fc",
+	               $ev="dnp3_application_request_header", $fc=fc);
+	hook fc_row(c, is_orig, r);
+	Log::write(LOG, r);
 	# A confirm (0) is no request that waits for a reply.
 	if ( fc == 0 )
 		return;
@@ -142,8 +149,10 @@ event dnp3_application_request_header(c: connection, is_orig: bool, application:
 
 event dnp3_application_response_header(c: connection, is_orig: bool, application: count, fc: count, iin: count)
 	{
-	Log::write(LOG, Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="fc",
-	                     $ev="dnp3_application_response_header", $fc=fc));
+	local r = Info($ts=network_time(), $uid=c$uid, $is_orig=is_orig, $kind="fc",
+	               $ev="dnp3_application_response_header", $fc=fc);
+	hook fc_row(c, is_orig, r);
+	Log::write(LOG, r);
 	local o = is_orig ? c$id$orig_h : c$id$resp_h;
 	local m = is_orig ? c$id$resp_h : c$id$orig_h;
 	local seq = application % 16;

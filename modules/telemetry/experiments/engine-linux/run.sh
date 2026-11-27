@@ -48,9 +48,11 @@
 # images zeek-patch/build.sh built, `zeek-probe-c1p` and `zeek-probe-c2` run
 # too, on those images by ID. A fourth mode, `hr23-unit WORK`, runs D4's unit
 # and negative tests of the patch (zeek-patch/dispatch_unit.py) on them.
-# A fifth, `hr25-unit WORK` (HR25-B1, D4-124), runs D4's unit tests of HR-25
-# option A's patch (zeek-patch/hr25_unit.py) on C2A (HR25_C2A_IMAGE) and its
-# mutant controls (HR25_M_*_IMAGE), with C2 quoted.
+# A fifth, `hr25-unit WORK` (HR25-B1 and B2, D4-124), runs D4's unit tests of
+# HR-25 option A's patch and script part (zeek-patch/hr25_unit.py) on C2A
+# (HR25_C2A_IMAGE) and its mutant controls (HR25_M_*_IMAGE, and C2A with
+# each script control), with C2 run beside them and printed as ran or exit
+# N only.
 #
 # The script-hash check (docs/release.md section 8.4 item 3; D4-115 item 5):
 # every Zeek container that has a mount is made, checked, run and removed
@@ -188,11 +190,15 @@ if [ "$mode" = hr23-unit ]; then
   [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$work/hr23-unit.md" >> "$GITHUB_STEP_SUMMARY"
   exit $rc
 fi
-# HR-25's option A, part HR25-B1 (D4-124): D4's unit tests of A's patch
-# (zeek-patch/hr25_unit.py) on D4's own `d4u-hr25-*` inputs, under C2A and
-# its mutant controls, with C2 quoted. It reads no D6 case and no GT-PCAP
-# capture. Run only when D1 rules it; the workflow's build_only input runs
-# no mode of this script.
+# HR-25's option A, parts HR25-B1 and HR25-B2 (D4-124): D4's unit tests of
+# A's patch and its script part (zeek-patch/hr25_unit.py) on D4's own
+# `d4u-hr25-*` inputs, under C2A and its mutant controls, with C2 run
+# beside them. It reads no D6 case and no GT-PCAP capture. Run only when D1
+# rules it (D1's ruling on D4-131 item 5.1: on main, after HR25-B2); the
+# workflow's build_only input runs no mode of this script. What it prints
+# and uploads is causes, counts and weird names only: the engines' own
+# output (in-container.sh's lines, which can quote an engine's stderr) goes
+# to WORK/hr25-unit/engine.log, which is neither printed nor uploaded.
 if [ "$mode" = hr25-unit ]; then
   case ${HR23_C2_IMAGE:-}/${HR25_C2A_IMAGE:-} in sha256:*/sha256:*) ;; *) echo "hr25-unit needs HR23_C2_IMAGE and HR25_C2A_IMAGE, each an image ID" >&2; exit 1 ;; esac
   . "$here/zeek-patch/build.env"
@@ -202,11 +208,25 @@ if [ "$mode" = hr25-unit ]; then
   mkdir -p "$u/out"
   docker pull -q "$ZEEK_IMAGE" > /dev/null
   mc_selftest
-  # C2 does not define dnp3_resync, so it runs without resync-unit.zeek.
-  cfgs="zeek-hr25-c2=$HR23_C2_IMAGE= zeek-hr25-c2a=$HR25_C2A_IMAGE=/exp/zeek-patch/resync-unit.zeek"
+  # The script controls: the script part with one control patch each,
+  # mounted read-only at /ctl.
+  ctl=$u/ctl
+  mkdir -p "$ctl"
+  for m in $(python3 -I "$here/zeek-patch/hr25_unit.py" script-controls); do
+    mkdir -p "$ctl/$m"
+    cp "$here/zeek-patch/resync.zeek" "$ctl/$m/resync.zeek"
+    patch -d "$ctl/$m" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/zeek-patch/controls/$m.patch" > /dev/null \
+      || { echo "script control $m does not apply" >&2; exit 1; }
+  done
+  # C2 does not define A's events, so it runs without the script part.
+  a=/exp/zeek-patch/resync.zeek
+  cfgs="zeek-hr25-c2=$HR23_C2_IMAGE= zeek-hr25-c2a=$HR25_C2A_IMAGE=$a"
   for m in $HR25_CONTROLS; do
     eval "im=\${HR25_M_$(echo "$m" | tr a-z- A-Z_)_IMAGE:-}"
-    [ -z "$im" ] || cfgs="$cfgs zeek-hr25-m-$m=$im=/exp/zeek-patch/resync-unit.zeek"
+    [ -z "$im" ] || cfgs="$cfgs zeek-hr25-m-$m=$im=$a"
+  done
+  for m in $(python3 -I "$here/zeek-patch/hr25_unit.py" script-controls); do
+    cfgs="$cfgs zeek-hr25-m-$m=$HR25_C2A_IMAGE=/ctl/$m/resync.zeek"
   done
   for c in $cfgs; do
     cfg=${c%%=*}
@@ -214,14 +234,17 @@ if [ "$mode" = hr25-unit ]; then
     im=${rest%%=*}
     extra=${rest#*=}
     for p in "$u/pcaps"/*.pcap; do
-      mc_run --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" \
-        "$im" sh /exp/in-container.sh zeek "$cfg" "/pcaps/${p##*/}" /exp/probe.zeek $extra
+      mc_run --network none -v "$u/pcaps:/pcaps:ro" -v "$u/out:/out" -v "$here:/exp:ro" -v "$ctl:/ctl:ro" \
+        "$im" sh /exp/in-container.sh zeek "$cfg" "/pcaps/${p##*/}" /exp/probe.zeek /exp/zeek-patch/viol.zeek $extra \
+        >> "$u/engine.log"
     done
   done
   rc=0
-  { echo "# HR-25: D4's unit tests of option A's patch (HR25-B1)"; echo
+  { echo "# HR-25: D4's unit tests of option A's patch and its script part (HR25-B1, HR25-B2)"; echo
     echo "D4's own inputs (\`d4u-hr25-*\`); no counted measurement reads them. Each row's controls are C2A with"
-    echo "one control patch each (zeek-patch/controls/hr25-*.patch); C2, the (i) build, is quoted, not judged."; echo
+    echo "one control patch each (zeek-patch/controls/hr25-*.patch), or C2A with the script part changed by one"
+    echo "(zeek-patch/controls/script-*.patch). C2, the (i) build, is printed as ran or exit N only, never judged."
+    echo "Causes, counts and weird names only (D1's ruling on D4-131 item 5.1)."; echo
     python3 -I "$here/zeek-patch/hr25_unit.py" check "$u/out" || rc=$?; } > "$work/hr25-unit.md"
   mc_stop
   mc_record "$work/hr25-unit.md"

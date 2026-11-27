@@ -1,0 +1,15 @@
+HR-25 option A's control `end-five` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'Rows on flows that never confirm': the five counts before option (a), without transport_seq.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -792,7 +792,7 @@
+ // (design 2.7), or invariant, which design 2.9 says writes its row.
+ void DNP3_Base::ReportEnd() {
+     static const int unconfirmed[] = {APP_PARSE,           FRAGMENT_LIMIT, EMBEDDED_HEADER, FIRST_CHUNK_MISSING,
+-                                      TRANSPORT_SEQ,       GAP,            INVARIANT};
++                                      GAP,                 INVARIANT};
+ 
+     for ( bool orig : {true, false} ) {
+         Endpoint* endp = End(orig);

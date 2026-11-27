@@ -1,0 +1,15 @@
+HR-25 option A's control `fcm-each-charged` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'A run of first_chunk_missing': each drop of a run counts against F.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -628,7 +628,7 @@
+ 
+     if ( cause == FIRST_CHUNK_MISSING ) {
+         endp->fcm_run = true;
+-        Charge(orig, in_run ? 0 : 1, 0);
++        Charge(orig, 1, 0);
+     }
+     else
+         Charge(orig, 1, octets);

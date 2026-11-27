@@ -1,0 +1,15 @@
+HR-25 option A's control `budget-o-2047` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'The budget: two bounds': O one less than val-O.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.h
++++ b/src/analyzer/protocol/dnp3/DNP3.h
+@@ -46,7 +46,7 @@
+     // The budget before confirmation (design 2.7): F failures and O octets
+     // per connection, at D6's pinned values (val-F, val-O).
+     static const int BUDGET_F = 8;
+-    static const int BUDGET_O = 2048;
++    static const int BUDGET_O = 2047;
+ 
+     struct Endpoint {
+         u_char buffer[MAX_BUFFER_SIZE] = {0};

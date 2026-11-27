@@ -1,0 +1,14 @@
+HR-25 option A's script control `script-end-free` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.8, 'The interval and the host cap': end and budget rows not held back by K.) Applied with
+`patch -p1 --fuzz=0` to a copy of zeek-patch/resync.zeek, never shipped.
+
+--- a/resync.zeek
++++ b/resync.zeek
+@@ -110,7 +110,7 @@
+ 		written = 0;
+ 		}
+ 	# Every row but the overflow row counts against K, whatever its why.
+-	if ( written >= host_cap )
++	if ( written >= host_cap && why != "end" && why != "budget" )
+ 		{
+ 		if ( held == 0 )
+ 			schedule grid_start + (n + 1) * DNP3::resync_report_interval - network_time() { overflow_due(n) };

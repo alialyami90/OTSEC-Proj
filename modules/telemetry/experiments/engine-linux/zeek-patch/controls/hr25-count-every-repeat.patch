@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -414,7 +414,7 @@
+@@ -455,7 +455,7 @@
          if ( n == (tseq + 1) % 64 ) {
              // Append.
          }
@@ -12,4 +12,4 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 +        else if ( false )
              return; // A link-layer retry: discarded, nothing counted.
          else {
-             Drop(orig, TRANSPORT_SEQ);
+             // Only the frame that failed counts against O (design 2.7).

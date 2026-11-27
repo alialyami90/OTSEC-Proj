@@ -1,0 +1,16 @@
+HR-25 option A's control `confirm-at-header` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'Confirmation': confirmed at the first passing header, as Zeek 9.0.1 and HR25-B1 were.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -244,6 +244,9 @@
+ 
+             endp->scanning = false;
+ 
++            if ( ! confirmed )
++                Confirm();
++
+             u_char ctrl = endp->buffer[PSEUDO_CONTROL_FIELD_INDEX];
+ 
+             // A link-only frame consumes its 10 octets, and the rest of the

@@ -1,11 +1,14 @@
 OTSEC patch for HR-25, option A with option (a): frame-by-frame recovery in
 Zeek 9.0.1's DNP3 analyzer, on top of HR-23's option (i)
 (docs/phase4/D4-hr25-design.md; D1's ruling 6893095629, D4-106; option (a),
-D4-112 item 3; D1's rulings on #782, D4-123). This file is part HR25-B1 of
-the build (D4-124): sections 2.1 to 2.6 and 2.9 of the design, the
-transport sequence check of section 2.3, the fourteen causes counted, and
-the event dnp3_resync raised with why "end". Confirmation, the budget, the
-other rows and the mark (sections 2.7 and 2.8) are HR25-B2's.
+D4-112 item 3; D1's rulings on #782, D4-123). This file carries parts
+HR25-B1 and HR25-B2 of the build (D4-124): sections 2.1 to 2.6 and 2.9 of
+the design, the transport sequence check of section 2.3, the fourteen
+causes counted (B1); confirmation at the first whole fragment, the budget
+before it, the weirds gated, and the events dnp3_resync (why "first",
+"interval", "end" and "budget") and dnp3_resync_mark (sections 2.7 and 2.8,
+B2). The script part is zeek-patch/resync.zeek, which declares
+DNP3::resync_report_interval.
 
 Against: Zeek 9.0.1 (zeek-9.0.1.tar.gz, SHA-256 in build.env) with
 hr23-fc-dispatch.patch applied. Applied after it, from the top of the
@@ -17,9 +20,10 @@ lines this patch adds are the project's own (LICENSE.md). No grant to offer
 them upstream exists, and any report to Zeek's maintainers waits for the
 owner's word (design section 4, C5).
 
+
 --- a/src/analyzer/protocol/dnp3/DNP3.h
 +++ b/src/analyzer/protocol/dnp3/DNP3.h
-@@ -12,13 +12,37 @@
+@@ -12,13 +12,41 @@
  
  class DNP3_Base {
  public:
@@ -56,10 +60,14 @@ owner's word (design section 4, C5).
      static const int MAX_BUFFER_SIZE = 300;
 +    static const int HEADER_LEN = 10;    // the link header with its CRC
 +    static const int LAST_SEG_SIZE = 250; // a frame's user data, at most
++    // The budget before confirmation (design 2.7): F failures and O octets
++    // per connection, at D6's pinned values (val-F, val-O).
++    static const int BUDGET_F = 8;
++    static const int BUDGET_O = 2048;
  
      struct Endpoint {
          u_char buffer[MAX_BUFFER_SIZE] = {0};
-@@ -27,7 +51,35 @@
+@@ -27,7 +55,47 @@
          int tpflags = 0;
          int pkt_length = 0;
          int pkt_cnt = 0;
@@ -92,10 +100,22 @@ owner's word (design section 4, C5).
 +        uint64_t counts[NUM_CAUSES] = {0};
 +        uint64_t scanned_octets = 0;
 +        int last_cause = -1;
++        // HR25-B2 (design 2.7, 2.8): in a run of first_chunk_missing, which
++        // counts once against F; the cause of the last drop or scan, for
++        // dnp3_resync_mark (-1: none pending); this end's rows: whether its
++        // `first` row was raised, its time, the interval of its last row,
++        // and the counts that row carried.
++        bool fcm_run = false;
++        int mark = -1;
++        bool first_raised = false;
++        double first_ts = 0;
++        uint64_t interval_n = 0;
++        uint64_t row_counts[NUM_CAUSES] = {0};
++        uint64_t row_scanned = 0;
      };
  
      bool ProcessData(int len, const u_char* data, bool orig);
-@@ -48,17 +100,35 @@
+@@ -48,17 +116,47 @@
       */
      int AddToBuffer(Endpoint* endp, int target_len, const u_char** data, int* len);
  
@@ -110,13 +130,18 @@ owner's word (design section 4, C5).
 +    int HeaderCause(const u_char* hdr);
 +    bool ProcessFrame(bool orig, const u_char* rest, int rest_len);
 +    int CheckChunks(Endpoint* endp, u_char* seg, int* seg_len);
-+    void TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len);
++    void TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len, int flen);
 +    bool SameSegment(const Endpoint* endp, const u_char* seg, int seg_len);
 +    bool EmbeddedCheck(Endpoint* endp, const u_char* rest, int rest_len);
 +    bool EmbeddedPeek(Endpoint* endp, const u_char* data, int len);
 +    void ResetFrame(Endpoint* endp);
 +    void Count(bool orig, int cause);
-+    void Drop(bool orig, int cause);
++    void Drop(bool orig, int cause, int octets);
++    void Embedded(bool orig);
++    void Charge(bool orig, int failures, int octets);
++    void Confirm();
++    void Raise(bool orig, const char* why);
++    void AfterDelivery(bool orig);
 +    void DatagramEnd(bool orig);
 +    void Gap(bool orig);
 +    void EndOfStream(bool orig);
@@ -130,10 +155,17 @@ owner's word (design section 4, C5).
      analyzer::Analyzer* analyzer;
 -    binpac::DNP3::DNP3_Conn* interp;
 +    bool stream; // TCP: a stream; UDP: datagrams
++    // HR25-B2 (design 2.7): confirmed at the first fragment that parses
++    // whole; before it, the connection's failures and octets against F and
++    // O; and whether the budget ran out, which sets skip.
++    bool confirmed = false;
++    int budget_failures = 0;
++    int budget_octets = 0;
++    bool exhausted = false;
  
      Endpoint orig_state;
      Endpoint resp_state;
-@@ -82,6 +152,7 @@
+@@ -82,6 +180,7 @@
  public:
      explicit DNP3_UDP_Analyzer(Connection* conn);
  
@@ -143,18 +175,23 @@ owner's word (design section 4, C5).
      static analyzer::Analyzer* Instantiate(Connection* conn) { return new DNP3_UDP_Analyzer(conn); }
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -110,7 +110,10 @@
+@@ -109,8 +109,15 @@
+ 
  #include "zeek/analyzer/protocol/dnp3/DNP3.h"
  
++#include <cmath>
++#include <cstring>
++
  #include "zeek/Reporter.h"
 +#include "zeek/ID.h"
++#include "zeek/RunState.h"
 +#include "zeek/Val.h"
  #include "zeek/analyzer/protocol/dnp3/consts.bif.h"
 +#include "zeek/analyzer/protocol/dnp3/events.bif.h"
  
  constexpr unsigned int PSEUDO_LENGTH_INDEX = 2;        // index of len field of DNP3 Pseudo Link Layer
  constexpr unsigned int PSEUDO_CONTROL_FIELD_INDEX = 3; // index of ctrl field of DNP3 Pseudo Link Layer
-@@ -125,9 +128,34 @@
+@@ -125,9 +132,56 @@
  bool DNP3_Base::crc_table_initialized = false;
  unsigned int DNP3_Base::crc_table[256];
  
@@ -182,6 +219,28 @@ owner's word (design section 4, C5).
 +static_assert(sizeof(cause_name) / sizeof(cause_name[0]) == DNP3_Base::NUM_CAUSES);
 +static_assert(sizeof(cause_weird) / sizeof(cause_weird[0]) == DNP3_Base::NUM_CAUSES);
 +
++// HR25-B2: DNP3::resync_report_interval, which the shipped script declares
++// (design 2.8; a constant of the analyzer's own bif would need init-bare.zeek
++// changed). Without it, no `interval` row is raised.
++static double report_interval() {
++    static double iv = -1;
++
++    if ( iv < 0 ) {
++        const auto& id = id::find("DNP3::resync_report_interval");
++        iv = (id && id->GetVal()) ? id->GetVal()->AsInterval() : 0;
++    }
++
++    return iv;
++}
++
++static bool any_count(const uint64_t* counts) {
++    for ( int c = 0; c < DNP3_Base::NUM_CAUSES; ++c )
++        if ( counts[c] > 0 )
++            return true;
++
++    return false;
++}
++
 +DNP3_Base::DNP3_Base(analyzer::Analyzer* arg_analyzer, bool arg_stream) {
      analyzer = arg_analyzer;
 -    interp = new binpac::DNP3::DNP3_Conn(analyzer);
@@ -191,7 +250,7 @@ owner's word (design section 4, C5).
  
      ClearEndpointState(true);
      ClearEndpointState(false);
-@@ -136,15 +164,23 @@
+@@ -136,15 +190,29 @@
          PrecomputeCRCTable();
  }
  
@@ -204,14 +263,20 @@ owner's word (design section 4, C5).
  bool DNP3_Base::ProcessData(int len, const u_char* data, bool orig) {
 -    Endpoint* endp = orig ? &orig_state : &resp_state;
 +    Endpoint* endp = End(orig);
++
++    // HR25-B2: once the budget has run out, the analyzer has set skip, and
++    // nothing more is read (design 2.7).
++    if ( analyzer->Skipping() )
++        return true;
  
 -    while ( len ) {
 +    // A failed frame's embedded-header check that waits for octets past the
 +    // frame's end reads them here, without consuming them (design 2.2).
 +    if ( endp->emb_pending && EmbeddedPeek(endp, data, len) )
-+        Count(orig, EMBEDDED_HEADER);
++        Embedded(orig);
 +
-+    while ( len > 0 ) {
++    // The budget can run out in the middle of a delivery (design 2.7).
++    while ( len > 0 && ! analyzer->Skipping() ) {
          if ( endp->in_hdr ) {
 -            // We're parsing the DNP3 header and link layer, get that in full.
 -            int res = AddToBuffer(endp, PSEUDO_APP_LAYER_INDEX, &data, &len);
@@ -220,7 +285,7 @@ owner's word (design section 4, C5).
  
              if ( res == 0 )
                  return true;
-@@ -152,92 +188,87 @@
+@@ -152,92 +220,90 @@
              if ( res < 0 )
                  return false;
  
@@ -238,21 +303,26 @@ owner's word (design section 4, C5).
 +            if ( cause >= 0 ) {
 +                // A failed header consumes 1 octet and scans. The run counts
 +                // its first cause once and raises its weird once.
++                // Before confirmation the run counts one against F, and
++                // each octet it consumes, the failed header's included,
++                // one against O, checked after each (design 2.7).
 +                if ( ! endp->scanning ) {
 +                    endp->scanning = true;
++                    endp->mark = cause;
 +                    Count(orig, cause);
++                    Charge(orig, 1, 0);
 +                }
 +
 +                ++endp->scanned_octets;
 +                memmove(endp->buffer, endp->buffer + 1, HEADER_LEN - 1);
 +                endp->buffer_len = HEADER_LEN - 1;
++                Charge(orig, 0, 1);
 +                continue;
              }
  
+-            // If the checksum works out, we're pretty certainly DNP3.
+-            analyzer->AnalyzerConfirmation();
 +            endp->scanning = false;
-+
-             // If the checksum works out, we're pretty certainly DNP3.
-             analyzer->AnalyzerConfirmation();
  
 -            // DNP3 packets without transport and application
 -            // layers can happen, we ignore them.
@@ -358,7 +428,7 @@ owner's word (design section 4, C5).
          reporter->AnalyzerError(analyzer, "dnp3 invalid target length: %d - %d", target_len, endp->buffer_len);
          return -1;
      }
-@@ -245,6 +276,7 @@
+@@ -245,6 +311,7 @@
      int to_copy = min(*len, target_len - endp->buffer_len);
  
      if ( endp->buffer_len + to_copy > MAX_BUFFER_SIZE ) {
@@ -366,7 +436,7 @@ owner's word (design section 4, C5).
          reporter->AnalyzerError(analyzer, "dnp3 buffer length exceeded: %d + %d", endp->buffer_len, to_copy);
          return -1;
      }
-@@ -260,85 +292,339 @@
+@@ -260,85 +327,490 @@
      return 0;
  }
  
@@ -398,6 +468,7 @@ owner's word (design section 4, C5).
 +    u_char ctrl = hdr[PSEUDO_CONTROL_FIELD_INDEX];
 +    u_char seg[sizeof(endp->last_seg)];
 +    int seg_len = 0;
++    int flen = endp->buffer_len;
  
 -    u_char* data = endp->buffer + PSEUDO_TRANSPORT_INDEX; // The transport layer byte counts as app-layer it seems.
 -    int len = endp->pkt_length - 5;
@@ -405,39 +476,40 @@ owner's word (design section 4, C5).
 +
 +    if ( res < 0 )
 +        return false;
-+
-+    if ( res == 0 ) {
-+        // A chunk CRC failed: the frame is consumed by its length, and a
-+        // header inside it is flagged, never parsed (design 2.2).
-+        bool found = EmbeddedCheck(endp, rest, rest_len);
-+        ResetFrame(endp);
-+        Drop(orig, CHUNK_CRC);
-+
-+        if ( found )
-+            Count(orig, EMBEDDED_HEADER);
-+
-+        return true;
-+    }
-+
-+    ResetFrame(endp);
-+    TransportRule(orig, ctrl, hdr, seg, seg_len);
-+    return true;
-+}
  
 -    // DNP3 Packet :  DNP3 Pseudo Link Layer | DNP3 Pseudo Transport Layer | DNP3 Pseudo Application
 -    // Layer DNP3 Serial Transport Layer data is always 1 byte. Get FIN FIR seq field in transport
 -    // header. FIR indicate whether the following DNP3 Serial Application Layer is first chunk of
 -    // bytes or not. FIN indicate whether the following DNP3 Serial Application Layer is last chunk
 -    // of bytes or not.
++    if ( res == 0 ) {
++        // A chunk CRC failed: the frame is consumed by its length, and a
++        // header inside it is flagged, never parsed (design 2.2).
++        bool found = EmbeddedCheck(endp, rest, rest_len);
++        ResetFrame(endp);
++        Drop(orig, CHUNK_CRC, flen);
+ 
+-    int is_first = (endp->tpflags & 0x40) >> 6; // Initial chunk of data in this packet.
+-    int is_last = (endp->tpflags & 0x80) >> 7;  // Last chunk of data in this packet.
++        if ( found )
++            Embedded(orig);
+ 
+-    int transport = PSEUDO_TRANSPORT_LEN;
++        return true;
++    }
++
++    ResetFrame(endp);
++    TransportRule(orig, ctrl, hdr, seg, seg_len, flen);
++    return true;
++}
++
 +// Checks every chunk CRC of the whole frame in the buffer, and copies its
 +// user data (the transport octet and the application octets, without CRCs)
 +// into seg. 1: every chunk passed; 0: one failed; -1: a broken invariant.
 +int DNP3_Base::CheckChunks(Endpoint* endp, u_char* seg, int* seg_len) {
 +    bool orig = (endp == &orig_state);
 +    int len = endp->pkt_length - 5;
- 
--    int is_first = (endp->tpflags & 0x40) >> 6; // Initial chunk of data in this packet.
--    int is_last = (endp->tpflags & 0x80) >> 7;  // Last chunk of data in this packet.
++
 +    // Design 2.9 item 5: the user data must fit last_seg's own buffer
 +    // (sizeof, not a literal), checked before the copy and the compare.
 +    if ( len > static_cast<int>(sizeof(endp->last_seg)) ) {
@@ -445,8 +517,7 @@ owner's word (design section 4, C5).
 +        reporter->AnalyzerError(analyzer, "dnp3 transport segment exceeds its buffer: %d", len);
 +        return -1;
 +    }
- 
--    int transport = PSEUDO_TRANSPORT_LEN;
++
 +    const u_char* data = endp->buffer + PSEUDO_TRANSPORT_INDEX;
 +    int out = 0;
  
@@ -502,8 +573,9 @@ owner's word (design section 4, C5).
 +}
 +
 +// The transport rule and the fragment-size limit (design 2.2 steps 2 and 3,
-+// 2.3), on a frame whose every CRC passed.
-+void DNP3_Base::TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len) {
++// 2.3), on a frame whose every CRC passed. `flen` is the frame's octets,
++// which a drop of it counts against O before confirmation (design 2.7).
++void DNP3_Base::TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len, int flen) {
 +    Endpoint* endp = End(orig);
 +    int& tseq = endp->tseq;
 +    u_char t = seg[0];
@@ -519,9 +591,13 @@ owner's word (design section 4, C5).
 +    bool link_retry = confirmed && endp->fcb == fcb;
 +
 +    if ( fir ) {
++        // A FIR frame ends a run of first_chunk_missing (design 2.7).
++        endp->fcm_run = false;
++
 +        // A FIR frame accepts any number; one inside a fragment drops it.
++        // The frames dropped with it were accepted, so it counts no octets.
 +        if ( endp->encountered_first_chunk )
-+            Drop(orig, FIR_RESTART);
++            Drop(orig, FIR_RESTART, 0);
 +    }
 +    else if ( endp->encountered_first_chunk ) {
 +        if ( n == (tseq + 1) % 64 ) {
@@ -530,7 +606,8 @@ owner's word (design section 4, C5).
 +        else if ( n == tseq && link_retry && SameSegment(endp, seg, seg_len) )
 +            return; // A link-layer retry: discarded, nothing counted.
 +        else {
-+            Drop(orig, TRANSPORT_SEQ);
++            // Only the frame that failed counts against O (design 2.7).
++            Drop(orig, TRANSPORT_SEQ, flen);
 +            return;
 +        }
 +    }
@@ -539,7 +616,7 @@ owner's word (design section 4, C5).
 +        if ( endp->after_fin && n == tseq && link_retry && SameSegment(endp, seg, seg_len) )
 +            return;
 +
-+        Drop(orig, FIRST_CHUNK_MISSING);
++        Drop(orig, FIRST_CHUNK_MISSING, flen);
 +        return;
 +    }
 +
@@ -550,7 +627,7 @@ owner's word (design section 4, C5).
 +
 +    if ( BifConst::DNP3::max_application_layer_fragment_size > 0 &&
 +         static_cast<size_t>(base + app) > BifConst::DNP3::max_application_layer_fragment_size ) {
-+        Drop(orig, FRAGMENT_LIMIT);
++        Drop(orig, FRAGMENT_LIMIT, flen);
 +        return;
 +    }
 +
@@ -581,7 +658,7 @@ owner's word (design section 4, C5).
 -    if ( is_first )
 -        endp->encountered_first_chunk = true;
 +    if ( thrown ) {
-+        Drop(orig, APP_PARSE);
++        Drop(orig, APP_PARSE, flen);
 +        return;
 +    }
  
@@ -593,6 +670,11 @@ owner's word (design section 4, C5).
 +        endp->encountered_first_chunk = false;
 +        endp->app_octets = 0;
 +        endp->pkt_cnt = 0;
++
++        // Confirmation: the first fragment that parses whole, every check
++        // passed, FIN, and FlowEOF returned (design 2.7).
++        if ( ! confirmed )
++            Confirm();
      }
 +}
 +
@@ -603,12 +685,24 @@ owner's word (design section 4, C5).
 +    binpac::DNP3::DNP3_Conn* interp = Interpreter(orig);
 +    binpac::DNP3::DNP3_Flow* flow = orig ? interp->upflow() : interp->downflow();
 +
-+    if ( fir )
++    if ( fir ) {
++        // HR25-B2: the cause of the last drop or scan on this end, once,
++        // before the first fragment after it reaches binpac (design 2.8).
++        Endpoint* endp = End(orig);
++
++        if ( endp->mark >= 0 ) {
++            if ( ::dnp3_resync_mark )
++                analyzer->EnqueueConnEvent(::dnp3_resync_mark, analyzer->ConnVal(), val_mgr->Bool(orig),
++                                           make_intrusive<StringVal>(cause_name[endp->mark]));
++            endp->mark = -1;
++        }
++
 +        interp->NewData(orig, hdr, hdr + PSEUDO_LINK_LAYER_LEN);
++    }
++
++    flow->flow_buffer()->BufferData(seg + PSEUDO_TRANSPORT_LEN, seg + seg_len);
  
 -    if ( is_last ) {
-+    flow->flow_buffer()->BufferData(seg + PSEUDO_TRANSPORT_LEN, seg + seg_len);
-+
 +    if ( fin ) {
          flow->flow_buffer()->FinishBuffer();
          flow->FlowEOF();
@@ -665,15 +759,27 @@ owner's word (design section 4, C5).
 +    Endpoint* endp = End(orig);
 +    ++endp->counts[cause];
 +    endp->last_cause = cause;
-+    analyzer->Weird(cause_weird[cause]);
++
++    // Another cause ends a run of first_chunk_missing (design 2.7).
++    if ( cause != FIRST_CHUNK_MISSING )
++        endp->fcm_run = false;
++
++    // Before confirmation only `budget` raises its weird (design 2.7, 2.8).
++    // A broken invariant is never quiet (design 2.9).
++    if ( confirmed || cause == BUDGET || cause == INVARIANT )
++        analyzer->Weird(cause_weird[cause]);
 +}
 +
 +// The one drop function (design 2.6): counts the cause, clears this end's
 +// state, and remakes this end's interpreter if a fragment is in progress.
-+// The other end is not touched.
-+void DNP3_Base::Drop(bool orig, int cause) {
++// The other end is not touched. Before confirmation it counts one against
++// F and `octets` against O, but a run of first_chunk_missing counts one
++// and no octets (design 2.7).
++void DNP3_Base::Drop(bool orig, int cause, int octets) {
 +    Endpoint* endp = End(orig);
++    bool in_run = cause == FIRST_CHUNK_MISSING && endp->fcm_run;
 +    Count(orig, cause);
++    endp->mark = cause;
 +    bool remake = endp->encountered_first_chunk;
 +    ClearEndpointState(orig);
 +
@@ -681,6 +787,113 @@ owner's word (design section 4, C5).
 +        delete endp->interp;
 +        endp->interp = new binpac::DNP3::DNP3_Conn(analyzer);
 +    }
++
++    if ( cause == FIRST_CHUNK_MISSING ) {
++        endp->fcm_run = true;
++        Charge(orig, in_run ? 0 : 1, 0);
++    }
++    else
++        Charge(orig, 1, octets);
++}
++
++// An embedded header counts one more against F (design 2.7).
++void DNP3_Base::Embedded(bool orig) {
++    Count(orig, EMBEDDED_HEADER);
++    Charge(orig, 1, 0);
++}
++
++// The budget before confirmation (design 2.7), per connection: it runs out
++// at the step at which the failures reach F or the octets reach O. Then the
++// analyzer counts `budget`, raises its weird, its row and one violation,
++// and sets skip itself.
++void DNP3_Base::Charge(bool orig, int failures, int octets) {
++    if ( confirmed || exhausted )
++        return;
++
++    budget_failures += failures;
++    budget_octets += octets;
++
++    if ( budget_failures < BUDGET_F && budget_octets < BUDGET_O )
++        return;
++
++    exhausted = true;
++    Count(orig, BUDGET);
++    Raise(orig, "budget");
++    analyzer->AnalyzerViolation("dnp3_resync_budget_exhausted");
++    analyzer->SetSkip(true);
++}
++
++// Confirmation (design 2.7), and each end's `first` row if its counts kept
++// from before it are not zero (design 2.8).
++void DNP3_Base::Confirm() {
++    confirmed = true;
++    analyzer->AnalyzerConfirmation();
++
++    for ( bool orig : {true, false} )
++        if ( any_count(End(orig)->counts) )
++            Raise(orig, "first");
++}
++
++// dnp3_resync for one end (design 2.8). Causes and counts only, cumulative
++// from the analyzer's start.
++void DNP3_Base::Raise(bool orig, const char* why) {
++    Endpoint* endp = End(orig);
++
++    if ( strcmp(why, "first") == 0 ) {
++        endp->first_raised = true;
++        endp->first_ts = run_state::network_time;
++        endp->interval_n = 0;
++    }
++
++    memcpy(endp->row_counts, endp->counts, sizeof(endp->counts));
++    endp->row_scanned = endp->scanned_octets;
++
++    if ( ! ::dnp3_resync )
++        return;
++
++    auto counts = make_intrusive<VectorVal>(id::index_vec);
++
++    for ( auto c : endp->counts )
++        counts->Append(val_mgr->Count(c));
++
++    analyzer->EnqueueConnEvent(::dnp3_resync, analyzer->ConnVal(), val_mgr->Bool(orig), make_intrusive<StringVal>(why),
++                               make_intrusive<StringVal>(endp->last_cause >= 0 ? cause_name[endp->last_cause] : ""),
++                               std::move(counts), val_mgr->Count(endp->scanned_octets));
++}
++
++// After each delivery on an end, once confirmed (design 2.8): its `first`
++// row at the first failure after confirmation, at once; then at most one
++// `interval` row per interval, at the first delivery at or after the
++// `first` row's time plus n intervals, if its counts changed since its last
++// row. Times are compared in whole microseconds.
++void DNP3_Base::AfterDelivery(bool orig) {
++    Endpoint* endp = End(orig);
++
++    if ( ! confirmed )
++        return;
++
++    if ( ! endp->first_raised ) {
++        if ( any_count(endp->counts) )
++            Raise(orig, "first");
++        return;
++    }
++
++    int64_t iv = llround(report_interval() * 1e6);
++    int64_t since = llround((run_state::network_time - endp->first_ts) * 1e6);
++
++    if ( iv <= 0 || since < 0 )
++        return;
++
++    uint64_t n = static_cast<uint64_t>(since / iv);
++
++    if ( n <= endp->interval_n )
++        return;
++
++    endp->interval_n = n;
++
++    if ( memcmp(endp->counts, endp->row_counts, sizeof(endp->counts)) != 0 ||
++         endp->scanned_octets != endp->row_scanned )
++        Raise(orig, "interval");
 +}
 +
 +// UDP: the end of a datagram (design 2.4). A scan run ends here and its held
@@ -689,27 +902,39 @@ owner's word (design section 4, C5).
 +    Endpoint* endp = End(orig);
 +    endp->emb_pending = false;
 +
++    if ( analyzer->Skipping() )
++        return;
++
 +    if ( endp->scanning ) {
 +        endp->scanning = false;
 +        ResetFrame(endp);
 +        return;
 +    }
 +
++    // The octets held count against O before confirmation (design 2.7).
 +    if ( ! endp->in_hdr || endp->buffer_len > 0 )
-+        Drop(orig, TRUNCATED);
++        Drop(orig, TRUNCATED, endp->buffer_len);
 +}
 +
 +// TCP: a content gap drops this end, which then scans (design 2.5).
 +void DNP3_Base::Gap(bool orig) {
 +    Endpoint* endp = End(orig);
 +    endp->emb_pending = false;
-+    Drop(orig, GAP);
++
++    if ( analyzer->Skipping() )
++        return;
++
++    Drop(orig, GAP, 0);
 +    endp->scanning = true;
 +}
 +
 +// TCP: the end of this end's stream, inside A's catch (design 2.6, T11).
 +void DNP3_Base::EndOfStream(bool orig) {
 +    End(orig)->emb_pending = false;
++
++    if ( exhausted )
++        return;
++
 +    bool thrown = false;
 +
 +    try {
@@ -719,34 +944,30 @@ owner's word (design section 4, C5).
 +    }
 +
 +    if ( thrown )
-+        Drop(orig, APP_PARSE);
++        Drop(orig, APP_PARSE, 0);
 +}
 +
-+// dnp3_resync with why "end", for each end whose counts are not all zero
-+// (design 2.8; B1 raises only this one).
++// dnp3_resync with why "end", when the analyzer is done (design 2.8): for
++// each end whose counts are not all zero; on a flow that never confirmed,
++// only for an end on which one of app_parse, fragment_limit,
++// embedded_header, first_chunk_missing, transport_seq or gap is not zero
++// (design 2.7), or invariant, which design 2.9 says writes its row.
 +void DNP3_Base::ReportEnd() {
-+    if ( ! ::dnp3_resync )
-+        return;
++    static const int unconfirmed[] = {APP_PARSE,           FRAGMENT_LIMIT, EMBEDDED_HEADER, FIRST_CHUNK_MISSING,
++                                      TRANSPORT_SEQ,       GAP,            INVARIANT};
 +
 +    for ( bool orig : {true, false} ) {
 +        Endpoint* endp = End(orig);
 +        bool any = false;
 +
-+        for ( auto c : endp->counts )
-+            any = any || c > 0;
++        if ( confirmed )
++            any = any_count(endp->counts);
++        else
++            for ( int c : unconfirmed )
++                any = any || endp->counts[c] > 0;
 +
-+        if ( ! any )
-+            continue;
-+
-+        auto counts = make_intrusive<VectorVal>(id::index_vec);
-+
-+        for ( auto c : endp->counts )
-+            counts->Append(val_mgr->Count(c));
-+
-+        analyzer->EnqueueConnEvent(::dnp3_resync, analyzer->ConnVal(), val_mgr->Bool(orig),
-+                                   make_intrusive<StringVal>("end"),
-+                                   make_intrusive<StringVal>(endp->last_cause >= 0 ? cause_name[endp->last_cause] : ""),
-+                                   std::move(counts), val_mgr->Count(endp->scanned_octets));
++        if ( any )
++            Raise(orig, "end");
 +    }
  }
  
@@ -757,7 +978,7 @@ owner's word (design section 4, C5).
  
      endp->in_hdr = true;
      endp->encountered_first_chunk = false;
-@@ -346,13 +632,23 @@
+@@ -346,13 +818,23 @@
      endp->pkt_length = 0;
      endp->tpflags = 0;
      endp->pkt_cnt = 0;
@@ -782,7 +1003,7 @@ owner's word (design section 4, C5).
  bool DNP3_Base::CheckCRC(int len, const u_char* data, const u_char* crc16, const char* where) {
      unsigned int crc = CalcCRC(len, data);
  
-@@ -390,13 +686,14 @@
+@@ -390,13 +872,14 @@
  }
  
  } // namespace detail
@@ -800,12 +1021,22 @@ owner's word (design section 4, C5).
  }
  
  void DNP3_TCP_Analyzer::DeliverStream(int len, const u_char* data, bool orig) {
-@@ -416,15 +713,20 @@
+@@ -405,6 +888,8 @@
+     try {
+         if ( ! ProcessData(len, data, orig) )
+             SetSkip(true);
++        else
++            AfterDelivery(orig);
+     }
+ 
+     catch ( const binpac::Exception& e ) {
+@@ -416,15 +901,21 @@
  
  void DNP3_TCP_Analyzer::Undelivered(uint64_t seq, int len, bool orig) {
      TCP_ApplicationAnalyzer::Undelivered(seq, len, orig);
 -    Interpreter()->NewGap(orig, len);
 +    Gap(orig);
++    AfterDelivery(orig);
  }
  
  void DNP3_TCP_Analyzer::EndpointEOF(bool is_orig) {
@@ -824,18 +1055,20 @@ owner's word (design section 4, C5).
  
  void DNP3_UDP_Analyzer::DeliverPacket(int len, const u_char* data, bool orig, uint64_t seq, const IP_Hdr* ip,
                                        int caplen) {
-@@ -433,6 +735,8 @@
+@@ -433,6 +924,10 @@
      try {
          if ( ! ProcessData(len, data, orig) )
              SetSkip(true);
-+        else
++        else {
 +            DatagramEnd(orig);
++            AfterDelivery(orig);
++        }
      }
  
      catch ( const binpac::Exception& e ) {
 --- a/src/analyzer/protocol/dnp3/events.bif
 +++ b/src/analyzer/protocol/dnp3/events.bif
-@@ -268,3 +268,23 @@
+@@ -268,3 +268,38 @@
  ## generates this for unknown "cases". The user can use it to debug the byte
  ## string to check what caused the malformed network packets.
  event dnp3_debug_byte%(c: connection, is_orig: bool, debug: string%);
@@ -848,7 +1081,10 @@ owner's word (design section 4, C5).
 +##
 +## is_orig: True if this reflects originator-side activity.
 +##
-+## why: "end" when the analyzer is done (the only one raised in this build).
++## why: "first" (at confirmation, or at the first failure after it),
++##      "interval" (at most one per DNP3::resync_report_interval), "end"
++##      (when the analyzer is done) or "budget" (when the budget before
++##      confirmation runs out).
 +##
 +## cause: the cause counted last on this end, or "" if none.
 +##
@@ -859,3 +1095,15 @@ owner's word (design section 4, C5).
 +##
 +## scanned_octets: the octets consumed by scan runs on this end.
 +event dnp3_resync%(c: connection, is_orig: bool, why: string, cause: string, counts: index_vec, scanned_octets: count%);
++
++## OTSEC patch (HR-25, A; docs/phase4/D4-hr25-design.md, section 2.8):
++## generated once before the first fragment that reaches the parser on an
++## end after a drop or a scan on that end, with that drop's or scan's cause.
++## Never a payload octet.
++##
++## c: The connection the DNP3 communication is part of.
++##
++## is_orig: True if this reflects originator-side activity.
++##
++## cause: the cause of the last drop or scan on this end.
++event dnp3_resync_mark%(c: connection, is_orig: bool, cause: string%);

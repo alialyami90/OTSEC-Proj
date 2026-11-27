@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "resync-cases.tsv")
 CONDITIONS = os.path.join(HERE, "resync-conditions.tsv")
 CASES_SHA256 = "5801290f39a6aeb3f44b511ef34d2d18fd2bbe2fcd1ca9b800bd3f041ad1da40"
-CONDITIONS_SHA256 = "9e3b8ca006acd1edf1f0d03dff6f6d00483c54a043670d0734861420b348bbaf"
+CONDITIONS_SHA256 = "60eb2fb421166b4e0dd5a0e7fe93e8b6f2a1546514fffeee4c96bfc1fdcb7632"
 
 # The closed set of causes and their weirds (design section 2.8).
 WEIRDS = {
