@@ -1,0 +1,15 @@
+HR-25 option A's control `weirds-before-confirm` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.8, 'The weirds' bound': every cause raises its weird before confirmation too.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -606,7 +606,7 @@
+ 
+     // Before confirmation only `budget` raises its weird (design 2.7, 2.8).
+     // A broken invariant is never quiet (design 2.9).
+-    if ( confirmed || cause == BUDGET || cause == INVARIANT )
++    if ( true )
+         analyzer->Weird(cause_weird[cause]);
+ }
+ 

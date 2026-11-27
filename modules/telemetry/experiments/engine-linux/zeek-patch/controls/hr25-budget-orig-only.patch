@@ -1,0 +1,15 @@
+HR-25 option A's control `budget-orig-only` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'Per connection': the responder's failures not charged, so the ends do not add up.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -647,7 +647,7 @@
+ // analyzer counts `budget`, raises its weird, its row and one violation,
+ // and sets skip itself.
+ void DNP3_Base::Charge(bool orig, int failures, int octets) {
+-    if ( confirmed || exhausted )
++    if ( confirmed || exhausted || ! orig )
+         return;
+ 
+     budget_failures += failures;

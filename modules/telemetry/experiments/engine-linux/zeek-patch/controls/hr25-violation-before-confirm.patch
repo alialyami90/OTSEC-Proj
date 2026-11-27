@@ -1,0 +1,16 @@
+HR-25 option A's control `violation-before-confirm` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'Confirmation': a failure before confirmation raises a violation.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -604,6 +604,9 @@
+     if ( cause != FIRST_CHUNK_MISSING )
+         endp->fcm_run = false;
+ 
++    if ( ! confirmed && cause != BUDGET && cause != INVARIANT )
++        analyzer->AnalyzerViolation(cause_weird[cause]);
++
+     // Before confirmation only `budget` raises its weird (design 2.7, 2.8).
+     // A broken invariant is never quiet (design 2.9).
+     if ( confirmed || cause == BUDGET || cause == INVARIANT )

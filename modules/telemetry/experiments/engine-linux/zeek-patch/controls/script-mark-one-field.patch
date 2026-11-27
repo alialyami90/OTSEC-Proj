@@ -1,0 +1,14 @@
+HR-25 option A's script control `script-mark-one-field` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.8, 'Where the pending cause lives': one pending field for both ends.) Applied with
+`patch -p1 --fuzz=0` to a copy of zeek-patch/resync.zeek, never shipped.
+
+--- a/resync.zeek
++++ b/resync.zeek
+@@ -132,7 +132,7 @@
+ # queued.
+ event dnp3_resync_mark(c: connection, is_orig: bool, cause: string)
+ 	{
+-	if ( is_orig )
++	if ( T )
+ 		c$otsec_resync_orig = cause;
+ 	else
+ 		c$otsec_resync_resp = cause;

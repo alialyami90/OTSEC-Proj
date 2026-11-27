@@ -4,11 +4,11 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -426,7 +426,7 @@
+@@ -470,7 +470,7 @@
          if ( endp->after_fin && n == tseq && link_retry && SameSegment(endp, seg, seg_len) )
              return;
  
--        Drop(orig, FIRST_CHUNK_MISSING);
+-        Drop(orig, FIRST_CHUNK_MISSING, flen);
 +        Count(orig, FIRST_CHUNK_MISSING);
          return;
      }

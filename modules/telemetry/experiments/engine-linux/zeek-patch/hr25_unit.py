@@ -1,5 +1,6 @@
-"""HR-25 option A, part HR25-B1: D4's unit tests of the patch, on synthetic
-frames (brief P4-4-HR25 deliverable 3; D4-124).
+"""HR-25 option A, parts HR25-B1 and HR25-B2: D4's unit tests of the patch
+and of its script part, on synthetic frames (brief P4-4-HR25 deliverable 3;
+D4-124; brief HR25-B2).
 
 These are D4's own inputs, named `d4u-hr25-*`. They are not GT-PCAP cases
 and not D6's `dnp3-resync-*` cases, which D6 pins and which no part of this
@@ -7,27 +8,37 @@ file reads; no counted measurement reads these. Each input is written here
 from D6's byte helpers (tests/integration/gt_pcap/dnp3.py, synth.py,
 pcapfile.py), used as they are. Addresses are from TEST-NET-1 (RFC 5737).
 
-Every test is run under C2A (`zeek-hr25-c2a`, the (i)+A build) and under
-the mutant controls of zeek-patch/controls/hr25-*.patch (`zeek-hr25-m-<name>`,
-C2A with one control patch each). A row passes when C2A meets its
-expectation and every control the row names, each of which breaks one rule
-of docs/phase4/D4-hr25-design.md sections 2.1, 2.2 and 3.1, does not (the
-control is killed). A configuration that did not run, or whose Zeek exited non-zero,
-fails the row: a crash is never read as a kill. C2 (`zeek-hr25-c2`, the (i)
-build) is quoted beside each row, never judged.
+Every test is run under C2A (`zeek-hr25-c2a`, the (i)+A build, with
+probe.zeek and the script part zeek-patch/resync.zeek) and under the mutant
+controls (`zeek-hr25-m-<name>`): C2A with one control patch of
+zeek-patch/controls/hr25-*.patch each, or C2A's image with the script part
+changed by one control patch of zeek-patch/controls/script-*.patch. A row
+passes when C2A meets its expectation and every control the row names, each
+of which breaks one rule of docs/phase4/D4-hr25-design.md sections 2.1 to
+2.3, 2.7, 2.8 and 3.1, does not (the control is killed). A configuration
+that did not run, or whose Zeek exited non-zero, fails the row: a crash is
+never read as a kill. C2 (`zeek-hr25-c2`, the (i) build) is run beside each
+row and printed as `ran` or `exit N` only, never judged (D1's ruling on
+D4-131 item 5.1).
 
-What a build did is read from two logs: the probe log's `fc` rows (each
-DNP3 application header, as (is_orig, function code), in order), and
-otsec_resync_unit.log (resync-unit.zeek), one row per dnp3_resync event,
-whose `counts` are in the closed set's order. An expectation names the
-whole `fc` list, and the counts that are not zero; every other count must
-be zero on both ends.
+What a build did is read from four logs, as causes, counts and weird names
+only (D1's ruling on D4-131 item 5.1): otsec_probe.log's `fc` rows (each
+DNP3 application header, as (is_orig, function code), in order, with its
+`resync_cause`) and its `resync` rows (each end's `why`, the delivery it
+was written at, and its `counts`); weird.log's `dnp3_` names; and the count
+of DNP3 violations in otsec_viol.log (viol.zeek). An expectation names the
+whole `fc` list; the counts that are not zero, read from each end's last
+resync row, every other count being zero; the resync rows in order; the
+weird names with their number of rows; the fc rows that carry a cause; and
+the violations. A capture of many flows (the host cap) is judged on its
+rows' number by `why`, its overflow rows and its weirds.
 
 Evidence class: the expectations are `desk`, from the design's rules. A
 result, once a run that D1 rules reads these, is `simulated` (CI-Linux).
 
 Usage: python -I hr25_unit.py write OUT
        python -I hr25_unit.py check OUT
+       python -I hr25_unit.py script-controls   the script controls' names
 """
 import json
 import os
@@ -41,7 +52,7 @@ import synth  # noqa: E402
 
 C2A, C2 = "zeek-hr25-c2a", "zeek-hr25-c2"
 # DNP3::max_application_layer_fragment_size, Zeek 9.0.1's default (100 *
-# 1024, init-bare.zeek); neither the probe nor resync-unit.zeek redefines it.
+# 1024, init-bare.zeek); neither the probe nor resync.zeek redefines it.
 LIMIT = 100 * 1024
 # The closed set of causes, in the order of dnp3_resync's `counts` (design
 # 2.8). test_hr25_unit.py checks it against the patch's own list.
@@ -60,8 +71,10 @@ M, O = True, False
 U_M = 0xC4   # master, primary, unconfirmed user data (function 4)
 U_O = 0x44   # outstation, primary, unconfirmed user data
 RST_M = 0xC0  # master, primary, Reset Link States (function 0), link-only
+RST_O = 0x40  # outstation, primary, Reset Link States, link-only
 TEST_M = 0xD2  # master, primary, Test Link States (function 2, FCV set), link-only
 ACK_O = 0x00  # outstation, secondary, ACK (function 0), link-only
+ACK_M = 0x80  # master, secondary, ACK, link-only
 
 
 def conf_m(fcb):
@@ -69,8 +82,23 @@ def conf_m(fcb):
     return 0xD3 | (0x20 if fcb else 0)
 
 
+def conf_o(fcb):
+    """Outstation, primary, confirmed user data (function 3) with FCV set."""
+    return 0x53 | (0x20 if fcb else 0)
+
+
 def tp(fir, fin, n):
     return (0x80 if fin else 0) | (0x40 if fir else 0) | (n & 0x3F)
+
+
+def badhdr():
+    """Ten octets whose magic passes and whose header CRC fails."""
+    return b"\x05\x64\x0a\xc4\x0a\x00\x01\x00\x00\x00"
+
+
+def garbage(n):
+    """n octets of 11h, which hold no 05 64."""
+    return bytes([0x11]) * n
 
 
 def frame(from_m, ctrl, user, dest=None):
@@ -102,6 +130,23 @@ def link_only(from_m, ctrl):
     return frame(from_m, ctrl, b"")
 
 
+def badchunk(from_m, n=7):
+    """A whole one-frame read (or response) whose header passes and whose
+    first chunk CRC fails."""
+    b = bytearray(whole(from_m, n, Q if from_m else R(0)))
+    b[10 + 1] ^= 0xFF
+    return bytes(b)
+
+
+def carrier():
+    """A frame whose header passes and whose first chunk CRC fails (the low
+    octet of that chunk's CRC, at offset 26, is inverted), holding W's whole
+    frame as its user data: an embedded header."""
+    c = bytearray(frame(M, U_M, whole(M, 1, W)))
+    c[10 + 16] ^= 0xFF
+    return bytes(c)
+
+
 # The messages. P and Q are reads (code 1), R(k) a response (129), W the
 # master's direct operate (code 5, g12v1), which the tests split.
 P = dnp3.request(0, dnp3.READ, dnp3.all_objects(60, 1))
@@ -114,6 +159,23 @@ def R(k):
     return dnp3.response(k)
 
 
+# The one fragment these inputs make throw: a response of five application
+# octets, IIN 0000h and one object octet, 3Ch, too short for its object
+# header (D6's `badobj`, HR-23 design 4.7). Its fc row's place against the
+# throw is the generated code's, not read, so an expectation allows both.
+BADOBJ = dnp3.response(0, objects=b"\x3c")
+
+
+class Either:
+    """An fc list that may be any of the lists given."""
+
+    def __init__(self, *alts):
+        self.alts = [list(a) for a in alts]
+
+    def __contains__(self, fc):
+        return list(fc) in self.alts
+
+
 # The fc rows of a flow P R | W R | Q R, and without W.
 ALL = [(M, 1), (O, 129), (M, 5), (O, 129), (M, 1), (O, 129)]
 NO_W = [(M, 1), (O, 129), (M, 1), (O, 129)]
@@ -123,22 +185,29 @@ NO_W_R = [(M, 1), (O, 129), (O, 129), (M, 1), (O, 129)]
 class Flow:
     """One UDP 5-tuple, or one TCP connection after a full handshake, which
     the master opens, so the master is Zeek's originator. `send` puts its
-    frames in one datagram or one segment."""
+    frames in one datagram or one segment, at the next tick of the clock or
+    `at` seconds after the clock's start. `sent` keeps each delivery as
+    (from the master, octets, time in ns)."""
 
-    def __init__(self, tcp=False):
-        self.clock = synth.Clock()
+    START = synth.Clock().ns
+
+    def __init__(self, tcp=False, clock=None, port=None):
+        self.clock = clock or synth.Clock()
         if tcp:
             a = synth.Host(MASTER.mac, MASTER.ip, CLIENT_PORT)
             self.conv = synth.TCPConv(a, OUTSTATION, self.clock)
             self.conv.handshake()
         else:
-            self.conv = synth.UDPConv(MASTER, OUTSTATION, self.clock)
+            m = MASTER if port is None else synth.Host(MASTER.mac, MASTER.ip, port)
+            self.conv = synth.UDPConv(m, OUTSTATION, self.clock)
         self.sent = []
 
-    def send(self, from_m, *frames):
+    def send(self, from_m, *frames, at=None):
         data = b"".join(frames)
-        self.conv.send(from_m, data)
-        self.sent.append((from_m, data))
+        gap = None if at is None else self.START + round(at * 1e9) - self.clock.ns
+        assert gap is None or gap > 0, "times must increase"
+        fr = self.conv.send(from_m, data, gap_ns=gap)
+        self.sent.append((from_m, data, fr[0].ns))
         return self
 
     def start(self, p_n=0):
@@ -150,6 +219,23 @@ class Flow:
         if with_r1:
             self.send(O, whole(O, 1, R(1)))
         return self.send(M, whole(M, q_n, Q)).send(O, whole(O, 2, R(2)))
+
+
+class Hosts:
+    """Many UDP flows on one clock, in one capture: the host cap's inputs."""
+
+    def __init__(self, n):
+        self.clock = synth.Clock()
+        self.flows = [Flow(clock=self.clock, port=40000 + i) for i in range(n)]
+
+    def add(self):
+        f = Flow(clock=self.clock, port=40000 + len(self.flows))
+        self.flows.append(f)
+        return f
+
+    @property
+    def frames(self):
+        return sorted((x for f in self.flows for x in f.conv.frames), key=lambda x: x.ns)
 
 
 def reset(f):
@@ -391,7 +477,187 @@ def cases():
     f.send(O, whole(O, 1, R(1)))
     f.send(M, wf[:17]).send(M, wf[17:])
     out["d4u-hr25-tcp-split"] = f.finish(2, with_r1=False)
+    out.update(cases_b2())
     return out
+
+
+def session(f, p_n=0):
+    """P R | W R | Q R, each whole, after whatever f holds."""
+    f.start(p_n)
+    f.send(M, whole(M, (p_n + 1) % 64, W))
+    return f.finish((p_n + 2) % 64)
+
+
+def cases_b2():
+    """HR25-B2's inputs: confirmation, the budget, the rows, the mark and the
+    host cap (design 2.7, 2.8)."""
+    out = {}
+
+    # Confirmation at the first fragment that parses whole (design 2.7):
+    # before it a failure is counted only, and raises no weird. A frame
+    # whose header passes and whose chunk fails; a fragment's first frame,
+    # then a frame out of sequence.
+    f = Flow().send(M, badchunk(M))
+    out["d4u-hr25-unconfirmed-chunk"] = session(f, 2)
+    f = Flow().send(M, seg(M, True, False, 1, W1)).send(M, seg(M, False, False, 5, b"\x22"))
+    out["d4u-hr25-unconfirmed-multi"] = session(f, 2)
+    # A fragment that throws confirms nothing; its flow writes its end row
+    # on app_parse, one of the six counts. The master sends Reset Link
+    # States first, so that it is the originator.
+    f = Flow().send(M, link_only(M, RST_M)).send(O, whole(O, 0, BADOBJ))
+    out["d4u-hr25-throw-alone"] = f
+    # A flow that never confirms writes an end row only on the six counts:
+    # garbage (magic) writes none; a frame out of sequence writes one.
+    out["d4u-hr25-unconfirmed-garbage"] = Flow().send(M, garbage(16))
+    f = Flow().send(M, seg(M, True, False, 1, W1)).send(M, seg(M, False, False, 5, b"\x22"))
+    out["d4u-hr25-unconfirmed-seq-only"] = f
+
+    # The budget's bound F (val-F = 8), per connection: F - 1, F and F + 1
+    # failed headers, one datagram each, then the session.
+    for name, k in (("d4u-hr25-budget-f-minus-1", 7), ("d4u-hr25-budget-f", 8), ("d4u-hr25-budget-f-plus-1", 9)):
+        f = Flow()
+        for _ in range(k):
+            f.send(M, badhdr())
+        out[name] = session(f)
+    # The two ends add up: four failed headers from each, alternating.
+    f = Flow()
+    for i in range(8):
+        f.send(i % 2 == 0, badhdr())
+    out["d4u-hr25-budget-split"] = session(f)
+    # O (val-O = 2048), over TCP: O - 1, O and O + 1 octets of garbage in two
+    # segments, one scan run, then the session.
+    for name, k in (("d4u-hr25-budget-o-minus-1", 2047), ("d4u-hr25-budget-o", 2048), ("d4u-hr25-budget-o-plus-1", 2049)):
+        f = Flow(True).send(M, garbage(1024)).send(M, garbage(k - 1024))
+        out[name] = session(f)
+    # An embedded header counts two, and the budget runs out mid-delivery:
+    # four carriers and P in one datagram.
+    f = Flow().send(M, *([carrier()] * 4), whole(M, 0, P))
+    f.send(O, whole(O, 0, R(0))).send(M, whole(M, 1, W))
+    out["d4u-hr25-budget-embedded"] = f.finish(2)
+    # skip set by the analyzer, not left to dpd.zeek's 10 KiB: 11,000 octets
+    # of link-only frames first.
+    f = Flow()
+    for _ in range(11):
+        f.send(M, *([link_only(M, TEST_M)] * 100))
+    for _ in range(8):
+        f.send(M, badhdr())
+    out["d4u-hr25-budget-over-10k"] = session(f)
+    # A run of first_chunk_missing counts one and no octets: nine full
+    # frames without FIR (2,628 octets).
+    f = Flow()
+    for k in range(9):
+        f.send(M, seg(M, False, k == 8, 1 + k, bytes(249)))
+    out["d4u-hr25-budget-fcm-run"] = session(f, 20)
+    # Another cause ends the run: a frame without FIR and garbage, four
+    # times, count eight.
+    f = Flow()
+    for k in range(4):
+        f.send(M, seg(M, False, False, 10 + k, b"\x22")).send(M, garbage(16))
+    out["d4u-hr25-budget-fcm-broken"] = session(f, 20)
+    # transport_seq counts one, and only its own frame's octets: a fragment
+    # of nine full frames, then a frame out of sequence; then three pairs of
+    # a FIR frame (its transport octet alone) and a frame out of sequence.
+    f = Flow()
+    for k in range(9):
+        f.send(M, seg(M, k == 0, False, 1 + k, bytes(249)))
+    f.send(M, seg(M, False, False, 20, b"\x22"))
+    for k in range(3):
+        f.send(M, seg(M, True, False, 30 + k, b"")).send(M, seg(M, False, False, 40 + k, b"\x22"))
+    out["d4u-hr25-budget-tseq"] = session(f, 50)
+    # A link-layer retry discarded counts against neither: W in three
+    # confirmed frames, its middle one retried eight times.
+    f = reset(Flow())
+    f.send(M, seg(M, True, False, 1, W1, conf_m(1)))
+    ack(f)
+    for _ in range(9):
+        f.send(M, seg(M, False, False, 2, W2, conf_m(0)))
+        ack(f)
+    f.send(M, seg(M, False, True, 3, W3, conf_m(1)))
+    ack(f)
+    out["d4u-hr25-budget-retry"] = f.finish(4)
+
+    # Confirmation reads the flow's state, not the frame's link function
+    # (design 2.7): Reset Link States on each end, a failure before
+    # confirmation, then a session whose every fragment is in confirmed user
+    # data (function 3, FCB 1, 0, 1 per end, each acknowledged), with a
+    # failure after confirmation. Confirmed at P, one first row, and no
+    # first row at a later fragment.
+    f = reset(Flow()).send(O, link_only(O, RST_O)).send(M, link_only(M, ACK_M))
+    f.send(M, garbage(16))
+    for k, (q, r) in enumerate(((P, R(0)), (W, R(1)), (Q, R(2)))):
+        f.send(M, whole(M, k, q, conf_m(k % 2 == 0)))
+        ack(f)
+        f.send(O, whole(O, k, r, conf_o(k % 2 == 0)))
+        f.send(M, link_only(M, ACK_M))
+        if k == 0:
+            f.send(M, garbage(16))
+    out["d4u-hr25-confirmed-data"] = f
+    # Before confirmation dnp3_unexpected_flow_direction is not raised
+    # (design 2.8): ten frames from the originator with DIR clear, each
+    # without FIR and with no application octet; the flow never confirms.
+    f = Flow()
+    for k in range(10):
+        f.send(M, seg(M, False, False, 10 + k, b"", ctrl=U_O))
+    out["d4u-hr25-direction-unconfirmed"] = f
+
+    # The first row at confirmation, on both ends (design 2.8).
+    f = Flow().send(M, garbage(16)).send(O, garbage(16))
+    out["d4u-hr25-first-both-ends"] = session(f)
+    # The interval rows (DNP3::resync_report_interval, val-interval = 60 s),
+    # anchored at the first row: a failure at 10 s and at 40 s; a read at
+    # 69.999999 s, and one at 70 s, the interval's edge; none changed at 130 s;
+    # a failure at 140 s; a delivery at 190 s.
+    f = Flow().send(M, whole(M, 0, P), at=1).send(O, whole(O, 0, R(0)), at=1.01)
+    f.send(M, badchunk(M), at=10).send(M, badchunk(M), at=40)
+    f.send(M, whole(M, 1, P), at=69.999999)
+    for k, t in ((2, 70), (3, 130)):
+        f.send(M, whole(M, k, P), at=t).send(O, whole(O, k, R(k)), at=t + 0.01)
+    f.send(M, badchunk(M), at=140)
+    out["d4u-hr25-interval"] = f.send(M, whole(M, 4, P), at=190).send(O, whole(O, 4, R(4)), at=190.01)
+
+    # The cause on the next fc row of its end (design 2.8): a chunk failure
+    # on m, then two reads; a chunk failure on o, then a read; garbage on m,
+    # then a read.
+    f = Flow().start()
+    f.send(M, badchunk(M)).send(M, whole(M, 1, P)).send(O, whole(O, 1, R(1)))
+    f.send(M, whole(M, 2, P)).send(O, whole(O, 2, R(2)))
+    f.send(O, badchunk(O)).send(M, whole(M, 3, P)).send(O, whole(O, 3, R(3)))
+    out["d4u-hr25-mark"] = f.send(M, garbage(16)).send(M, whole(M, 4, P)).send(O, whole(O, 4, R(4)))
+
+    # The host cap (val-K = 100): K, and K + 1, flows each confirmed, then
+    # one chunk failure; then one link-only frame at 85 s, past the first
+    # interval, on a fresh flow that counts nothing.
+    for name, n in (("d4u-hr25-cap-k", 100), ("d4u-hr25-cap-k-plus-1", 101)):
+        h = confirmed_hosts(n, badchunk(M))
+        out[name] = at_85(h)
+    # A budget row counts against K (design 2.8): K flows' first rows fill
+    # the interval, then a flow that never confirms spends its budget.
+    h = confirmed_hosts(100, badchunk(M))
+    b = h.add()
+    for k in range(8):
+        b.send(M, badhdr(), at=20 + 0.01 * k)
+    out["d4u-hr25-cap-budget"] = at_85(h)
+    # At most one weird per scan run (design 2.8): 30 flows, each confirmed,
+    # then one scan run; the host's sampling of 25 rows per name shows how
+    # many weirds were raised.
+    out["d4u-hr25-scan-weirds"] = confirmed_hosts(30, garbage(16))
+    return out
+
+
+def confirmed_hosts(n, failure):
+    """n flows, each confirmed by P R, then `failure` on each at 10 s."""
+    h = Hosts(n)
+    for i, f in enumerate(h.flows):
+        f.send(M, whole(M, 0, P), at=1 + 0.05 * i).send(O, whole(O, 0, R(0)), at=1.01 + 0.05 * i)
+    for i, f in enumerate(h.flows):
+        f.send(M, failure, at=10 + 0.05 * i)
+    return h
+
+
+def at_85(h):
+    """A link-only frame at 85 s on a fresh flow, which counts nothing."""
+    h.add().send(M, link_only(M, TEST_M), at=85)
+    return h
 
 
 # Expectations: (case, rule, fc rows, non-zero counts as {(end, cause): n},
@@ -458,9 +724,147 @@ EXPECT = [
     ("d4u-hr25-first-chunk-missing", "cause first_chunk_missing", ALL, {("m", "first_chunk_missing"): 1}, []),
     ("d4u-hr25-tcp-split", "a frame split across segments is held", [(M, 1), (O, 129), (M, 5), (O, 129), (M, 5),
                                                                       (M, 1), (O, 129)], {}, []),
+    # HR25-B2 (design 2.7 and 2.8).
+    ("d4u-hr25-unconfirmed-chunk", "confirmed at a whole fragment; before it a failure raises no weird, no "
+     "violation and no row, and sets no skip", ALL,
+     {("m", "chunk_crc"): 1}, ["confirm-at-header", "weirds-before-confirm", "violation-before-confirm",
+                               "rows-before-confirm", "skip-before-confirm"]),
+    ("d4u-hr25-unconfirmed-multi", "confirmed at a whole fragment, not at its first frame", ALL,
+     {("m", "transport_seq"): 1}, ["confirm-at-fir"]),
+    ("d4u-hr25-throw-alone", "a fragment that throws confirms nothing; its end row on app_parse",
+     Either([], [(O, 129)]), {("o", "app_parse"): 1}, ["confirm-before-eof"]),
+    ("d4u-hr25-unconfirmed-garbage", "a flow never confirmed: no end row on magic", [], {}, ["end-any-count"]),
+    ("d4u-hr25-unconfirmed-seq-only", "a flow never confirmed: its end row on transport_seq", [],
+     {("m", "transport_seq"): 1}, ["end-five"]),
+    ("d4u-hr25-budget-f-minus-1", "the budget: F - 1 failures", ALL, {("m", "header_crc"): 7}, ["budget-f-7"]),
+    ("d4u-hr25-budget-f", "the budget: F failures; its weird, row, one violation and skip", [],
+     {("m", "header_crc"): 8, ("m", "budget"): 1}, ["budget-f-gt", "budget-no-violation", "budget-weird-gated",
+                                                    "budget-no-count", "budget-no-row"]),
+    ("d4u-hr25-budget-f-plus-1", "the budget: F + 1 failures, reaching ends it", [],
+     {("m", "header_crc"): 8, ("m", "budget"): 1}, ["budget-f-gt"]),
+    ("d4u-hr25-budget-split", "the budget is per connection: the two ends add up", [],
+     {("o", "header_crc"): 4, ("o", "budget"): 1}, ["budget-orig-only"]),
+    ("d4u-hr25-budget-o-minus-1", "the budget: O - 1 octets", ALL, {("m", "magic"): 1}, ["budget-o-2047"]),
+    ("d4u-hr25-budget-o", "the budget: O octets, the failed header's octet counted", [],
+     {("m", "magic"): 1, ("m", "budget"): 1}, ["budget-o-gt", "scan-first-octet-free", "budget-o-not-in-scan"]),
+    ("d4u-hr25-budget-o-plus-1", "the budget: O + 1 octets, checked after each", [],
+     {("m", "magic"): 1, ("m", "budget"): 1}, ["budget-o-gt", "budget-o-not-in-scan"]),
+    ("d4u-hr25-budget-embedded", "an embedded header counts two; out in the middle of a delivery", [],
+     {("m", "chunk_crc"): 4, ("m", "embedded_header"): 4, ("m", "budget"): 1},
+     ["embedded-free", "budget-at-delivery-end"]),
+    ("d4u-hr25-budget-over-10k", "skip set by the analyzer, above dpd.zeek's 10 KiB", [],
+     {("m", "header_crc"): 8, ("m", "budget"): 1}, ["budget-no-skip"]),
+    ("d4u-hr25-budget-fcm-run", "a run of first_chunk_missing counts one and no octets", ALL,
+     {("m", "first_chunk_missing"): 9}, ["fcm-each-charged", "fcm-octets-charged"]),
+    ("d4u-hr25-budget-fcm-broken", "another cause ends a run of first_chunk_missing", [],
+     {("m", "first_chunk_missing"): 4, ("m", "magic"): 4, ("m", "budget"): 1}, ["fcm-run-unbroken"]),
+    ("d4u-hr25-budget-tseq", "transport_seq counts one, and only its own frame's octets", ALL,
+     {("m", "transport_seq"): 4}, ["tseq-charges-fragment", "tseq-charges-two"]),
+    ("d4u-hr25-budget-retry", "a discarded link-layer retry counts against neither", [(M, 5), (O, 129), (M, 1), (O, 129)],
+     {}, ["retry-charged"]),
+    ("d4u-hr25-confirmed-data", "confirmed at a fragment in confirmed user data; no first row at a later one",
+     ALL, {("m", "magic"): 2}, ["confirm-reads-link-function"]),
+    ("d4u-hr25-direction-unconfirmed", "before confirmation no dnp3_unexpected_flow_direction", [],
+     {("m", "first_chunk_missing"): 10}, ["direction-weird-ungated"]),
+    ("d4u-hr25-first-both-ends", "the first rows at confirmation, on both ends", ALL,
+     {("m", "magic"): 1, ("o", "magic"): 1}, ["no-first-at-confirm"]),
+    ("d4u-hr25-interval", "interval rows: at the edge, once per interval, only on a change",
+     [(M, 1), (O, 129), (M, 1), (M, 1), (O, 129), (M, 1), (O, 129), (M, 1), (O, 129)], {("m", "chunk_crc"): 3},
+     ["interval-strict", "interval-twice", "interval-any-delivery",
+      "interval-no-change-check", "confirm-reads-link-function"]),
+    ("d4u-hr25-mark", "the cause on the next fc row of its end, once", [(M, 1), (O, 129)] * 5,
+     {("m", "chunk_crc"): 1, ("m", "magic"): 1, ("o", "chunk_crc"): 1},
+     ["mark-drop-only", "script-mark-kept", "script-mark-one-field", "no-first-after-confirm"]),
+    ("d4u-hr25-cap-k", "the host cap: K rows in an interval, no overflow row", None, None, ["script-cap-lt"]),
+    ("d4u-hr25-cap-k-plus-1", "the host cap: K + 1, one overflow row, every row counted but it; sampling", None, None,
+     ["script-cap-gt", "script-overflow-counted", "script-end-free", "script-no-sampling"]),
+    ("d4u-hr25-cap-budget", "the host cap: a budget row counts against K", None, None,
+     ["script-budget-free", "script-end-free"]),
+    ("d4u-hr25-scan-weirds", "at most one weird per scan run", None, None, ["scan-weird-each-octet"]),
 ]
 # A frame from the master is TCP's client and UDP's first sender: the
 # originator. The fc rows of d4u-hr25-tcp-split: P R, W R(1), W, Q R(2).
+
+
+
+
+def more(rows, weirds=None, marks=(), viol=0, scanned=None):
+    return dict(rows=list(rows), weirds=dict(weirds or {}), marks=list(marks), viol=viol, scanned=dict(scanned or {}))
+
+
+# The rest of each expectation (HR25-B2): each resync row as (end, why, the
+# index of the delivery it was written at, or "end"), in order; the dnp3_
+# weird names with their rows in weird.log; the fc rows that carry a cause,
+# as (index among the fc rows, cause); the DNP3 violations; and, where
+# named, each end's scanned octets in its last row. A host-cap input names
+# its rows' number by why, its overflow rows' values in order, and its
+# weirds.
+MORE = {
+    "d4u-hr25-wrap": more([]),
+    "d4u-hr25-f1": more([('m', 'first', 3), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(2, 'first_chunk_missing')]),
+    "d4u-hr25-f1-tcp": more([('m', 'first', 3), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(2, 'first_chunk_missing')]),
+    "d4u-hr25-in-sequence": more([('m', 'first', 4), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1}, marks=[(2, 'transport_seq')]),
+    "d4u-hr25-retry-middle": more([]),
+    "d4u-hr25-retry-fin": more([('m', 'first', 8), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(3, 'first_chunk_missing')]),
+    "d4u-hr25-retry-octet": more([('m', 'first', 8), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(3, 'first_chunk_missing')]),
+    "d4u-hr25-retry-shorter": more([('m', 'first', 8), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(3, 'first_chunk_missing')]),
+    "d4u-hr25-retry-longer": more([('m', 'first', 8), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(3, 'first_chunk_missing')]),
+    "d4u-hr25-unconfirmed-repeat": more([('m', 'first', 4), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(2, 'first_chunk_missing')]),
+    "d4u-hr25-fcb-toggled": more([('m', 'first', 8), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(2, 'first_chunk_missing')]),
+    "d4u-hr25-repeat-after-reset": more([('m', 'first', 10), ('m', 'end', 'end')], weirds={'dnp3_transport_sequence': 1, 'dnp3_first_application_layer_chunk_missing': 1}, marks=[(2, 'first_chunk_missing')]),
+    "d4u-hr25-retry-last": more([]),
+    "d4u-hr25-retry-last-after-drop": more([('m', 'first', 7), ('m', 'end', 'end')], weirds={'dnp3_first_application_layer_chunk_missing': 1}, marks=[(4, 'first_chunk_missing')]),
+    "d4u-hr25-retry-last-divergent": more([('m', 'first', 7), ('m', 'end', 'end')], weirds={'dnp3_first_application_layer_chunk_missing': 1}, marks=[(4, 'first_chunk_missing')]),
+    "d4u-hr25-full-frame": more([]),
+    "d4u-hr25-fir-any-number": more([]),
+    "d4u-hr25-per-end": more([('o', 'first', 4), ('o', 'end', 'end')], weirds={'dnp3_transport_sequence': 1}, marks=[(3, 'transport_seq')]),
+    "d4u-hr25-per-end-tcp": more([('o', 'first', 4), ('o', 'end', 'end')], weirds={'dnp3_transport_sequence': 1}, marks=[(3, 'transport_seq')]),
+    "d4u-hr25-link-only-mid": more([]),
+    "d4u-hr25-link-only-mid-tcp": more([]),
+    "d4u-hr25-failed-header-mid": more([('m', 'first', 3), ('m', 'end', 'end')], weirds={'dnp3_header_lacks_magic': 1}, marks=[(4, 'magic')]),
+    "d4u-hr25-failed-header-mid-tcp": more([('m', 'first', 3), ('m', 'end', 'end')], weirds={'dnp3_header_lacks_magic': 1}, marks=[(4, 'magic')]),
+    "d4u-hr25-false-magic": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_corrupt_header_checksum': 1}, marks=[(2, 'header_crc')]),
+    "d4u-hr25-false-magic-odd": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_corrupt_header_checksum': 1}, marks=[(2, 'header_crc')]),
+    "d4u-hr25-link-only-then-w": more([]),
+    "d4u-hr25-chunk-crc-then-w": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_corrupt_app_chunk_checksum': 1}, marks=[(2, 'chunk_crc')]),
+    "d4u-hr25-limit-equal": more([]),
+    "d4u-hr25-limit-over": more([('m', 'first', 413), ('m', 'end', 'end')], weirds={'dnp3_max_application_layer_fragment_size_exceeded': 1}, marks=[(2, 'fragment_limit')]),
+    "d4u-hr25-magic": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_header_lacks_magic': 1}, marks=[(2, 'magic')]),
+    "d4u-hr25-header-crc": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_corrupt_header_checksum': 1}, marks=[(2, 'header_crc')]),
+    "d4u-hr25-link-length": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_invalid_link_length': 1}, marks=[(2, 'link_length')]),
+    "d4u-hr25-chunk-crc-embedded": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_corrupt_app_chunk_checksum': 1, 'dnp3_embedded_header': 1}, marks=[(2, 'chunk_crc')]),
+    "d4u-hr25-truncated": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_truncated_frame': 1}, marks=[(2, 'truncated')]),
+    "d4u-hr25-fir-restart": more([('m', 'first', 3), ('m', 'end', 'end')], weirds={'dnp3_fragment_restarted': 1}, marks=[(2, 'fir_restart')]),
+    "d4u-hr25-first-chunk-missing": more([('m', 'first', 2), ('m', 'end', 'end')], weirds={'dnp3_first_application_layer_chunk_missing': 1}, marks=[(2, 'first_chunk_missing')]),
+    "d4u-hr25-tcp-split": more([]),
+    "d4u-hr25-unconfirmed-chunk": more([('m', 'first', 1), ('m', 'end', 'end')], marks=[(0, 'chunk_crc')]),
+    "d4u-hr25-unconfirmed-multi": more([('m', 'first', 2), ('m', 'end', 'end')], marks=[(0, 'transport_seq')]),
+    "d4u-hr25-throw-alone": more([('o', 'end', 'end')]),
+    "d4u-hr25-unconfirmed-garbage": more([]),
+    "d4u-hr25-unconfirmed-seq-only": more([('m', 'end', 'end')]),
+    "d4u-hr25-budget-f-minus-1": more([('m', 'first', 7), ('m', 'end', 'end')], marks=[(0, 'header_crc')]),
+    "d4u-hr25-budget-f": more([('m', 'budget', 7)], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1),
+    "d4u-hr25-budget-f-plus-1": more([('m', 'budget', 7)], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1),
+    "d4u-hr25-budget-split": more([('o', 'budget', 7)], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1),
+    "d4u-hr25-budget-o-minus-1": more([('m', 'first', 2), ('m', 'end', 'end')], marks=[(0, 'magic')], scanned={'m': 2047}),
+    "d4u-hr25-budget-o": more([('m', 'budget', 2)], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1, scanned={'m': 2048}),
+    "d4u-hr25-budget-o-plus-1": more([('m', 'budget', 2)], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1, scanned={'m': 2048}),
+    "d4u-hr25-budget-embedded": more([('m', 'budget', 0), ('m', 'end', 'end')], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1),
+    "d4u-hr25-budget-over-10k": more([('m', 'budget', 18)], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1),
+    "d4u-hr25-budget-fcm-run": more([('m', 'first', 9), ('m', 'end', 'end')], marks=[(0, 'first_chunk_missing')]),
+    "d4u-hr25-budget-fcm-broken": more([('m', 'budget', 7), ('m', 'end', 'end')], weirds={'dnp3_resync_budget_exhausted': 1}, viol=1),
+    "d4u-hr25-budget-tseq": more([('m', 'first', 16), ('m', 'end', 'end')], marks=[(0, 'transport_seq')]),
+    "d4u-hr25-budget-retry": more([]),
+    "d4u-hr25-first-both-ends": more([('m', 'first', 2), ('o', 'first', 2), ('m', 'end', 'end'), ('o', 'end', 'end')], marks=[(0, 'magic'), (1, 'magic')]),
+    "d4u-hr25-interval": more([('m', 'first', 2), ('m', 'interval', 5), ('m', 'interval', 10), ('m', 'end', 'end')], weirds={'dnp3_corrupt_app_chunk_checksum': 1}, marks=[(2, 'chunk_crc'), (7, 'chunk_crc')]),
+    "d4u-hr25-mark": more([('m', 'first', 2), ('o', 'first', 7), ('m', 'end', 'end'), ('o', 'end', 'end')], weirds={'dnp3_corrupt_app_chunk_checksum': 1, 'dnp3_header_lacks_magic': 1}, marks=[(2, 'chunk_crc'), (7, 'chunk_crc'), (8, 'magic')]),
+    "d4u-hr25-cap-k": dict(host=({'first': 100, 'end': 100}, [], {'dnp3_corrupt_app_chunk_checksum': 25})),
+    "d4u-hr25-cap-k-plus-1": dict(host=({'first': 100, 'end': 100}, [1, 1], {'dnp3_corrupt_app_chunk_checksum': 25})),
+    "d4u-hr25-confirmed-data": more([('m', 'first', 5), ('m', 'end', 'end')], weirds={'dnp3_header_lacks_magic': 1}, marks=[(0, 'magic'), (2, 'magic')]),
+    "d4u-hr25-direction-unconfirmed": more([('m', 'end', 'end')]),
+    "d4u-hr25-cap-budget": dict(host=({'first': 100, 'end': 100}, [1], {'dnp3_corrupt_app_chunk_checksum': 25, 'dnp3_resync_budget_exhausted': 1})),
+    "d4u-hr25-scan-weirds": dict(host=({'first': 30, 'end': 30}, [], {'dnp3_header_lacks_magic': 25})),
+}
 
 
 def controls():
@@ -473,10 +877,20 @@ def controls():
     return out
 
 
+def patch_controls():
+    """The controls that are A's patch with one control patch (an image
+    each); the others change the script part."""
+    return [m for m in controls() if not m.startswith("script-")]
+
+
+def script_controls():
+    return [m for m in controls() if m.startswith("script-")]
+
+
 def write(outdir):
     os.makedirs(outdir, exist_ok=True)
     for name, f in cases().items():
-        pcapfile.write(os.path.join(outdir, name + ".pcap"), f.conv.frames)
+        pcapfile.write(os.path.join(outdir, name + ".pcap"), f.frames if isinstance(f, Hosts) else f.conv.frames)
 
 
 def rows(path):
@@ -486,35 +900,78 @@ def rows(path):
         return [json.loads(x) for x in fh if x.startswith("{")]
 
 
-def reading(d):
-    """(exit code, fc rows, counts) of one configuration on one input, or
-    (exit code, None, None) when it left no probe log. counts maps (end,
-    cause) to n, for the counts that are not zero."""
+def us(t):
+    return round(t * 1e6)
+
+
+def reading(d, f):
+    """(exit code, what the configuration did) on one input, or (exit
+    code, None) when it left no probe log. Only causes, counts, weird names
+    and the count of violations are read (D1's ruling on D4-131 item 5.1)."""
     p = os.path.join(d, "exit-code")
     code = open(p, encoding="utf-8").read().strip() if os.path.exists(p) else None
     probe = rows(os.path.join(d, "otsec_probe.log"))
     if probe is None:
-        return code, None, None
-    fc = [(r["is_orig"], r["fc"]) for r in probe if r.get("kind") == "fc"]
-    counts = {}
-    for r in rows(os.path.join(d, "otsec_resync_unit.log")) or []:
-        if r.get("why") != "end":
-            continue
+        return code, None
+    weirds = {}
+    for r in rows(os.path.join(d, "weird.log")) or []:
+        if r.get("name", "").startswith("dnp3_"):
+            weirds[r["name"]] = weirds.get(r["name"], 0) + 1
+    resync = [r for r in probe if r.get("kind") == "resync"]
+    if isinstance(f, Hosts):
+        by_why, overflow = {}, []
+        for r in resync:
+            if r["why"] == "overflow":
+                overflow.append(r["overflow"])
+            else:
+                by_why[r["why"]] = by_why.get(r["why"], 0) + 1
+        return code, (by_why, overflow, weirds)
+    fcrows = [r for r in probe if r.get("kind") == "fc"]
+    fc = [(r["is_orig"], r["fc"]) for r in fcrows]
+    marks = [(i, r["resync_cause"]) for i, r in enumerate(fcrows) if r.get("resync_cause")]
+    at = {ns // 1000: i for i, (_, _, ns) in enumerate(f.sent)}
+    out, counts, scanned = [], {}, {}
+    for r in resync:
         end = "m" if r["is_orig"] else "o"
-        for cause, n in zip(CAUSES, r["counts"]):
-            if n:
-                counts[(end, cause)] = n
-    return code, fc, counts
+        out.append((end, r["why"], "end" if r["why"] == "end" else at.get(us(r["ts"]), "?")))
+        counts = {k: v for k, v in counts.items() if k[0] != end}
+        counts.update({(end, c): n for c, n in zip(CAUSES, r["counts"]) if n})
+        scanned[end] = r["scanned_octets"]
+    viol = sum(1 for r in rows(os.path.join(d, "otsec_viol.log")) or [] if "DNP3" in r.get("analyzer", ""))
+    return code, (fc, counts, out, weirds, marks, viol, scanned)
 
 
-def state(d, want_fc, want_counts):
+def meets(row, got):
+    """Whether a reading meets a row's expectation."""
+    case, _, want_fc, want_counts, _ = row
+    m = MORE[case]
+    if "host" in m:
+        return tuple(got) == m["host"]
+    fc, counts, out, weirds, marks, viol, scanned = got
+    fc_ok = fc in want_fc if isinstance(want_fc, Either) else list(fc) == list(want_fc)
+    return (fc_ok and counts == want_counts and out == m["rows"] and weirds == m["weirds"]
+            and marks == m["marks"] and viol == m["viol"]
+            and all(scanned.get(e) == n for e, n in m["scanned"].items()))
+
+
+def state(d, row, f):
     """`not run`, `exit N`, `met` or `not met`."""
-    code, fc, counts = reading(d)
-    if code is None or fc is None:
+    code, got = reading(d, f)
+    if code is None or got is None:
         return "not run"
     if code != "0":
         return f"exit {code}"
-    return "met" if fc == want_fc and counts == want_counts else "not met"
+    return "met" if meets(row, got) else "not met"
+
+
+def ran(d):
+    """C2's column: whether it ran, and its exit code, never more (D1's
+    ruling on D4-131 item 5.1)."""
+    p = os.path.join(d, "exit-code")
+    if not os.path.exists(p):
+        return "not run"
+    code = open(p, encoding="utf-8").read().strip()
+    return "ran" if code == "0" else f"exit {code}"
 
 
 def verdict(c2a, ctl):
@@ -527,25 +984,29 @@ def verdict(c2a, ctl):
 
 def check(out):
     rc = 0
-    print("| input | rule | C2A | controls (each must be killed: not met) | C2, quoted | result |")
+    flows = cases()
+    print("| input | rule | C2A | controls (each must be killed: not met) | C2 | result |")
     print("| --- | --- | --- | --- | --- | --- |")
-    for case, rule, want_fc, want_counts, ctl_names in EXPECT:
+    for row in EXPECT:
+        case, rule, ctl_names = row[0], row[1], row[4]
         base = os.path.join(out, case)
-        c2a = state(os.path.join(base, C2A), want_fc, want_counts)
-        ctl = [(m, state(os.path.join(base, "zeek-hr25-m-" + m), want_fc, want_counts)) for m in ctl_names]
-        c2 = state(os.path.join(base, C2), want_fc, {})
+        f = flows[case]
+        c2a = state(os.path.join(base, C2A), row, f)
+        ctl = [(m, state(os.path.join(base, "zeek-hr25-m-" + m), row, f)) for m in ctl_names]
         v = verdict(c2a, ctl)
         if v != "pass":
             rc = 1
         cs = "; ".join(f"{m}: {s}" for m, s in ctl) or "none"
-        print(f"| {case} | {rule} | {c2a} | {cs} | {c2} (fc rows only) | {v} |")
+        print(f"| {case} | {rule} | {c2a} | {cs} | {ran(os.path.join(base, C2))} | {v} |")
     return rc
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("write", "check"):
+    if sys.argv[1:] == ["script-controls"]:
+        print(" ".join(script_controls()))
+    elif len(sys.argv) != 3 or sys.argv[1] not in ("write", "check"):
         sys.exit(__doc__)
-    if sys.argv[1] == "write":
+    elif sys.argv[1] == "write":
         write(sys.argv[2])
     else:
         sys.exit(check(sys.argv[2]))

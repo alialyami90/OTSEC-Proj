@@ -4,12 +4,12 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -436,7 +436,7 @@
+@@ -480,7 +480,7 @@
      int base = fir ? 0 : endp->app_octets;
  
      if ( BifConst::DNP3::max_application_layer_fragment_size > 0 &&
 -         static_cast<size_t>(base + app) > BifConst::DNP3::max_application_layer_fragment_size ) {
 +         static_cast<size_t>(base + app) >= BifConst::DNP3::max_application_layer_fragment_size ) {
-         Drop(orig, FRAGMENT_LIMIT);
+         Drop(orig, FRAGMENT_LIMIT, flen);
          return;
      }

@@ -1,0 +1,14 @@
+HR-25 option A's script control `script-no-sampling` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.8, 'The weirds' bound': the weirds not in Weird::sampling_global_list.) Applied with
+`patch -p1 --fuzz=0` to a copy of zeek-patch/resync.zeek, never shipped.
+
+--- a/resync.zeek
++++ b/resync.zeek
+@@ -25,7 +25,7 @@
+ 
+ # The weirds' bound (design 2.8, N8 and T10): every weird of the closed set
+ # of causes, the existing ones included, is rate-limited across the host.
+-redef Weird::sampling_global_list += {
++global unused_sampling_list: set[string] = {
+ 	"dnp3_header_lacks_magic",
+ 	"dnp3_corrupt_header_checksum",
+ 	"dnp3_invalid_link_length",

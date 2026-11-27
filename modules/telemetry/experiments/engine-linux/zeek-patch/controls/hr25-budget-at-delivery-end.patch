@@ -1,0 +1,15 @@
+HR-25 option A's control `budget-at-delivery-end` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'When it runs out mid-delivery': the rest of the delivery still read.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -209,7 +209,7 @@
+         Embedded(orig);
+ 
+     // The budget can run out in the middle of a delivery (design 2.7).
+-    while ( len > 0 && ! analyzer->Skipping() ) {
++    while ( len > 0 ) {
+         if ( endp->in_hdr ) {
+             // The header is judged at 10 octets (design 2.1).
+             int res = AddToBuffer(endp, HEADER_LEN, &data, &len);

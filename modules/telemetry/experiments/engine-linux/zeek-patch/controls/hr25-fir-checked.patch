@@ -4,12 +4,12 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -409,6 +409,10 @@
-         // A FIR frame accepts any number; one inside a fragment drops it.
+@@ -452,6 +452,10 @@
+         // The frames dropped with it were accepted, so it counts no octets.
          if ( endp->encountered_first_chunk )
-             Drop(orig, FIR_RESTART);
+             Drop(orig, FIR_RESTART, 0);
 +        else if ( tseq >= 0 && n != (tseq + 1) % 64 ) {
-+            Drop(orig, TRANSPORT_SEQ);
++            Drop(orig, TRANSPORT_SEQ, flen);
 +            return;
 +        }
      }

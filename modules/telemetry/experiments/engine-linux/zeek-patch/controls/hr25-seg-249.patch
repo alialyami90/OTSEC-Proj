@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.h
 +++ b/src/analyzer/protocol/dnp3/DNP3.h
-@@ -66,7 +66,7 @@
+@@ -70,7 +70,7 @@
          // carried FIN, and its FCB when it was a primary frame of confirmed
          // user data with FCV set (-1: none).
          int tseq = -1;

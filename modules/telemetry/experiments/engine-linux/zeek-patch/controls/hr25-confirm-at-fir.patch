@@ -1,0 +1,16 @@
+HR-25 option A's control `confirm-at-fir` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'Confirmation': confirmed when a fragment's first frame is accepted, not at a whole fragment.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -498,6 +498,9 @@
+     // The catch inside the loop (design 2.6, T3): binpac::Exception only.
+     bool thrown = false;
+ 
++    if ( fir && ! confirmed )
++        Confirm();
++
+     try {
+         ParseAppLayer(orig, hdr, seg, seg_len, fir, fin);
+     } catch ( const binpac::Exception& ) {

@@ -104,14 +104,14 @@ sed -i 's/^ bool DNP3_Base::crc_table_initialized = false;$/ bool DNP3_Base::crc
 setpin HR25_PATCH_SHA256 "$(sha "$work/case/hr25-resync.patch")"
 expect "A's patch context changed and pinned: it needs fuzz" "A's patch does not apply with no fuzz"
 fresh
-sed -i 's/^@@ -12,13 +12,37 @@$/@@ -10,13 +10,37 @@/' "$work/case/hr25-resync.patch"
+sed -i 's/^@@ -12,13 +12,41 @@$/@@ -10,13 +10,41 @@/' "$work/case/hr25-resync.patch"
 setpin HR25_PATCH_SHA256 "$(sha "$work/case/hr25-resync.patch")"
 expect "A's patch hunk moved and pinned: it applies only at an offset" "A's patch applied only with an offset or fuzz"
 fresh
 rm "$work/case/controls/hr25-no-mod64.patch"
 expect "a control that build.env names is missing" "control hr25-no-mod64.patch is missing"
 fresh
-sed -i 's/^@@ -411,7 +411,7 @@$/@@ -409,7 +409,7 @@/' "$work/case/controls/hr25-no-mod64.patch"
+sed -i 's/^@@ -454,7 +454,7 @@$/@@ -452,7 +452,7 @@/' "$work/case/controls/hr25-no-mod64.patch"
 expect "a control's hunk moved: it applies only at an offset" "control hr25-no-mod64.patch applied only with an offset or fuzz"
 fresh
 sed -i 's/^             \/\/ Append\.$/             \/\/ Appended./' "$work/case/controls/hr25-no-mod64.patch"

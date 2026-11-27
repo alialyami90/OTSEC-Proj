@@ -1,0 +1,15 @@
+HR-25 option A's control `tseq-charges-fragment` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'The budget: two bounds': transport_seq counts the fragment's appended frames against O too.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -461,7 +461,7 @@
+             return; // A link-layer retry: discarded, nothing counted.
+         else {
+             // Only the frame that failed counts against O (design 2.7).
+-            Drop(orig, TRANSPORT_SEQ, flen);
++            Drop(orig, TRANSPORT_SEQ, flen + endp->app_octets);
+             return;
+         }
+     }

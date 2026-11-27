@@ -4,9 +4,9 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -392,7 +392,7 @@
- // 2.3), on a frame whose every CRC passed.
- void DNP3_Base::TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len) {
+@@ -430,7 +430,7 @@
+ // which a drop of it counts against O before confirmation (design 2.7).
+ void DNP3_Base::TransportRule(bool orig, u_char ctrl, const u_char* hdr, const u_char* seg, int seg_len, int flen) {
      Endpoint* endp = End(orig);
 -    int& tseq = endp->tseq;
 +    int& tseq = orig_state.tseq;

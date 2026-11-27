@@ -4,8 +4,8 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -411,7 +411,7 @@
-             Drop(orig, FIR_RESTART);
+@@ -454,7 +454,7 @@
+             Drop(orig, FIR_RESTART, 0);
      }
      else if ( endp->encountered_first_chunk ) {
 -        if ( n == (tseq + 1) % 64 ) {

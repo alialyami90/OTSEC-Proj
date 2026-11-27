@@ -4,11 +4,11 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -194,6 +194,7 @@
-                 // A failed header consumes 1 octet and scans. The run counts
-                 // its first cause once and raises its weird once.
+@@ -229,6 +229,7 @@
+                 // each octet it consumes, the failed header's included,
+                 // one against O, checked after each (design 2.7).
                  if ( ! endp->scanning ) {
 +                    ClearEndpointState(orig);
                      endp->scanning = true;
+                     endp->mark = cause;
                      Count(orig, cause);
-                 }
