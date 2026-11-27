@@ -38,8 +38,8 @@ const AlarmSensorRecordRefused = "sensor-record-refused"
 // it, so a sensor that reconnects
 // again and again without a heartbeat accepted still raises it (D3's S1,
 // D1 in D4-73). It is raised once per such stretch, and status shows the
-// sensor unreachable until the next accepted heartbeat (D5-sensor-node.md
-// section 2). The node's own clock times it, so a step of the wall clock
+// sensor unreachable until the next accepted heartbeat, or on the 0.2 link
+// the next frame accepted under CH-44 (D5-sensor-node.md section 2). The node's own clock times it, so a step of the wall clock
 // or of the sensor's moves nothing. It is raised at the first Tick at or
 // after 60 s of quiet, so at most 60 s + TickInterval (<= 120 s today)
 // after the last heartbeat or the start (D1 on #581).
@@ -107,7 +107,8 @@ type SensorStatus struct {
 	AlertDropsSince   time.Time         `json:"alert_drops_since,omitzero"`
 	AlertDropsWritten time.Time         `json:"alert_drops_written,omitzero"`
 	// Unreachable: no heartbeat accepted for SensorUnreachableAfter, as
-	// AlarmSensorUnreachable says; it clears at the next accepted one.
+	// AlarmSensorUnreachable says; it clears at the next accepted one, or
+	// on the 0.2 link at the next frame accepted under CH-44.
 	Unreachable bool `json:"unreachable"`
 	// Coverage is "unknown" while ticks are accepted and no current
 	// heartbeat has come for 60 s (CH-44, sensor-no-heartbeat), and Blind
@@ -200,12 +201,13 @@ type sensorIntake struct {
 	obs, alert dropReport
 	refused    map[string]bool // reasons whose alarm is raised
 	// The sensor-unreachable timer: quietFrom is the monotonic time of the
-	// last accepted heartbeat, or of the start before the first;
-	// heartbeats is the link's count last seen.
+	// last accepted heartbeat, or on the 0.2 link of the last frame
+	// accepted under CH-44, or of the start before the first; heartbeats
+	// is the link's count last seen.
 	quietFrom   time.Duration
 	heartbeats  uint64
 	accepted    uint64 // the link's Stats.Accepted last seen (CH-44)
-	unreachable bool   // status shows it, until a heartbeat
+	unreachable bool   // status shows it, until a heartbeat or an accepted frame
 	raised      bool   // the alarm for this quiet stretch is raised
 	// checkpointFailures is the hold's count the last alarm was raised at.
 	checkpointFailures uint64

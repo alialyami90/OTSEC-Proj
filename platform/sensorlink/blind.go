@@ -24,17 +24,25 @@ import (
 //     its packets have not risen across the current heartbeats of more
 //     than blind_after_s, or it was first seen within the comparison and
 //     has not risen since. The comparison starts again at a new run's
-//     first current heartbeat. One stretch per sensor: the status alarm and
+//     first current heartbeat, where an interface named in a standing
+//     stretch has no grace: the stretch stands until its packets rise in
+//     the new run (D3's and D6's B1 on #802). One stretch per sensor: the
+//     status alarm and
 //     its pool event once, at the stretch's start, naming the interfaces
 //     blind then; an interface that goes blind inside the stretch is named
 //     in it, in BlindStatus and in a pool event that names every interface
 //     of the stretch, with no second status alarm. The stretch ends at a
-//     current heartbeat with no interface blind.
-//   - sensor-no-heartbeat and coverage unknown (CH-44): at an accepted tick
-//     that is not early, when no current heartbeat has come for
-//     NoHeartbeatAfter (since the link was made, when none has come), once
-//     a stretch; the stretch ends at a current heartbeat only. A
-//     sensor-blind that stands when it begins stays standing through it.
+//     current heartbeat with no interface blind. Its names are at most
+//     MaxInterfaces; past that, a count of the rest, once a run, goes in
+//     the detail (D3's N4 on #802).
+//   - sensor-no-heartbeat and coverage unknown (CH-44): at every accepted
+//     frame that is not a current heartbeat (a tick that is not early, a
+//     late or backlog heartbeat taken, an observation committed, held or
+//     dropped by the budget; D3's N1 on #802), when no current heartbeat
+//     has come for NoHeartbeatAfter (since the link was made, when none
+//     has come), once a stretch; the stretch ends at a current heartbeat
+//     only. A sensor-blind that stands when it begins stays standing
+//     through it.
 //   - sensor.past-blind (CH-44): every heartbeat, in the order read, keeps
 //     each interface's packets and the at_utc of its last rise (or of the
 //     run's first heartbeat read here); at a heartbeat that is not
@@ -42,12 +50,15 @@ import (
 //     the sensor's at_utc. A stretch of them ends at a heartbeat that is
 //     not current with none past-blind, at a current heartbeat, or at a new
 //     run; ended stretches are merged and made due in the pool, one event,
-//     once no backlog is on.
+//     once no backlog is on, their names at most MaxInterfaces and a count
+//     of the rest. Both are held in memory only: a node stop loses them.
 //   - Accepted (CH-44's reset of sensor-unreachable): a tick that is not
 //     early, a heartbeat taken, and an observation committed, held or
 //     dropped by the budget count; a refused record, a failed hello, an
-//     early tick, a duplicate and a connect do not. The node's timer reads
-//     Stats.Accepted and Stats.AcceptedMono.
+//     early tick, a duplicate and a connect do not. CH-17 counts a
+//     duplicate as taken, so its exclusion is the stricter reading, towards
+//     the alarm. The node's timer reads Stats.Accepted and
+//     Stats.AcceptedMono.
 
 // The alarms of this file (CH-45's pool list).
 const (
@@ -72,9 +83,13 @@ const NoHeartbeatAfter = 60 * time.Second
 // raises only past NoHeartbeatAfter; noHbEachTick raises at every tick of
 // the stretch; pastBlindOff records no past stretch; pastBlindAtOnce makes
 // it due at its end, backlog or not; acceptedAnyFrame counts every frame
-// read, the hello included, as accepted.
+// read, the hello included, as accepted; blindNewRunGrace gives every
+// interface the grace at a new run, a named one included; noHbTicksOnly
+// checks sensor-no-heartbeat at accepted ticks only; blindNamesUncapped
+// keeps every name of a stretch.
 var blindBacklogCounts, blindLateCounts, blindAtLimit, blindAllOnly, blindCarrierIgnored, blindFirstOnly, blindAcrossRuns bool
 var blindEachHeartbeat, blindClearsAtUnknown, noHbAnyEnds, noHbPastLimit, noHbEachTick, pastBlindOff, pastBlindAtOnce, acceptedAnyFrame bool
+var blindNewRunGrace, noHbTicksOnly, blindNamesUncapped bool
 
 // ifBlind is one interface's state for sensor-blind (mono) or for
 // sensor.past-blind (at).
@@ -85,10 +100,12 @@ type ifBlind struct {
 	rose    bool          // a baseline is held: false for a name first seen within it
 }
 
-// pastStretch is one or more ended past-blind stretches, merged.
+// pastStretch is one or more ended past-blind stretches, merged: at most
+// MaxInterfaces names, and more counts those past it, once a stretch.
 type pastStretch struct {
 	from, to time.Time
 	names    []string
+	more     int
 	n        int
 }
 
@@ -101,6 +118,10 @@ type blindState struct {
 	live     map[string]*ifBlind
 	standing bool
 	named    []string
+	// over is the stretch's names past MaxInterfaces in this run, and
+	// overPrev the count of those in earlier runs.
+	over     []string
+	overPrev int
 	// Coverage unknown: the last current heartbeat's receipt.
 	cur     time.Duration
 	curSeen bool
@@ -136,6 +157,13 @@ func (l *Link) acceptedFrame() {
 	l.stats.Accepted++
 	l.stats.AcceptedMono = m
 	l.mu.Unlock()
+}
+
+// acceptedRecord is an observation accepted under CH-44: it resets the
+// node's timer, and is a frame that is not a current heartbeat.
+func (l *Link) acceptedRecord() {
+	l.acceptedFrame()
+	l.noHeartbeat(false)
 }
 
 // frameRead is acceptedAnyFrame's control: every frame read counts.
@@ -188,24 +216,33 @@ func (l *Link) judgeBlind(cn *conn, h *netobs.Heartbeat, late bool) {
 	}
 	var raise, due bool
 	var named []string
+	var more int
 	if judged {
-		raise, due, named = b.liveLocked(h.RunID, names, byName, m, limit)
+		raise, due, named, more = b.liveLocked(h.RunID, names, byName, m, limit)
 	}
 	b.mu.Unlock()
-	l.blindRaise(raise, due, named, limit)
+	l.blindRaise(raise, due, named, more, limit)
 	l.pastDue(pastDue)
+	if !current {
+		l.noHeartbeat(false)
+	}
 }
 
 // liveLocked is sensor-blind at a current heartbeat: whether the stretch's
 // alarm is raised, whether its event is due again for a name added, and
-// the names it carries. The caller holds b.mu.
-func (b *blindState) liveLocked(run string, names []string, byName map[string]netobs.InterfaceCount, m, limit time.Duration) (raise, due bool, named []string) {
+// the names it carries with the count past MaxInterfaces. The caller holds
+// b.mu.
+func (b *blindState) liveLocked(run string, names []string, byName map[string]netobs.InterfaceCount, m, limit time.Duration) (raise, due bool, named []string, more int) {
 	if b.run != run && (!blindAcrossRuns || b.run == "") {
 		// The run's first current heartbeat: the comparison starts again.
+		// An interface named in a standing stretch has no grace, so the
+		// stretch stands until it rises (D3's and D6's B1 on #802).
 		b.run, b.live = run, map[string]*ifBlind{}
 		for _, n := range names {
-			b.live[n] = &ifBlind{packets: byName[n].Packets, mono: m, rose: true}
+			inStretch := b.standing && slices.Contains(b.named, n) && !blindNewRunGrace
+			b.live[n] = &ifBlind{packets: byName[n].Packets, mono: m, rose: !inStretch}
 		}
+		b.overPrev, b.over = b.overPrev+len(b.over), nil
 	}
 	b.run = run
 	for n := range b.live {
@@ -233,19 +270,41 @@ func (b *blindState) liveLocked(run string, names []string, byName map[string]ne
 	}
 	switch {
 	case len(blind) == 0:
-		b.standing, b.named = false, nil
+		b.standing, b.named, b.over, b.overPrev = false, nil, nil, 0
 	case !b.standing || blindEachHeartbeat:
-		b.standing, b.named = true, blind
+		b.standing, b.named, b.over, b.overPrev = true, blind, nil, 0
 		raise = true
 	case !blindFirstOnly:
 		for _, n := range blind {
-			if !slices.Contains(b.named, n) {
-				b.named, due = append(b.named, n), true
-			}
+			due = b.addName(n) || due
 		}
-		slices.Sort(b.named)
 	}
-	return raise, due, slices.Clone(b.named)
+	return raise, due, slices.Clone(b.named), b.overPrev + len(b.over)
+}
+
+// addName names n in the standing stretch, or past MaxInterfaces names
+// counts it once in this run; it reports whether either grew. The caller
+// holds b.mu.
+func (b *blindState) addName(n string) bool {
+	switch {
+	case slices.Contains(b.named, n) || slices.Contains(b.over, n):
+		return false
+	case len(b.named) < netobs.MaxInterfaces || blindNamesUncapped:
+		b.named = append(b.named, n)
+		slices.Sort(b.named)
+	default:
+		b.over = append(b.over, n)
+	}
+	return true
+}
+
+// nameList is names for a detail, with the count of those not listed.
+func nameList(names []string, more int) string {
+	s := strings.Join(names, ", ")
+	if more > 0 {
+		s += fmt.Sprintf(", and %d more not listed", more)
+	}
+	return s
 }
 
 // pastLocked keeps the past-blind state at heartbeat h of run, and returns
@@ -315,10 +374,14 @@ func (b *blindState) endPastLocked() {
 		return
 	}
 	p := b.pend
-	p.from, p.to, p.n = minTime(p.from, o.from), maxTime(p.to, o.to), p.n+o.n
+	p.from, p.to, p.n, p.more = minTime(p.from, o.from), maxTime(p.to, o.to), p.n+o.n, p.more+o.more
 	for _, n := range o.names {
-		if !slices.Contains(p.names, n) {
+		switch {
+		case slices.Contains(p.names, n):
+		case len(p.names) < netobs.MaxInterfaces || blindNamesUncapped:
 			p.names = append(p.names, n)
+		default:
+			p.more++ // D3's N4 on #802: the names merged across runs are bounded
 		}
 	}
 	slices.Sort(p.names)
@@ -340,12 +403,12 @@ func maxTime(a, b time.Time) time.Time {
 
 // blindRaise raises sensor-blind for the stretch, or makes its event due
 // again for a name added inside it.
-func (l *Link) blindRaise(raise, due bool, named []string, limit time.Duration) {
+func (l *Link) blindRaise(raise, due bool, named []string, more int, limit time.Duration) {
 	if !raise && !due {
 		return
 	}
 	detail := fmt.Sprintf("sensor %s: interfaces blind in this stretch: %s (packets not risen across the current heartbeats of more than %s, or carrier down)",
-		l.cfg.SensorID, strings.Join(named, ", "), limit)
+		l.cfg.SensorID, nameList(named, more), limit)
 	if raise {
 		l.raise(AlarmBlind, detail)
 		return
@@ -362,17 +425,18 @@ func (l *Link) pastDue(p *pastStretch) {
 		return
 	}
 	detail := fmt.Sprintf("sensor %s: interfaces %s showed no capture in late or backlog heartbeats from %s to %s (blind_after_s %s)",
-		l.cfg.SensorID, strings.Join(p.names, ", "), canonUTC(p.from), canonUTC(p.to), l.blindAfter())
+		l.cfg.SensorID, nameList(p.names, p.more), canonUTC(p.from), canonUTC(p.to), l.blindAfter())
 	if p.n > 1 {
 		detail += fmt.Sprintf("; %d stretches merged", p.n)
 	}
 	h.alarm(EventPastBlind, detail)
 }
 
-// tickNoHeartbeat is CH-44 at an accepted tick that is not early: coverage
-// unknown, and sensor-no-heartbeat once a stretch.
-func (l *Link) tickNoHeartbeat() {
-	if !l.skewOn() {
+// noHeartbeat is CH-44 at an accepted frame that is not a current
+// heartbeat (tick: a tick that is not early): coverage unknown, and
+// sensor-no-heartbeat once a stretch.
+func (l *Link) noHeartbeat(tick bool) {
+	if !l.skewOn() || noHbTicksOnly && !tick {
 		return
 	}
 	m := l.opt.Monotonic()
@@ -396,7 +460,7 @@ func (l *Link) tickNoHeartbeat() {
 	}
 	b.mu.Unlock()
 	if raise {
-		l.raise(AlarmNoHeartbeat, fmt.Sprintf("sensor %s: coverage unknown: ticks are accepted, and no current heartbeat has come for %s", l.cfg.SensorID, quiet))
+		l.raise(AlarmNoHeartbeat, fmt.Sprintf("sensor %s: coverage unknown: frames are accepted, and no current heartbeat has come for %s", l.cfg.SensorID, quiet))
 	}
 }
 

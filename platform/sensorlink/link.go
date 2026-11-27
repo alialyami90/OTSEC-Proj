@@ -439,7 +439,7 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, l
 	}
 	stored := *o
 	stored.Frames, stored.Node = nil, nd
-	if err := stored.ValidateStored(); err != nil {
+	if err := stored.ValidateStored(); err != nil || refuseStoredFault {
 		l.refuseStored()
 		return
 	}

@@ -1429,6 +1429,11 @@ func (l *Link) egress(cn *conn, h *netobs.Heartbeat, next *Cursor) {
 // goroutine can land.
 var observeFault func()
 
+// refuseStoredFault is a test seam, false in the node: observe refuses the
+// record at the store (refuseStored), as it refuses a stored form that
+// fails its check, which no valid record reaches otherwise.
+var refuseStoredFault bool
+
 // observation stores record n, with node.lost when spans are unmarked
 // (CH-40), and the cursor in the same commit (CH-17).
 func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation, n uint64) string {
@@ -1479,7 +1484,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 		return netobs.CloseStore // not final: T stays, the record is resent
 	case outCommitted:
 		cn.cur, cn.saved, cn.pending = f.marked, f.marked.Taken, false // with what releases moved (commitOne)
-		l.acceptedFrame()
+		l.acceptedRecord()
 	case outDuplicate:
 		// A release disposed of n after it was placed: a duplicate by the
 		// position saved now (section 1.4 item 4). T moves at the next fold.
@@ -1489,9 +1494,9 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	case outDropped:
 		cn.cur.Dropped++
 		cn.cur.Taken, cn.pending = n, true
-		l.acceptedFrame()
+		l.acceptedRecord()
 	default: // held, or committed in a release: final, and stored
-		l.acceptedFrame()
+		l.acceptedRecord()
 		marked.Taken = n
 		cn.cur, cn.pending = marked, true
 	}
@@ -1544,7 +1549,7 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 	}
 	cn.lastTick, cn.tickAt = t, now
 	l.acceptedFrame()
-	l.tickNoHeartbeat()
+	l.noHeartbeat(true)
 	raised, onset := l.sample(t.SensorUTC, false, cn.held)
 	raised = l.spansRaise(t.Lost) || raised
 	if onset {
