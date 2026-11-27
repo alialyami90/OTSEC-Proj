@@ -269,6 +269,13 @@ func TestStepCheckThreshold(t *testing.T) {
 			r.pass(time.Second)
 			r.addWall(-500 * time.Microsecond)
 			r.l.CheckStep(bg)
+			// A check that moves W writes its record, the cursor and the
+			// run file, so the control, which moves it at each check, did
+			// 600 such writes: 44.5 to 93.4 s on Windows (D4-127 item 3.4
+			// (b)). W moved fails the checks below, so the rest is not run.
+			if gw, _ := r.l.watchNow(); !gw.Equal(w) {
+				return r, w
+			}
 		}
 		r.addWall(-1900 * time.Millisecond)
 		r.l.CheckStep(bg)

@@ -2011,13 +2011,32 @@ func secondOn(t *testing.T, g *gsrc, sharedHealth bool) *gsrc {
 	return &gsrc{t: t, r: r2, p: r2.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
 }
 
-// TestHealthRigIdleDeadline (D6's N6 on #788): a link made by newHealthRig,
-// and one made by secondOn, runs with the rig's idle deadline, rigIdle,
-// not the base rig's 10 s (D1's ruling 9), and rigIdle is longer than it.
+// TestHealthRigIdleDeadline (D6's N6 on #788; brief P4-NODE-WINTIME): a
+// link made by newRig, by newHealthRig and by secondOn runs with the rig's
+// idle deadline, rigIdle, and not with the 10 s that closed connections
+// left open on a slow runner (D1's ruling 9); decisionRig's runs with
+// decisionIdle. Control: the base rig's link with a deadline shorter than
+// the next step, a second rig made while its connection is open, as
+// TestIntakeM8EachCloseReason and TestIntakeH1Rows make one per row: the
+// node closes it idle, and the next send fails.
 func TestHealthRigIdleDeadline(t *testing.T) {
-	if base := newRig(t, nil).l.timeouts().Idle; rigIdle <= base {
-		t.Fatalf("rigIdle %s, want longer than the base rig's %s", rigIdle, base)
+	if base := newRig(t, nil).l.timeouts().Idle; base != rigIdle || rigIdle < 30*time.Minute {
+		t.Fatalf("the base rig's idle deadline %s, want rigIdle %s, at least 30 minutes", base, rigIdle)
 	}
+	if d := decisionRig(t, nil).l.timeouts().Idle; d != decisionIdle {
+		t.Fatalf("decisionRig's link: idle %s, want %s", d, decisionIdle)
+	}
+	t.Run("control: the base rig's connection idle past its deadline", func(t *testing.T) {
+		r := newRig(t, func(o *Options) { o.Timeouts.Idle = 50 * time.Millisecond })
+		p := r.accepted(hello02())
+		newRig(t, nil)
+		if why := p.closed(); why != netobs.CloseIdle {
+			t.Fatalf("the connection closed %q, want %q", why, netobs.CloseIdle)
+		}
+		if err := netobs.WriteFrame(p.c, []byte("{}")); !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("send: %v, want %v", err, io.ErrClosedPipe)
+		}
+	})
 	r := newHealthRig(t)
 	if d := r.l.timeouts().Idle; d != rigIdle {
 		t.Fatalf("newHealthRig's link: idle %s, want %s", d, rigIdle)

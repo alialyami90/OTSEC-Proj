@@ -132,7 +132,16 @@ type linkRig struct {
 	l      *sensorlink.Link
 	mu     sync.Mutex
 	raised []string
+	// idle is the link's idle deadline, zero for linkIdle.
+	idle time.Duration
 }
+
+// linkIdle is the link's idle deadline: far past any test's run. The
+// deadline is real time, while these tests run on the rig's clocks, so at
+// 10 s a connection left open across the steps between frames could be
+// closed on a slow runner (D5's list in 7112362339 on #788; brief
+// P4-NODE-WINTIME).
+const linkIdle = time.Hour
 
 func newLinkRig(t *testing.T, g *rig, r *node.Runtime) *linkRig {
 	k := &linkRig{t: t, g: g, r: r, sink: &ceilingGate{sink: r.SensorHealthSink()}, pins: &pins{m: map[uint64]string{}},
@@ -164,13 +173,17 @@ func (k *linkRig) make() {
 	stream := node.NetObservationStream(sensorID)
 	nl := netLog{r: k.r, stream: stream}
 	k.file = sensorlink.OpenRunFile(k.path)
+	idle := k.idle
+	if idle == 0 {
+		idle = linkIdle
+	}
 	k.h = sensorlink.NewHealth(sensorlink.HealthConfig{SensorID: sensorID, Sink: k.sink, Monotonic: k.g.monoNow, Now: k.g.now, Raise: k.raise, File: k.file})
 	l, err := sensorlink.New(sensorlink.Config{NodeID: "site-a-node1", SensorID: sensorID, EvidenceClass: asset.Simulated, OutageHours: 1,
 		ObservationQuota: 64 << 20, Stream: stream}, sensorlink.Options{Store: nl, Monotonic: k.g.monoNow, Now: k.g.now,
 		Received: func() event.Received {
 			return event.Received{UTC: "2026-11-13T10:00:01.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}}
 		},
-		Cursor: nl, Pins: k.pins, Raise: k.raise, Health: k.h, Timeouts: sensorlink.ConnTimeouts{Hello: 10 * time.Second, Idle: 10 * time.Second}})
+		Cursor: nl, Pins: k.pins, Raise: k.raise, Health: k.h, Timeouts: sensorlink.ConnTimeouts{Hello: 10 * time.Second, Idle: idle}})
 	if err != nil {
 		k.t.Fatal(err)
 	}
@@ -429,7 +442,31 @@ func TestHeldPoolEventBuiltAtWrite(t *testing.T) {
 	if d := healthEvents(t, r, sensorlink.EventCounters)[0].Health.Details; d["diff.drops_driver"] != "3" || d[event.DetailCaptureLoss] != "drops_driver" {
 		t.Fatalf("sensor.counters %v", d)
 	}
-	c.end()
+	if why := c.end(); why != "" {
+		t.Fatalf("the connection closed %q, want the sensor's own end", why)
+	}
+	// The rig's control: the link's idle deadline shorter than the steps
+	// between frames, as its 10 s were on a slow runner. The node closes the
+	// connection idle, and the check above fails.
+	t.Run("control: the link's idle deadline passed", func(t *testing.T) {
+		g := newRig(t)
+		r, _ := g.start(node.SensorSeams{})
+		defer r.Close()
+		k := newLinkRig(t, g, r)
+		k.idle = 50 * time.Millisecond
+		k.make()
+		c := k.dial()
+		c.send(hello())
+		c.ack(0)
+		select {
+		case why := <-c.done:
+			if why != netobs.CloseIdle {
+				t.Fatalf("the connection closed %q, want %q", why, netobs.CloseIdle)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("the connection was not closed idle")
+		}
+	})
 
 	// Control: the event built at its hold and kept as bytes, re-stamped
 	// to a later minor (a rollback's view), is refused at its write. The
