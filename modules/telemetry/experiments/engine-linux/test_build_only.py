@@ -27,6 +27,8 @@ WORKFLOW = os.path.join(ROOT, ".github", "workflows", "d4-engine-linux-eval.yml"
 ALLOWED = ("actions/checkout", "Free disk for the Zeek build", "build.sh refuses every changed input",
            "Build C1p, C2, C2A and the controls")
 # hr25_unit's one engine step.
+# The one form of an upload path under hr25_unit: a single report file.
+UPLOAD_FILE = r"\$\{\{ runner\.temp \}\}/(e-d4-03/)?[\w.-]+\.(md|txt)"
 HR25_STEP = "D4's unit tests of HR-25 option A's patch"
 
 
@@ -101,10 +103,12 @@ def check_hr25_unit(js):
         if "upload-artifact" in st.get("uses", ""):
             uploads += 1
             # The engines' own output stays on the runner (D1's ruling on
-            # D4-131 item 5.1; B3 on #803): no upload names the unit mode's
-            # folder, an output folder or engine.log.
+            # D4-131 item 5.1; B3 and D6's re-review on #803): an allowlist,
+            # each path one .md or .txt file, with no glob and no folder.
             for p in st.get("with", "").split("\n"):
-                assert not re.search(r"hr25-unit/|(^|/)out/|engine\.log", p), f"hr25_unit uploads {p}"
+                if not p or re.match(r"(name|path|if-no-files-found):", p):
+                    continue
+                assert re.fullmatch(UPLOAD_FILE, p), f"hr25_unit uploads {p}"
             continue
         assert label.startswith(ALLOWED + (HR25_STEP,)), f"step '{label}' runs under hr25_unit"
         run = st.get("run", "")
@@ -219,6 +223,10 @@ CONTROLS = [
     ("hr25_unit uploads its folder", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03/hr25-unit/\n")),
     ("hr25_unit uploads an output folder", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03/out/\n")),
     ("hr25_unit uploads engine.log", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/engine.log\n")),
+    ("hr25_unit uploads its folder without the slash",
+     (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03/hr25-unit\n")),
+    ("hr25_unit uploads the parent folder", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03\n")),
+    ("hr25_unit uploads a glob", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/**/*.log\n")),
 ]
 
 

@@ -69,12 +69,12 @@ global held = 0;
 
 global overflow_due: event(n: count);
 
-# A time before the grid's start (a capture clock stepped back) takes the
-# open interval, as the analyzer does with a negative time since its first
-# row.
+# A time before the open interval's start (a capture clock stepped back)
+# takes the open interval, so that an interval closed is never opened
+# again and its rows stay bounded (design 2.8).
 function grid_index(t: time): count
 	{
-	if ( t < grid_start )
+	if ( t < grid_start + open_n * DNP3::resync_report_interval )
 		return open_n;
 	return double_to_count(floor((t - grid_start) / DNP3::resync_report_interval));
 	}

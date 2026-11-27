@@ -2,8 +2,9 @@
 ##! for every analyzer_violation_info event, whatever the analyzer, so that
 ##! D4's unit tests count violations as raised, before dpd.zeek's and
 ##! logging.zeek's filters decide which reach analyzer.log. Loaded by
-##! run.sh's hr23-unit mode and its HR-23 feed (hr23_feed) only, never by
-##! the sensor's script. It logs the reason, never the violation's data.
+##! run.sh's hr23-unit and hr25-unit modes and its HR-23 feed (hr23_feed),
+##! and named by row judge-viol of resync-conditions.tsv; never by the
+##! sensor's script. It logs the reason, never the violation's data.
 
 module OtsecViol;
 
