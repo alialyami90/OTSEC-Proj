@@ -62,10 +62,11 @@ func TestBlindNewRunStanding(t *testing.T) {
 // not a current heartbeat, not only at ticks. No tick is sent: backlog
 // heartbeats that are not late, and, on a live link, observations
 // committed with no heartbeat, each for 70 s, raise sensor-no-heartbeat
-// once and show coverage unknown. Control: checked at accepted ticks only
-// (nothing raised).
+// once and show coverage unknown; so does one observation dropped by a
+// full class, and one held, 61 s after the hello (D6's N2 on #802, its
+// probe P9). Control: checked at accepted ticks only (nothing raised).
 func TestBlindNoHeartbeatWithoutTicks(t *testing.T) {
-	backlog := func(t *testing.T) *gsrc {
+	backlog := func(t *testing.T) *rig {
 		g := newGsrc(t)
 		g.live(6, true)
 		g.cut()
@@ -80,9 +81,9 @@ func TestBlindNoHeartbeatWithoutTicks(t *testing.T) {
 			g.buf = g.buf[1:]
 			g.send(h)
 		}
-		return g
+		return g.r.rig
 	}
-	records := func(t *testing.T) *gsrc {
+	records := func(t *testing.T) *rig {
 		g := newGsrc(t)
 		g.live(6, true)
 		for range 7 { // one observation each 10 s, no heartbeat or tick
@@ -91,20 +92,47 @@ func TestBlindNoHeartbeatWithoutTicks(t *testing.T) {
 			g.p.send(obs02(g.seq))
 			g.p.ack(uint64(g.seq))
 		}
-		return g
+		return g.r.rig
+	}
+	dropped := func(t *testing.T) *rig {
+		r := newRig(t, func(o *Options) { o.Store = quotaStore{o.Store} })
+		p := r.accepted(hello02())
+		r.pass(61 * time.Second)
+		p.send(obs02(1))
+		p.taken()
+		if d := r.l.Stats().Dropped[DropClassFull]; d != 1 {
+			t.Fatalf("dropped %v, want one under %s", r.l.Stats().Dropped, DropClassFull)
+		}
+		return r
+	}
+	held := func(t *testing.T) *rig {
+		r, hs := holdRig02(t)
+		if err := r.l.Dispatch(bg, HoldRun{RequestID: "req-1", AssetID: relay, Endpoint: endpoint, L4: "tcp"}); err != nil {
+			t.Fatal(err)
+		}
+		h := hello02()
+		h.FirstSeq, h.NewestSeq = itoa(1), itoa(0) // nothing buffered: no backlog
+		p := r.accepted(h)
+		r.pass(61 * time.Second)
+		p.send(nodeFlow02(1))
+		p.taken()
+		if rec := hs.last(); rec.State != HoldHolding || len(rec.Flows) != 1 || len(rec.Flows[0].Records) != 1 {
+			t.Fatalf("not held: %+v", rec)
+		}
+		return r
 	}
 	for _, c := range []struct {
 		what string
-		run  func(*testing.T) *gsrc
-	}{{"backlog heartbeats", backlog}, {"observations", records}} {
+		run  func(*testing.T) *rig
+	}{{"backlog heartbeats", backlog}, {"observations", records}, {"a dropped observation", dropped}, {"a held observation", held}} {
 		t.Run(c.what, func(t *testing.T) {
-			g := c.run(t)
-			if g.r.al.count(AlarmNoHeartbeat) != 1 || !g.r.l.BlindStatus().CoverageUnknown {
-				t.Fatalf("%v, coverage unknown %v; want sensor-no-heartbeat once and coverage unknown", g.r.al.list, g.r.l.BlindStatus().CoverageUnknown)
+			r := c.run(t)
+			if r.al.count(AlarmNoHeartbeat) != 1 || !r.l.BlindStatus().CoverageUnknown {
+				t.Fatalf("%v, coverage unknown %v; want sensor-no-heartbeat once and coverage unknown", r.al.list, r.l.BlindStatus().CoverageUnknown)
 			}
 			t.Run("control: at accepted ticks only", func(t *testing.T) {
 				withSeam(t, &noHbTicksOnly)
-				if g := c.run(t); g.r.al.count(AlarmNoHeartbeat) != 0 {
+				if r := c.run(t); r.al.count(AlarmNoHeartbeat) != 0 {
 					t.Fatal("the control raised it")
 				}
 			})
@@ -259,6 +287,34 @@ func TestBlindNamesCapped(t *testing.T) {
 	if s := nameList(named, more); !strings.HasSuffix(s, fmt.Sprintf(", and %d more not listed", runs-netobs.MaxInterfaces)) {
 		t.Fatalf("detail names %q", s)
 	}
+	// D3's N7 and D6's N3 on #802: once a stretch's names have overflowed,
+	// no interface gets the grace at a new run. Nine runs leave if0 to if7
+	// named and if8 counted; run 9 carries if8 up and flat: the stretch
+	// stands. Control: the grace for a name counted past the cap.
+	overflow := func() bool {
+		b := &blindState{}
+		at := t0
+		for i := range 9 {
+			n, r := fmt.Sprintf("if%d", i), fmt.Sprintf("run%d", i)
+			by := map[string]netobs.InterfaceCount{n: {Name: n, Carrier: "down"}}
+			b.pastLocked(r, []string{n}, by, at, 5*time.Minute, true, false)
+			b.liveLocked(r, []string{n}, by, time.Duration(i)*time.Minute, at, 5*time.Minute)
+			at = at.Add(10 * time.Second)
+		}
+		by := map[string]netobs.InterfaceCount{"if8": {Name: "if8", Carrier: "up", Packets: 5}}
+		b.pastLocked("run9", []string{"if8"}, by, at, 5*time.Minute, true, false)
+		b.liveLocked("run9", []string{"if8"}, by, 10*time.Minute, at, 5*time.Minute)
+		return b.standing
+	}
+	if !overflow() {
+		t.Fatal("a new run gave the grace to a name counted past the cap, and the stretch ended")
+	}
+	t.Run("control: the grace past the cap", func(t *testing.T) {
+		withSeam(t, &blindOverGrace)
+		if overflow() {
+			t.Fatal("the control kept the stretch")
+		}
+	})
 	t.Run("control: every name kept", func(t *testing.T) {
 		withSeam(t, &blindNamesUncapped)
 		if named, _, past := run(); len(named) != runs || len(past.names) != runs {

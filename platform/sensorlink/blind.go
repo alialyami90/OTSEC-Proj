@@ -25,8 +25,9 @@ import (
 //     than blind_after_s, or it was first seen within the comparison and
 //     has not risen since. The comparison starts again at a new run's
 //     first current heartbeat, where an interface named in a standing
-//     stretch has no grace: the stretch stands until its packets rise in
-//     the new run (D3's and D6's B1 on #802). A rise seen only in backlog
+//     stretch has no grace, nor has any interface once the stretch's names
+//     have overflowed: the stretch stands until its packets rise in the
+//     new run (D3's and D6's B1, D3's N7 on #802). A rise seen only in backlog
 //     or late heartbeats is credited at the receipt less its age by at_utc
 //     (creditRise; B2 on #802). One stretch per sensor: the
 //     status alarm and
@@ -40,7 +41,7 @@ import (
 //   - sensor-no-heartbeat and coverage unknown (CH-44): at every accepted
 //     frame that is not a current heartbeat (a tick that is not early, a
 //     late or backlog heartbeat taken, an observation committed, held or
-//     dropped by the budget; D3's N1 on #802), when no current heartbeat
+//     dropped by the budget or a full class; D3's N1 on #802), when no current heartbeat
 //     has come for NoHeartbeatAfter (since the link was made, when none
 //     has come), once a stretch; the stretch ends at a current heartbeat
 //     only. A sensor-blind that stands when it begins stays standing
@@ -56,7 +57,7 @@ import (
 //     of the rest. Both are held in memory only: a node stop loses them.
 //   - Accepted (CH-44's reset of sensor-unreachable): a tick that is not
 //     early, a heartbeat taken, and an observation committed, held or
-//     dropped by the budget count; a refused record, a failed hello, an
+//     dropped by the budget or a full class count; a refused record, a failed hello, an
 //     early tick, a duplicate and a connect do not. CH-17 counts a
 //     duplicate as taken, so its exclusion is the stricter reading, towards
 //     the alarm. The node's timer reads Stats.Accepted and
@@ -93,6 +94,10 @@ const NoHeartbeatAfter = 60 * time.Second
 // blindNoLowerClamp drop creditRise's clamps; blindNoParseGuard drops its
 // guard on an at_utc that does not parse.
 var blindCreditAtReceipt, blindNoUpperClamp, blindNoLowerClamp, blindNoParseGuard bool
+
+// blindOverGrace gives the grace at a new run to every interface not
+// named, after the stretch's names have overflowed.
+var blindOverGrace bool
 var blindBacklogCounts, blindLateCounts, blindAtLimit, blindAllOnly, blindCarrierIgnored, blindFirstOnly, blindAcrossRuns bool
 var blindEachHeartbeat, blindClearsAtUnknown, noHbAnyEnds, noHbPastLimit, noHbEachTick, pastBlindOff, pastBlindAtOnce, acceptedAnyFrame bool
 var blindNewRunGrace, noHbTicksOnly, blindNamesUncapped bool
@@ -244,9 +249,13 @@ func (b *blindState) liveLocked(run string, names []string, byName map[string]ne
 		// The run's first current heartbeat: the comparison starts again.
 		// An interface named in a standing stretch has no grace, so the
 		// stretch stands until it rises (D3's and D6's B1 on #802).
+		// Once the stretch's names have overflowed, a name counted past
+		// the cap may be any of them, so none has the grace (D3's N7 on
+		// #802).
+		overflowed := len(b.over)+b.overPrev > 0 && !blindOverGrace
 		b.run, b.live = run, map[string]*ifBlind{}
 		for _, n := range names {
-			inStretch := b.standing && slices.Contains(b.named, n) && !blindNewRunGrace
+			inStretch := b.standing && (slices.Contains(b.named, n) || overflowed) && !blindNewRunGrace
 			b.live[n] = &ifBlind{packets: byName[n].Packets, mono: m, rose: !inStretch}
 		}
 		b.overPrev, b.over = b.overPrev+len(b.over), nil

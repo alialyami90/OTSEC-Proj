@@ -110,8 +110,9 @@ type SensorStatus struct {
 	// AlarmSensorUnreachable says; it clears at the next accepted one, or
 	// on the 0.2 link at the next frame accepted under CH-44.
 	Unreachable bool `json:"unreachable"`
-	// Coverage is "unknown" while ticks are accepted and no current
-	// heartbeat has come for 60 s (CH-44, sensor-no-heartbeat), and Blind
+	// Coverage is "unknown" while frames other than a current heartbeat
+	// are accepted and no current heartbeat has come for 60 s (CH-44,
+	// sensor-no-heartbeat), and Blind
 	// names the interfaces of the standing sensor-blind stretch (CH-31).
 	// The 0.2 link only.
 	Coverage string   `json:"coverage,omitempty"`
