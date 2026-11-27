@@ -32,7 +32,10 @@ const AlarmSensorRecordRefused = "sensor-record-refused"
 
 // AlarmSensorUnreachable: no heartbeat was accepted for SensorUnreachableAfter
 // of the node's monotonic time since the later of the last one and the
-// node's start. A connect never resets it, so a sensor that reconnects
+// node's start; on the 0.2 link, no frame accepted under CH-44: a tick that
+// is not early, or a heartbeat or record taken (sensorlink.Stats.Accepted).
+// A refused record, a failed hello, an early tick or a connect never resets
+// it, so a sensor that reconnects
 // again and again without a heartbeat accepted still raises it (D3's S1,
 // D1 in D4-73). It is raised once per such stretch, and status shows the
 // sensor unreachable until the next accepted heartbeat (D5-sensor-node.md
@@ -106,6 +109,12 @@ type SensorStatus struct {
 	// Unreachable: no heartbeat accepted for SensorUnreachableAfter, as
 	// AlarmSensorUnreachable says; it clears at the next accepted one.
 	Unreachable bool `json:"unreachable"`
+	// Coverage is "unknown" while ticks are accepted and no current
+	// heartbeat has come for 60 s (CH-44, sensor-no-heartbeat), and Blind
+	// names the interfaces of the standing sensor-blind stretch (CH-31).
+	// The 0.2 link only.
+	Coverage string   `json:"coverage,omitempty"`
+	Blind    []string `json:"blind,omitempty"`
 	// Hold is the intake hold's counts since start (D4-72). Repaired and
 	// RepairRefused are the start repair's runs: a release whose
 	// collection.run it wrote, and one it refused for want of an allowed
@@ -195,8 +204,9 @@ type sensorIntake struct {
 	// heartbeats is the link's count last seen.
 	quietFrom   time.Duration
 	heartbeats  uint64
-	unreachable bool // status shows it, until a heartbeat
-	raised      bool // the alarm for this quiet stretch is raised
+	accepted    uint64 // the link's Stats.Accepted last seen (CH-44)
+	unreachable bool   // status shows it, until a heartbeat
+	raised      bool   // the alarm for this quiet stretch is raised
 	// checkpointFailures is the hold's count the last alarm was raised at.
 	checkpointFailures uint64
 	// detectorDown: the detector consumer did not start, and its alarm is
@@ -481,9 +491,7 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 	m := r.opt.Mono()
 	r.reportDrops(ctx, &in.obs, now, final, func() map[string]string { return dropDetails(in.stream, in.obs.since, now) })
 	r.reportDrops(ctx, &in.alert, in.alerts, final, func() map[string]string { return alertDropDetails(in.alert.stream, in.alert.since, in.alerts) })
-	if st.Heartbeats != in.heartbeats {
-		in.heartbeats, in.quietFrom, in.raised, in.unreachable = st.Heartbeats, max(in.quietFrom, st.HeartbeatMono), false, false
-	}
+	in.heard(st)
 	if !in.raised && m-in.quietFrom >= SensorUnreachableAfter {
 		in.raised, in.unreachable = true, true
 		r.opt.Status.Alarm(NetworkDB, c5.Alarm{Code: AlarmSensorUnreachable, At: r.opt.Now(), Stream: in.stream,
@@ -518,10 +526,37 @@ func (r *Runtime) tickSensor(ctx context.Context, final bool) (more bool) {
 	}
 	s.DispatchTimeouts, s.ResultTimeouts, s.LockWaitMaxMS = st.DispatchTimeouts, st.ResultTimeouts, st.LockWaitMax.Milliseconds()
 	s.SchedPanics = st.SchedPanics
+	s.Coverage, s.Blind = sensorCoverage(in.link.BlindStatus())
 	s.HealthHeld = r.sensorHeld.Load()
 	s.LinkKeyPin = r.linkKeyPin()
 	r.opt.Status.SetSensor(s)
 	return more
+}
+
+// unreachableHeartbeatsOnly is heard's control: the timer reset by a
+// heartbeat only, as before CH-44's accepted frames.
+var unreachableHeartbeatsOnly bool
+
+// heard resets the sensor-unreachable timer when the link accepted a
+// heartbeat, or on the 0.2 link any frame CH-44 counts, since the last
+// tick. The caller holds in.mu.
+func (in *sensorIntake) heard(st sensorlink.Stats) {
+	if unreachableHeartbeatsOnly {
+		st.Accepted, st.AcceptedMono = in.accepted, 0
+	}
+	if st.Heartbeats != in.heartbeats || st.Accepted != in.accepted {
+		in.heartbeats, in.accepted, in.raised, in.unreachable = st.Heartbeats, st.Accepted, false, false
+		in.quietFrom = max(in.quietFrom, st.HeartbeatMono, st.AcceptedMono)
+	}
+}
+
+// sensorCoverage is status's coverage and blind interfaces from the
+// link's blindness state (CH-31, CH-44).
+func sensorCoverage(b sensorlink.BlindStatus) (coverage string, blind []string) {
+	if b.CoverageUnknown {
+		coverage = "unknown"
+	}
+	return coverage, b.Blind
 }
 
 // notTied raises AlarmNetworkSessionNotTied once for each stretch of

@@ -436,6 +436,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 	case reason != "":
 		return reason
 	}
+	l.frameRead()
 	reason = l.locked(func() string {
 		if r := l.decided(ctx); r != "" {
 			return r // a decision made while the frame was read
@@ -463,6 +464,7 @@ func (l *Link) serveConn(ctx context.Context, cn *conn) string {
 			return ""
 		}
 		if reason == "" {
+			l.frameRead()
 			step := l.opt.Monotonic()
 			reason = l.locked(func() string {
 				if r := l.decided(ctx); r != "" {
@@ -1292,6 +1294,8 @@ func (l *Link) heartbeat(ctx context.Context, cn *conn, h *netobs.Heartbeat, n u
 	l.stats.Heartbeats++
 	l.stats.HeartbeatMono = l.opt.Monotonic()
 	l.mu.Unlock()
+	l.acceptedFrame()
+	l.judgeBlind(cn, h, late)
 	cn.cur.Taken, cn.pending = max(cn.cur.Taken, n), true
 	// An unwatched close's raise is saved before its record is written; a
 	// save that fails closes store, and the raise is saved with the next
@@ -1475,6 +1479,7 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 		return netobs.CloseStore // not final: T stays, the record is resent
 	case outCommitted:
 		cn.cur, cn.saved, cn.pending = f.marked, f.marked.Taken, false // with what releases moved (commitOne)
+		l.acceptedFrame()
 	case outDuplicate:
 		// A release disposed of n after it was placed: a duplicate by the
 		// position saved now (section 1.4 item 4). T moves at the next fold.
@@ -1484,7 +1489,9 @@ func (l *Link) observation(ctx context.Context, cn *conn, o *netobs.Observation,
 	case outDropped:
 		cn.cur.Dropped++
 		cn.cur.Taken, cn.pending = n, true
+		l.acceptedFrame()
 	default: // held, or committed in a release: final, and stored
+		l.acceptedFrame()
 		marked.Taken = n
 		cn.cur, cn.pending = marked, true
 	}
@@ -1536,6 +1543,8 @@ func (l *Link) tick(ctx context.Context, cn *conn, t *netobs.Tick) string {
 		return netobs.CloseStore
 	}
 	cn.lastTick, cn.tickAt = t, now
+	l.acceptedFrame()
+	l.tickNoHeartbeat()
 	raised, onset := l.sample(t.SensorUTC, false, cn.held)
 	raised = l.spansRaise(t.Lost) || raised
 	if onset {

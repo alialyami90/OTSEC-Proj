@@ -652,6 +652,7 @@ func (l *Link) CheckStep(ctx context.Context) {
 	if l.skewOn() {
 		l.gapTick(ctx) // a silent gap due, and the gap records due (2e-2)
 	}
+	l.pastBlindTick() // past-blind stretches due once no backlog is on (blind.go)
 }
 
 // actStep saves the cursor and the run file with what a step moved, and

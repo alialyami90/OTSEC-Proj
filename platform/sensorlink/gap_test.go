@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -885,17 +886,21 @@ func (g *gsrc) drain(q []pend) {
 	}
 }
 
-// TestGapFlatCountsCarrierUp (V-17, the gap only: sensor.past-blind is
-// P4-4-INT-D5-BLIND's, D4-121).
+// TestGapFlatCountsCarrierUp (V-17; its sensor.past-blind half is
+// P4-4-INT-D5-BLIND's, blind.go).
 //   - A ten-minute cut, one run, every carrier up and every packets flat
 //     for the whole cut: closed unwatched. Control: a chain that checks the
-//     carrier alone, which closes it as covered.
+//     carrier alone, which closes it as covered. And one sensor.past-blind
+//     naming eth1, written once the backlog drains. Control: no past
+//     stretch recorded.
 //   - The blind close: the link current, flat for blind_after_s, then
 //     rising: a blind gap written open from R, closed unwatched at the
 //     first heartbeat that rises. Control: a gap from the moment the node
 //     finds every interface blind, blind_after_s late.
-//   - Every carrier down for 60 s inside the cut, packets rising: unwatched.
-//   - Every packets flat for seven minutes inside the cut: unwatched.
+//   - Every carrier down for 60 s inside the cut, packets rising: unwatched,
+//     and one sensor.past-blind.
+//   - Every packets flat for seven minutes inside the cut: unwatched, and
+//     one sensor.past-blind.
 //   - Flat from four minutes before W, no restart: from R. Control: a gap
 //     from W.
 //   - The cables pulled after W's heartbeat: the next heartbeat's packets
@@ -916,6 +921,15 @@ func TestGapFlatCountsCarrierUp(t *testing.T) {
 	if d := flatCut(t).lastGap(); d == nil || d["covered"] != "false" {
 		t.Fatalf("last record %v, want closed unwatched", d)
 	}
+	if ev := flatCut(t).events(EventPastBlind); len(ev) != 1 || !strings.Contains(ev[0]["detail"], "eth1") {
+		t.Fatalf("past-blind events %v, want one naming eth1", ev)
+	}
+	t.Run("control: no past stretch", func(t *testing.T) {
+		withSeam(t, &pastBlindOff)
+		if ev := flatCut(t).events(EventPastBlind); len(ev) != 0 {
+			t.Fatalf("the control wrote %v", ev)
+		}
+	})
 	t.Run("control: the carrier alone", func(t *testing.T) {
 		withSeam(t, &gapChainCarrierOnly)
 		if g := flatCut(t); !g.anyCovered() {
@@ -971,8 +985,12 @@ func TestGapFlatCountsCarrierUp(t *testing.T) {
 		mid  func(*gsrc)
 	}{{"carrier down for 60 s", down60}, {"flat for seven minutes", flat7}} {
 		t.Run(c.what, func(t *testing.T) {
-			if d := inside(t, c.mid).lastGap(); d == nil || d["covered"] != "false" {
+			g := inside(t, c.mid)
+			if d := g.lastGap(); d == nil || d["covered"] != "false" {
 				t.Fatalf("records %v, want closed unwatched", d)
+			}
+			if ev := g.events(EventPastBlind); len(ev) != 1 {
+				t.Fatalf("past-blind events %v, want one", ev)
 			}
 			t.Run("control: stretches as long as blind_after_s", func(t *testing.T) {
 				withSeam(t, &gapChainStretch)
