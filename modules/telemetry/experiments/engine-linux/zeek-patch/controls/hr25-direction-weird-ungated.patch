@@ -1,0 +1,15 @@
+HR-25 option A's control `direction-weird-ungated` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.8, 'The weirds' bound': dnp3_unexpected_flow_direction raised before confirmation too.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -259,7 +259,7 @@
+             // Double check the direction in case the first
+             // received packet is a response.
+             // Before confirmation only `budget` raises a weird (design 2.8).
+-            if ( confirmed && orig != static_cast<bool>(ctrl & 0x80) )
++            if ( orig != static_cast<bool>(ctrl & 0x80) )
+                 analyzer->Weird("dnp3_unexpected_flow_direction");
+ 
+             endp->pkt_length = endp->buffer[PSEUDO_LENGTH_INDEX];

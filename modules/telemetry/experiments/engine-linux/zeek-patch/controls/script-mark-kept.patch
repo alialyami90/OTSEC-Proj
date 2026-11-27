@@ -3,7 +3,7 @@ HR-25 option A's script control `script-mark-kept` (HR25-B2; docs/phase4/D4-hr25
 
 --- a/resync.zeek
 +++ b/resync.zeek
-@@ -139,7 +139,6 @@
+@@ -144,7 +144,6 @@
  	if ( is_orig && c?$otsec_resync_orig )
  		{
  		r$resync_cause = c$otsec_resync_orig;

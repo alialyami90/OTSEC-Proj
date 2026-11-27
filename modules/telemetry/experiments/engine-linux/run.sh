@@ -117,6 +117,8 @@ mc_selftest() {
 mc_counts() {
   mc_count=
   [ "$mode" != hr23-unit ] || mc_count=--no-count
+  # hr25-unit's mount summary prints no per-folder counts, as hr23-unit's does.
+  [ "$mode" != hr25-unit ] || mc_count=--no-count
   [ "$mode" != dnp3 ] || [ -z "$hr23" ] || mc_count=--no-count
 }
 mc_record() {
@@ -209,14 +211,17 @@ if [ "$mode" = hr25-unit ]; then
   docker pull -q "$ZEEK_IMAGE" > /dev/null
   mc_selftest
   # The script controls: the script part with one control patch each,
-  # mounted read-only at /ctl.
+  # mounted read-only at /ctl. Each must apply with no fuzz and no offset,
+  # as build.sh requires of the patches (D7's N2 on #803).
   ctl=$u/ctl
   mkdir -p "$ctl"
   for m in $(python3 -I "$here/zeek-patch/hr25_unit.py" script-controls); do
     mkdir -p "$ctl/$m"
     cp "$here/zeek-patch/resync.zeek" "$ctl/$m/resync.zeek"
-    patch -d "$ctl/$m" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/zeek-patch/controls/$m.patch" > /dev/null \
+    out=$(patch -d "$ctl/$m" -p1 --fuzz=0 --no-backup-if-mismatch < "$here/zeek-patch/controls/$m.patch" 2>&1) \
       || { echo "script control $m does not apply" >&2; exit 1; }
+    ! echo "$out" | grep -qiE 'fuzz|offset|hunk .* (failed|ignored)' \
+      || { echo "script control $m applied only with an offset or fuzz" >&2; exit 1; }
   done
   # C2 does not define A's events, so it runs without the script part.
   a=/exp/zeek-patch/resync.zeek

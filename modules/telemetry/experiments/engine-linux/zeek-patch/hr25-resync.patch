@@ -285,7 +285,7 @@ owner's word (design section 4, C5).
  
              if ( res == 0 )
                  return true;
-@@ -152,92 +220,90 @@
+@@ -152,92 +220,91 @@
              if ( res < 0 )
                  return false;
  
@@ -345,7 +345,9 @@ owner's word (design section 4, C5).
              // received packet is a response.
 -            u_char ctrl = endp->buffer[PSEUDO_CONTROL_FIELD_INDEX];
 -
-             if ( orig != static_cast<bool>(ctrl & 0x80) )
+-            if ( orig != static_cast<bool>(ctrl & 0x80) )
++            // Before confirmation only `budget` raises a weird (design 2.8).
++            if ( confirmed && orig != static_cast<bool>(ctrl & 0x80) )
                  analyzer->Weird("dnp3_unexpected_flow_direction");
  
 -            // Update state.
@@ -428,7 +430,7 @@ owner's word (design section 4, C5).
          reporter->AnalyzerError(analyzer, "dnp3 invalid target length: %d - %d", target_len, endp->buffer_len);
          return -1;
      }
-@@ -245,6 +311,7 @@
+@@ -245,6 +312,7 @@
      int to_copy = min(*len, target_len - endp->buffer_len);
  
      if ( endp->buffer_len + to_copy > MAX_BUFFER_SIZE ) {
@@ -436,7 +438,7 @@ owner's word (design section 4, C5).
          reporter->AnalyzerError(analyzer, "dnp3 buffer length exceeded: %d + %d", endp->buffer_len, to_copy);
          return -1;
      }
-@@ -260,85 +327,490 @@
+@@ -260,85 +328,491 @@
      return 0;
  }
  
@@ -585,10 +587,11 @@ owner's word (design section 4, C5).
 +
 +    // A primary frame of confirmed user data (link function 3) with FCV set
 +    // has an FCB; a repeat of it whose FCB is not toggled is a link-layer
-+    // retry (D1's ruling 1 on #782).
-+    bool confirmed = (ctrl & 0x40) && (ctrl & 0x10) && (ctrl & 0x0f) == 3;
++    // retry (D1's ruling 1 on #782). Named conf_data, not confirmed, so that
++    // it does not hide the member that says whether the flow is confirmed.
++    bool conf_data = (ctrl & 0x40) && (ctrl & 0x10) && (ctrl & 0x0f) == 3;
 +    int fcb = (ctrl & 0x20) ? 1 : 0;
-+    bool link_retry = confirmed && endp->fcb == fcb;
++    bool link_retry = conf_data && endp->fcb == fcb;
 +
 +    if ( fir ) {
 +        // A FIR frame ends a run of first_chunk_missing (design 2.7).
@@ -635,7 +638,7 @@ owner's word (design section 4, C5).
 +    memcpy(endp->last_seg, seg, seg_len);
 +    endp->last_seg_len = seg_len;
 +    endp->after_fin = fin;
-+    endp->fcb = confirmed ? fcb : -1;
++    endp->fcb = conf_data ? fcb : -1;
 +    endp->app_octets = base + app;
 +    endp->tpflags = t;
 +    ++endp->pkt_cnt;
@@ -862,10 +865,10 @@ owner's word (design section 4, C5).
 +}
 +
 +// After each delivery on an end, once confirmed (design 2.8): its `first`
-+// row at the first failure after confirmation, at once; then at most one
-+// `interval` row per interval, at the first delivery at or after the
-+// `first` row's time plus n intervals, if its counts changed since its last
-+// row. Times are compared in whole microseconds.
++// row at the first failure after confirmation, at the end of that delivery;
++// then at most one `interval` row per interval, at the first delivery at or
++// after the `first` row's time plus n intervals, if its counts changed since
++// its last row. Times are compared in whole microseconds.
 +void DNP3_Base::AfterDelivery(bool orig) {
 +    Endpoint* endp = End(orig);
 +
@@ -978,7 +981,7 @@ owner's word (design section 4, C5).
  
      endp->in_hdr = true;
      endp->encountered_first_chunk = false;
-@@ -346,13 +818,23 @@
+@@ -346,13 +820,23 @@
      endp->pkt_length = 0;
      endp->tpflags = 0;
      endp->pkt_cnt = 0;
@@ -1003,7 +1006,7 @@ owner's word (design section 4, C5).
  bool DNP3_Base::CheckCRC(int len, const u_char* data, const u_char* crc16, const char* where) {
      unsigned int crc = CalcCRC(len, data);
  
-@@ -390,13 +872,14 @@
+@@ -390,13 +874,14 @@
  }
  
  } // namespace detail
@@ -1021,7 +1024,7 @@ owner's word (design section 4, C5).
  }
  
  void DNP3_TCP_Analyzer::DeliverStream(int len, const u_char* data, bool orig) {
-@@ -405,6 +888,8 @@
+@@ -405,6 +890,8 @@
      try {
          if ( ! ProcessData(len, data, orig) )
              SetSkip(true);
@@ -1030,7 +1033,7 @@ owner's word (design section 4, C5).
      }
  
      catch ( const binpac::Exception& e ) {
-@@ -416,15 +901,21 @@
+@@ -416,15 +903,21 @@
  
  void DNP3_TCP_Analyzer::Undelivered(uint64_t seq, int len, bool orig) {
      TCP_ApplicationAnalyzer::Undelivered(seq, len, orig);
@@ -1055,7 +1058,7 @@ owner's word (design section 4, C5).
  
  void DNP3_UDP_Analyzer::DeliverPacket(int len, const u_char* data, bool orig, uint64_t seq, const IP_Hdr* ip,
                                        int caplen) {
-@@ -433,6 +924,10 @@
+@@ -433,6 +926,10 @@
      try {
          if ( ! ProcessData(len, data, orig) )
              SetSkip(true);

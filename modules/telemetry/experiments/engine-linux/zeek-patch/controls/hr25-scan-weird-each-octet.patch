@@ -1,0 +1,15 @@
+HR-25 option A's control `scan-weird-each-octet` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.8, 'The weirds' bound': a scan run raises its weird at every octet it consumes, not once.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -234,6 +234,8 @@
+                     Count(orig, cause);
+                     Charge(orig, 1, 0);
+                 }
++                else if ( confirmed )
++                    analyzer->Weird(cause_weird[cause]);
+ 
+                 ++endp->scanned_octets;
+                 memmove(endp->buffer, endp->buffer + 1, HEADER_LEN - 1);

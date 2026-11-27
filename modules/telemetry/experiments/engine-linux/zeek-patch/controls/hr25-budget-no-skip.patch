@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -658,7 +658,6 @@
+@@ -660,7 +660,6 @@
      Count(orig, BUDGET);
      Raise(orig, "budget");
      analyzer->AnalyzerViolation("dnp3_resync_budget_exhausted");

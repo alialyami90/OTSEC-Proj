@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -465,8 +465,10 @@
+@@ -467,8 +467,10 @@
      }
      else {
          // Identical link-layer retries of the last segment after its FIN.

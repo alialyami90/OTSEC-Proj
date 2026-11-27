@@ -111,7 +111,7 @@ fresh
 rm "$work/case/controls/hr25-no-mod64.patch"
 expect "a control that build.env names is missing" "control hr25-no-mod64.patch is missing"
 fresh
-sed -i 's/^@@ -452,7 +452,7 @@$/@@ -450,7 +450,7 @@/' "$work/case/controls/hr25-no-mod64.patch"
+sed -i 's/^@@ -454,7 +454,7 @@$/@@ -452,7 +452,7 @@/' "$work/case/controls/hr25-no-mod64.patch"
 expect "a control's hunk moved: it applies only at an offset" "control hr25-no-mod64.patch applied only with an offset or fuzz"
 fresh
 sed -i 's/^             \/\/ Append\.$/             \/\/ Appended./' "$work/case/controls/hr25-no-mod64.patch"

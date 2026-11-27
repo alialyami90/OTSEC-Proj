@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -421,7 +421,7 @@
+@@ -422,7 +422,7 @@
  // segment, its transport octet and every application octet, with equal
  // lengths (design 2.3, D3's C1).
  bool DNP3_Base::SameSegment(const Endpoint* endp, const u_char* seg, int seg_len) {

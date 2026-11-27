@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -724,7 +724,7 @@
+@@ -726,7 +726,7 @@
  
      uint64_t n = static_cast<uint64_t>(since / iv);
  

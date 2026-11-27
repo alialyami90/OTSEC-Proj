@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -604,7 +604,7 @@
+@@ -606,7 +606,7 @@
  
      // Before confirmation only `budget` raises its weird (design 2.7, 2.8).
      // A broken invariant is never quiet (design 2.9).

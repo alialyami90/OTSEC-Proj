@@ -3,7 +3,7 @@ HR-25 option A's script control `script-overflow-counted` (HR25-B2; docs/phase4/
 
 --- a/resync.zeek
 +++ b/resync.zeek
-@@ -78,7 +78,7 @@
+@@ -83,7 +83,7 @@
  # charged to no interval (D6's B6).
  function flush(n: count)
  	{

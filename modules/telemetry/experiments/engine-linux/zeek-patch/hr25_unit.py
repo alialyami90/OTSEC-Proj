@@ -52,7 +52,7 @@ import synth  # noqa: E402
 
 C2A, C2 = "zeek-hr25-c2a", "zeek-hr25-c2"
 # DNP3::max_application_layer_fragment_size, Zeek 9.0.1's default (100 *
-# 1024, init-bare.zeek); neither the probe nor resync-unit.zeek redefines it.
+# 1024, init-bare.zeek); neither the probe nor resync.zeek redefines it.
 LIMIT = 100 * 1024
 # The closed set of causes, in the order of dnp3_resync's `counts` (design
 # 2.8). test_hr25_unit.py checks it against the patch's own list.
@@ -71,13 +71,20 @@ M, O = True, False
 U_M = 0xC4   # master, primary, unconfirmed user data (function 4)
 U_O = 0x44   # outstation, primary, unconfirmed user data
 RST_M = 0xC0  # master, primary, Reset Link States (function 0), link-only
+RST_O = 0x40  # outstation, primary, Reset Link States, link-only
 TEST_M = 0xD2  # master, primary, Test Link States (function 2, FCV set), link-only
 ACK_O = 0x00  # outstation, secondary, ACK (function 0), link-only
+ACK_M = 0x80  # master, secondary, ACK, link-only
 
 
 def conf_m(fcb):
     """Master, primary, confirmed user data (function 3) with FCV set."""
     return 0xD3 | (0x20 if fcb else 0)
+
+
+def conf_o(fcb):
+    """Outstation, primary, confirmed user data (function 3) with FCV set."""
+    return 0x53 | (0x20 if fcb else 0)
 
 
 def tp(fir, fin, n):
@@ -132,8 +139,9 @@ def badchunk(from_m, n=7):
 
 
 def carrier():
-    """A frame whose header passes and whose second chunk CRC fails, holding
-    W's whole frame as its user data: an embedded header."""
+    """A frame whose header passes and whose first chunk CRC fails (the low
+    octet of that chunk's CRC, at offset 26, is inverted), holding W's whole
+    frame as its user data: an embedded header."""
     c = bytearray(frame(M, U_M, whole(M, 1, W)))
     c[10 + 16] ^= 0xFF
     return bytes(c)
@@ -219,6 +227,11 @@ class Hosts:
     def __init__(self, n):
         self.clock = synth.Clock()
         self.flows = [Flow(clock=self.clock, port=40000 + i) for i in range(n)]
+
+    def add(self):
+        f = Flow(clock=self.clock, port=40000 + len(self.flows))
+        self.flows.append(f)
+        return f
 
     @property
     def frames(self):
@@ -563,6 +576,30 @@ def cases_b2():
     ack(f)
     out["d4u-hr25-budget-retry"] = f.finish(4)
 
+    # Confirmation reads the flow's state, not the frame's link function
+    # (design 2.7): Reset Link States on each end, a failure before
+    # confirmation, then a session whose every fragment is in confirmed user
+    # data (function 3, FCB 1, 0, 1 per end, each acknowledged), with a
+    # failure after confirmation. Confirmed at P, one first row, and no
+    # first row at a later fragment.
+    f = reset(Flow()).send(O, link_only(O, RST_O)).send(M, link_only(M, ACK_M))
+    f.send(M, garbage(16))
+    for k, (q, r) in enumerate(((P, R(0)), (W, R(1)), (Q, R(2)))):
+        f.send(M, whole(M, k, q, conf_m(k % 2 == 0)))
+        ack(f)
+        f.send(O, whole(O, k, r, conf_o(k % 2 == 0)))
+        f.send(M, link_only(M, ACK_M))
+        if k == 0:
+            f.send(M, garbage(16))
+    out["d4u-hr25-confirmed-data"] = f
+    # Before confirmation dnp3_unexpected_flow_direction is not raised
+    # (design 2.8): ten frames from the originator with DIR clear, each
+    # without FIR and with no application octet; the flow never confirms.
+    f = Flow()
+    for k in range(10):
+        f.send(M, seg(M, False, False, 10 + k, b"", ctrl=U_O))
+    out["d4u-hr25-direction-unconfirmed"] = f
+
     # The first row at confirmation, on both ends (design 2.8).
     f = Flow().send(M, garbage(16)).send(O, garbage(16))
     out["d4u-hr25-first-both-ends"] = session(f)
@@ -588,16 +625,39 @@ def cases_b2():
     out["d4u-hr25-mark"] = f.send(M, garbage(16)).send(M, whole(M, 4, P)).send(O, whole(O, 4, R(4)))
 
     # The host cap (val-K = 100): K, and K + 1, flows each confirmed, then
-    # one chunk failure; one delivery at 85 s, past the first interval.
+    # one chunk failure; then one link-only frame at 85 s, past the first
+    # interval, on a fresh flow that counts nothing.
     for name, n in (("d4u-hr25-cap-k", 100), ("d4u-hr25-cap-k-plus-1", 101)):
-        h = Hosts(n)
-        for i, f in enumerate(h.flows):
-            f.send(M, whole(M, 0, P), at=1 + 0.05 * i).send(O, whole(O, 0, R(0)), at=1.01 + 0.05 * i)
-        for i, f in enumerate(h.flows):
-            f.send(M, badchunk(M), at=10 + 0.05 * i)
-        h.flows[0].send(M, link_only(M, TEST_M), at=85)
-        out[name] = h
+        h = confirmed_hosts(n, badchunk(M))
+        out[name] = at_85(h)
+    # A budget row counts against K (design 2.8): K flows' first rows fill
+    # the interval, then a flow that never confirms spends its budget.
+    h = confirmed_hosts(100, badchunk(M))
+    b = h.add()
+    for k in range(8):
+        b.send(M, badhdr(), at=20 + 0.01 * k)
+    out["d4u-hr25-cap-budget"] = at_85(h)
+    # At most one weird per scan run (design 2.8): 30 flows, each confirmed,
+    # then one scan run; the host's sampling of 25 rows per name shows how
+    # many weirds were raised.
+    out["d4u-hr25-scan-weirds"] = confirmed_hosts(30, garbage(16))
     return out
+
+
+def confirmed_hosts(n, failure):
+    """n flows, each confirmed by P R, then `failure` on each at 10 s."""
+    h = Hosts(n)
+    for i, f in enumerate(h.flows):
+        f.send(M, whole(M, 0, P), at=1 + 0.05 * i).send(O, whole(O, 0, R(0)), at=1.01 + 0.05 * i)
+    for i, f in enumerate(h.flows):
+        f.send(M, failure, at=10 + 0.05 * i)
+    return h
+
+
+def at_85(h):
+    """A link-only frame at 85 s on a fresh flow, which counts nothing."""
+    h.add().send(M, link_only(M, TEST_M), at=85)
+    return h
 
 
 # Expectations: (case, rule, fc rows, non-zero counts as {(end, cause): n},
@@ -665,8 +725,10 @@ EXPECT = [
     ("d4u-hr25-tcp-split", "a frame split across segments is held", [(M, 1), (O, 129), (M, 5), (O, 129), (M, 5),
                                                                       (M, 1), (O, 129)], {}, []),
     # HR25-B2 (design 2.7 and 2.8).
-    ("d4u-hr25-unconfirmed-chunk", "confirmed at a whole fragment; before it a failure raises no weird", ALL,
-     {("m", "chunk_crc"): 1}, ["confirm-at-header", "weirds-before-confirm"]),
+    ("d4u-hr25-unconfirmed-chunk", "confirmed at a whole fragment; before it a failure raises no weird, no "
+     "violation and no row, and sets no skip", ALL,
+     {("m", "chunk_crc"): 1}, ["confirm-at-header", "weirds-before-confirm", "violation-before-confirm",
+                               "rows-before-confirm", "skip-before-confirm"]),
     ("d4u-hr25-unconfirmed-multi", "confirmed at a whole fragment, not at its first frame", ALL,
      {("m", "transport_seq"): 1}, ["confirm-at-fir"]),
     ("d4u-hr25-throw-alone", "a fragment that throws confirms nothing; its end row on app_parse",
@@ -676,16 +738,17 @@ EXPECT = [
      {("m", "transport_seq"): 1}, ["end-five"]),
     ("d4u-hr25-budget-f-minus-1", "the budget: F - 1 failures", ALL, {("m", "header_crc"): 7}, ["budget-f-7"]),
     ("d4u-hr25-budget-f", "the budget: F failures; its weird, row, one violation and skip", [],
-     {("m", "header_crc"): 8, ("m", "budget"): 1}, ["budget-f-gt", "budget-no-violation", "budget-weird-gated"]),
+     {("m", "header_crc"): 8, ("m", "budget"): 1}, ["budget-f-gt", "budget-no-violation", "budget-weird-gated",
+                                                    "budget-no-count", "budget-no-row"]),
     ("d4u-hr25-budget-f-plus-1", "the budget: F + 1 failures, reaching ends it", [],
      {("m", "header_crc"): 8, ("m", "budget"): 1}, ["budget-f-gt"]),
     ("d4u-hr25-budget-split", "the budget is per connection: the two ends add up", [],
      {("o", "header_crc"): 4, ("o", "budget"): 1}, ["budget-orig-only"]),
     ("d4u-hr25-budget-o-minus-1", "the budget: O - 1 octets", ALL, {("m", "magic"): 1}, ["budget-o-2047"]),
     ("d4u-hr25-budget-o", "the budget: O octets, the failed header's octet counted", [],
-     {("m", "magic"): 1, ("m", "budget"): 1}, ["budget-o-gt", "scan-first-octet-free"]),
+     {("m", "magic"): 1, ("m", "budget"): 1}, ["budget-o-gt", "scan-first-octet-free", "budget-o-not-in-scan"]),
     ("d4u-hr25-budget-o-plus-1", "the budget: O + 1 octets, checked after each", [],
-     {("m", "magic"): 1, ("m", "budget"): 1}, ["budget-o-gt"]),
+     {("m", "magic"): 1, ("m", "budget"): 1}, ["budget-o-gt", "budget-o-not-in-scan"]),
     ("d4u-hr25-budget-embedded", "an embedded header counts two; out in the middle of a delivery", [],
      {("m", "chunk_crc"): 4, ("m", "embedded_header"): 4, ("m", "budget"): 1},
      ["embedded-free", "budget-at-delivery-end"]),
@@ -699,18 +762,25 @@ EXPECT = [
      {("m", "transport_seq"): 4}, ["tseq-charges-fragment", "tseq-charges-two"]),
     ("d4u-hr25-budget-retry", "a discarded link-layer retry counts against neither", [(M, 5), (O, 129), (M, 1), (O, 129)],
      {}, ["retry-charged"]),
+    ("d4u-hr25-confirmed-data", "confirmed at a fragment in confirmed user data; no first row at a later one",
+     ALL, {("m", "magic"): 2}, ["confirm-reads-link-function"]),
+    ("d4u-hr25-direction-unconfirmed", "before confirmation no dnp3_unexpected_flow_direction", [],
+     {("m", "first_chunk_missing"): 10}, ["direction-weird-ungated"]),
     ("d4u-hr25-first-both-ends", "the first rows at confirmation, on both ends", ALL,
      {("m", "magic"): 1, ("o", "magic"): 1}, ["no-first-at-confirm"]),
     ("d4u-hr25-interval", "interval rows: at the edge, once per interval, only on a change",
      [(M, 1), (O, 129), (M, 1), (M, 1), (O, 129), (M, 1), (O, 129), (M, 1), (O, 129)], {("m", "chunk_crc"): 3},
      ["interval-strict", "interval-twice", "interval-any-delivery",
-      "interval-no-change-check"]),
+      "interval-no-change-check", "confirm-reads-link-function"]),
     ("d4u-hr25-mark", "the cause on the next fc row of its end, once", [(M, 1), (O, 129)] * 5,
      {("m", "chunk_crc"): 1, ("m", "magic"): 1, ("o", "chunk_crc"): 1},
-     ["mark-drop-only", "script-mark-kept", "script-mark-one-field"]),
+     ["mark-drop-only", "script-mark-kept", "script-mark-one-field", "no-first-after-confirm"]),
     ("d4u-hr25-cap-k", "the host cap: K rows in an interval, no overflow row", None, None, ["script-cap-lt"]),
     ("d4u-hr25-cap-k-plus-1", "the host cap: K + 1, one overflow row, every row counted but it; sampling", None, None,
      ["script-cap-gt", "script-overflow-counted", "script-end-free", "script-no-sampling"]),
+    ("d4u-hr25-cap-budget", "the host cap: a budget row counts against K", None, None,
+     ["script-budget-free", "script-end-free"]),
+    ("d4u-hr25-scan-weirds", "at most one weird per scan run", None, None, ["scan-weird-each-octet"]),
 ]
 # A frame from the master is TCP's client and UDP's first sender: the
 # originator. The fc rows of d4u-hr25-tcp-split: P R, W R(1), W, Q R(2).
@@ -790,6 +860,10 @@ MORE = {
     "d4u-hr25-mark": more([('m', 'first', 2), ('o', 'first', 7), ('m', 'end', 'end'), ('o', 'end', 'end')], weirds={'dnp3_corrupt_app_chunk_checksum': 1, 'dnp3_header_lacks_magic': 1}, marks=[(2, 'chunk_crc'), (7, 'chunk_crc'), (8, 'magic')]),
     "d4u-hr25-cap-k": dict(host=({'first': 100, 'end': 100}, [], {'dnp3_corrupt_app_chunk_checksum': 25})),
     "d4u-hr25-cap-k-plus-1": dict(host=({'first': 100, 'end': 100}, [1, 1], {'dnp3_corrupt_app_chunk_checksum': 25})),
+    "d4u-hr25-confirmed-data": more([('m', 'first', 5), ('m', 'end', 'end')], weirds={'dnp3_header_lacks_magic': 1}, marks=[(0, 'magic'), (2, 'magic')]),
+    "d4u-hr25-direction-unconfirmed": more([('m', 'end', 'end')]),
+    "d4u-hr25-cap-budget": dict(host=({'first': 100, 'end': 100}, [1], {'dnp3_corrupt_app_chunk_checksum': 25, 'dnp3_resync_budget_exhausted': 1})),
+    "d4u-hr25-scan-weirds": dict(host=({'first': 30, 'end': 30}, [], {'dnp3_header_lacks_magic': 25})),
 }
 
 

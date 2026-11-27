@@ -3,7 +3,7 @@ HR-25 option A's script control `script-cap-lt` (HR25-B2; docs/phase4/D4-hr25-de
 
 --- a/resync.zeek
 +++ b/resync.zeek
-@@ -110,7 +110,7 @@
+@@ -115,7 +115,7 @@
  		written = 0;
  		}
  	# Every row but the overflow row counts against K, whatever its why.

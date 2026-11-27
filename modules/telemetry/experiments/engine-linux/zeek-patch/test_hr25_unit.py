@@ -39,7 +39,7 @@ def header_cause(h, mutant=None):
 
 
 # DNP3::max_application_layer_fragment_size, Zeek 9.0.1's default (100 *
-# 1024, init-bare.zeek), which neither the probe nor resync-unit.zeek
+# 1024, init-bare.zeek), which neither the probe nor resync.zeek
 # redefines.
 LIMIT = 100 * 1024
 
@@ -118,6 +118,11 @@ class Model:
             loud = self.mut != "budget-weird-gated" or self.confirmed
         if loud:
             self.weirds.append(WEIRD[cause])
+        unconfirmed_failure = not self.confirmed and cause not in ("budget", "invariant")
+        if unconfirmed_failure and self.mut == "violation-before-confirm":
+            self.viol += 1
+        if unconfirmed_failure and self.mut == "skip-before-confirm":
+            self.skip = True
 
     def charge(self, orig, fails, octets):
         if self.confirmed or self.exhausted:
@@ -131,11 +136,17 @@ class Model:
         o_lim = 2047 if self.mut == "budget-o-2047" else O
         f_out = self.fails[k] > f_lim if self.mut == "budget-f-gt" else self.fails[k] >= f_lim
         o_out = self.octets[k] > o_lim if self.mut == "budget-o-gt" else self.octets[k] >= o_lim
+        if self.mut == "budget-o-not-in-scan" and self.ends[orig].scanning:
+            o_out = False
         if not (f_out or o_out):
             return
         self.exhausted = True
-        self.count(orig, "budget")
-        self.raise_row(orig, "budget")
+        if self.mut == "budget-no-count":
+            self.weirds.append(WEIRD["budget"])
+        else:
+            self.count(orig, "budget")
+        if self.mut != "budget-no-row":
+            self.raise_row(orig, "budget")
         if self.mut != "budget-no-violation":
             self.viol += 1
         if self.mut == "budget-no-skip":
@@ -162,10 +173,10 @@ class Model:
 
     def after_delivery(self, orig):
         e = self.ends[orig]
-        if not self.confirmed:
+        if not self.confirmed and self.mut != "rows-before-confirm":
             return
         if e.first_ts is None:
-            if e.counts:
+            if e.counts and self.mut != "no-first-after-confirm":
                 self.raise_row(orig, "first")
             return
         since = self.now - e.first_ts
@@ -237,6 +248,8 @@ class Model:
                     first = True
                 else:
                     first = False
+                    if self.confirmed and self.mut == "scan-weird-each-octet":
+                        self.weirds.append(WEIRD[cause])
                 step = {"header-skip-10": 10, "header-skip-2": 2}.get(self.mut, 1)
                 e.scanned += step
                 e.buf = e.buf[step:]
@@ -260,6 +273,9 @@ class Model:
             need = frame_len(length)
             if len(e.buf) < need:
                 break
+            # Before confirmation only `budget` raises a weird (design 2.8).
+            if orig != bool(ctrl & 0x80) and (self.confirmed or self.mut == "direction-weird-ungated"):
+                self.weirds.append("dnp3_unexpected_flow_direction")
             fr, e.buf = e.buf[:need], e.buf[need:]
             if self.frame(orig, fr, e.buf) == "chunk_crc" and self.mut == "chunk-crc-ends-delivery":
                 e.buf = b""
@@ -308,9 +324,9 @@ class Model:
         fir, fin, n = bool(t & 0x40), bool(t & 0x80), t & 0x3F
         tseq_end = self.ends[True] if m == "shared-tseq" else e
         tseq = tseq_end.tseq
-        confirmed = bool(ctrl & 0x40) and bool(ctrl & 0x10) and (ctrl & 0x0F) == 3
+        conf_data = bool(ctrl & 0x40) and bool(ctrl & 0x10) and (ctrl & 0x0F) == 3
         fcb = 1 if ctrl & 0x20 else 0
-        retry = confirmed and (e.fcb == fcb or m == "ignore-fcb")
+        retry = conf_data and (e.fcb == fcb or m == "ignore-fcb")
         if m == "any-repeat":
             retry = True
         if fir:
@@ -351,7 +367,7 @@ class Model:
             return
         tseq_end.tseq = n
         e.last, e.after_fin = s, fin
-        e.fcb = fcb if confirmed else None
+        e.fcb = fcb if conf_data else None
         e.app = (b"" if fir else e.app) + s[1:]
         e.open = True
         if fir:
@@ -374,7 +390,10 @@ class Model:
             if len(app) >= 2:
                 cause = self.pending.get(orig) if m == "script-mark-kept" and orig else self.pending.pop(orig, None)
                 self.fc.append((orig, app[1], cause))
-            if not self.confirmed:
+            if m == "confirm-reads-link-function":
+                if not conf_data:
+                    self.confirm(orig)
+            elif not self.confirmed:
                 self.confirm(orig)
 
     def same(self, e, s):
@@ -455,7 +474,8 @@ def run_hosts(h, mutant=None):
             if held and not (mutant == "script-overflow-counted" and written >= K):
                 overflow.append(held)
             open_n, written, held = n, 0, 0
-        free = mutant == "script-end-free" and why in ("end", "budget")
+        free = (mutant == "script-end-free" and why in ("end", "budget")) or (mutant == "script-budget-free"
+                                                                           and why == "budget")
         cap = K + 1 if mutant == "script-cap-gt" else K - 1 if mutant == "script-cap-lt" else K
         if written >= cap and not free:
             held += 1
@@ -589,8 +609,26 @@ def info_fields(text):
     return re.findall(r"^\s*([a-z_]+):", m.group(1), re.M)
 
 
+def code(text):
+    """The script without its comments and with its strings emptied."""
+    return re.sub(r'"[^"\n]*"', '""', re.sub(r"#[^\n]*", "", text))
+
+
 def containers(text):
-    return re.findall(r"^global\s+\w+\s*:\s*(?:table|set|vector)\b", text, re.M)
+    """Every table, set or vector type or constructor, in any declaration
+    (global, const, option, local or a record field), outside the
+    Weird::sampling_global_list redef (D3's N1)."""
+    t = re.sub(r"redef Weird::sampling_global_list \+= \{.*?\};", "", code(text), flags=re.S)
+    return re.findall(r"\b(?:table|set)\s*[\[(]|\bvector\s*(?:of\b|\()", t)
+
+
+def connection_fields(text):
+    """The fields every `redef record connection` adds, as (name, type and
+    attributes)."""
+    out = []
+    for m in re.finditer(r"redef record connection \+= \{(.*?)\};", code(text), re.S):
+        out += [(n, t.strip()) for n, t in re.findall(r"(\w+)\s*:\s*([^;]+);", m.group(1))]
+    return out
 
 
 def test_the_script_adds_exactly_the_designs_fields():
@@ -607,9 +645,30 @@ def test_the_script_holds_no_container():
     assert containers(script_text()) == []
 
 
-def test_the_container_check_finds_a_table_keyed_by_connection():
-    t = script_text() + "\nglobal pending: table[string, bool] of string;\n"
-    assert containers(t) != []
+CONTAINER_CONTROLS = [
+    ("global table", "global pending: table[string, bool] of string;"),
+    ("global table constructor", 'global pending = table(["a"] = "b");'),
+    ("global set constructor", 'global seen = set("a");'),
+    ("const set", "const seen: set[string] = {} &redef;"),
+    ("option vector", "option kept: vector of string = vector();"),
+    ("a field on the connection record",
+     "redef record connection += {\n\totsec_kept: table[count] of string &optional;\n};"),
+]
+
+
+@pytest.mark.parametrize("name,decl", CONTAINER_CONTROLS, ids=[c[0] for c in CONTAINER_CONTROLS])
+def test_the_container_check_finds_each_form(name, decl):
+    assert containers(script_text() + "\n" + decl + "\n") != []
+
+
+def test_the_connection_record_gains_exactly_two_optional_strings():
+    assert connection_fields(script_text()) == [("otsec_resync_orig", "string &optional"),
+                                                ("otsec_resync_resp", "string &optional")]
+
+
+def test_the_connection_field_check_refuses_a_third_field():
+    t = script_text() + "\nredef record connection += {\n\totsec_resync_x: string &optional;\n};\n"
+    assert connection_fields(t) != connection_fields(script_text())
 
 
 def test_the_script_bounds_every_weird_of_the_closed_set():
@@ -707,6 +766,8 @@ def test_c2_is_printed_as_ran_or_its_exit_code_only(tmp_path, capsys):
     lines = [ln for ln in out.splitlines() if ln.startswith("| " + row[0])]
     assert [ln.split(" | ")[4] for ln in lines] == ["ran", "exit 1"]
     assert all("met" not in ln.split(" | ")[4] for ln in lines)
+    # D6's N1: the third value, when C2 left no exit code.
+    assert u.ran(str(base / "no-such-run")) == "not run"
 
 
 def test_the_c2_column_control_a_judged_c2_is_refused(tmp_path):
@@ -731,3 +792,112 @@ def test_the_reading_holds_no_reason_text(tmp_path):
         fh.write('{"name":"dnp3_resync_budget_exhausted","addl":"SECRET-ADDL"}\n')
     _, got = u.reading(str(d), f)
     assert "SECRET" not in repr(got)
+
+
+# A local that hides a member of DNP3_Base (B1 on #803). The model cannot
+# see such a defect, since it is not the patch, so the patch's text is
+# checked: no local declared in DNP3.cc takes the name of a member that
+# DNP3.h declares in DNP3_Base after its Endpoint struct.
+def patch_part(text, f):
+    return text.split("--- a/src/analyzer/protocol/dnp3/" + f + "\n", 1)[1].split("\n--- a/", 1)[0]
+
+
+def members(text):
+    lines = patch_part(text, "DNP3.h").split("\n")
+    i = next(k for k, ln in enumerate(lines) if ln[1:].strip() == "analyzer::Analyzer* analyzer;")
+    j = next(k for k, ln in enumerate(lines) if ln[1:].strip() == "Endpoint resp_state;")
+    return {m.group(1) for ln in lines[i:j + 1] if ln and ln[0] in " +"
+            for m in [re.match(r"[ +] {4}[\w:<>]+\*?\s+(\w+)\s*[=;]", ln)] if m}
+
+
+def locals_(text):
+    return {m.group(1) for ln in patch_part(text, "DNP3.cc").split("\n") if ln and ln[0] in " +"
+            for m in [re.match(r"[ +] {4,}(?:const\s+)?(?:bool|int|u_char|uint64_t|int64_t|size_t|auto|double|"
+                               r"Endpoint)\s*[*&]?\s*(\w+)\s*[=;\[]", ln)] if m}
+
+
+def test_no_local_hides_a_member():
+    p = patch_text("hr25-resync.patch")
+    assert {"analyzer", "confirmed", "exhausted"} <= members(p)
+    assert "conf_data" in locals_(p)
+    assert locals_(p) & members(p) == set()
+
+
+def test_the_hiding_check_refuses_the_local_confirmed():
+    # The control: the local as it was at 94c59c7e.
+    p = patch_text("hr25-resync.patch").replace("+    bool conf_data = ", "+    bool confirmed = ", 1)
+    assert locals_(p) & members(p) == {"confirmed"}
+
+
+# The unit mode's output limit (D1's ruling on D4-131 item 5.1; B3 on #803):
+# in run.sh's hr25-unit block every engine container's output goes to
+# WORK/hr25-unit/engine.log. And each script control must apply at its
+# stated line, with no offset or fuzz, as build.sh requires of the patches.
+RUN_SH = os.path.join(HERE, "..", "run.sh")
+
+
+def hr25_block(text):
+    b = text.split('if [ "$mode" = hr25-unit ]; then\n', 1)[1].split("\nfi\n", 1)[0]
+    return b.replace("\\\n", " ")
+
+
+def run_sh():
+    with open(RUN_SH, encoding="utf-8") as fh:
+        return fh.read().replace("\r\n", "\n")
+
+
+def check_engine_output(block):
+    runs = [ln.strip() for ln in block.split("\n") if re.match(r"\s*mc_run\b", ln)]
+    assert runs, "no engine container in the hr25-unit block"
+    for r in runs:
+        assert r.endswith('>> "$u/engine.log"'), f"an engine's output is not sent to engine.log: {r}"
+
+
+OFFSET_GREP = "grep -qiE 'fuzz|offset|hunk .* (failed|ignored)'"
+
+
+def check_script_controls_exact(block):
+    assert re.search(r'out=\$\(patch -d "\$ctl/\$m" -p1 --fuzz=0 [^\n]*controls/\$m\.patch" 2>&1\)', block), \
+        "the script control's patch output is not kept"
+    assert OFFSET_GREP in block, "a script control applied at an offset or with fuzz is not refused"
+
+
+def test_the_engines_output_goes_to_engine_log():
+    check_engine_output(hr25_block(run_sh()))
+
+
+def test_the_engine_log_check_refuses_an_engine_printing_to_the_job_log():
+    b = hr25_block(run_sh()).replace(' >> "$u/engine.log"', "", 1)
+    with pytest.raises(AssertionError):
+        check_engine_output(b)
+
+
+def test_run_sh_refuses_a_script_control_at_an_offset():
+    check_script_controls_exact(hr25_block(run_sh()))
+
+
+def test_the_offset_check_refuses_a_loop_that_reads_only_the_exit_status():
+    b = hr25_block(run_sh()).replace(OFFSET_GREP, "true", 1)
+    with pytest.raises(AssertionError):
+        check_script_controls_exact(b)
+
+
+def applies_at_its_line(script, patch):
+    """Whether the patch's one hunk matches the script at the line its
+    header states, as `patch --fuzz=0` with no offset would."""
+    hunk = patch.split("\n@@ -", 1)[1]
+    start = int(hunk.split(",", 1)[0])
+    old = [ln[1:] for ln in hunk.split("\n")[1:] if ln and ln[0] in " -"]
+    return script.split("\n")[start - 1:start - 1 + len(old)] == old
+
+
+@pytest.mark.parametrize("name", [n for n in CONTROL_FILES if n.startswith("script-")])
+def test_each_script_control_applies_at_its_stated_line(name):
+    assert applies_at_its_line(script_text(), patch_text(os.path.join("controls", name)))
+
+
+def test_the_line_check_refuses_a_moved_hunk():
+    p = patch_text(os.path.join("controls", "script-cap-gt.patch"))
+    n = int(p.split("\n@@ -", 1)[1].split(",", 1)[0])
+    moved = p.replace(f"\n@@ -{n},", f"\n@@ -{n + 1},", 1)
+    assert not applies_at_its_line(script_text(), moved)

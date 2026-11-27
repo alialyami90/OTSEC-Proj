@@ -4,7 +4,7 @@ Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patche
 
 --- a/src/analyzer/protocol/dnp3/DNP3.cc
 +++ b/src/analyzer/protocol/dnp3/DNP3.cc
-@@ -637,7 +637,7 @@
+@@ -639,7 +639,7 @@
  // An embedded header counts one more against F (design 2.7).
  void DNP3_Base::Embedded(bool orig) {
      Count(orig, EMBEDDED_HEADER);

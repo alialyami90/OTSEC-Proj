@@ -1,0 +1,15 @@
+HR-25 option A's control `confirm-reads-link-function` (HR25-B2; docs/phase4/D4-hr25-design.md, section 2.7, 'Confirmation': the FIN step reads the frame's link function (confirmed user data), not whether the flow is confirmed.) Applied with
+`patch -p1 --fuzz=0` to the tree after hr23-fc-dispatch.patch and hr25-resync.patch, never shipped.
+Zeek 9.0.1's file, under the BSD-3-Clause licence in COPYING beside these patches.
+
+--- a/src/analyzer/protocol/dnp3/DNP3.cc
++++ b/src/analyzer/protocol/dnp3/DNP3.cc
+@@ -516,7 +516,7 @@
+ 
+         // Confirmation: the first fragment that parses whole, every check
+         // passed, FIN, and FlowEOF returned (design 2.7).
+-        if ( ! confirmed )
++        if ( ! conf_data )
+             Confirm();
+     }
+ }

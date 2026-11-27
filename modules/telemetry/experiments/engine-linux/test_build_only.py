@@ -100,6 +100,11 @@ def check_hr25_unit(js):
             continue
         if "upload-artifact" in st.get("uses", ""):
             uploads += 1
+            # The engines' own output stays on the runner (D1's ruling on
+            # D4-131 item 5.1; B3 on #803): no upload names the unit mode's
+            # folder, an output folder or engine.log.
+            for p in st.get("with", "").split("\n"):
+                assert not re.search(r"hr25-unit/|(^|/)out/|engine\.log", p), f"hr25_unit uploads {p}"
             continue
         assert label.startswith(ALLOWED + (HR25_STEP,)), f"step '{label}' runs under hr25_unit"
         run = st.get("run", "")
@@ -157,6 +162,7 @@ def test_build_only_still_builds():
     assert len(build) == 1 and runs_under_build_only(build[0]) and "build.sh build" in build[0]["run"]
 
 
+HR25_MD = "            ${{ runner.temp }}/e-d4-03/hr25-unit.md\n"
 CONTROLS = [
     ("an engine step without the skip", ("&& !inputs.build_only && !inputs.hr25_unit }}\n        run: sh modules/"
                                          "telemetry/experiments/engine-linux/run.sh dnp3",
@@ -208,6 +214,11 @@ CONTROLS = [
                                                       "  dnp3-public:\n    if: ${{ !inputs.build_only }}")),
     ("the prp job without hr25_unit's skip", ("  prp:\n    if: ${{ !inputs.build_only && !inputs.hr25_unit }}",
                                               "  prp:\n    if: ${{ !inputs.build_only }}")),
+    # B3 on #803: an upload under hr25_unit that names the unit mode's
+    # folder, an output folder or engine.log.
+    ("hr25_unit uploads its folder", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03/hr25-unit/\n")),
+    ("hr25_unit uploads an output folder", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03/out/\n")),
+    ("hr25_unit uploads engine.log", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/engine.log\n")),
 ]
 
 

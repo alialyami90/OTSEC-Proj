@@ -3,7 +3,7 @@ HR-25 option A's script control `script-mark-one-field` (HR25-B2; docs/phase4/D4
 
 --- a/resync.zeek
 +++ b/resync.zeek
-@@ -127,7 +127,7 @@
+@@ -132,7 +132,7 @@
  # queued.
  event dnp3_resync_mark(c: connection, is_orig: bool, cause: string)
  	{
