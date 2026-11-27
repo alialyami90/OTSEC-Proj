@@ -26,7 +26,9 @@ import (
 //     has not risen since. The comparison starts again at a new run's
 //     first current heartbeat, where an interface named in a standing
 //     stretch has no grace: the stretch stands until its packets rise in
-//     the new run (D3's and D6's B1 on #802). One stretch per sensor: the
+//     the new run (D3's and D6's B1 on #802). A rise seen only in backlog
+//     or late heartbeats is credited at the receipt less its age by at_utc
+//     (creditRise; B2 on #802). One stretch per sensor: the
 //     status alarm and
 //     its pool event once, at the stretch's start, naming the interfaces
 //     blind then; an interface that goes blind inside the stretch is named
@@ -86,7 +88,11 @@ const NoHeartbeatAfter = 60 * time.Second
 // read, the hello included, as accepted; blindNewRunGrace gives every
 // interface the grace at a new run, a named one included; noHbTicksOnly
 // checks sensor-no-heartbeat at accepted ticks only; blindNamesUncapped
-// keeps every name of a stretch.
+// keeps every name of a stretch; blindCreditAtReceipt credits a rise at
+// the current heartbeat's receipt, however old; blindNoUpperClamp and
+// blindNoLowerClamp drop creditRise's clamps; blindNoParseGuard drops its
+// guard on an at_utc that does not parse.
+var blindCreditAtReceipt, blindNoUpperClamp, blindNoLowerClamp, blindNoParseGuard bool
 var blindBacklogCounts, blindLateCounts, blindAtLimit, blindAllOnly, blindCarrierIgnored, blindFirstOnly, blindAcrossRuns bool
 var blindEachHeartbeat, blindClearsAtUnknown, noHbAnyEnds, noHbPastLimit, noHbEachTick, pastBlindOff, pastBlindAtOnce, acceptedAnyFrame bool
 var blindNewRunGrace, noHbTicksOnly, blindNamesUncapped bool
@@ -218,7 +224,7 @@ func (l *Link) judgeBlind(cn *conn, h *netobs.Heartbeat, late bool) {
 	var named []string
 	var more int
 	if judged {
-		raise, due, named, more = b.liveLocked(h.RunID, names, byName, m, limit)
+		raise, due, named, more = b.liveLocked(h.RunID, names, byName, m, at, limit)
 	}
 	b.mu.Unlock()
 	l.blindRaise(raise, due, named, more, limit)
@@ -230,9 +236,10 @@ func (l *Link) judgeBlind(cn *conn, h *netobs.Heartbeat, late bool) {
 
 // liveLocked is sensor-blind at a current heartbeat: whether the stretch's
 // alarm is raised, whether its event is due again for a name added, and
-// the names it carries with the count past MaxInterfaces. The caller holds
-// b.mu.
-func (b *blindState) liveLocked(run string, names []string, byName map[string]netobs.InterfaceCount, m, limit time.Duration) (raise, due bool, named []string, more int) {
+// the names it carries with the count past MaxInterfaces. at is the
+// heartbeat's at_utc. The caller holds b.mu, and pastLocked has taken the
+// heartbeat, so b.past holds the at_utc of each interface's last rise.
+func (b *blindState) liveLocked(run string, names []string, byName map[string]netobs.InterfaceCount, m time.Duration, at time.Time, limit time.Duration) (raise, due bool, named []string, more int) {
 	if b.run != run && (!blindAcrossRuns || b.run == "") {
 		// The run's first current heartbeat: the comparison starts again.
 		// An interface named in a standing stretch has no grace, so the
@@ -258,7 +265,13 @@ func (b *blindState) liveLocked(run string, names []string, byName map[string]ne
 			lv = &ifBlind{packets: ic.Packets}
 			b.live[n] = lv
 		} else if ic.Packets > lv.packets {
-			lv.mono, lv.rose = m, true
+			var riseAt time.Time
+			if p := b.past[n]; p != nil {
+				riseAt = p.at
+			}
+			if c, ok := creditRise(lv.mono, m, at, riseAt); ok {
+				lv.mono, lv.rose = c, true
+			}
 		}
 		lv.packets = ic.Packets
 		if blindIn(ic.Carrier, lv.rose, m-lv.mono, limit) {
@@ -280,6 +293,31 @@ func (b *blindState) liveLocked(run string, names []string, byName map[string]ne
 		}
 	}
 	return raise, due, slices.Clone(b.named), b.overPrev + len(b.over)
+}
+
+// creditRise is the node's monotonic time a rise is credited at, seen at a
+// current heartbeat received at m whose at_utc is at, the interface's last
+// rise having at_utc riseAt (B2 on #802, option (i)): the receipt less the
+// rise's age on the sensor's clock, no earlier than prev, the previous
+// credit, and no later than the receipt. So a rise seen only in backlog or
+// late heartbeats counts from when it happened, and the sensor's clock can
+// only move a credit earlier than the receipt. An at_utc that does not
+// parse moves no credit (false).
+func creditRise(prev, m time.Duration, at, riseAt time.Time) (time.Duration, bool) {
+	if (at.IsZero() || riseAt.IsZero()) && !blindNoParseGuard {
+		return prev, false
+	}
+	if blindCreditAtReceipt {
+		return m, true
+	}
+	c := m - at.Sub(riseAt)
+	if c > m && !blindNoUpperClamp {
+		c = m
+	}
+	if c < prev && !blindNoLowerClamp {
+		c = prev
+	}
+	return c, true
 }
 
 // addName names n in the standing stretch, or past MaxInterfaces names

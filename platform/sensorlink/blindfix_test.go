@@ -241,7 +241,7 @@ func TestBlindNamesCapped(t *testing.T) {
 			n, r := fmt.Sprintf("if%d", i), fmt.Sprintf("run%d", i)
 			by := map[string]netobs.InterfaceCount{n: {Name: n, Carrier: "down"}}
 			for range 2 {
-				_, _, named, more = b.liveLocked(r, []string{n}, by, time.Duration(i)*time.Minute, 5*time.Minute)
+				_, _, named, more = b.liveLocked(r, []string{n}, by, time.Duration(i)*time.Minute, at, 5*time.Minute)
 				b.pastLocked(r, []string{n}, by, at, 5*time.Minute, false, true)
 				at = at.Add(10 * time.Second)
 			}
@@ -263,6 +263,131 @@ func TestBlindNamesCapped(t *testing.T) {
 		withSeam(t, &blindNamesUncapped)
 		if named, _, past := run(); len(named) != runs || len(past.names) != runs {
 			t.Fatalf("the control kept %d and %d names", len(named), len(past.names))
+		}
+	})
+}
+
+// B2 (D6 on #802; option (i), agreed by D6, D3 and D4): a rise seen only
+// in backlog heartbeats is credited at the receipt less its age by at_utc.
+// D6's P2: eth2 named and standing; a cut in which eth2 rises once at its
+// start and is then flat for 400 s by at_utc; the backlog drains; the
+// first current heartbeat, eth2 still flat, keeps eth2 named, and so do
+// 300 s more, with one status alarm. Control: the rise credited at the
+// receipt, as at 953809b7 (eth2 cleared). D6's P4, both interfaces rising
+// through a ten-minute cut, then live: no sensor-blind.
+func TestBlindOldRiseNotCredited(t *testing.T) {
+	run := func(t *testing.T) *gsrc {
+		g := newGsrc(t)
+		e2 := new(uint64)
+		g.two(e2)
+		g.live(40, true) // eth2 blind, standing
+		g.cut()
+		*e2 += 50
+		g.buffer(1, true)  // eth2 rose once, at the cut's start
+		g.buffer(40, true) // eth2 flat 400 s by at_utc
+		g.reconnect(false)
+		g.live(1, true) // the first current heartbeat, eth2 flat
+		return g
+	}
+	g := run(t)
+	if !slices.Equal(g.named(), []string{"eth2"}) {
+		t.Fatalf("at the first current heartbeat: named %v, want eth2", g.named())
+	}
+	g.live(30, true)
+	if !slices.Equal(g.named(), []string{"eth2"}) || g.blindN() != 1 {
+		t.Fatalf("300 s later: named %v, %d sensor-blind; want eth2, one alarm", g.named(), g.blindN())
+	}
+	t.Run("control: credited at the receipt", func(t *testing.T) {
+		withSeam(t, &blindCreditAtReceipt)
+		if g := run(t); len(g.named()) != 0 {
+			t.Fatalf("the control kept %v", g.named())
+		}
+	})
+	t.Run("rising through a cut raises nothing", func(t *testing.T) {
+		g := newGsrc(t)
+		var e2 uint64
+		g.f = func(h *netobs.Heartbeat) {
+			e2 += 7
+			ifs([]string{"eth1", "eth2"}, []uint64{g.pk, e2})(h)
+		}
+		g.live(6, true)
+		g.cut()
+		g.buffer(60, true)
+		g.reconnect(false)
+		g.live(3, true)
+		if g.blindN() != 0 || len(g.named()) != 0 {
+			t.Fatalf("%d sensor-blind, named %v; want none", g.blindN(), g.named())
+		}
+	})
+}
+
+// creditCase is one interface's comparison begun at m0 with packets 1,
+// then a current heartbeat at m with packets 2, at_utc at, whose last rise
+// has at_utc riseAt; it returns the interface's credit and grace. first:
+// the interface was first seen within the comparison (no grace).
+func creditCase(m0, m time.Duration, at, riseAt time.Time, first bool) (time.Duration, bool) {
+	b := &blindState{}
+	by := func(p uint64) map[string]netobs.InterfaceCount {
+		return map[string]netobs.InterfaceCount{"eth1": {Name: "eth1", Carrier: "up", Packets: p}}
+	}
+	b.liveLocked(testRun, []string{"eth1"}, by(1), m0, t0, 5*time.Minute)
+	if first {
+		b.live["eth1"] = &ifBlind{packets: 1}
+	}
+	b.past = map[string]*ifBlind{"eth1": {at: riseAt}}
+	b.liveLocked(testRun, []string{"eth1"}, by(2), m, at, 5*time.Minute)
+	lv := b.live["eth1"]
+	return lv.mono, lv.rose
+}
+
+// creditRise's clamps and guard (B2 on #802), each with its control:
+//   - upper: a rise whose at_utc is an hour later than the heartbeat's is
+//     credited no later than the receipt (control: no upper clamp,
+//     credited an hour past it);
+//   - lower: a rise older than the previous credit is credited at that
+//     credit (control: no lower clamp, credited before it);
+//   - guard: an at_utc that does not parse moves no credit, so an
+//     interface with no grace keeps none (control: no guard, given grace).
+//     netobs refuses such a heartbeat as form first; this is the guard.
+func TestBlindCreditClamps(t *testing.T) {
+	m := 1000 * time.Second
+	upper := func() time.Duration {
+		c, _ := creditCase(0, m, t0.Add(m), t0.Add(m+time.Hour), false)
+		return c
+	}
+	lower := func() time.Duration {
+		c, _ := creditCase(900*time.Second, m, t0.Add(2000*time.Second), t0, false)
+		return c
+	}
+	guard := func() bool {
+		_, rose := creditCase(0, m, time.Time{}, t0, true)
+		return rose
+	}
+	if c := upper(); c != m {
+		t.Fatalf("upper: credited at %s, want the receipt %s", c, m)
+	}
+	if c := lower(); c != 900*time.Second {
+		t.Fatalf("lower: credited at %s, want the previous credit 900s", c)
+	}
+	if guard() {
+		t.Fatal("guard: an at_utc that does not parse gave grace")
+	}
+	t.Run("control: no upper clamp", func(t *testing.T) {
+		withSeam(t, &blindNoUpperClamp)
+		if c := upper(); c <= m {
+			t.Fatalf("the control credited at %s", c)
+		}
+	})
+	t.Run("control: no lower clamp", func(t *testing.T) {
+		withSeam(t, &blindNoLowerClamp)
+		if c := lower(); c >= 900*time.Second {
+			t.Fatalf("the control credited at %s", c)
+		}
+	})
+	t.Run("control: no guard", func(t *testing.T) {
+		withSeam(t, &blindNoParseGuard)
+		if !guard() {
+			t.Fatal("the control gave no grace")
 		}
 	})
 }
