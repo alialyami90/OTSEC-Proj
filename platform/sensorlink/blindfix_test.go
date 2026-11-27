@@ -289,21 +289,24 @@ func TestBlindNamesCapped(t *testing.T) {
 	}
 	// D3's N7 and D6's N3 on #802: once a stretch's names have overflowed,
 	// no interface gets the grace at a new run. Nine runs leave if0 to if7
-	// named and if8 counted; run 9 carries if8 up and flat: the stretch
-	// stands. Control: the grace for a name counted past the cap.
+	// named and if8 counted; run 9 carries only if7, blind, so the count
+	// is in overPrev alone at run 10 (D6's N4, its probe P11); run 10
+	// carries if8 up and flat: the stretch stands. Control: the grace for
+	// a name counted past the cap.
 	overflow := func() bool {
 		b := &blindState{}
 		at := t0
-		for i := range 9 {
-			n, r := fmt.Sprintf("if%d", i), fmt.Sprintf("run%d", i)
-			by := map[string]netobs.InterfaceCount{n: {Name: n, Carrier: "down"}}
+		step := func(r, n, carrier string, m time.Duration) {
+			by := map[string]netobs.InterfaceCount{n: {Name: n, Carrier: carrier, Packets: 5}}
 			b.pastLocked(r, []string{n}, by, at, 5*time.Minute, true, false)
-			b.liveLocked(r, []string{n}, by, time.Duration(i)*time.Minute, at, 5*time.Minute)
+			b.liveLocked(r, []string{n}, by, m, at, 5*time.Minute)
 			at = at.Add(10 * time.Second)
 		}
-		by := map[string]netobs.InterfaceCount{"if8": {Name: "if8", Carrier: "up", Packets: 5}}
-		b.pastLocked("run9", []string{"if8"}, by, at, 5*time.Minute, true, false)
-		b.liveLocked("run9", []string{"if8"}, by, 10*time.Minute, at, 5*time.Minute)
+		for i := range 9 {
+			step(fmt.Sprintf("run%d", i), fmt.Sprintf("if%d", i), "down", time.Duration(i)*time.Minute)
+		}
+		step("run9", "if7", "down", 9*time.Minute)
+		step("run10", "if8", "up", 10*time.Minute)
 		return b.standing
 	}
 	if !overflow() {
