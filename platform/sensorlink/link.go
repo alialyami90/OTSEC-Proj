@@ -135,6 +135,10 @@ type Stats struct {
 	// for the node's sensor-unreachable (D4-73).
 	Heartbeats    uint64
 	HeartbeatMono time.Duration
+	// Accepted counts the 0.2 frames that reset sensor-unreachable (CH-44;
+	// blind.go), and AcceptedMono is the monotonic time of the last.
+	Accepted     uint64
+	AcceptedMono time.Duration
 	// Hold is the intake hold's counts.
 	Hold HoldStats
 	// DispatchTimeouts and ResultTimeouts count the scheduler calls that
@@ -216,6 +220,9 @@ type Link struct {
 	// that waits with their writes (gap.go). It is taken after curMu and
 	// before cmu; the node's tick only tries it.
 	gmu sync.Mutex
+	// blind is the blindness alarms' state (blind.go), under its own leaf
+	// lock.
+	blind blindState
 }
 
 // New makes a link. The unresolved budget starts empty (D5-c5-0.9 section 4).
@@ -247,6 +254,7 @@ func New(cfg Config, opt Options) (*Link, error) {
 		conn:   ConnStats{Closes: map[string]uint64{}},
 		budget: newBudget(cfg.ObservationQuota, cfg.OutageHours, opt.Monotonic())}
 	h.off = l.offNow
+	l.blind.made = opt.Monotonic()
 	if opt.Health != nil && opt.Health.cfg.File != nil {
 		opt.Health.cfg.File.addLink(l)
 	}
@@ -431,7 +439,7 @@ func (l *Link) observe(ctx context.Context, o *netobs.Observation, seq uint64, l
 	}
 	stored := *o
 	stored.Frames, stored.Node = nil, nd
-	if err := stored.ValidateStored(); err != nil {
+	if err := stored.ValidateStored(); err != nil || refuseStoredFault {
 		l.refuseStored()
 		return
 	}
