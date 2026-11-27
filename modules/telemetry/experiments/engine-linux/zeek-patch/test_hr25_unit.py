@@ -589,10 +589,9 @@ def test_inputs_are_distinct_and_named():
     assert {r[0] for r in u.EXPECT} == set(c)
 
 
-def test_the_throwing_fragment_avoids_the_held_items_by_construction():
-    # The one throwing fragment is a response (129) whose only object octet
-    # is 3Ch (group 60), as D6's badobj; no input sends code 2 (D1's ruling
-    # on D4-131 item 5.1; items held under D4-112 item 1.3).
+def test_the_throwing_fragment_is_badobjs_bytes():
+    # BADOBJ is a response (129) whose only object octet is 3Ch, as D6's
+    # badobj.
     assert u.BADOBJ[1] == 129 and u.BADOBJ[4:] == b"\x3c"
 
 
