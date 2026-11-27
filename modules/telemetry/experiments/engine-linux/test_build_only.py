@@ -106,8 +106,10 @@ def check_hr25_unit(js):
             # D4-131 item 5.1; B3 and D6's re-review on #803): an allowlist,
             # each path one .md or .txt file, with no glob and no folder.
             for p in st.get("with", "").split("\n"):
-                if not p or re.match(r"(name|path|if-no-files-found):", p):
+                if not p or p == "path: |" or re.match(r"(name|if-no-files-found):", p):
                     continue
+                # A path written on the `path:` line itself is checked too.
+                p = re.sub(r"^path:\s*", "", p)
                 assert re.fullmatch(UPLOAD_FILE, p), f"hr25_unit uploads {p}"
             continue
         assert label.startswith(ALLOWED + (HR25_STEP,)), f"step '{label}' runs under hr25_unit"
@@ -167,6 +169,7 @@ def test_build_only_still_builds():
 
 
 HR25_MD = "            ${{ runner.temp }}/e-d4-03/hr25-unit.md\n"
+HR23_MD = "            ${{ runner.temp }}/hr23-selftest.md\n"
 CONTROLS = [
     ("an engine step without the skip", ("&& !inputs.build_only && !inputs.hr25_unit }}\n        run: sh modules/"
                                          "telemetry/experiments/engine-linux/run.sh dnp3",
@@ -226,7 +229,9 @@ CONTROLS = [
     ("hr25_unit uploads its folder without the slash",
      (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03/hr25-unit\n")),
     ("hr25_unit uploads the parent folder", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/e-d4-03\n")),
-    ("hr25_unit uploads a glob", (HR25_MD, HR25_MD + "            ${{ runner.temp }}/**/*.log\n")),
+    ("hr25_unit uploads a folder on the path line",
+     ("          path: |\n" + HR23_MD, "          path: ${{ runner.temp }}/e-d4-03/hr25-unit\n" + HR23_MD)),
+    ("hr25_unit uploads a glob",(HR25_MD, HR25_MD + "            ${{ runner.temp }}/**/*.log\n")),
 ]
 
 
