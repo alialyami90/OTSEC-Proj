@@ -108,6 +108,13 @@ const NoHeartbeatAfter = 60 * time.Second
 var pastNamesUncapped, pastCountEachStretch, noHbNotAtLate, overUnbounded bool
 var pastMergeNamesOnly, pastDetailOverOnly bool
 
+// D6's N4 and N5 on #806: pastDueIgnoreFull and blindRaiseIgnoreFull
+// write the event's detail as if the list were not full; pastMergeDropFull
+// drops full in endPastLocked's merge; blindKeepFullAtEnd never resets
+// sensor-blind's overFull, at a stretch's end or at a new one's raise
+// (each reset alone covers the other, so dropping one is equivalent).
+var pastDueIgnoreFull, blindRaiseIgnoreFull, pastMergeDropFull, blindKeepFullAtEnd bool
+
 // overBound is N of D1's ruling 7231553676 on #806 (option (i)): the most
 // names past MaxInterfaces one list keeps, deduplicated, in a run. Past it
 // no name is kept, and the detail says "more than" its count, which is
@@ -287,7 +294,7 @@ func (l *Link) judgeBlind(cn *conn, h *netobs.Heartbeat, late bool) {
 		raise, due, named, more, full = b.liveLocked(h.RunID, names, byName, m, at, limit)
 	}
 	b.mu.Unlock()
-	l.blindRaise(raise, due, named, more, full, limit)
+	l.blindRaise(raise, due, named, more, full && !blindRaiseIgnoreFull, limit)
 	l.pastDue(pastDue)
 	if !current && !(late && noHbNotAtLate) {
 		l.noHeartbeat(false)
@@ -348,9 +355,9 @@ func (b *blindState) liveLocked(run string, names []string, byName map[string]ne
 	}
 	switch {
 	case len(blind) == 0:
-		b.standing, b.named, b.over, b.overPrev, b.overFull = false, nil, nil, 0, false
+		b.standing, b.named, b.over, b.overPrev, b.overFull = false, nil, nil, 0, b.overFull && blindKeepFullAtEnd
 	case !b.standing || blindEachHeartbeat:
-		b.standing, b.named, b.over, b.overPrev, b.overFull = true, blind, nil, 0, false
+		b.standing, b.named, b.over, b.overPrev, b.overFull = true, blind, nil, 0, b.overFull && blindKeepFullAtEnd
 		raise = true
 	case !blindFirstOnly:
 		for _, n := range blind {
@@ -498,7 +505,7 @@ func (b *blindState) endPastLocked() {
 		p.add(o.run, n, blindNamesUncapped)
 	}
 	p.overPrev += o.overPrev
-	p.full = p.full || o.full
+	p.full = p.full || o.full && !pastMergeDropFull
 }
 
 func minTime(a, b time.Time) time.Time {
@@ -543,7 +550,7 @@ func (l *Link) pastDue(p *pastStretch) {
 		more = len(p.over)
 	}
 	detail := fmt.Sprintf("sensor %s: interfaces %s showed no capture in late or backlog heartbeats from %s to %s (blind_after_s %s)",
-		l.cfg.SensorID, nameList(p.names, more, p.full), canonUTC(p.from), canonUTC(p.to), l.blindAfter())
+		l.cfg.SensorID, nameList(p.names, more, p.full && !pastDueIgnoreFull), canonUTC(p.from), canonUTC(p.to), l.blindAfter())
 	if p.n > 1 {
 		detail += fmt.Sprintf("; %d stretches merged", p.n)
 	}

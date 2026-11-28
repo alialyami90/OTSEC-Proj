@@ -458,3 +458,146 @@ func TestBlindPastDetailAcrossRuns(t *testing.T) {
 		}
 	})
 }
+
+// downIfs makes each heartbeat name names, carrier down.
+func downIfs(names []string) func(*netobs.Heartbeat) {
+	return func(h *netobs.Heartbeat) {
+		pk := make([]uint64, len(names))
+		for j := range pk {
+			pk[j] = 1000 // counters.packets 8000, above the live heartbeats' before
+		}
+		ifs(names, pk)(h)
+		for j := range h.Interfaces {
+			h.Interfaces[j].Carrier = "down"
+		}
+	}
+}
+
+// D6's N4 on #806: "more than" in the events. Through the rig, ten
+// heartbeats each naming 8 new interfaces, carrier down: 80 names, 8
+// named, 64 kept past the cap, the rest not kept. Live, the last
+// sensor-blind event due again reads "and more than 64 not listed"
+// (control: blindRaiseIgnoreFull, "and 64 more"); in one backlog
+// stretch, the sensor.past-blind event reads the same (control:
+// pastDueIgnoreFull).
+func TestBlindOverBoundEvents(t *testing.T) {
+	want := fmt.Sprintf(", and more than %d not listed", overBound)
+	live := func(t *testing.T) string {
+		g := newGsrc(t)
+		g.live(6, true)
+		for i := range 10 {
+			g.f = downIfs(ifRange(8*i, 8))
+			g.live(1, false)
+		}
+		g.idle(time.Hour) // PoolPerName: the pool writes the event it holds, of the last detail
+		ev := g.events(AlarmBlind)
+		if len(ev) == 0 {
+			t.Fatal("no sensor-blind event")
+		}
+		return ev[len(ev)-1]["detail"]
+	}
+	past := func(t *testing.T) string {
+		g := newGsrc(t)
+		g.live(6, true)
+		g.cut()
+		for i := range 10 {
+			g.f = downIfs(ifRange(8*i, 8))
+			g.buffer(1, false)
+		}
+		g.f, g.pk = nil, 10000 // eth1 again, counters.packets above the 8000 before
+		g.buffer(1, true)
+		g.reconnect(false)
+		g.live(3, true)
+		ev := g.events(EventPastBlind)
+		if len(ev) != 1 {
+			t.Fatalf("past-blind events %v, want one", ev)
+		}
+		return ev[0]["detail"]
+	}
+	for _, c := range []struct {
+		name    string
+		run     func(*testing.T) string
+		control *bool
+	}{{"sensor-blind", live, &blindRaiseIgnoreFull}, {"sensor.past-blind", past, &pastDueIgnoreFull}} {
+		t.Run(c.name, func(t *testing.T) {
+			if d := c.run(t); !strings.Contains(d, want) {
+				t.Fatalf("detail %q, want %q", d, want)
+			}
+			t.Run("control: the detail ignoring full", func(t *testing.T) {
+				withSeam(t, c.control)
+				if d := c.run(t); strings.Contains(d, want) {
+					t.Fatalf("the control said more than: %q", d)
+				}
+			})
+		})
+	}
+}
+
+// D6's N4 on #806, the merge: in one run, a stretch of if00 to if71 ends,
+// 8 named and 64 kept past the cap, not full; a second, of the same 72
+// and then zz, ends full. Merged, every name of the second is already
+// held, so only the second's full makes the merged stretch say "more
+// than". Control: pastMergeDropFull, "and 64 more".
+func TestBlindPastMergeFull(t *testing.T) {
+	run := func() string {
+		b := &blindState{}
+		at := t0
+		for range 2 {
+			for i := range 9 {
+				pastHb(b, &at, "run1", ifRange(8*i, 8))
+			}
+			if b.pend != nil {
+				pastHb(b, &at, "run1", []string{"zz"})
+			}
+			pastEnd(b, &at, "run1")
+		}
+		return nameList(b.pend.names, b.pend.more(), b.pend.full)
+	}
+	want := fmt.Sprintf(", and more than %d not listed", overBound)
+	if d := run(); !strings.HasSuffix(d, want) {
+		t.Fatalf("merged %q, want %q", d, want)
+	}
+	t.Run("control: full dropped in the merge", func(t *testing.T) {
+		withSeam(t, &pastMergeDropFull)
+		if d := run(); strings.Contains(d, "more than") {
+			t.Fatalf("the control said more than: %q", d)
+		}
+	})
+}
+
+// D6's N5 on #806: a sensor-blind stretch that filled the bound ends, and
+// a new one names one interface: its detail carries no count and no "more
+// than". Control: blindKeepFullAtEnd, overFull never reset.
+func TestBlindOverFullReset(t *testing.T) {
+	run := func() string {
+		b := &blindState{}
+		at := t0
+		m := time.Duration(0)
+		hb := func(names []string) (named []string, more int, full bool) {
+			by := map[string]netobs.InterfaceCount{}
+			for _, n := range names {
+				by[n] = netobs.InterfaceCount{Name: n, Carrier: "down"}
+			}
+			_, _, named, more, full = b.liveLocked("run1", names, by, m, at, 5*time.Minute)
+			at, m = at.Add(10*time.Second), m+10*time.Second
+			return named, more, full
+		}
+		for i := range 10 {
+			hb(ifRange(8*i, 8))
+		}
+		if !b.overFull {
+			t.Fatal("the first stretch did not fill the bound")
+		}
+		hb(nil) // none blind: the stretch ends
+		return nameList(hb([]string{"zz"}))
+	}
+	if d := run(); d != "zz" {
+		t.Fatalf("the new stretch's names %q, want zz alone", d)
+	}
+	t.Run("control: overFull never reset", func(t *testing.T) {
+		withSeam(t, &blindKeepFullAtEnd)
+		if d := run(); !strings.Contains(d, "more than") {
+			t.Fatalf("the control gave %q", d)
+		}
+	})
+}
