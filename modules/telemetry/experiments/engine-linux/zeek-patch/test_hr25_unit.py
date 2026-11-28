@@ -121,6 +121,9 @@ class Model:
         unconfirmed_failure = not self.confirmed and cause not in ("budget", "invariant")
         if unconfirmed_failure and self.mut == "violation-before-confirm":
             self.viol += 1
+            # dpd.zeek removes the analyzer, as at budget-no-skip: run
+            # 46086376121 left this control no row on its input.
+            self.skip = self.skip or self.size <= DPD_IGNORE_AFTER
         if unconfirmed_failure and self.mut == "skip-before-confirm":
             self.skip = True
 
@@ -678,15 +681,22 @@ def test_the_script_bounds_every_weird_of_the_closed_set():
     assert re.findall(r'"(dnp3_[a-z_]+)"', m.group(1)) == weirds and len(weirds) == 14
 
 
-def write_cfg(d, code="0", fc=(), resync=(), weirds=(), viol=0):
+def write_cfg(d, code="0", fc=(), resync=(), weirds=(), viol=0, probe=True, conn=True):
+    """One configuration's output folder. probe False leaves no
+    otsec_probe.log, as Zeek does when no row is written to it; conn False
+    leaves no conn.log, the run's proof that it reached its end."""
     os.makedirs(d, exist_ok=True)
     if code is not None:
         open(os.path.join(d, "exit-code"), "w").write(code)
-    with open(os.path.join(d, "otsec_probe.log"), "w") as fh:
-        for o, c in fc:
-            fh.write('{"kind":"fc","is_orig":%s,"fc":%d}\n' % ("true" if o else "false", c))
-        for r in resync:
-            fh.write(json.dumps(r) + "\n")
+    if conn:
+        with open(os.path.join(d, "conn.log"), "w") as fh:
+            fh.write('{"uid":"C1"}\n')
+    if probe:
+        with open(os.path.join(d, "otsec_probe.log"), "w") as fh:
+            for o, c in fc:
+                fh.write('{"kind":"fc","is_orig":%s,"fc":%d}\n' % ("true" if o else "false", c))
+            for r in resync:
+                fh.write(json.dumps(r) + "\n")
     with open(os.path.join(d, "weird.log"), "w") as fh:
         for w in weirds:
             fh.write('{"name":"%s"}\n' % w)
@@ -738,6 +748,103 @@ def test_state_reads_a_probe_log_without_an_exit_code_as_not_run(tmp_path):
     row = row_of("d4u-hr25-unconfirmed-seq-only")
     write_cfg(tmp_path / "a", code=None, resync=[end_row("m", {"transport_seq": 1})])
     assert u.state(str(tmp_path / "a"), row, u.cases()[row[0]]) == "not run"
+
+
+def test_an_absent_probe_log_after_a_completed_run_reads_as_empty(tmp_path):
+    # HR25-UNIT-FIX: Zeek creates a log file at its first row, so a run that
+    # writes no row leaves no otsec_probe.log. Run 46086376121 read five such
+    # cells as `not run`, whatever their exit-code said, so that run cannot
+    # show Zeek's own exit code for them; the next dispatch does. With exit
+    # 0 and conn.log they read as empty.
+    row = row_of("d4u-hr25-unconfirmed-garbage")
+    f = u.cases()[row[0]]
+    write_cfg(tmp_path / "a", probe=False)
+    assert u.state(str(tmp_path / "a"), row, f) == "met"
+    # A control that writes nothing where the row wants rows is killed.
+    row = row_of("d4u-hr25-budget-f")
+    write_cfg(tmp_path / "b", probe=False, weirds=["dnp3_resync_budget_exhausted"], viol=1)
+    assert u.state(str(tmp_path / "b"), row, u.cases()[row[0]]) == "not met"
+
+
+def test_the_completion_control_without_its_proof_the_cell_stays_not_run(tmp_path):
+    # The named control `no-completion-proof`: no probe log, and the proof
+    # that the run completed missing in one part each. Never read as empty.
+    row = row_of("d4u-hr25-unconfirmed-garbage")
+    f = u.cases()[row[0]]
+    write_cfg(tmp_path / "no-conn", probe=False, conn=False)
+    assert u.state(str(tmp_path / "no-conn"), row, f) == "not run"
+    write_cfg(tmp_path / "no-code", code=None, probe=False)
+    assert u.state(str(tmp_path / "no-code"), row, f) == "not run"
+    write_cfg(tmp_path / "empty-conn", probe=False)
+    open(tmp_path / "empty-conn" / "conn.log", "w").close()
+    assert u.state(str(tmp_path / "empty-conn"), row, f) == "not run"
+    # A crash reads as its exit code, never as empty, with or without the
+    # proof's file.
+    write_cfg(tmp_path / "crash", code="139", probe=False)
+    assert u.state(str(tmp_path / "crash"), row, f) == "exit 139"
+    write_cfg(tmp_path / "crash-no-conn", code="139", probe=False, conn=False)
+    assert u.state(str(tmp_path / "crash-no-conn"), row, f) == "exit 139"
+    assert u.state(str(tmp_path / "never-started"), row, f) == "not run"
+
+
+# The PIA's buffering before a signature matches: dpd_buffer_size (1024
+# octets) and dpd_max_packets (100), init-bare.zeek, as D4-hr23-design.md
+# section 4.1 cites them. The datagrams before the match reach the analyzer
+# only by the PIA's replay, within both. The check is strict at each edge
+# (fewer than 100 datagrams, fewer than 1024 octets), since PIA.cc's own
+# comparison is not read here.
+DPD_BUFFER, DPD_PACKETS = 1024, 100
+
+
+def udp_attach_problems(flows):
+    """The UDP flows that DNP3_UDP would not read whole. Zeek 9.0.1 attaches
+    DNP3_UDP only by dpd.sig's content signature, on a datagram whose
+    payload starts 05 64, from either end; 20000/udp attaches DNP3_TCP,
+    which reads no datagram (D4-hr23-design.md section 1, item 3). A flow
+    needs such a datagram, and the datagrams before it within the PIA's
+    buffering, or what they hold is never read."""
+    out = []
+    for name, f in flows.items():
+        for i, g in enumerate(f.flows if isinstance(f, u.Hosts) else [f]):
+            if not isinstance(g.conv, u.synth.UDPConv):
+                continue
+            first = next((k for k, (_, d, _) in enumerate(g.sent) if d.startswith(b"\x05\x64")), None)
+            if first is None:
+                out.append(f"{name}[{i}]: no datagram starts 05 64")
+                continue
+            before = [d for _, d, _ in g.sent[:first]]
+            if len(before) >= DPD_PACKETS:
+                out.append(f"{name}[{i}]: {len(before)} datagrams before the match")
+            if sum(map(len, before)) >= DPD_BUFFER:
+                out.append(f"{name}[{i}]: {sum(map(len, before))} octets before the match")
+    return out
+
+
+def test_every_udp_input_reaches_the_analyzer():
+    # HR25-UNIT-FIX: d4u-hr25-unconfirmed-garbage was a UDP flow of garbage
+    # only, which no DNP3 analyzer read under any configuration.
+    assert udp_attach_problems(all_cases()) == []
+
+
+def one_flow(*datagrams):
+    f = u.Flow()
+    for d in datagrams:
+        f.send(u.M, d)
+    return {"x": f}
+
+
+def test_the_attachment_check_controls():
+    w = u.whole(u.M, 1, u.W)
+    # The input as run 46086376121 ran it: garbage only.
+    assert udp_attach_problems(one_flow(u.garbage(16))) == ["x[0]: no datagram starts 05 64"]
+    # 05 64 inside a datagram, not at its start.
+    assert udp_attach_problems(one_flow(b"\x11" + w)) == ["x[0]: no datagram starts 05 64"]
+    # The packet limit: 99 datagrams before the match pass, 100 do not.
+    assert udp_attach_problems(one_flow(*[b"\x11"] * 99, w)) == []
+    assert udp_attach_problems(one_flow(*[b"\x11"] * 100, w)) == ["x[0]: 100 datagrams before the match"]
+    # The octet limit: 1023 octets before the match pass, 1024 do not.
+    assert udp_attach_problems(one_flow(u.garbage(1000), u.garbage(23), w)) == []
+    assert udp_attach_problems(one_flow(u.garbage(1000), u.garbage(24), w)) == ["x[0]: 1024 octets before the match"]
 
 
 def only(rows, fn):
