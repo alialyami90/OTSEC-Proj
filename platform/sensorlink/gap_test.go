@@ -2050,8 +2050,8 @@ func TestHealthRigIdleDeadline(t *testing.T) {
 // TestWaitBound (D6's N1 on #805): the rig's progress waits outlast the
 // longest store stall seen (F-016's 37.9 s) and the old 20 s, end at least
 // a minute before the binary's deadline when it is more than 80 s away,
-// and are capped at waitMax, so a hang in a helper fails by name inside
-// each job's limit.
+// never less than waitFloor when it is nearer (N4), and are capped at
+// waitMax, so a hang in a helper fails by name inside each job's limit.
 func TestWaitBound(t *testing.T) {
 	now := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	if waitMax < 2*38*time.Second || waitMax > 5*time.Minute {
@@ -2062,18 +2062,19 @@ func TestWaitBound(t *testing.T) {
 		left time.Duration
 		want time.Duration
 	}{{false, 0, waitMax}, {true, 30 * time.Minute, waitMax}, {true, waitMax + time.Minute, waitMax},
-		{true, 81 * time.Second, 21 * time.Second}, {true, 2 * time.Minute, time.Minute}} {
+		{true, 81 * time.Second, 21 * time.Second}, {true, 2 * time.Minute, time.Minute},
+		{true, 80 * time.Second, waitFloor}, {true, 55 * time.Second, waitFloor}, {true, 0, waitFloor}} {
 		if d := waitBoundAt(now, now.Add(c.left), c.ok); d != c.want {
 			t.Fatalf("deadline set %v, %s away: %s, want %s", c.ok, c.left, d, c.want)
 		}
 	}
+	// The live bound: the deadline is read before waitBound, which reads the
+	// clock later and so waits no longer than this allows.
 	end, ok := t.Deadline()
+	left := time.Until(end)
 	d := waitBound(t)
-	if ok && d > time.Until(end)-time.Minute {
-		t.Fatalf("waitBound %s, not a minute short of the deadline %s away", d, time.Until(end))
-	}
-	if (!ok || time.Until(end) > 80*time.Second) && d <= 20*time.Second {
-		t.Fatalf("waitBound %s, want longer than 20 s", d)
+	if d < waitFloor || d > waitMax || ok && d > max(waitFloor, left-time.Minute) {
+		t.Fatalf("waitBound %s, the deadline set %v and %s away", d, ok, left)
 	}
 }
 

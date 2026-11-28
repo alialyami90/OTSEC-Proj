@@ -198,15 +198,20 @@ func (k *linkRig) timeouts() sensorlink.ConnTimeouts {
 // waitMax and waitBound are platform/sensorlink's rig's (conn_fixtures_test.go):
 // a wait for the link's progress is real time, outlasts a store stall
 // (F-016's 37.9 s), and fails by name a minute before the binary's
-// deadline or at waitMax (D6's N2 and N3 on #805).
-const waitMax = 3 * time.Minute
+// deadline or at waitMax, and never waits less than waitFloor (D6's N2 to
+// N4 on #805).
+const waitMax, waitFloor = 3 * time.Minute, 20 * time.Second
 
 func waitBound(t *testing.T) time.Duration {
 	end, ok := t.Deadline()
+	return waitBoundAt(time.Now(), end, ok)
+}
+
+func waitBoundAt(now, end time.Time, ok bool) time.Duration {
 	if !ok {
 		return waitMax
 	}
-	return min(waitMax, time.Until(end)-time.Minute)
+	return max(waitFloor, min(waitMax, end.Sub(now)-time.Minute))
 }
 
 // TestLinkRigDeadlines (D6's N1 on #805): linkRig's link runs with an idle
@@ -217,13 +222,22 @@ func TestLinkRigDeadlines(t *testing.T) {
 	if d := k.timeouts().Idle; d != linkIdle || linkIdle < 30*time.Minute {
 		t.Fatalf("linkRig's idle deadline %s, want linkIdle %s, at least 30 minutes", d, linkIdle)
 	}
-	end, ok := t.Deadline()
-	d := waitBound(t)
-	if ok && d > time.Until(end)-time.Minute {
-		t.Fatalf("waitBound %s, not a minute short of the deadline %s away", d, time.Until(end))
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ok   bool
+		left time.Duration
+		want time.Duration
+	}{{false, 0, waitMax}, {true, 30 * time.Minute, waitMax}, {true, 81 * time.Second, 21 * time.Second},
+		{true, 55 * time.Second, waitFloor}, {true, 0, waitFloor}} {
+		if d := waitBoundAt(now, now.Add(c.left), c.ok); d != c.want {
+			t.Fatalf("deadline set %v, %s away: %s, want %s", c.ok, c.left, d, c.want)
+		}
 	}
-	if (!ok || time.Until(end) > 80*time.Second) && (d <= 20*time.Second || d > waitMax) {
-		t.Fatalf("waitBound %s, want longer than 20 s and at most %s", d, waitMax)
+	end, ok := t.Deadline()
+	left := time.Until(end)
+	d := waitBound(t)
+	if d < waitFloor || d > waitMax || ok && d > max(waitFloor, left-time.Minute) {
+		t.Fatalf("waitBound %s, the deadline set %v and %s away", d, ok, left)
 	}
 }
 
@@ -500,7 +514,7 @@ func TestHeldPoolEventBuiltAtWrite(t *testing.T) {
 			if why != netobs.CloseIdle {
 				t.Fatalf("the connection closed %q, want %q", why, netobs.CloseIdle)
 			}
-		case <-time.After(20 * time.Second):
+		case <-time.After(waitBound(t)):
 			t.Fatal("the connection was not closed idle")
 		}
 	})

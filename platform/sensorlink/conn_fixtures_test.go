@@ -335,9 +335,14 @@ func (p *peer) send(vs ...any) {
 // runner, and well inside each job's limit (D6's N3 on #805).
 const waitMax = 3 * time.Minute
 
+// waitFloor is the shortest a wait waits, the old fixed bound: with less
+// than a minute to the binary's deadline, a wait still gives the link 20 s
+// (D6's N4 on #805), and the binary's own timeout then prints its stacks.
+const waitFloor = 20 * time.Second
+
 // waitBound is how long a wait for the link's progress waits before it
 // fails: waitMax, or a minute before the test binary's deadline when that
-// is sooner. The wait is real time, since the link acts on a frame in its
+// is sooner, and never less than waitFloor. The wait is real time, since the link acts on a frame in its
 // own goroutine and no clock of the rig moves it, and a store commit can
 // stall for longer than 20 s on a loaded disk (on the owner's PC during
 // #802, "the link acted on 0 of 1 frames"). So a slow commit is waited
@@ -354,7 +359,7 @@ func waitBoundAt(now, end time.Time, ok bool) time.Duration {
 	if !ok {
 		return waitMax
 	}
-	return min(waitMax, end.Sub(now)-time.Minute)
+	return max(waitFloor, min(waitMax, end.Sub(now)-time.Minute))
 }
 
 // taken waits until the link has acted on every frame sent.
