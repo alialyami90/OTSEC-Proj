@@ -752,8 +752,10 @@ def test_state_reads_a_probe_log_without_an_exit_code_as_not_run(tmp_path):
 
 def test_an_absent_probe_log_after_a_completed_run_reads_as_empty(tmp_path):
     # HR25-UNIT-FIX: Zeek creates a log file at its first row, so a run that
-    # writes no row leaves no otsec_probe.log. Run 46086376121 read six such
-    # cells as `not run`. With exit 0 and conn.log they read as empty.
+    # writes no row leaves no otsec_probe.log. Run 46086376121 read five such
+    # cells as `not run`, whatever their exit-code said, so that run cannot
+    # show Zeek's own exit code for them; the next dispatch does. With exit
+    # 0 and conn.log they read as empty.
     row = row_of("d4u-hr25-unconfirmed-garbage")
     f = u.cases()[row[0]]
     write_cfg(tmp_path / "a", probe=False)
@@ -785,28 +787,64 @@ def test_the_completion_control_without_its_proof_the_cell_stays_not_run(tmp_pat
     assert u.state(str(tmp_path / "never-started"), row, f) == "not run"
 
 
-def udp_flows_without_magic(flows):
-    """The UDP flows in which no datagram starts 05 64. Zeek 9.0.1 attaches
-    DNP3_UDP only by dpd.sig's content signature on such a datagram, and
-    20000/udp attaches DNP3_TCP, which reads no datagram (D4-hr23-design.md
-    section 1, item 3), so such a flow reaches no DNP3 analyzer."""
+# The PIA's buffering before a signature matches: dpd_buffer_size (1024
+# octets) and dpd_max_packets (100), init-bare.zeek, as D4-hr23-design.md
+# section 4.1 cites them. The datagrams before the match reach the analyzer
+# only by the PIA's replay, within both. The check is strict at each edge
+# (fewer than 100 datagrams, fewer than 1024 octets), since PIA.cc's own
+# comparison is not read here.
+DPD_BUFFER, DPD_PACKETS = 1024, 100
+
+
+def udp_attach_problems(flows):
+    """The UDP flows that DNP3_UDP would not read whole. Zeek 9.0.1 attaches
+    DNP3_UDP only by dpd.sig's content signature, on a datagram whose
+    payload starts 05 64, from either end; 20000/udp attaches DNP3_TCP,
+    which reads no datagram (D4-hr23-design.md section 1, item 3). A flow
+    needs such a datagram, and the datagrams before it within the PIA's
+    buffering, or what they hold is never read."""
     out = []
     for name, f in flows.items():
         for i, g in enumerate(f.flows if isinstance(f, u.Hosts) else [f]):
-            if isinstance(g.conv, u.synth.UDPConv) and not any(d.startswith(b"\x05\x64") for _, d, _ in g.sent):
-                out.append(f"{name}[{i}]")
+            if not isinstance(g.conv, u.synth.UDPConv):
+                continue
+            first = next((k for k, (_, d, _) in enumerate(g.sent) if d.startswith(b"\x05\x64")), None)
+            if first is None:
+                out.append(f"{name}[{i}]: no datagram starts 05 64")
+                continue
+            before = [d for _, d, _ in g.sent[:first]]
+            if len(before) >= DPD_PACKETS:
+                out.append(f"{name}[{i}]: {len(before)} datagrams before the match")
+            if sum(map(len, before)) >= DPD_BUFFER:
+                out.append(f"{name}[{i}]: {sum(map(len, before))} octets before the match")
     return out
 
 
 def test_every_udp_input_reaches_the_analyzer():
     # HR25-UNIT-FIX: d4u-hr25-unconfirmed-garbage was a UDP flow of garbage
     # only, which no DNP3 analyzer read under any configuration.
-    assert udp_flows_without_magic(all_cases()) == []
+    assert udp_attach_problems(all_cases()) == []
 
 
-def test_the_attachment_check_finds_a_udp_flow_of_garbage_only():
-    # Its control: the input as run 46086376121 ran it.
-    assert udp_flows_without_magic({"old": u.Flow().send(u.M, u.garbage(16))}) == ["old[0]"]
+def one_flow(*datagrams):
+    f = u.Flow()
+    for d in datagrams:
+        f.send(u.M, d)
+    return {"x": f}
+
+
+def test_the_attachment_check_controls():
+    w = u.whole(u.M, 1, u.W)
+    # The input as run 46086376121 ran it: garbage only.
+    assert udp_attach_problems(one_flow(u.garbage(16))) == ["x[0]: no datagram starts 05 64"]
+    # 05 64 inside a datagram, not at its start.
+    assert udp_attach_problems(one_flow(b"\x11" + w)) == ["x[0]: no datagram starts 05 64"]
+    # The packet limit: 99 datagrams before the match pass, 100 do not.
+    assert udp_attach_problems(one_flow(*[b"\x11"] * 99, w)) == []
+    assert udp_attach_problems(one_flow(*[b"\x11"] * 100, w)) == ["x[0]: 100 datagrams before the match"]
+    # The octet limit: 1023 octets before the match pass, 1024 do not.
+    assert udp_attach_problems(one_flow(u.garbage(1000), u.garbage(23), w)) == []
+    assert udp_attach_problems(one_flow(u.garbage(1000), u.garbage(24), w)) == ["x[0]: 1024 octets before the match"]
 
 
 def only(rows, fn):
