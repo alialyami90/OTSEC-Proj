@@ -2047,6 +2047,36 @@ func TestHealthRigIdleDeadline(t *testing.T) {
 	}
 }
 
+// TestWaitBound (D6's N1 on #805): the rig's progress waits outlast the
+// longest store stall seen (F-016's 37.9 s) and the old 20 s, end at least
+// a minute before the binary's deadline when it is more than 80 s away,
+// and are capped at waitMax, so a hang in a helper fails by name inside
+// each job's limit.
+func TestWaitBound(t *testing.T) {
+	now := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	if waitMax < 2*38*time.Second || waitMax > 5*time.Minute {
+		t.Fatalf("waitMax %s, want between 76 s and 5 minutes", waitMax)
+	}
+	for _, c := range []struct {
+		ok   bool
+		left time.Duration
+		want time.Duration
+	}{{false, 0, waitMax}, {true, 30 * time.Minute, waitMax}, {true, waitMax + time.Minute, waitMax},
+		{true, 81 * time.Second, 21 * time.Second}, {true, 2 * time.Minute, time.Minute}} {
+		if d := waitBoundAt(now, now.Add(c.left), c.ok); d != c.want {
+			t.Fatalf("deadline set %v, %s away: %s, want %s", c.ok, c.left, d, c.want)
+		}
+	}
+	end, ok := t.Deadline()
+	d := waitBound(t)
+	if ok && d > time.Until(end)-time.Minute {
+		t.Fatalf("waitBound %s, not a minute short of the deadline %s away", d, time.Until(end))
+	}
+	if (!ok || time.Until(end) > 80*time.Second) && d <= 20*time.Second {
+		t.Fatalf("waitBound %s, want longer than 20 s", d)
+	}
+}
+
 // TestLostGapNotBehindOtherGaps (V-6's third case). The lost budget spent
 // within the hour, so a fifth lost record waits; then a link gap of the
 // same sensor stands 90 s: its open record is in the health stream within
@@ -2120,7 +2150,7 @@ func TestLostGapNotBehindOtherGaps(t *testing.T) {
 			if why != netobs.CloseIdle {
 				t.Fatalf("sensor 1's connection closed %q, want %q", why, netobs.CloseIdle)
 			}
-		case <-time.After(20 * time.Second):
+		case <-time.After(waitBound(t)):
 			t.Fatal("sensor 1's connection was not closed idle")
 		}
 		if err := netobs.WriteFrame(g.p.c, []byte("{}")); !errors.Is(err, io.ErrClosedPipe) {

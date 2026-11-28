@@ -1169,7 +1169,7 @@ func (r *rig) helloAnswer(h *netobs.SensorHello) string {
 			return ""
 		}
 		return p.closed()
-	case <-time.After(20 * time.Second):
+	case <-time.After(waitBound(r.t)):
 		r.t.Fatal("the hello was neither acked nor closed")
 		return ""
 	}

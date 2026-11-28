@@ -330,21 +330,31 @@ func (p *peer) send(vs ...any) {
 	}
 }
 
+// waitMax is the longest a wait for the link's progress waits: several
+// times the longest store stall seen, F-016's 37.9 s on the hosted Windows
+// runner, and well inside each job's limit (D6's N3 on #805).
+const waitMax = 3 * time.Minute
+
 // waitBound is how long a wait for the link's progress waits before it
-// fails: until a minute before the test binary's -timeout, and never less
-// than 20 s. The wait is real time, since the link acts on a frame in its
+// fails: waitMax, or a minute before the test binary's deadline when that
+// is sooner. The wait is real time, since the link acts on a frame in its
 // own goroutine and no clock of the rig moves it, and a store commit can
-// stall for longer than 20 s on a loaded disk (F-016 saw 37.9 s on the
-// hosted Windows runner; on the owner's PC during #802, "the link acted on
-// 0 of 1 frames"). So a slow commit is waited out, and a link that never
-// acts still fails here, by name, before the binary's timeout prints its
-// stacks (brief P4-NODE-WINTIME).
+// stall for longer than 20 s on a loaded disk (on the owner's PC during
+// #802, "the link acted on 0 of 1 frames"). So a slow commit is waited
+// out, and a link that never acts fails here, by name, before the
+// binary's timeout prints its stacks (brief P4-NODE-WINTIME).
 func waitBound(t *testing.T) time.Duration {
-	d := 10 * time.Minute
-	if end, ok := t.Deadline(); ok {
-		d = time.Until(end) - time.Minute
+	end, ok := t.Deadline()
+	return waitBoundAt(time.Now(), end, ok)
+}
+
+// waitBoundAt is waitBound at now, for a binary whose deadline is end when
+// ok holds.
+func waitBoundAt(now, end time.Time, ok bool) time.Duration {
+	if !ok {
+		return waitMax
 	}
-	return max(d, 20*time.Second)
+	return min(waitMax, end.Sub(now)-time.Minute)
 }
 
 // taken waits until the link has acted on every frame sent.

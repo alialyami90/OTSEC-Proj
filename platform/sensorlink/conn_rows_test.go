@@ -163,7 +163,7 @@ func TestIntakeM8EachCloseReason(t *testing.T) {
 // the last reason counted.
 func (l *Link) waitClose(t *testing.T) string {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(waitBound(t))
 	for time.Now().Before(deadline) {
 		l.guard.mu.Lock()
 		live := l.guard.live

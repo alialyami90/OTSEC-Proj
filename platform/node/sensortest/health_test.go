@@ -173,21 +173,58 @@ func (k *linkRig) make() {
 	stream := node.NetObservationStream(sensorID)
 	nl := netLog{r: k.r, stream: stream}
 	k.file = sensorlink.OpenRunFile(k.path)
-	idle := k.idle
-	if idle == 0 {
-		idle = linkIdle
-	}
 	k.h = sensorlink.NewHealth(sensorlink.HealthConfig{SensorID: sensorID, Sink: k.sink, Monotonic: k.g.monoNow, Now: k.g.now, Raise: k.raise, File: k.file})
 	l, err := sensorlink.New(sensorlink.Config{NodeID: "site-a-node1", SensorID: sensorID, EvidenceClass: asset.Simulated, OutageHours: 1,
 		ObservationQuota: 64 << 20, Stream: stream}, sensorlink.Options{Store: nl, Monotonic: k.g.monoNow, Now: k.g.now,
 		Received: func() event.Received {
 			return event.Received{UTC: "2026-11-13T10:00:01.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}}
 		},
-		Cursor: nl, Pins: k.pins, Raise: k.raise, Health: k.h, Timeouts: sensorlink.ConnTimeouts{Hello: 10 * time.Second, Idle: idle}})
+		Cursor: nl, Pins: k.pins, Raise: k.raise, Health: k.h, Timeouts: k.timeouts()})
 	if err != nil {
 		k.t.Fatal(err)
 	}
 	k.l = l
+}
+
+// timeouts are the link's deadlines: the idle one is k.idle, or linkIdle.
+func (k *linkRig) timeouts() sensorlink.ConnTimeouts {
+	idle := k.idle
+	if idle == 0 {
+		idle = linkIdle
+	}
+	return sensorlink.ConnTimeouts{Hello: 10 * time.Second, Idle: idle}
+}
+
+// waitMax and waitBound are platform/sensorlink's rig's (conn_fixtures_test.go):
+// a wait for the link's progress is real time, outlasts a store stall
+// (F-016's 37.9 s), and fails by name a minute before the binary's
+// deadline or at waitMax (D6's N2 and N3 on #805).
+const waitMax = 3 * time.Minute
+
+func waitBound(t *testing.T) time.Duration {
+	end, ok := t.Deadline()
+	if !ok {
+		return waitMax
+	}
+	return min(waitMax, time.Until(end)-time.Minute)
+}
+
+// TestLinkRigDeadlines (D6's N1 on #805): linkRig's link runs with an idle
+// deadline of linkIdle, at least 30 minutes, and its progress waits
+// outlast the old 20 s and stop short of the binary's deadline.
+func TestLinkRigDeadlines(t *testing.T) {
+	k := &linkRig{}
+	if d := k.timeouts().Idle; d != linkIdle || linkIdle < 30*time.Minute {
+		t.Fatalf("linkRig's idle deadline %s, want linkIdle %s, at least 30 minutes", d, linkIdle)
+	}
+	end, ok := t.Deadline()
+	d := waitBound(t)
+	if ok && d > time.Until(end)-time.Minute {
+		t.Fatalf("waitBound %s, not a minute short of the deadline %s away", d, time.Until(end))
+	}
+	if (!ok || time.Until(end) > 80*time.Second) && (d <= 20*time.Second || d > waitMax) {
+		t.Fatalf("waitBound %s, want longer than 20 s and at most %s", d, waitMax)
+	}
 }
 
 // restart makes the link again, applies the run file and writes what the
@@ -253,7 +290,7 @@ func (c *conn) send(v any) {
 
 func (c *conn) ack(seq uint64) {
 	c.t.Helper()
-	deadline := time.After(20 * time.Second)
+	deadline := time.After(waitBound(c.t))
 	for {
 		select {
 		case n, ok := <-c.acks:
@@ -274,7 +311,7 @@ func (c *conn) end() string {
 	select {
 	case r := <-c.done:
 		return r
-	case <-time.After(20 * time.Second):
+	case <-time.After(waitBound(c.t)):
 		c.t.Fatal("the node did not close the connection")
 		return ""
 	}
