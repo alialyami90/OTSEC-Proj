@@ -269,7 +269,7 @@ func TestBlindNamesCapped(t *testing.T) {
 			n, r := fmt.Sprintf("if%d", i), fmt.Sprintf("run%d", i)
 			by := map[string]netobs.InterfaceCount{n: {Name: n, Carrier: "down"}}
 			for range 2 {
-				_, _, named, more = b.liveLocked(r, []string{n}, by, time.Duration(i)*time.Minute, at, 5*time.Minute)
+				_, _, named, more, _ = b.liveLocked(r, []string{n}, by, time.Duration(i)*time.Minute, at, 5*time.Minute)
 				b.pastLocked(r, []string{n}, by, at, 5*time.Minute, false, true)
 				at = at.Add(10 * time.Second)
 			}
@@ -281,10 +281,10 @@ func TestBlindNamesCapped(t *testing.T) {
 	if len(named) != netobs.MaxInterfaces || more != runs-netobs.MaxInterfaces {
 		t.Fatalf("sensor-blind names %d and %d more, want %d and %d", len(named), more, netobs.MaxInterfaces, runs-netobs.MaxInterfaces)
 	}
-	if past == nil || len(past.names) != netobs.MaxInterfaces || past.more != runs-netobs.MaxInterfaces {
+	if past == nil || len(past.names) != netobs.MaxInterfaces || past.more() != runs-netobs.MaxInterfaces {
 		t.Fatalf("sensor.past-blind %+v, want %d names and %d more", past, netobs.MaxInterfaces, runs-netobs.MaxInterfaces)
 	}
-	if s := nameList(named, more); !strings.HasSuffix(s, fmt.Sprintf(", and %d more not listed", runs-netobs.MaxInterfaces)) {
+	if s := nameList(named, more, false); !strings.HasSuffix(s, fmt.Sprintf(", and %d more not listed", runs-netobs.MaxInterfaces)) {
 		t.Fatalf("detail names %q", s)
 	}
 	// D3's N7 and D6's N3 on #802: once a stretch's names have overflowed,

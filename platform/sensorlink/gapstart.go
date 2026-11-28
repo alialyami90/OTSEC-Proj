@@ -18,14 +18,18 @@ import (
 //     gaps the cursor owes come after, through WriteOwed (CH-40). With no W
 //     (the sensor database lost, or a sensor never watched) it opens from
 //     the bound, the run file's copy, with from_bound; with no copy either,
-//     from the Unix epoch, with from_bound, until P4-4-DE replaces it with
-//     enrolled_at (D1's ruling 7 on #788). Only the start's cursor read
+//     or with a copy later than the wall clock, which bounds nothing on the
+//     clock as it now is, from the Unix epoch, with from_bound, until
+//     P4-4-DE replaces it with enrolled_at (D1's ruling 7 on #788; D6's N8
+//     on #788, option (b), with D3's condition: the epoch is also the copy
+//     the start writes). Only the start's cursor read
 //     takes W, R, G and D at W, the floor and the held gap: when it failed,
 //     a later read takes only M and the kept interfaces (ruling 6).
 //   - It is marked clock_stepped at once where W, R, the floor or the copy
 //     it starts from is later than the wall clock. The mark moves nothing:
 //     the cap of W, R and the floor waits for the gap's close (CH-45). The
-//     copy the start writes is capped, W held or not, its step written
+//     copy the start writes is capped, at the wall clock with W held and at
+//     the epoch with none, its step written
 //     first, and does not rise while the gap stands (ruling 11).
 //   - While it is open nothing places W or R and no other gap opens: a
 //     cause found joins it (link, restart, blind, sensor-failed).
@@ -95,11 +99,19 @@ var startLateTakesAll, startNoBoundNow, startChainCursorGD bool
 // step's record at the gap's close too, where the start wrote it.
 var startCopyCapNoW, startCopyRises, startStepTwice bool
 
+// The controls of D6's N8 on #788, option (b) (P4-NODE-PASTCAP item 3):
+// startCapFromWall opens a gap with no W and a copy later than the wall
+// clock from the wall clock, and writes the wall clock as the copy, the
+// code at 5e5c8028; startCopyAtWall opens it from the epoch and writes the
+// wall clock as the copy (D3's condition, 7230895738 on #805).
+var startCapFromWall, startCopyAtWall bool
+
 // nodeStart opens the node-start gap for the link at the node's start
 // (CH-45, "At a start"): copyAt is the run file's copy, zero when the file
 // holds none for the sensor. The gap held for the floor that takeWatch
-// found is written first, by gapAct's order. It returns the copy capped at
-// the wall clock when the cap moved it, zero otherwise: the start writes
+// found is written first, by gapAct's order. It returns the copy capped,
+// at the wall clock with W held or at the epoch with none, when the cap
+// moved it, zero otherwise: the start writes
 // the file with it, so a kill after the cap loses nothing, and the cap's
 // time.node-stepped is written here, before that write (D6's B2 on #788,
 // option (a)).
@@ -145,12 +157,24 @@ func (s *skew) startGapLocked(copyAt, wall time.Time, mono, blind time.Duration)
 	}
 	from, bound, stepped := wt.earlierWR(), false, false
 	if wt.w.IsZero() {
-		// No W: the bound (CH-45), the run file's copy, capped at the
-		// wall clock before it serves (D3's N3 on #774).
+		// No W: the bound (CH-45), the run file's copy, never served
+		// later than the wall clock (D3's N3 on #774). A copy later than
+		// it was written before a step back, so it bounds nothing on the
+		// clock as it now is: the gap is from the epoch, marked, and the
+		// epoch is the copy the start writes, so a kill before the open
+		// record commits cannot start the next gap at this start (D6's N8
+		// on #788, option (b); D3's condition).
 		from, bound = copyAt, true
 		if from.After(wall) && !startCopyUncapped {
 			wt.owedStep += from.Sub(wall)
-			from, stepped, capped = wall, true, wall
+			epoch := time.Unix(0, 0).UTC()
+			from, stepped, capped = epoch, true, epoch
+			if startCapFromWall {
+				from, capped = wall, wall
+			}
+			if startCopyAtWall {
+				capped = wall
+			}
 		}
 		if from.IsZero() {
 			// No copy either: the Unix epoch, the earliest the node can

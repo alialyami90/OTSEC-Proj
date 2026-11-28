@@ -478,6 +478,10 @@ func (h *Health) persist(ctx context.Context, now bool) error {
 	return nil
 }
 
+// copyBackUnclamped, false in the node, is the control of
+// TestGapCopyCapNoW's step leg: a step back moves the copy before the epoch.
+var copyBackUnclamped bool
+
 // entry is what the run file keeps for the sensor: never a run loss,
 // whose home is the cursor's owed mark.
 func (h *Health) entry() runFileSensor {
@@ -500,6 +504,13 @@ func (h *Health) entry() runFileSensor {
 		w, back, held = h.watched()
 		if !h.copyFile.IsZero() {
 			h.copyFile = h.copyFile.Add(-back)
+			// No earlier than the epoch, the earliest the node states
+			// (CH-45; D3's N1 and D6's N3 on #806): a step found while a
+			// node-start gap from the epoch stands leaves the copy there,
+			// as the cursor's clampNano does.
+			if epoch := time.Unix(0, 0); h.copyFile.Before(epoch) && !copyBackUnclamped {
+				h.copyFile = epoch
+			}
 		}
 	}
 	// While a gap is held for the floor the copy never rises: each write
