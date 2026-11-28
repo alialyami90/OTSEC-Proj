@@ -117,8 +117,11 @@ var pastDueIgnoreFull, blindRaiseIgnoreFull, pastMergeDropFull, blindKeepFullAtE
 
 // overBound is N of D1's ruling 7231553676 on #806 (option (i)): the most
 // names past MaxInterfaces one list keeps, deduplicated, in a run. Past it
-// no name is kept, and the detail says "more than" its count, which is
-// then a lower bound. 64 names of at most 64 bytes (tokenForm) are 4 KiB a
+// no more name is kept in that run, and the detail says "more than" its
+// count, which is then a lower bound. At a new run the list is counted
+// and starts empty, and keeps up to overBound names again, while the
+// stretch's full stays set, so the detail goes on saying "more than"
+// with the count of every run (D5's N2 on #804). 64 names of at most 64 bytes (tokenForm) are 4 KiB a
 // list, CH-45's record size, and a heartbeat's work under b.mu is at most
 // MaxInterfaces names compared with overBound each (SL-20's bounded
 // memory and work for each link).
