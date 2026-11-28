@@ -302,7 +302,7 @@ func TestReleaseAtCursorOpenCountedOnce(t *testing.T) {
 	p := r.accepted(resume(1, 20))
 	select {
 	case <-done:
-	case <-time.After(20 * time.Second):
+	case <-time.After(waitBound(t)):
 		t.Fatal("the release did not run")
 	}
 	p.end()

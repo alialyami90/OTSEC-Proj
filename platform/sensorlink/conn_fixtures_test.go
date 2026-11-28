@@ -130,6 +130,7 @@ type cursorStore struct {
 }
 
 func (c *cursorStore) SourceCursor(ctx context.Context) ([]byte, error) {
+	defer timed(c.s.name, time.Now())
 	return c.s.db.SourceCursor(ctx, obsStream)
 }
 
@@ -141,6 +142,7 @@ func (c *cursorStore) SaveSourceCursor(ctx context.Context, b []byte) error {
 		return errors.New("test: the save failed")
 	}
 	c.mu.Unlock()
+	defer timed(c.s.name, time.Now())
 	return c.s.db.SaveSourceCursor(ctx, obsStream, b)
 }
 
@@ -208,6 +210,15 @@ type rig struct {
 	opt   func(*Options)
 }
 
+// rigIdle is the rig's idle deadline: far past any test's run, so no
+// connection is closed for the runner's speed. The deadline is real time
+// (conn.go's read and ack), while these tests run on the rig's clocks: at
+// 10 s, a connection left open while other steps ran (a new rig, a
+// restart, WriteOwed, a store's setup) was closed on a slow runner (D1's
+// ruling 9 on #788; brief P4-NODE-WINTIME). A test of the idle close sets
+// its own deadline (conn_rows_test.go's "idle", decisionRig).
+const rigIdle = time.Hour
+
 func newRig(t *testing.T, opt func(*Options)) *rig {
 	s := openNet(t, 64<<20)
 	r := &rig{t: t, s: s, cs: &cursorStore{s: s}, pins: newPins(), clk: &aclock{},
@@ -230,7 +241,7 @@ func (r *rig) restart() *Link {
 			r.owed = append(r.owed, w)
 			return nil
 		},
-		Timeouts: ConnTimeouts{Hello: 10 * time.Second, Idle: 10 * time.Second}}
+		Timeouts: ConnTimeouts{Hello: 10 * time.Second, Idle: rigIdle}}
 	if r.opt != nil {
 		r.opt(&o)
 	}
@@ -319,10 +330,42 @@ func (p *peer) send(vs ...any) {
 	}
 }
 
+// waitMax is the longest a wait for the link's progress waits: several
+// times the longest store stall seen, F-016's 37.9 s on the hosted Windows
+// runner, and well inside each job's limit (D6's N3 on #805).
+const waitMax = 3 * time.Minute
+
+// waitFloor is the shortest a wait waits, the old fixed bound: with less
+// than a minute to the binary's deadline, a wait still gives the link 20 s
+// (D6's N4 on #805), and the binary's own timeout then prints its stacks.
+const waitFloor = 20 * time.Second
+
+// waitBound is how long a wait for the link's progress waits before it
+// fails: waitMax, or a minute before the test binary's deadline when that
+// is sooner, and never less than waitFloor. The wait is real time, since the link acts on a frame in its
+// own goroutine and no clock of the rig moves it, and a store commit can
+// stall for longer than 20 s on a loaded disk (on the owner's PC during
+// #802, "the link acted on 0 of 1 frames"). So a slow commit is waited
+// out, and a link that never acts fails here, by name, before the
+// binary's timeout prints its stacks (brief P4-NODE-WINTIME).
+func waitBound(t *testing.T) time.Duration {
+	end, ok := t.Deadline()
+	return waitBoundAt(time.Now(), end, ok)
+}
+
+// waitBoundAt is waitBound at now, for a binary whose deadline is end when
+// ok holds.
+func waitBoundAt(now, end time.Time, ok bool) time.Duration {
+	if !ok {
+		return waitMax
+	}
+	return max(waitFloor, min(waitMax, end.Sub(now)-time.Minute))
+}
+
 // taken waits until the link has acted on every frame sent.
 func (p *peer) taken() {
 	p.t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(waitBound(p.t))
 	for p.l.ConnStats().Frames-p.base < p.sent {
 		if time.Now().After(deadline) {
 			p.t.Fatalf("the link acted on %d of %d frames", p.l.ConnStats().Frames-p.base, p.sent)
@@ -335,7 +378,7 @@ func (p *peer) taken() {
 // fails.
 func (p *peer) ack(seq uint64) {
 	p.t.Helper()
-	deadline := time.After(20 * time.Second)
+	deadline := time.After(waitBound(p.t))
 	for {
 		select {
 		case a, ok := <-p.acks:
@@ -357,7 +400,7 @@ func (p *peer) ack(seq uint64) {
 // ackAtLeast waits for an ack at or above seq.
 func (p *peer) ackAtLeast(seq uint64) {
 	p.t.Helper()
-	deadline := time.After(20 * time.Second)
+	deadline := time.After(waitBound(p.t))
 	for {
 		select {
 		case a, ok := <-p.acks:
@@ -379,7 +422,7 @@ func (p *peer) closed() string {
 	select {
 	case r := <-p.done:
 		return r
-	case <-time.After(30 * time.Second):
+	case <-time.After(waitBound(p.t)):
 		p.t.Fatal("the node did not close the connection")
 		return ""
 	}
@@ -425,7 +468,7 @@ func storedObs(t *testing.T, s netStore) []*netobs.Observation {
 // refused or dropped), observed through its counts.
 func settle(t *testing.T, l *Link, want func(Stats) bool) {
 	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(waitBound(t))
 	for time.Now().Before(deadline) {
 		if want(l.Stats()) {
 			return

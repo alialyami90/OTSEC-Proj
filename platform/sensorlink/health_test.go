@@ -95,16 +95,9 @@ type healthRig struct {
 	file *RunFile
 	h    *Health
 	gen  *linkGen
-	// idle is the links' idle deadline, zero for rigIdle. The deadline is
-	// real time (conn.go's read), while these tests run on the test
-	// clocks: at the base rig's 10 s, a connection left idle while other
-	// steps run was closed on a slow runner (D1's ruling 9 on #788).
+	// idle is the links' idle deadline, zero for rigIdle (conn_fixtures_test.go).
 	idle time.Duration
 }
-
-// rigIdle is the health rig's idle deadline: far past any test's run, so
-// no connection is closed for the runner's speed.
-const rigIdle = time.Hour
 
 func (r *healthRig) idleDeadline() time.Duration {
 	if r.idle > 0 {

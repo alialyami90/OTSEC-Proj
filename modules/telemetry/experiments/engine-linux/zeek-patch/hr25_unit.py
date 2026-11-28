@@ -17,7 +17,9 @@ passes when C2A meets its expectation and every control the row names, each
 of which breaks one rule of docs/phase4/D4-hr25-design.md sections 2.1 to
 2.3, 2.7, 2.8 and 3.1, does not (the control is killed). A configuration
 that did not run, or whose Zeek exited non-zero, fails the row: a crash is
-never read as a kill. C2 (`zeek-hr25-c2`, the (i) build) is run beside each
+never read as a kill. A log that a run did not create is read as empty
+only when the run is shown to have completed (exit 0 and conn.log); else
+the configuration did not run. C2 (`zeek-hr25-c2`, the (i) build) is run beside each
 row and printed as `ran` or `exit N` only, never judged (D1's ruling on
 D4-131 item 5.1).
 
@@ -507,8 +509,12 @@ def cases_b2():
     f = Flow().send(M, link_only(M, RST_M)).send(O, whole(O, 0, BADOBJ))
     out["d4u-hr25-throw-alone"] = f
     # A flow that never confirms writes an end row only on the six counts:
-    # garbage (magic) writes none; a frame out of sequence writes one.
-    out["d4u-hr25-unconfirmed-garbage"] = Flow().send(M, garbage(16))
+    # garbage (magic) writes none; a frame out of sequence writes one. The
+    # garbage goes over TCP to 20000, where the port attaches DNP3_TCP at the
+    # start: a UDP flow with no datagram that starts 05 64 reaches no DNP3
+    # analyzer (dpd.sig; D4-hr23-design.md section 1, item 3), so it could
+    # not show the rule (run 46086376121).
+    out["d4u-hr25-unconfirmed-garbage"] = Flow(True).send(M, garbage(16))
     f = Flow().send(M, seg(M, True, False, 1, W1)).send(M, seg(M, False, False, 5, b"\x22"))
     out["d4u-hr25-unconfirmed-seq-only"] = f
 
@@ -904,15 +910,29 @@ def us(t):
     return round(t * 1e6)
 
 
+def completed(d, code):
+    """Whether the run is shown to have reached its end: Zeek exited 0 and
+    wrote conn.log, which it writes for each connection when the connection
+    is removed, at the latest at the capture's end, after every analyzer's
+    end rows; every input holds a connection. Nothing of conn.log is read
+    but that it holds a row."""
+    return code == "0" and bool(rows(os.path.join(d, "conn.log")))
+
+
 def reading(d, f):
     """(exit code, what the configuration did) on one input, or (exit
-    code, None) when it left no probe log. Only causes, counts, weird names
-    and the count of violations are read (D1's ruling on D4-131 item 5.1)."""
+    code, None) when it left no probe log and is not shown to have
+    completed. Zeek creates a log file at its first row, so a completed run
+    that wrote no row has no otsec_probe.log, and that is read as no rows
+    (HR25-UNIT-FIX). Only causes, counts, weird names and the count of
+    violations are read (D1's ruling on D4-131 item 5.1)."""
     p = os.path.join(d, "exit-code")
     code = open(p, encoding="utf-8").read().strip() if os.path.exists(p) else None
     probe = rows(os.path.join(d, "otsec_probe.log"))
     if probe is None:
-        return code, None
+        if not completed(d, code):
+            return code, None
+        probe = []
     weirds = {}
     for r in rows(os.path.join(d, "weird.log")) or []:
         if r.get("name", "").startswith("dnp3_"):
@@ -957,10 +977,12 @@ def meets(row, got):
 def state(d, row, f):
     """`not run`, `exit N`, `met` or `not met`."""
     code, got = reading(d, f)
-    if code is None or got is None:
+    if code is None:
         return "not run"
     if code != "0":
         return f"exit {code}"
+    if got is None:
+        return "not run"
     return "met" if meets(row, got) else "not met"
 
 
