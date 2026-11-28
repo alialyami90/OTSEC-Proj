@@ -2011,13 +2011,32 @@ func secondOn(t *testing.T, g *gsrc, sharedHealth bool) *gsrc {
 	return &gsrc{t: t, r: r2, p: r2.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
 }
 
-// TestHealthRigIdleDeadline (D6's N6 on #788): a link made by newHealthRig,
-// and one made by secondOn, runs with the rig's idle deadline, rigIdle,
-// not the base rig's 10 s (D1's ruling 9), and rigIdle is longer than it.
+// TestHealthRigIdleDeadline (D6's N6 on #788; brief P4-NODE-WINTIME): a
+// link made by newRig, by newHealthRig and by secondOn runs with the rig's
+// idle deadline, rigIdle, and not with the 10 s that closed connections
+// left open on a slow runner (D1's ruling 9); decisionRig's runs with
+// decisionIdle. Control: the base rig's link with a deadline shorter than
+// the next step, a second rig made while its connection is open, as
+// TestIntakeM8EachCloseReason and TestIntakeH1Rows make one per row: the
+// node closes it idle, and the next send fails.
 func TestHealthRigIdleDeadline(t *testing.T) {
-	if base := newRig(t, nil).l.timeouts().Idle; rigIdle <= base {
-		t.Fatalf("rigIdle %s, want longer than the base rig's %s", rigIdle, base)
+	if base := newRig(t, nil).l.timeouts().Idle; base != rigIdle || rigIdle < 30*time.Minute {
+		t.Fatalf("the base rig's idle deadline %s, want rigIdle %s, at least 30 minutes", base, rigIdle)
 	}
+	if d := decisionRig(t, nil).l.timeouts().Idle; d != decisionIdle {
+		t.Fatalf("decisionRig's link: idle %s, want %s", d, decisionIdle)
+	}
+	t.Run("control: the base rig's connection idle past its deadline", func(t *testing.T) {
+		r := newRig(t, func(o *Options) { o.Timeouts.Idle = 50 * time.Millisecond })
+		p := r.accepted(hello02())
+		newRig(t, nil)
+		if why := p.closed(); why != netobs.CloseIdle {
+			t.Fatalf("the connection closed %q, want %q", why, netobs.CloseIdle)
+		}
+		if err := netobs.WriteFrame(p.c, []byte("{}")); !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("send: %v, want %v", err, io.ErrClosedPipe)
+		}
+	})
 	r := newHealthRig(t)
 	if d := r.l.timeouts().Idle; d != rigIdle {
 		t.Fatalf("newHealthRig's link: idle %s, want %s", d, rigIdle)
@@ -2025,6 +2044,37 @@ func TestHealthRigIdleDeadline(t *testing.T) {
 	g := &gsrc{t: t, r: r, p: r.accepted(live02()), run: testRun, counter: 5, carrier: "up"}
 	if d := secondOn(t, g, false).r.l.timeouts().Idle; d != rigIdle {
 		t.Fatalf("secondOn's link: idle %s, want %s", d, rigIdle)
+	}
+}
+
+// TestWaitBound (D6's N1 on #805): the rig's progress waits outlast the
+// longest store stall seen (F-016's 37.9 s) and the old 20 s, end at least
+// a minute before the binary's deadline when it is more than 80 s away,
+// never less than waitFloor when it is nearer (N4), and are capped at
+// waitMax, so a hang in a helper fails by name inside each job's limit.
+func TestWaitBound(t *testing.T) {
+	now := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	if waitMax < 2*38*time.Second || waitMax > 5*time.Minute {
+		t.Fatalf("waitMax %s, want between 76 s and 5 minutes", waitMax)
+	}
+	for _, c := range []struct {
+		ok   bool
+		left time.Duration
+		want time.Duration
+	}{{false, 0, waitMax}, {true, 30 * time.Minute, waitMax}, {true, waitMax + time.Minute, waitMax},
+		{true, 81 * time.Second, 21 * time.Second}, {true, 2 * time.Minute, time.Minute},
+		{true, 80 * time.Second, waitFloor}, {true, 55 * time.Second, waitFloor}, {true, 0, waitFloor}} {
+		if d := waitBoundAt(now, now.Add(c.left), c.ok); d != c.want {
+			t.Fatalf("deadline set %v, %s away: %s, want %s", c.ok, c.left, d, c.want)
+		}
+	}
+	// The live bound: the deadline is read before waitBound, which reads the
+	// clock later and so waits no longer than this allows.
+	end, ok := t.Deadline()
+	left := time.Until(end)
+	d := waitBound(t)
+	if d < waitFloor || d > waitMax || ok && d > max(waitFloor, left-time.Minute) {
+		t.Fatalf("waitBound %s, the deadline set %v and %s away", d, ok, left)
 	}
 }
 
@@ -2101,7 +2151,7 @@ func TestLostGapNotBehindOtherGaps(t *testing.T) {
 			if why != netobs.CloseIdle {
 				t.Fatalf("sensor 1's connection closed %q, want %q", why, netobs.CloseIdle)
 			}
-		case <-time.After(20 * time.Second):
+		case <-time.After(waitBound(t)):
 			t.Fatal("sensor 1's connection was not closed idle")
 		}
 		if err := netobs.WriteFrame(g.p.c, []byte("{}")); !errors.Is(err, io.ErrClosedPipe) {

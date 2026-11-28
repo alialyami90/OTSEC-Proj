@@ -142,8 +142,9 @@ func received() event.Received {
 // netStore is a network database with the given observation quota, and a
 // Log over it.
 type netStore struct {
-	db  *store.DB
-	log *c5.Log
+	db   *store.DB
+	log  *c5.Log
+	name string // the test that opened it, for storeTime
 }
 
 func openNet(t *testing.T, obsQuota int64) netStore {
@@ -183,19 +184,22 @@ func openNet(t *testing.T, obsQuota int64) netStore {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return netStore{db: db, log: log}
+	return netStore{db: db, log: log, name: t.Name()}
 }
 
 // Append, AppendBatch and LastCommitted make a netStore the link's Appender.
 func (s netStore) Append(ctx context.Context, rec c5.Record) (c5.Receipt, error) {
+	defer timed(s.name, time.Now())
 	return s.log.Append(ctx, rec)
 }
 
 func (s netStore) AppendBatch(ctx context.Context, recs []c5.Record) ([]c5.Receipt, error) {
+	defer timed(s.name, time.Now())
 	return s.log.AppendBatch(ctx, recs)
 }
 
 func (s netStore) LastCommitted(ctx context.Context) (uint64, error) {
+	defer timed(s.name, time.Now())
 	return s.db.LastCommitted(ctx, obsStream)
 }
 

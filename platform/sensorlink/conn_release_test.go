@@ -289,7 +289,7 @@ func TestHoldReleaseMovesTOnce(t *testing.T) {
 			if a == nil || num(a.Seq) != 11 {
 				t.Fatalf("ack %+v after the release, want 11", a)
 			}
-		case <-time.After(20 * time.Second):
+		case <-time.After(waitBound(t)):
 			t.Fatal("no ack of 11")
 		}
 	})

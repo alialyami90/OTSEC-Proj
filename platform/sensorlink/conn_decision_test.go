@@ -10,6 +10,23 @@ import (
 	"otsec.local/otsec/contracts/netobs"
 )
 
+// decisionIdle is the idle deadline of these tests' links. Each bounds a
+// decision's close by half of it, so a close that waits for the idle
+// deadline fails, and the rig's own deadline, rigIdle, would make that
+// bound half an hour (brief P4-NODE-WINTIME).
+const decisionIdle = 10 * time.Second
+
+// decisionRig is newRig with the idle deadline decisionIdle; opt, when
+// set, runs after it.
+func decisionRig(t *testing.T, opt func(*Options)) *rig {
+	return newRig(t, func(o *Options) {
+		o.Timeouts.Idle = decisionIdle
+		if opt != nil {
+			opt(o)
+		}
+	})
+}
+
 // closedWithin waits at most d for the node's close reason, and fails when
 // the connection is still open.
 func (p *peer) closedWithin(d time.Duration) string {
@@ -42,7 +59,7 @@ func TestDecisionMidFrameNoAck(t *testing.T) {
 		t.Run(map[bool]string{true: "decision", false: "control"}[armed], func(t *testing.T) {
 			var l *Link
 			var arm atomic.Bool
-			r := newRig(t, func(o *Options) {
+			r := decisionRig(t, func(o *Options) {
 				inner := o.Owed
 				o.Owed = func(ctx context.Context, w Owed) error {
 					if arm.Load() {
@@ -80,7 +97,7 @@ func TestCancelMidFrameShutdown(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			var arm atomic.Bool
-			r := newRig(t, func(o *Options) {
+			r := decisionRig(t, func(o *Options) {
 				inner := o.Owed
 				o.Owed = func(c context.Context, w Owed) error {
 					if arm.Load() {
@@ -158,7 +175,7 @@ func (c *ackRaceConn) Write(b []byte) (int, error) {
 func TestDecisionAtAckDeadline(t *testing.T) {
 	for _, armed := range []bool{true, false} {
 		t.Run(map[bool]string{true: "decision", false: "control"}[armed], func(t *testing.T) {
-			r := newRig(t, nil)
+			r := decisionRig(t, nil)
 			c := &ackRaceConn{l: r.l, done: make(chan struct{})}
 			c.armed.Store(armed)
 			if !armed {
@@ -190,7 +207,7 @@ func TestFirstDecisionWins(t *testing.T) {
 			defer cancel()
 			var l *Link
 			var arm atomic.Bool
-			r := newRig(t, func(o *Options) {
+			r := decisionRig(t, func(o *Options) {
 				inner := o.Owed
 				o.Owed = func(c context.Context, w Owed) error {
 					if arm.Load() {

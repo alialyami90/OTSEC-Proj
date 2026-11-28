@@ -132,7 +132,16 @@ type linkRig struct {
 	l      *sensorlink.Link
 	mu     sync.Mutex
 	raised []string
+	// idle is the link's idle deadline, zero for linkIdle.
+	idle time.Duration
 }
+
+// linkIdle is the link's idle deadline: far past any test's run. The
+// deadline is real time, while these tests run on the rig's clocks, so at
+// 10 s a connection left open across the steps between frames could be
+// closed on a slow runner (D5's list in 7112362339 on #788; brief
+// P4-NODE-WINTIME).
+const linkIdle = time.Hour
 
 func newLinkRig(t *testing.T, g *rig, r *node.Runtime) *linkRig {
 	k := &linkRig{t: t, g: g, r: r, sink: &ceilingGate{sink: r.SensorHealthSink()}, pins: &pins{m: map[uint64]string{}},
@@ -170,11 +179,66 @@ func (k *linkRig) make() {
 		Received: func() event.Received {
 			return event.Received{UTC: "2026-11-13T10:00:01.000000Z", ResolutionNS: 1000, Clock: event.Clock{Sync: event.SyncSynchronized}}
 		},
-		Cursor: nl, Pins: k.pins, Raise: k.raise, Health: k.h, Timeouts: sensorlink.ConnTimeouts{Hello: 10 * time.Second, Idle: 10 * time.Second}})
+		Cursor: nl, Pins: k.pins, Raise: k.raise, Health: k.h, Timeouts: k.timeouts()})
 	if err != nil {
 		k.t.Fatal(err)
 	}
 	k.l = l
+}
+
+// timeouts are the link's deadlines: the idle one is k.idle, or linkIdle.
+func (k *linkRig) timeouts() sensorlink.ConnTimeouts {
+	idle := k.idle
+	if idle == 0 {
+		idle = linkIdle
+	}
+	return sensorlink.ConnTimeouts{Hello: 10 * time.Second, Idle: idle}
+}
+
+// waitMax and waitBound are platform/sensorlink's rig's (conn_fixtures_test.go):
+// a wait for the link's progress is real time, outlasts a store stall
+// (F-016's 37.9 s), and fails by name a minute before the binary's
+// deadline or at waitMax, and never waits less than waitFloor (D6's N2 to
+// N4 on #805).
+const waitMax, waitFloor = 3 * time.Minute, 20 * time.Second
+
+func waitBound(t *testing.T) time.Duration {
+	end, ok := t.Deadline()
+	return waitBoundAt(time.Now(), end, ok)
+}
+
+func waitBoundAt(now, end time.Time, ok bool) time.Duration {
+	if !ok {
+		return waitMax
+	}
+	return max(waitFloor, min(waitMax, end.Sub(now)-time.Minute))
+}
+
+// TestLinkRigDeadlines (D6's N1 on #805): linkRig's link runs with an idle
+// deadline of linkIdle, at least 30 minutes, and its progress waits
+// outlast the old 20 s and stop short of the binary's deadline.
+func TestLinkRigDeadlines(t *testing.T) {
+	k := &linkRig{}
+	if d := k.timeouts().Idle; d != linkIdle || linkIdle < 30*time.Minute {
+		t.Fatalf("linkRig's idle deadline %s, want linkIdle %s, at least 30 minutes", d, linkIdle)
+	}
+	now := time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		ok   bool
+		left time.Duration
+		want time.Duration
+	}{{false, 0, waitMax}, {true, 30 * time.Minute, waitMax}, {true, 81 * time.Second, 21 * time.Second},
+		{true, 55 * time.Second, waitFloor}, {true, 0, waitFloor}} {
+		if d := waitBoundAt(now, now.Add(c.left), c.ok); d != c.want {
+			t.Fatalf("deadline set %v, %s away: %s, want %s", c.ok, c.left, d, c.want)
+		}
+	}
+	end, ok := t.Deadline()
+	left := time.Until(end)
+	d := waitBound(t)
+	if d < waitFloor || d > waitMax || ok && d > max(waitFloor, left-time.Minute) {
+		t.Fatalf("waitBound %s, the deadline set %v and %s away", d, ok, left)
+	}
 }
 
 // restart makes the link again, applies the run file and writes what the
@@ -240,7 +304,7 @@ func (c *conn) send(v any) {
 
 func (c *conn) ack(seq uint64) {
 	c.t.Helper()
-	deadline := time.After(20 * time.Second)
+	deadline := time.After(waitBound(c.t))
 	for {
 		select {
 		case n, ok := <-c.acks:
@@ -261,7 +325,7 @@ func (c *conn) end() string {
 	select {
 	case r := <-c.done:
 		return r
-	case <-time.After(20 * time.Second):
+	case <-time.After(waitBound(c.t)):
 		c.t.Fatal("the node did not close the connection")
 		return ""
 	}
@@ -429,7 +493,31 @@ func TestHeldPoolEventBuiltAtWrite(t *testing.T) {
 	if d := healthEvents(t, r, sensorlink.EventCounters)[0].Health.Details; d["diff.drops_driver"] != "3" || d[event.DetailCaptureLoss] != "drops_driver" {
 		t.Fatalf("sensor.counters %v", d)
 	}
-	c.end()
+	if why := c.end(); why != "" {
+		t.Fatalf("the connection closed %q, want the sensor's own end", why)
+	}
+	// The rig's control: the link's idle deadline shorter than the steps
+	// between frames, as its 10 s were on a slow runner. The node closes the
+	// connection idle, and the check above fails.
+	t.Run("control: the link's idle deadline passed", func(t *testing.T) {
+		g := newRig(t)
+		r, _ := g.start(node.SensorSeams{})
+		defer r.Close()
+		k := newLinkRig(t, g, r)
+		k.idle = 50 * time.Millisecond
+		k.make()
+		c := k.dial()
+		c.send(hello())
+		c.ack(0)
+		select {
+		case why := <-c.done:
+			if why != netobs.CloseIdle {
+				t.Fatalf("the connection closed %q, want %q", why, netobs.CloseIdle)
+			}
+		case <-time.After(waitBound(t)):
+			t.Fatal("the connection was not closed idle")
+		}
+	})
 
 	// Control: the event built at its hold and kept as bytes, re-stamped
 	// to a later minor (a rollback's view), is refused at its write. The
