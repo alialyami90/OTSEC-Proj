@@ -37,7 +37,8 @@ import (
 //     of the stretch, with no second status alarm. The stretch ends at a
 //     current heartbeat with no interface blind. Its names are at most
 //     MaxInterfaces; past that, a count of the rest, once a run, goes in
-//     the detail (D3's N4 on #802).
+//     the detail (D3's N4 on #802), kept up to overBound names and past
+//     that said as "more than" (D1's ruling 7231553676 on #806).
 //   - sensor-no-heartbeat and coverage unknown (CH-44): at every accepted
 //     frame that is not a current heartbeat (a tick that is not early, a
 //     late or backlog heartbeat taken, an observation committed, held or
@@ -55,7 +56,8 @@ import (
 //     run; ended stretches are merged and made due in the pool, one event,
 //     once no backlog is on, their names at most MaxInterfaces, within one
 //     stretch as across the merged ones, and a count of the rest, each once
-//     a run (D6's B2 and 7230756917 on #804). Both are held in memory only:
+//     a run (D6's B2 and 7230756917 on #804), kept as sensor-blind's
+//     are, up to overBound. Both are held in memory only:
 //     a node stop loses them.
 //   - Accepted (CH-44's reset of sensor-unreachable): a tick that is not
 //     early, a heartbeat taken, and an observation committed, held or
@@ -97,8 +99,24 @@ const NoHeartbeatAfter = 60 * time.Second
 // guard on an at_utc that does not parse; pastNamesUncapped keeps every
 // name of an open past-blind stretch; pastCountEachStretch counts a name
 // past the cap once for each merged stretch, as endPastLocked did before
-// P4-NODE-PASTCAP; noHbNotAtLate skips the 60 s check at a late heartbeat.
-var pastNamesUncapped, pastCountEachStretch, noHbNotAtLate bool
+// P4-NODE-PASTCAP; noHbNotAtLate skips the 60 s check at a late heartbeat;
+// overUnbounded keeps every name past the cap in both lists, as at
+// 31346346; pastMergeNamesOnly merges an ended stretch's names but not
+// those it counted past its cap (D6's N1 on #806); pastDetailOverOnly
+// counts in pastDue's detail only the last run's names past the cap (D6's
+// N2 on #806).
+var pastNamesUncapped, pastCountEachStretch, noHbNotAtLate, overUnbounded bool
+var pastMergeNamesOnly, pastDetailOverOnly bool
+
+// overBound is N of D1's ruling 7231553676 on #806 (option (i)): the most
+// names past MaxInterfaces one list keeps, deduplicated, in a run. Past it
+// no name is kept, and the detail says "more than" its count, which is
+// then a lower bound. 64 names of at most 64 bytes (tokenForm) are 4 KiB a
+// list, CH-45's record size, and a heartbeat's work under b.mu is at most
+// MaxInterfaces names compared with overBound each (SL-20's bounded
+// memory and work for each link).
+const overBound = 8 * netobs.MaxInterfaces
+
 var blindCreditAtReceipt, blindNoUpperClamp, blindNoLowerClamp, blindNoParseGuard bool
 
 // blindOverGrace gives the grace at a new run to every interface not
@@ -119,13 +137,15 @@ type ifBlind struct {
 
 // pastStretch is one or more past-blind stretches, merged: at most
 // MaxInterfaces names, and over and overPrev those past it, each once a
-// run, as sensor-blind's over and overPrev.
+// run, as sensor-blind's over and overPrev; full when a name past
+// overBound was not kept.
 type pastStretch struct {
 	from, to time.Time
 	names    []string
 	run      string   // the run of over
 	over     []string // the names past MaxInterfaces in run
 	overPrev int      // those counted in earlier runs
+	full     bool     // a name was not kept: more is a lower bound
 	n        int
 }
 
@@ -146,8 +166,10 @@ func (p *pastStretch) add(run, n string, uncapped bool) {
 	case len(p.names) < netobs.MaxInterfaces || uncapped:
 		p.names = append(p.names, n)
 		slices.Sort(p.names)
-	default:
+	case len(p.over) < overBound || overUnbounded:
 		p.over = append(p.over, n)
+	default:
+		p.full = true
 	}
 }
 
@@ -164,6 +186,7 @@ type blindState struct {
 	// overPrev the count of those in earlier runs.
 	over     []string
 	overPrev int
+	overFull bool // a name past overBound was not kept
 	// Coverage unknown: the last current heartbeat's receipt.
 	cur     time.Duration
 	curSeen bool
@@ -259,11 +282,12 @@ func (l *Link) judgeBlind(cn *conn, h *netobs.Heartbeat, late bool) {
 	var raise, due bool
 	var named []string
 	var more int
+	var full bool
 	if judged {
-		raise, due, named, more = b.liveLocked(h.RunID, names, byName, m, at, limit)
+		raise, due, named, more, full = b.liveLocked(h.RunID, names, byName, m, at, limit)
 	}
 	b.mu.Unlock()
-	l.blindRaise(raise, due, named, more, limit)
+	l.blindRaise(raise, due, named, more, full, limit)
 	l.pastDue(pastDue)
 	if !current && !(late && noHbNotAtLate) {
 		l.noHeartbeat(false)
@@ -272,10 +296,11 @@ func (l *Link) judgeBlind(cn *conn, h *netobs.Heartbeat, late bool) {
 
 // liveLocked is sensor-blind at a current heartbeat: whether the stretch's
 // alarm is raised, whether its event is due again for a name added, and
-// the names it carries with the count past MaxInterfaces. at is the
+// the names it carries with the count past MaxInterfaces, a lower bound
+// when full. at is the
 // heartbeat's at_utc. The caller holds b.mu, and pastLocked has taken the
 // heartbeat, so b.past holds the at_utc of each interface's last rise.
-func (b *blindState) liveLocked(run string, names []string, byName map[string]netobs.InterfaceCount, m time.Duration, at time.Time, limit time.Duration) (raise, due bool, named []string, more int) {
+func (b *blindState) liveLocked(run string, names []string, byName map[string]netobs.InterfaceCount, m time.Duration, at time.Time, limit time.Duration) (raise, due bool, named []string, more int, full bool) {
 	if b.run != run && (!blindAcrossRuns || b.run == "") {
 		// The run's first current heartbeat: the comparison starts again.
 		// An interface named in a standing stretch has no grace, so the
@@ -323,16 +348,16 @@ func (b *blindState) liveLocked(run string, names []string, byName map[string]ne
 	}
 	switch {
 	case len(blind) == 0:
-		b.standing, b.named, b.over, b.overPrev = false, nil, nil, 0
+		b.standing, b.named, b.over, b.overPrev, b.overFull = false, nil, nil, 0, false
 	case !b.standing || blindEachHeartbeat:
-		b.standing, b.named, b.over, b.overPrev = true, blind, nil, 0
+		b.standing, b.named, b.over, b.overPrev, b.overFull = true, blind, nil, 0, false
 		raise = true
 	case !blindFirstOnly:
 		for _, n := range blind {
 			due = b.addName(n) || due
 		}
 	}
-	return raise, due, slices.Clone(b.named), b.overPrev + len(b.over)
+	return raise, due, slices.Clone(b.named), b.overPrev + len(b.over), b.overFull
 }
 
 // creditRise is the node's monotonic time a rise is credited at, seen at a
@@ -361,8 +386,9 @@ func creditRise(prev, m time.Duration, at, riseAt time.Time) (time.Duration, boo
 }
 
 // addName names n in the standing stretch, or past MaxInterfaces names
-// counts it once in this run; it reports whether either grew. The caller
-// holds b.mu.
+// counts it once in this run, up to overBound kept; it reports whether
+// the detail changed: a name or a count added, or the first name not
+// kept. The caller holds b.mu.
 func (b *blindState) addName(n string) bool {
 	switch {
 	case slices.Contains(b.named, n) || slices.Contains(b.over, n):
@@ -370,16 +396,24 @@ func (b *blindState) addName(n string) bool {
 	case len(b.named) < netobs.MaxInterfaces || blindNamesUncapped:
 		b.named = append(b.named, n)
 		slices.Sort(b.named)
-	default:
+	case len(b.over) < overBound || overUnbounded:
 		b.over = append(b.over, n)
+	case b.overFull:
+		return false
+	default:
+		b.overFull = true
 	}
 	return true
 }
 
-// nameList is names for a detail, with the count of those not listed.
-func nameList(names []string, more int) string {
+// nameList is names for a detail, with the count of those not listed, a
+// lower bound when full.
+func nameList(names []string, more int, full bool) string {
 	s := strings.Join(names, ", ")
-	if more > 0 {
+	switch {
+	case full:
+		s += fmt.Sprintf(", and more than %d not listed", more)
+	case more > 0:
 		s += fmt.Sprintf(", and %d more not listed", more)
 	}
 	return s
@@ -456,10 +490,15 @@ func (b *blindState) endPastLocked() {
 	}
 	// D3's N4 on #802: the names merged across runs are bounded; a name
 	// past the cap in two stretches of one run is counted once.
-	for _, n := range slices.Concat(o.names, o.over) {
+	merged := slices.Concat(o.names, o.over)
+	if pastMergeNamesOnly {
+		merged = o.names
+	}
+	for _, n := range merged {
 		p.add(o.run, n, blindNamesUncapped)
 	}
 	p.overPrev += o.overPrev
+	p.full = p.full || o.full
 }
 
 func minTime(a, b time.Time) time.Time {
@@ -478,12 +517,12 @@ func maxTime(a, b time.Time) time.Time {
 
 // blindRaise raises sensor-blind for the stretch, or makes its event due
 // again for a name added inside it.
-func (l *Link) blindRaise(raise, due bool, named []string, more int, limit time.Duration) {
+func (l *Link) blindRaise(raise, due bool, named []string, more int, full bool, limit time.Duration) {
 	if !raise && !due {
 		return
 	}
 	detail := fmt.Sprintf("sensor %s: interfaces blind in this stretch: %s (packets not risen across the current heartbeats of more than %s, or carrier down)",
-		l.cfg.SensorID, nameList(named, more), limit)
+		l.cfg.SensorID, nameList(named, more, full), limit)
 	if raise {
 		l.raise(AlarmBlind, detail)
 		return
@@ -499,8 +538,12 @@ func (l *Link) pastDue(p *pastStretch) {
 	if p == nil || h == nil {
 		return
 	}
+	more := p.more()
+	if pastDetailOverOnly {
+		more = len(p.over)
+	}
 	detail := fmt.Sprintf("sensor %s: interfaces %s showed no capture in late or backlog heartbeats from %s to %s (blind_after_s %s)",
-		l.cfg.SensorID, nameList(p.names, p.more()), canonUTC(p.from), canonUTC(p.to), l.blindAfter())
+		l.cfg.SensorID, nameList(p.names, more, p.full), canonUTC(p.from), canonUTC(p.to), l.blindAfter())
 	if p.n > 1 {
 		detail += fmt.Sprintf("; %d stretches merged", p.n)
 	}

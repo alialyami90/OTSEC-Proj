@@ -243,6 +243,10 @@ func TestGapCopyCapNoW(t *testing.T) {
 				if d := g.openRecord(); d == nil || d["from_bound"] != "true" || d["clock_stepped"] != "true" || !fromOf(d).Equal(epoch) {
 					t.Fatalf("records %v, want open from the epoch, from_bound and clock_stepped, at the start", g.gaps())
 				}
+			} else if d := g.openRecord(); d == nil || d["from_bound"] != "true" || !fromOf(d).Equal(epoch) {
+				// D3's N2 on #806: the second start serves the epoch copy,
+				// no later than its wall clock: from the bound, marked so.
+				t.Fatalf("records %v, want the second start's open from the epoch, from_bound", g.gaps())
 			}
 			t.Run("control", func(t *testing.T) {
 				withSeam(t, c.control)
@@ -252,4 +256,205 @@ func TestGapCopyCapNoW(t *testing.T) {
 			})
 		})
 	}
+
+	// D3's N1 and D6's N3 (P5) on #806: a step back of five minutes found
+	// at a tick 10 s after the wider case's start, while its gap from the
+	// epoch stands, and the run file written: the copy stays the epoch, and
+	// a kill and a start with the database lost open the gap from it.
+	// Control: the copy moved by the step unclamped, before 1970.
+	step := func(t *testing.T) (string, GapStatus) {
+		g, _ := wider(t)
+		g.r.pass(10 * time.Second)
+		g.stepNode(-5 * time.Minute)
+		g.tick()
+		cp := runFileCopy(t, g.r.path)
+		g.r.gen.dead.Store(true)
+		g.r.loseDatabase()
+		g.up()
+		return cp, g.r.l.GapStatus()
+	}
+	t.Run("a step found while the gap stands", func(t *testing.T) {
+		cp, st := step(t)
+		if !parseUTC(cp).Equal(epoch) || !st.Open || !st.From.Equal(epoch) {
+			t.Fatalf("copy %q, gap %+v: want both the epoch", cp, st)
+		}
+		t.Run("control: the copy moved before the epoch", func(t *testing.T) {
+			withSeam(t, &copyBackUnclamped)
+			if cp, st := step(t); !parseUTC(cp).Before(epoch) || !st.From.Before(epoch) {
+				t.Fatalf("copy %q, gap %+v: the control kept the epoch", cp, st)
+			}
+		})
+	})
+}
+
+// D1's ruling 7231553676 on #806 (option (i)), D3's B1 and D6's flood
+// probe as a committed test: in one run, 100 heartbeats each naming 8 new
+// interfaces, carrier down, read in a backlog (sensor.past-blind) and as
+// current (sensor-blind). Each list keeps MaxInterfaces names and
+// overBound past them, and marks the rest as not kept; sensor-blind's
+// event is due again at each heartbeat that keeps a name and once at the
+// first name not kept, then not again. Control: overUnbounded, both lists
+// as at 31346346, which keep all 792.
+func TestBlindOverBounded(t *testing.T) {
+	const hbs = 100
+	type out struct {
+		past       *pastStretch
+		over, dues int
+		full       bool
+	}
+	run := func() out {
+		b := &blindState{}
+		at, dues := t0, 0
+		for i := range hbs {
+			names := make([]string, 8)
+			by := map[string]netobs.InterfaceCount{}
+			for j := range names {
+				names[j] = fmt.Sprintf("if%03d", 8*i+j)
+				by[names[j]] = netobs.InterfaceCount{Name: names[j], Carrier: "down"}
+			}
+			b.pastLocked("run1", names, by, at, 5*time.Minute, false, true)
+			if _, due, _, _, _ := b.liveLocked("run1", names, by, time.Duration(i)*time.Second, at, 5*time.Minute); due {
+				dues++
+			}
+			at = at.Add(10 * time.Second)
+		}
+		return out{past: b.open, over: len(b.over), dues: dues, full: b.overFull}
+	}
+	o := run()
+	if len(o.past.names) != netobs.MaxInterfaces || len(o.past.over) != overBound || !o.past.full {
+		t.Fatalf("sensor.past-blind keeps %d names and %d past them, full %v; want %d, %d, true", len(o.past.names), len(o.past.over), o.past.full, netobs.MaxInterfaces, overBound)
+	}
+	// The first heartbeat raises the stretch with 8 names; the next
+	// overBound/8 each keep 8 past the cap; the one after's first name is
+	// the first not kept.
+	if o.over != overBound || !o.full || o.dues != overBound/8+1 {
+		t.Fatalf("sensor-blind keeps %d past the cap, full %v, %d events due again; want %d, true, %d", o.over, o.full, o.dues, overBound, overBound/8+1)
+	}
+	t.Run("control: both lists as at 31346346", func(t *testing.T) {
+		withSeam(t, &overUnbounded)
+		all := hbs*8 - netobs.MaxInterfaces
+		if o := run(); len(o.past.over) != all || o.over != all {
+			t.Fatalf("the control kept %d and %d, want %d", len(o.past.over), o.over, all)
+		}
+	})
+}
+
+// D1's ruling on #806: the detail at overBound names past the cap and at
+// one more. In one run, MaxInterfaces + k interfaces each blind once, for
+// both lists: at k = overBound the detail counts them, "and 64 more not
+// listed"; at k = overBound + 1 it says "and more than 64 not listed".
+// Control: overUnbounded, which counts the 65th exactly.
+func TestBlindOverBoundDetail(t *testing.T) {
+	details := func(k int) (past, live string) {
+		b := &blindState{}
+		at := t0
+		var named []string
+		var more int
+		var full bool
+		for i := range netobs.MaxInterfaces + k {
+			n := fmt.Sprintf("if%03d", i)
+			by := map[string]netobs.InterfaceCount{n: {Name: n, Carrier: "down"}}
+			b.pastLocked("run1", []string{n}, by, at, 5*time.Minute, false, true)
+			_, _, named, more, full = b.liveLocked("run1", []string{n}, by, time.Duration(i)*time.Second, at, 5*time.Minute)
+			at = at.Add(10 * time.Second)
+		}
+		return nameList(b.open.names, b.open.more(), b.open.full), nameList(named, more, full)
+	}
+	at := fmt.Sprintf(", and %d more not listed", overBound)
+	past := fmt.Sprintf(", and more than %d not listed", overBound)
+	for _, c := range []struct {
+		k    int
+		want string
+	}{{overBound, at}, {overBound + 1, past}} {
+		if p, l := details(c.k); !strings.HasSuffix(p, c.want) || !strings.HasSuffix(l, c.want) {
+			t.Fatalf("at %d past the cap: %q and %q, want both to end %q", c.k, p, l, c.want)
+		}
+	}
+	t.Run("control: both lists as at 31346346", func(t *testing.T) {
+		withSeam(t, &overUnbounded)
+		want := fmt.Sprintf(", and %d more not listed", overBound+1)
+		if p, l := details(overBound + 1); !strings.HasSuffix(p, want) || !strings.HasSuffix(l, want) {
+			t.Fatalf("the control gave %q and %q", p, l)
+		}
+	})
+}
+
+// pastHb is one heartbeat that is not current, read in a backlog, at the
+// state level, naming down, each with carrier down; pastEnd is a current
+// heartbeat, which ends the open stretch, the backlog still on.
+func pastHb(b *blindState, at *time.Time, run string, down []string) {
+	by := map[string]netobs.InterfaceCount{}
+	for _, n := range down {
+		by[n] = netobs.InterfaceCount{Name: n, Carrier: "down"}
+	}
+	b.pastLocked(run, down, by, *at, 5*time.Minute, false, true)
+	*at = at.Add(10 * time.Second)
+}
+
+func pastEnd(b *blindState, at *time.Time, run string) {
+	b.pastLocked(run, nil, nil, *at, 5*time.Minute, true, true)
+	*at = at.Add(10 * time.Second)
+}
+
+// D6's N1 (P4) on #806: the names an ended stretch counted past its own
+// cap are merged. In one run, at most 8 names a heartbeat: a stretch of
+// if00 to if07 ends; a second, of if08 to if15 and then if16, ends after
+// it. The merged stretches name 8 and count 9. Control: pastMergeNamesOnly,
+// endPastLocked merging o.names alone, which drops if16.
+func TestBlindPastMergeOver(t *testing.T) {
+	run := func() *pastStretch {
+		b := &blindState{}
+		at := t0
+		pastHb(b, &at, "run1", ifRange(0, 8))
+		pastEnd(b, &at, "run1")
+		pastHb(b, &at, "run1", ifRange(8, 8))
+		pastHb(b, &at, "run1", ifRange(16, 1))
+		pastEnd(b, &at, "run1")
+		return b.pend
+	}
+	if p := run(); p == nil || len(p.names) != netobs.MaxInterfaces || p.more() != 9 || p.n != 2 {
+		t.Fatalf("merged %+v, want %d names, 9 more, 2 stretches", p, netobs.MaxInterfaces)
+	}
+	t.Run("control: the names past the cap not merged", func(t *testing.T) {
+		withSeam(t, &pastMergeNamesOnly)
+		if p := run(); p.more() == 9 {
+			t.Fatal("the control counted 9")
+		}
+	})
+}
+
+// D6's N2 on #806: pastDue's detail counts the names past the cap of every
+// merged run. if00 to if07, then if08, blind in run1, both stretches
+// ended; a stretch of run2 naming if08 again; one sensor.past-blind, whose
+// detail counts 2 more (if08 once in each run). Control:
+// pastDetailOverOnly, the detail from len(p.over), which counts 1.
+func TestBlindPastDetailAcrossRuns(t *testing.T) {
+	run := func(t *testing.T) string {
+		g := newGsrc(t)
+		g.live(6, true)
+		b := &blindState{}
+		at := t0
+		pastHb(b, &at, "run1", ifRange(0, 8))
+		pastEnd(b, &at, "run1")
+		pastHb(b, &at, "run1", ifRange(8, 1))
+		pastEnd(b, &at, "run1")
+		pastHb(b, &at, "run2", ifRange(8, 1)) // a new run: if08 again
+		b.endPastLocked()
+		g.r.l.pastDue(b.pend)
+		g.live(1, true)
+		ev := g.events(EventPastBlind)
+		if len(ev) != 1 {
+			t.Fatalf("past-blind events %v, want one", ev)
+		}
+		return ev[0]["detail"]
+	}
+	if d := run(t); !strings.Contains(d, "if07, and 2 more not listed") || !strings.Contains(d, "3 stretches merged") {
+		t.Fatalf("detail %q, want 2 more across the two runs", d)
+	}
+	t.Run("control: the detail from the last run alone", func(t *testing.T) {
+		withSeam(t, &pastDetailOverOnly)
+		if d := run(t); strings.Contains(d, "and 2 more") {
+			t.Fatalf("the control counted 2: %q", d)
+		}
+	})
 }
