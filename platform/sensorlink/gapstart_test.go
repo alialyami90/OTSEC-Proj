@@ -267,13 +267,15 @@ func TestGapStepAcrossStart(t *testing.T) {
 	}
 	t.Run("fourth: a step back while the node runs", func(t *testing.T) {
 		g, last := fourth(t)
-		if d := g.startClosed(); d == nil || fromOf(d).After(last) || d["from_bound"] != "true" || steps(g) != 1 {
-			t.Fatalf("records %v and %d steps, want from_bound from no later than %s and one step", g.gaps(), steps(g), last)
+		if d := g.startClosed(); d == nil || fromOf(d).After(last) || d["from_bound"] != "true" || d["clock_stepped"] == "true" || steps(g) != 1 {
+			t.Fatalf("records %v and %d steps, want from_bound from no later than %s, unmarked, and one step", g.gaps(), steps(g), last)
 		}
+		// The copy on the old clock is later than the start's: since D6's
+		// N8 on #788, option (b), it serves the epoch, marked.
 		t.Run("control: nothing moved back", func(t *testing.T) {
 			withSeam(t, &stepKeepsOld)
-			if g, last := fourth(t); g.startClosed() == nil || !fromOf(g.startClosed()).After(last) {
-				t.Fatalf("records %v: the control started no later than %s", g.gaps(), last)
+			if g, last := fourth(t); g.startClosed() == nil || !fromOf(g.startClosed()).After(last) && g.startClosed()["clock_stepped"] != "true" {
+				t.Fatalf("records %v: the control started no later than %s, unmarked", g.gaps(), last)
 			}
 		})
 	})
@@ -902,11 +904,13 @@ func TestGapStartBoundaries(t *testing.T) {
 		s.startGapLocked(copyAt, at0, mono, DefaultBlindAfter)
 		return s.wt.open
 	}
-	// The copy capped only when later than the wall clock, and marked.
+	// The copy capped only when later than the wall clock, and marked; a
+	// copy the cap moves is no bound, so the gap is from the epoch (D6's
+	// N8 on #788, option (b)).
 	if g := start(time.Time{}, at0); !g.from.Equal(at0) || g.stepped || !g.bound {
 		t.Fatalf("a copy at the wall clock: %+v", g)
 	}
-	if g := start(time.Time{}, at0.Add(1)); !g.from.Equal(at0) || !g.stepped {
+	if g := start(time.Time{}, at0.Add(1)); !g.from.Equal(time.Unix(0, 0)) || !g.stepped || !g.bound {
 		t.Fatalf("a copy 1 ns later than the wall clock: %+v", g)
 	}
 	// W marked only when later than the wall clock.
@@ -1268,11 +1272,13 @@ func TestGapCoveredClearedAfterCommit(t *testing.T) {
 // TestGapCopyCapSurvivesKill (D6's B2 on #788, option (a); D1's ruling
 // 3): the database lost and the clock stepped back ten minutes during the
 // stop, so the copy is later than the wall clock and is capped at the
-// first start; the node killed 20 s later with no tick, before the gap is
-// written open, and started again: the gap starts no later than the first
-// start, and time.node-stepped is in the stream once. Control: the copy
-// written uncapped and its step left to the next check, which starts the
-// gap at the second start and writes no time.node-stepped.
+// first start; the node killed 20 s later with no tick, and started again:
+// the gap starts no later than the first start, and time.node-stepped is
+// in the stream once. Control: the copy written uncapped and its step left
+// to the next check, which writes no time.node-stepped. Since D6's N8 on
+// #788, option (b), the first start's gap is from the epoch and written
+// open at once, so the kill before that record commits is
+// TestGapCopyCapNoW's.
 func TestGapCopyCapSurvivesKill(t *testing.T) {
 	run := func(t *testing.T) (*gsrc, time.Time) {
 		g := newGsrc(t)
@@ -1285,9 +1291,6 @@ func TestGapCopyCapSurvivesKill(t *testing.T) {
 		first := g.r.now()
 		g.up()
 		g.r.pass(20 * time.Second)
-		if g.openRecord() != nil {
-			t.Fatalf("records %v: written open before the kill", g.gaps())
-		}
 		g.kill()
 		return g, first
 	}
@@ -1300,9 +1303,9 @@ func TestGapCopyCapSurvivesKill(t *testing.T) {
 	}
 	t.Run("control: the copy uncapped", func(t *testing.T) {
 		withSeam(t, &startCopyKept)
-		g, first := run(t)
-		if st := g.r.l.GapStatus(); !st.From.After(first) || g.r.sink.count(event.HealthTimeNodeStepped) != 0 {
-			t.Fatalf("gap %+v and %d steps: the control started no later than %s or wrote the step", st, g.r.sink.count(event.HealthTimeNodeStepped), first)
+		g, _ := run(t)
+		if n := g.r.sink.count(event.HealthTimeNodeStepped); n != 0 {
+			t.Fatalf("%d steps: the control wrote the step", n)
 		}
 	})
 }
@@ -1314,11 +1317,13 @@ func TestGapCopyCapSurvivesKill(t *testing.T) {
 // at the first start, and a write of the run file 10 s later does not
 // raise it. The node is killed 20 s after the start, before the gap is
 // written open, and started again with the database lost, or with its
-// first cursor read failing once: in each leg the gap starts no later than
-// the first start, and time.node-stepped is in the stream once, from the
-// first start. Controls: the code at 4847722f (startCopyCapNoW with
-// startCopyRises), and each of the two alone, each of which starts the gap
-// at the second start.
+// first cursor read failing once: in each leg the gap starts at the first
+// start, the copy it capped, and time.node-stepped is in the stream once,
+// from the first start. Controls: the code at 4847722f (startCopyCapNoW
+// with startCopyRises), and each of the two alone, each of which leaves the
+// copy later than the second start's wall clock: the gap is then from the
+// epoch (D6's N8 on #788, option (b)), where at 5e5c8028 it was from the
+// second start.
 func TestGapCopyCapWHeld(t *testing.T) {
 	run := func(t *testing.T, readFails bool) (*gsrc, time.Time) {
 		g := newGsrc(t)
@@ -1357,8 +1362,8 @@ func TestGapCopyCapWHeld(t *testing.T) {
 	for _, leg := range legs {
 		t.Run(leg.name, func(t *testing.T) {
 			g, first := run(t, leg.readFails)
-			if st := g.r.l.GapStatus(); !st.Open || st.Cause != CauseNodeStart || st.From.After(first) {
-				t.Fatalf("gap %+v, want node-start open from no later than the first start %s", st, first)
+			if st := g.r.l.GapStatus(); !st.Open || st.Cause != CauseNodeStart || !st.From.Equal(first) {
+				t.Fatalf("gap %+v, want node-start open from the first start %s", st, first)
 			}
 			if n := g.r.sink.count(event.HealthTimeNodeStepped); n != 1 {
 				t.Fatalf("time.node-stepped %d, want 1", n)
@@ -1373,8 +1378,8 @@ func TestGapCopyCapWHeld(t *testing.T) {
 			} {
 				t.Run(c.name, func(t *testing.T) {
 					withSeams(t, c.seams...)
-					if g, first := run(t, leg.readFails); !g.r.l.GapStatus().From.After(first) {
-						t.Fatalf("gap %+v: the control started no later than the first start %s", g.r.l.GapStatus(), first)
+					if g, first := run(t, leg.readFails); g.r.l.GapStatus().From.Equal(first) {
+						t.Fatalf("gap %+v: the control started at the first start %s", g.r.l.GapStatus(), first)
 					}
 				})
 			}

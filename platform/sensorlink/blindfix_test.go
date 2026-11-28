@@ -281,7 +281,7 @@ func TestBlindNamesCapped(t *testing.T) {
 	if len(named) != netobs.MaxInterfaces || more != runs-netobs.MaxInterfaces {
 		t.Fatalf("sensor-blind names %d and %d more, want %d and %d", len(named), more, netobs.MaxInterfaces, runs-netobs.MaxInterfaces)
 	}
-	if past == nil || len(past.names) != netobs.MaxInterfaces || past.more != runs-netobs.MaxInterfaces {
+	if past == nil || len(past.names) != netobs.MaxInterfaces || past.more() != runs-netobs.MaxInterfaces {
 		t.Fatalf("sensor.past-blind %+v, want %d names and %d more", past, netobs.MaxInterfaces, runs-netobs.MaxInterfaces)
 	}
 	if s := nameList(named, more); !strings.HasSuffix(s, fmt.Sprintf(", and %d more not listed", runs-netobs.MaxInterfaces)) {
